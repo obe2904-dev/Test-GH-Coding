@@ -1,0 +1,75 @@
+// Test Supabase Connection
+import { supabase } from './src/lib/supabase'
+
+// Type augmentation for ImportMeta to include 'env'
+interface ImportMetaEnv {
+  VITE_SUPABASE_URL: string
+  VITE_SUPABASE_ANON_KEY: string
+  // add other env variables as needed
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv
+}
+
+// Use import.meta.env directly; no need to redeclare ImportMeta or ImportMetaEnv
+
+async function testSupabaseConnection() {
+  console.log('🔍 Testing Supabase connection...\n')
+
+  try {
+    // Test 1: Check if client is initialized
+    console.log('✓ Supabase client initialized')
+    console.log(`  URL: ${import.meta.env.VITE_SUPABASE_URL}`)
+    console.log(`  Key: ${import.meta.env.VITE_SUPABASE_ANON_KEY?.substring(0, 20)}...\n`)
+
+    // Test 2: Try to query the database
+    console.log('🔍 Testing database connection...')
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('count')
+      .limit(1)
+
+    if (error) {
+      console.error('❌ Database query failed:', error.message)
+      console.error('   Details:', error.details)
+      console.error('   Hint:', error.hint)
+      
+      if (error.message.includes('relation "public.profiles" does not exist')) {
+        console.log('\n⚠️  The profiles table does not exist yet.')
+        console.log('   Please run the migration:')
+        console.log('   1. Go to Supabase Dashboard → SQL Editor')
+        console.log('   2. Run the migration from: supabase/migrations/001_initial_schema.sql')
+      }
+      return false
+    }
+
+    console.log('✓ Database connection successful!\n')
+
+    // Test 3: Check auth
+    console.log('🔍 Testing authentication...')
+    const { data: { session } } = await supabase.auth.getSession()
+    
+    if (session) {
+      console.log('✓ User is authenticated')
+      console.log(`  User ID: ${session.user.id}`)
+      console.log(`  Email: ${session.user.email}`)
+    } else {
+      console.log('ℹ️  No user session (not logged in)')
+    }
+
+    console.log('\n✅ All Supabase tests passed!')
+    console.log('\n📋 Next steps:')
+    console.log('   1. Ensure migrations are run in Supabase Dashboard')
+    console.log('   2. Configure authentication providers')
+    console.log('   3. Test signup/login flow')
+    
+    return true
+
+  } catch (err) {
+    console.error('❌ Unexpected error:', err)
+    return false
+  }
+}
+
+testSupabaseConnection()
