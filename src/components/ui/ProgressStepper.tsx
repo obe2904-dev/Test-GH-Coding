@@ -5,30 +5,8 @@ interface ProgressStepperProps {
   totalSteps?: number
   stepLabels?: string[]
   onStepClick?: (step: number) => void
+  compact?: boolean
 }
-
-// Step Icons
-const Sparkles = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M12 3v18m0-18l-3 3m3-3l3 3m-3 15l-3-3m3 3l3-3m6-9H3m18 0l-3-3m3 3l-3 3M3 12l3-3m-3 3l3 3"/>
-  </svg>
-)
-
-const Camera = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-    <circle cx="12" cy="13" r="4"/>
-  </svg>
-)
-
-const Calendar = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-    <line x1="16" y1="2" x2="16" y2="6"/>
-    <line x1="8" y1="2" x2="8" y2="6"/>
-    <line x1="3" y1="10" x2="21" y2="10"/>
-  </svg>
-)
 
 const Check = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
@@ -36,7 +14,7 @@ const Check = ({ className }: { className?: string }) => (
   </svg>
 )
 
-export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onStepClick }: ProgressStepperProps) {
+export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onStepClick, compact = false }: ProgressStepperProps) {
   const { t } = useTranslation()
 
   const defaultLabels = [
@@ -44,7 +22,7 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
     t('createPost.steps.create', 'Design'),
     t('createPost.steps.publish', 'Publish')
   ]
-  
+
   const defaultSubtitles = [
     t('createPost.steps.generateSubtitle', "What's your message?"),
     t('createPost.steps.createSubtitle', 'How should it look?'),
@@ -52,23 +30,38 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
   ]
 
   const labels = stepLabels || defaultLabels
-  
-  // Step icons
-  const stepIcons = [Sparkles, Camera, Calendar]
+
+  if (compact) {
+    const idx = Math.max(0, Math.min(totalSteps - 1, currentStep - 1))
+
+    return (
+      <div className="py-2">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center border-2 font-bold text-sm bg-white text-slate-700">
+            {currentStep}
+          </div>
+          <div className="-translate-y-1 transform">
+            <div className="text-sm font-bold text-slate-800">{labels[idx]}</div>
+            <div className="text-xs text-slate-500 mt-2">{defaultSubtitles[idx]}</div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const denominator = Math.max(1, totalSteps - 1)
+  const progressPercent = totalSteps <= 1 ? 0 : ((currentStep - 1) / denominator) * 100
 
   return (
     <div className="py-6">
-      <div className="relative flex items-center justify-between">
+      <div className="relative h-28">
         {/* Background line */}
-        <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-slate-200 -translate-y-1/2" style={{ zIndex: 0 }} />
-        
+        <div className="absolute top-1/2 left-6 right-0 h-0.5 -translate-y-1/2 bg-slate-200" style={{ zIndex: 1 }} />
+
         {/* Progress line */}
-        <div 
-          className="absolute top-1/2 left-0 h-0.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600 -translate-y-1/2 transition-all duration-500"
-          style={{ 
-            width: currentStep === 1 ? '0%' : currentStep === 2 ? '50%' : '100%',
-            zIndex: 0
-          }}
+        <div
+          className="absolute top-1/2 left-6 h-0.5 -translate-y-1/2 bg-[#0F2E32] transition-all duration-500"
+          style={{ width: `${progressPercent}%`, zIndex: 1 }}
         />
 
         {/* Steps */}
@@ -77,63 +70,48 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
           const isActive = stepNumber === currentStep
           const isCompleted = stepNumber < currentStep
           const isFuture = stepNumber > currentStep
-          const StepIcon = stepIcons[index]
+
+          const baseLeftPercent = totalSteps <= 1 ? 50 : (index / denominator) * 100
+          const rightSafePercent = 92
+          const leftPercent = totalSteps > 1 && index === totalSteps - 1
+            ? Math.min(baseLeftPercent, rightSafePercent)
+            : baseLeftPercent
+          const isFirst = index === 0
+          const isLast = index === totalSteps - 1
+          const translateX = isFirst ? 'translateX(-4px)' : 'translateX(-20px)'
+
+          const circleAlignClass = 'justify-center'
+
+          const labelColor = isActive || isCompleted ? 'text-[#1F2937]' : 'text-[#4B5563]'
+          const subtitleColor = isActive || isCompleted ? 'text-[#6B7280]' : 'text-[#9CA3AF]'
 
           return (
             <button
               key={stepNumber}
               onClick={() => onStepClick?.(stepNumber)}
-              className="relative flex flex-col items-center cursor-pointer hover:opacity-80 transition-opacity"
-              style={{ zIndex: 1 }}
+              className={`absolute top-0 grid h-full min-w-[9rem] max-w-[16rem] grid-cols-[2.5rem_auto] grid-rows-2 gap-x-3 px-2 text-left ${isLast ? 'pr-4' : ''}`}
+              style={isLast ? { right: 0, left: 'auto', transform: 'none', zIndex: 2 } : { left: `${leftPercent}%`, transform: translateX, zIndex: 2 }}
               type="button"
             >
-              {/* Circle on the line */}
-              <div
-                className={`
-                  w-10 h-10 rounded-full flex items-center justify-center transition-all border-2
-                  ${isActive 
-                    ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white border-indigo-600 shadow-lg ring-4 ring-indigo-100' 
-                    : ''
-                  }
-                  ${isCompleted 
-                    ? 'bg-indigo-600 text-white border-indigo-600' 
-                    : ''
-                  }
-                  ${isFuture 
-                    ? 'bg-white text-slate-600 border-slate-300 hover:border-indigo-400' 
-                    : ''
-                  }
-                `}
-              >
-                {isCompleted ? (
-                  <Check className="w-5 h-5" />
-                ) : (
-                  <StepIcon className="w-5 h-5" />
-                )}
+              <div className={`row-span-2 flex items-center ${circleAlignClass}`}>
+                <div
+                  className={`
+                    w-10 h-10 rounded-full flex items-center justify-center border-2 font-bold text-lg transition-all
+                    ${isActive ? 'bg-[#F4F1FE] text-[#C7BAF7] border-[#C7BAF7] shadow-lg ring-4 ring-purple-50' : ''}
+                    ${isCompleted ? 'bg-[#FAFAFA] text-[#C7BAF7] border-[#C7BAF7] shadow-md' : ''}
+                    ${isFuture ? 'bg-white text-[#C7BAF7] border-[#D1D5DB] hover:border-[#C7BAF7]' : ''}
+                  `}
+                >
+                  {isCompleted ? <Check className="w-5 h-5" /> : stepNumber}
+                </div>
               </div>
-              
-              {/* Label and subtitle below */}
-              <div className="mt-2 text-center">
-                <div
-                  className={`
-                    text-sm font-bold
-                    ${isActive ? 'text-indigo-600' : ''}
-                    ${isCompleted ? 'text-indigo-600' : ''}
-                    ${isFuture ? 'text-slate-700' : ''}
-                  `}
-                >
-                  {labels[index]}
-                </div>
-                <div
-                  className={`
-                    text-xs mt-0.5 font-medium
-                    ${isActive ? 'text-slate-600' : ''}
-                    ${isCompleted ? 'text-slate-500' : ''}
-                    ${isFuture ? 'text-slate-500' : ''}
-                  `}
-                >
-                  {defaultSubtitles[index]}
-                </div>
+
+              <div className={`col-start-2 row-start-1 self-end mb-2 text-base font-bold ${labelColor}`}>
+                {labels[index]}
+              </div>
+
+              <div className={`col-start-2 row-start-2 self-start mt-2 text-sm font-medium leading-tight ${subtitleColor}`}>
+                {defaultSubtitles[index]}
               </div>
             </button>
           )

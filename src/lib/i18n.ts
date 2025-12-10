@@ -23,9 +23,9 @@ i18n
   .use(initReactI18next) // Passes i18n down to react-i18next
   .init({
     resources,
-    fallbackLng: 'en', // Use English if detected language is not available
+    fallbackLng: 'da', // Denmark-first: Use Danish if detected language is not available
     defaultNS: 'translation',
-    debug: true, // Set to true for development
+    debug: import.meta.env.DEV, // Only debug in development
     
     keySeparator: '.', // Use dots to separate keys
     returnEmptyString: false, // Don't return empty strings
@@ -40,7 +40,11 @@ i18n
       order: ['localStorage', 'navigator', 'htmlTag'],
       // Cache user language preference
       caches: ['localStorage']
-    }
+    },
+    
+    // Supported languages (Denmark first, then international expansion)
+    supportedLngs: ['da', 'en'],
+    nonExplicitSupportedLngs: true
   }).then(() => {
     console.log('=== i18n initialized ===')
     console.log('Language:', i18n.language)

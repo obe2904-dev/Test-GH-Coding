@@ -1,7 +1,13 @@
 import { create } from 'zustand'
+import { 
+  type UserTier, 
+  TIER_QUOTAS, 
+  checkQuota
+} from '../config/quotas'
 
-export type Tier = 'free' | 'standardplus' | 'premium'
+export type Tier = UserTier
 
+// Legacy interface for backward compatibility
 interface TierLimits {
   aiIdeasPerDay: number
   captionGenerationsPerDay: number
@@ -12,6 +18,19 @@ interface TierLimits {
   cohortInsights: 'none' | 'summary' | 'deep'
   maxUsers: number
   storageGB: number
+}
+
+interface DailyUsage {
+  generations: number
+  pdfUploads: number
+  websiteAnalysis: number
+}
+
+interface MonthlyUsage {
+  generations: number
+  pdfUploads: number
+  websiteAnalysis: number
+  scheduledPosts: number
 }
 
 interface QuotaUsage {
@@ -25,19 +44,27 @@ interface QuotaUsage {
 interface TierState {
   currentTier: Tier
   quotaUsage: QuotaUsage
+  dailyUsage: DailyUsage
+  monthlyUsage: MonthlyUsage
   
-  // Tier limits
+  // Tier limits (legacy - kept for backward compatibility)
   getTierLimits: (tier: Tier) => TierLimits
   
-  // Quota checks
+  // Quota checks (legacy)
   canUseAiIdeas: () => boolean
   canUseCaptionGeneration: () => boolean
   canSchedulePost: () => boolean
   
-  // Quota usage
+  // New quota checks aligned with centralized config
+  canUseFeature: (quotaType: 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis', period: 'daily' | 'monthly') => boolean
+  
+  // Quota usage (legacy)
   incrementAiIdeas: () => void
   incrementCaptionGeneration: () => void
   incrementScheduledPost: () => void
+  
+  // New quota tracking
+  incrementUsage: (quotaType: 'generations' | 'pdfUploads' | 'websiteAnalysis', period: 'daily' | 'monthly') => void
   
   // Tier management
   setTier: (tier: Tier) => void
@@ -47,39 +74,40 @@ interface TierState {
   resetMonthlyQuotas: () => void
 }
 
+// Legacy TIER_LIMITS for backward compatibility - now sourced from centralized config
 const TIER_LIMITS: Record<Tier, TierLimits> = {
   free: {
-    aiIdeasPerDay: 3,
-    captionGenerationsPerDay: 5,
+    aiIdeasPerDay: TIER_QUOTAS.free.aiGenerations.daily,
+    captionGenerationsPerDay: TIER_QUOTAS.free.aiGenerations.daily,
     photoFeedbackLevel: 'lite',
-    scheduledPostsPerMonth: 3,
-    maxChannels: 1,
-    autoReplies: false,
+    scheduledPostsPerMonth: TIER_QUOTAS.free.scheduledPosts,
+    maxChannels: TIER_QUOTAS.free.socialChannels,
+    autoReplies: TIER_QUOTAS.free.autoReplies,
     cohortInsights: 'none',
-    maxUsers: 1,
-    storageGB: 0.1 // 100MB
+    maxUsers: TIER_QUOTAS.free.teamMembers,
+    storageGB: TIER_QUOTAS.free.storageGB
   },
   standardplus: {
-    aiIdeasPerDay: Infinity,
-    captionGenerationsPerDay: Infinity,
+    aiIdeasPerDay: TIER_QUOTAS.standardplus.aiGenerations.daily === -1 ? Infinity : TIER_QUOTAS.standardplus.aiGenerations.daily,
+    captionGenerationsPerDay: TIER_QUOTAS.standardplus.aiGenerations.daily === -1 ? Infinity : TIER_QUOTAS.standardplus.aiGenerations.daily,
     photoFeedbackLevel: 'full',
-    scheduledPostsPerMonth: Infinity,
-    maxChannels: 3,
-    autoReplies: false, // Draft suggestions only
+    scheduledPostsPerMonth: TIER_QUOTAS.standardplus.scheduledPosts === -1 ? Infinity : TIER_QUOTAS.standardplus.scheduledPosts,
+    maxChannels: TIER_QUOTAS.standardplus.socialChannels,
+    autoReplies: TIER_QUOTAS.standardplus.autoReplies,
     cohortInsights: 'summary',
-    maxUsers: 3,
-    storageGB: 5
+    maxUsers: TIER_QUOTAS.standardplus.teamMembers,
+    storageGB: TIER_QUOTAS.standardplus.storageGB
   },
   premium: {
     aiIdeasPerDay: Infinity,
     captionGenerationsPerDay: Infinity,
     photoFeedbackLevel: 'full-batch',
     scheduledPostsPerMonth: Infinity,
-    maxChannels: 6,
-    autoReplies: true, // Rules-based auto + escalation
+    maxChannels: TIER_QUOTAS.premium.socialChannels === -1 ? Infinity : TIER_QUOTAS.premium.socialChannels,
+    autoReplies: TIER_QUOTAS.premium.autoReplies,
     cohortInsights: 'deep',
-    maxUsers: 10,
-    storageGB: 50
+    maxUsers: TIER_QUOTAS.premium.teamMembers,
+    storageGB: TIER_QUOTAS.premium.storageGB
   }
 }
 
@@ -91,6 +119,17 @@ export const useTierStore = create<TierState>((set, get) => ({
     scheduledPostsThisMonth: 0,
     lastResetDate: new Date().toISOString().split('T')[0],
     lastMonthResetDate: new Date().toISOString().substring(0, 7) // YYYY-MM
+  },
+  dailyUsage: {
+    generations: 0,
+    pdfUploads: 0,
+    websiteAnalysis: 0,
+  },
+  monthlyUsage: {
+    generations: 0,
+    pdfUploads: 0,
+    websiteAnalysis: 0,
+    scheduledPosts: 0,
   },
 
   getTierLimits: (tier: Tier) => TIER_LIMITS[tier],
@@ -165,6 +204,53 @@ export const useTierStore = create<TierState>((set, get) => ({
     set({ currentTier: tier })
   },
 
+  canUseFeature: (quotaType: 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis', period: 'daily' | 'monthly') => {
+    const state = get()
+    
+    // Check if reset needed
+    if (period === 'daily') {
+      const today = new Date().toISOString().split('T')[0]
+      if (state.quotaUsage.lastResetDate !== today) {
+        get().resetDailyQuotas()
+      }
+    } else {
+      const thisMonth = new Date().toISOString().substring(0, 7)
+      if (state.quotaUsage.lastMonthResetDate !== thisMonth) {
+        get().resetMonthlyQuotas()
+      }
+    }
+    
+    // Get current usage
+    const usageKey = quotaType === 'aiGenerations' ? 'generations' : quotaType
+    const currentUsage = period === 'daily' 
+      ? state.dailyUsage[usageKey as keyof DailyUsage]
+      : state.monthlyUsage[usageKey as keyof MonthlyUsage]
+    
+    // Use centralized quota checker
+    const result = checkQuota(state.currentTier, period, quotaType, currentUsage)
+    return result.allowed
+  },
+
+  incrementUsage: (quotaType: 'generations' | 'pdfUploads' | 'websiteAnalysis', period: 'daily' | 'monthly') => {
+    set((state) => {
+      if (period === 'daily') {
+        return {
+          dailyUsage: {
+            ...state.dailyUsage,
+            [quotaType]: state.dailyUsage[quotaType] + 1
+          }
+        }
+      } else {
+        return {
+          monthlyUsage: {
+            ...state.monthlyUsage,
+            [quotaType]: state.monthlyUsage[quotaType] + 1
+          }
+        }
+      }
+    })
+  },
+
   resetDailyQuotas: () => {
     const today = new Date().toISOString().split('T')[0]
     set((state) => ({
@@ -173,6 +259,11 @@ export const useTierStore = create<TierState>((set, get) => ({
         aiIdeasToday: 0,
         captionGenerationsToday: 0,
         lastResetDate: today
+      },
+      dailyUsage: {
+        generations: 0,
+        pdfUploads: 0,
+        websiteAnalysis: 0,
       }
     }))
   },
@@ -184,6 +275,12 @@ export const useTierStore = create<TierState>((set, get) => ({
         ...state.quotaUsage,
         scheduledPostsThisMonth: 0,
         lastMonthResetDate: thisMonth
+      },
+      monthlyUsage: {
+        generations: 0,
+        pdfUploads: 0,
+        websiteAnalysis: 0,
+        scheduledPosts: 0,
       }
     }))
   }

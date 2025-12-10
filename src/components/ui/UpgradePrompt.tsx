@@ -37,7 +37,7 @@ export function UpgradePrompt({ feature, currentUsage, targetTier = 'standardplu
       t('upgrade.threeChannels', 'Up to 3 Social Channels')
     ],
     premium: [
-      t('upgrade.allStandardPlus', 'Everything in StandardPlus'),
+      t('upgrade.allStandardPlus', 'Everything in Smart'),
       t('upgrade.sixChannels', 'Up to 6 Social Channels'),
       t('upgrade.autoReplies', 'Auto-Reply to Comments'),
       t('upgrade.deepInsights', 'Deep Analytics & Insights'),
@@ -79,8 +79,8 @@ export function UpgradePrompt({ feature, currentUsage, targetTier = 'standardplu
         <div className="p-6">
           <h3 className="text-base font-bold text-slate-800 mb-4">
             {targetTier === 'standardplus' 
-              ? t('upgrade.standardPlusFeatures', 'StandardPlus Features')
-              : t('upgrade.premiumFeatures', 'Premium Features')
+              ? t('upgrade.standardPlusFeatures', 'Smart Features')
+              : t('upgrade.premiumFeatures', 'Pro Features')
             }
           </h3>
           

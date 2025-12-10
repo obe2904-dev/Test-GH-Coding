@@ -20,8 +20,8 @@ interface PlanSwitcherProps {
 
 const TIER_LABELS: Record<Tier, string> = {
   free: 'Free',
-  standardplus: 'StandardPlus',
-  premium: 'Premium',
+  standardplus: 'Smart',
+  premium: 'Pro',
 }
 
 const STORAGE_KEY = 'dev:tier'
@@ -35,20 +35,44 @@ async function readPlanFromSupabase(): Promise<Tier | null> {
     const userId: string | undefined = sessionRes?.session?.user?.id
     if (!userId) return null
 
-    // Select only the needed field; tolerate absence
-    const { data, error } = await sbLoose
-      .from('profiles')
+    // Get user's business (as owner)
+    const { data: business, error: businessError } = await sbLoose
+      .from('businesses')
       .select('plan')
-      .eq('id', userId)
-      .single()
+      .eq('owner_id', userId)
+      .maybeSingle()
 
-    if (error) return null
-    const raw = (data?.plan ?? null) as string | null
-    if (!raw) return null
-    const normalized = raw.toLowerCase()
-    return (['free', 'standardplus', 'premium'] as const).includes(normalized as any)
-      ? (normalized as Tier)
-      : null
+    if (!businessError && business?.plan) {
+      const normalized = business.plan.toLowerCase()
+      if (['free', 'standardplus', 'premium'].includes(normalized)) {
+        return normalized as Tier
+      }
+    }
+
+    // If not owner, check if team member
+    const { data: membership } = await sbLoose
+      .from('business_team_members')
+      .select('business_id')
+      .eq('user_id', userId)
+      .not('accepted_at', 'is', null)
+      .maybeSingle()
+
+    if (membership?.business_id) {
+      const { data: teamBusiness } = await sbLoose
+        .from('businesses')
+        .select('plan')
+        .eq('id', membership.business_id)
+        .single()
+
+      if (teamBusiness?.plan) {
+        const normalized = teamBusiness.plan.toLowerCase()
+        if (['free', 'standardplus', 'premium'].includes(normalized)) {
+          return normalized as Tier
+        }
+      }
+    }
+
+    return null
   } catch {
     return null
   }
@@ -60,8 +84,8 @@ async function writePlanToSupabase(next: Tier): Promise<void> {
     const userId: string | undefined = sessionRes?.session?.user?.id
     if (!userId) return
 
-    // Soft-write; if the column doesn't exist yet, this will error and be swallowed.
-    await sbLoose.from('profiles').update({ plan: next }).eq('id', userId)
+    // Update plan on user's business (owners only can change plan)
+    await sbLoose.from('businesses').update({ plan: next }).eq('owner_id', userId)
   } catch {
     // dev-only: ignore
   }
@@ -112,7 +136,7 @@ export default function PlanSwitcher({ source = 'dev', writeBack = false, classN
     <div className={`w-full ${className}`}>
       <div className="flex items-center justify-between mb-2">
         <div className="text-xs font-medium text-slate-500">Plan</div>
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-[#6B7280]">
           {source === 'dev' ? 'DEV' : (loading ? 'Syncing…' : 'Supabase')}
         </span>
       </div>
@@ -128,7 +152,7 @@ export default function PlanSwitcher({ source = 'dev', writeBack = false, classN
               className={[
                 'px-3 py-1.5 text-sm transition-all',
                 'focus:outline-none focus-visible:ring',
-                active ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-50',
+                active ? 'bg-slate-900 text-white' : 'bg-white text-[#1F2937] hover:bg-slate-50',
                 'border-r last:border-r-0 border-slate-200',
               ].join(' ')}
               aria-pressed={active}

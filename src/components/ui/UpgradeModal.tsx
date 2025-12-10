@@ -136,7 +136,7 @@ export function UpgradeModal({ isOpen, onClose, feature }: UpgradeModalProps) {
                       {variant.tone}
                     </span>
                     {variant.locked ? (
-                      <span className="text-xs text-slate-500">🔒 StandardPlus</span>
+                      <span className="text-xs text-slate-500">🔒 Smart</span>
                     ) : (
                       <Check className="w-4 h-4 text-emerald-600" />
                     )}
@@ -152,7 +152,7 @@ export function UpgradeModal({ isOpen, onClose, feature }: UpgradeModalProps) {
           {/* Benefits */}
           <div>
             <h3 className="text-sm font-bold text-slate-900 mb-3">
-              {t('upgrade.withStandardPlus', 'With StandardPlus you get:')}
+              {t('upgrade.withStandardPlus', 'With Smart you get:')}
             </h3>
             <div className="space-y-2">
               {content.benefits.map((benefit, idx) => (
@@ -171,7 +171,7 @@ export function UpgradeModal({ isOpen, onClose, feature }: UpgradeModalProps) {
               <span className="text-sm text-purple-700">/month</span>
             </div>
             <p className="text-xs text-purple-700 mb-3">
-              {t('upgrade.unlimitedPosts', 'Unlimited posts + all premium features')}
+              {t('upgrade.unlimitedPosts', 'Unlimited posts + all pro features')}
             </p>
             <button className="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg font-bold hover:from-purple-700 hover:to-pink-700 transition-all shadow-md">
               {t('upgrade.startTrial', 'Start 14-Day Free Trial')}

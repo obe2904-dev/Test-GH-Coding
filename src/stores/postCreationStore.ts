@@ -24,18 +24,22 @@ export interface PlatformHashtag {
 
 export interface PlatformContent {
   headline: string
-  text: string
+  text: string // Clean text without hashtags
+  textWithHashtags?: string // Text with hashtags appended
   adjustments: TextAdjustments
   hashtags: PlatformHashtag[]
 }
 
 export interface PostContent {
   headline: string
-  text: string
+  text: string // Clean text without hashtags appended
+  textWithHashtags?: string // Text with selected hashtags appended (for Design step)
   adjustments: TextAdjustments
   platformSpecific?: boolean
   platformContent?: Record<string, PlatformContent>
   hashtags?: PlatformHashtag[]
+  platformHashtagViews?: Record<string, PlatformHashtag[]>
+  aiGeneratedHashtags?: string[] // Track which hashtags came from AI (without # prefix)
 }
 
 export interface PhotoAdjustments {
@@ -58,6 +62,15 @@ export interface PhotoAdjustments {
   }
 }
 
+export interface ImageVariant {
+  platform: string
+  size: string
+  width: number
+  height: number
+  url: string
+  filename: string
+}
+
 export interface MediaItem {
   id: string
   file: File
@@ -68,6 +81,7 @@ export interface MediaItem {
   adjustments?: PhotoAdjustments
   isProcessing?: boolean
   selectedVersionForPost?: 'original' | 'adjusted'
+  platformVariants?: ImageVariant[] // Platform-specific versions created by image processing
 }
 
 export interface PhotoContent {
@@ -93,6 +107,10 @@ interface PostCreationState {
   // Text step
   postContent: PostContent | null
   setPostContent: (content: PostContent) => void
+  
+  // Photo idea from AI
+  photoIdea: string
+  setPhotoIdea: (idea: string) => void
 
   // Photo step
   photoContent: PhotoContent | null
@@ -118,6 +136,10 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
   // Text step
   postContent: null,
   setPostContent: (content) => set({ postContent: content }),
+  
+  // Photo idea
+  photoIdea: '',
+  setPhotoIdea: (idea) => set({ photoIdea: idea }),
 
   // Photo step
   photoContent: null,
@@ -130,6 +152,7 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
     aiIdeas: [],
     selectedIdea: null,
     postContent: null,
+    photoIdea: '',
     photoContent: null
   })
 }))

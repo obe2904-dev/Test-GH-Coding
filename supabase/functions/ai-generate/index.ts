@@ -1,8 +1,22 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { getUserIdFromAuth, getUserQuota, incrementQuota } from '../_shared/quota-utils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// Centralized AI model configuration
+const AI_MODELS = {
+  ideaGeneration: {
+    'free': 'gpt-4o-mini',
+    'standardplus': 'gpt-4o',
+    'premium': 'gpt-4o',
+  }
+} as const
+
+function getAIModelForTier(userTier?: string): string {
+  return AI_MODELS.ideaGeneration[userTier as keyof typeof AI_MODELS.ideaGeneration] || 'gpt-4o-mini'
 }
 
 serve(async (req) => {
@@ -12,6 +26,47 @@ serve(async (req) => {
   }
 
   try {
+    // 🔐 SERVER-SIDE AUTHENTICATION & QUOTA CHECK
+    const authHeader = req.headers.get('authorization')
+    const userId = getUserIdFromAuth(authHeader)
+    
+    if (!userId) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized - valid token required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Check daily quota
+    const dailyQuota = await getUserQuota(userId, 'aiGenerations', 'daily')
+    if (!dailyQuota.allowed) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Daily quota exceeded',
+          tier: dailyQuota.tier,
+          current: dailyQuota.current,
+          limit: dailyQuota.limit,
+          message: dailyQuota.reason
+        }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Check monthly quota
+    const monthlyQuota = await getUserQuota(userId, 'aiGenerations', 'monthly')
+    if (!monthlyQuota.allowed) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Monthly quota exceeded',
+          tier: monthlyQuota.tier,
+          current: monthlyQuota.current,
+          limit: monthlyQuota.limit,
+          message: monthlyQuota.reason
+        }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Get request data
     const { 
       topic, 
@@ -20,8 +75,9 @@ serve(async (req) => {
       includeEmojis = true,
       includeHashtags = true,
       includeCTA = true,
-      tone = 'objective', // Free users always get objective
-      length = 'medium'   // Free users always get medium
+      tone = 'objective',
+      length = 'medium',
+      userTier = dailyQuota.tier // Use tier from database, not client
     } = await req.json()
 
     // Validate input
@@ -53,6 +109,10 @@ serve(async (req) => {
       'passionate': 'Passionate, enthusiastic, and energetic'
     }
 
+    // Get AI model based on tier
+    const aiModel = getAIModelForTier(userTier)
+    console.log('🤖 Using AI model:', aiModel, '(tier:', userTier || 'free', ')')
+
     // Call OpenAI API directly
     const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -61,7 +121,7 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: aiModel,
         messages: [
           {
             role: 'system',
@@ -135,6 +195,11 @@ Only include variations for the selected platforms: ${platforms.join(', ')}`
 
     // Parse and return the variations
     const variations = JSON.parse(content)
+
+    // ✅ INCREMENT USAGE AFTER SUCCESSFUL GENERATION
+    await incrementQuota(userId, 'aiGenerations')
+    
+    console.log(`✅ AI generation complete for user ${userId} (tier: ${userTier})`)
 
     return new Response(
       JSON.stringify(variations),
