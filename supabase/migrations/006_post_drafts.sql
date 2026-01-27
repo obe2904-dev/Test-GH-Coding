@@ -7,10 +7,7 @@ CREATE TABLE IF NOT EXISTS public.post_drafts (
   photo_content JSONB,
   photo_idea TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  
-  -- Indexes
-  CONSTRAINT post_drafts_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Create index for faster lookups

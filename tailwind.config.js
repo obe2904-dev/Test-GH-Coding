@@ -7,6 +7,7 @@ export default {
   theme: {
     extend: {
       colors: {
+        // legacy primary scale kept for compatibility
         primary: {
           50: '#f0f9ff',
           100: '#e0f2fe',
@@ -19,6 +20,16 @@ export default {
           800: '#075985',
           900: '#0c4a6e',
         },
+        // semantic tokens backed by CSS variables (POC)
+        brand: 'var(--color-primary)',
+        accent: 'var(--color-accent)',
+        lilac: 'var(--color-lilac)',
+        surface: 'var(--color-bg)',
+        muted: 'var(--color-muted)',
+        text: 'var(--color-text)',
+      },
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial'],
       },
     },
   },

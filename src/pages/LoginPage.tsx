@@ -19,9 +19,14 @@ export function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    await handleSignIn()
-    // Redirect to dashboard after successful login
-    navigate('/dashboard')
+    console.log('📝 Form submitted')
+    try {
+      await handleSignIn()
+      console.log('🎯 handleSignIn completed, navigating to dashboard...')
+      navigate('/dashboard')
+    } catch (err) {
+      console.error('🚨 handleSubmit error:', err)
+    }
   }
 
   return (

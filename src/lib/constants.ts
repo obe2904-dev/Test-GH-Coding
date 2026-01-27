@@ -22,6 +22,13 @@ export const SUPPORTED_LANGUAGES = [
   { code: 'da', name: 'Dansk', flag: '🇩🇰' }
 ] as const
 
+// Supported countries (display name + language mapping)
+export const SUPPORTED_COUNTRIES = [
+  { code: 'DK', name: 'Danmark', language: 'da', flag: '🇩🇰' },
+  { code: 'SE', name: 'Sverige', language: 'sv', flag: '🇸🇪' },
+  { code: 'GB', name: 'United Kingdom', language: 'en', flag: '🇬🇧' }
+] as const
+
 // Social media platforms
 export const SOCIAL_PLATFORMS = {
   FACEBOOK: 'facebook',

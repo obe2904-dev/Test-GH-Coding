@@ -60,8 +60,12 @@ export async function requestHashtagGroupPayload(
       return null
     }
 
+    console.log('📥 Raw hashtag AI response:', cleaned.substring(0, 500))
+
     try {
-      return JSON.parse(cleaned)
+      const parsed = JSON.parse(cleaned)
+      console.log('✅ Parsed hashtag response:', JSON.stringify(parsed, null, 2))
+      return parsed
     } catch (error) {
       console.error('Failed to parse hashtag model response JSON', error)
       return null

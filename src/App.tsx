@@ -53,12 +53,62 @@ const BusinessProfilePage = lazy(() =>
   import('./pages/dashboard/BusinessProfilePage').then((module) => ({ default: module.default }))
 )
 
+const LocationIntelligencePage = lazy(() =>
+  import('./pages/dashboard/LocationIntelligencePage').then((module) => ({ default: module.default }))
+)
+
+const ConceptFitPage = lazy(() =>
+  import('./pages/dashboard/ConceptFitPage').then((module) => ({ default: module.default }))
+)
+
+const TestLocationTypesPage = lazy(() =>
+  import('./pages/dashboard/TestLocationTypesPage').then((module) => ({ default: module.default }))
+)
+
+const TestLocationIntelligenceFullPage = lazy(() =>
+  import('./pages/dashboard/TestLocationIntelligenceFullPage').then((module) => ({ default: module.default }))
+)
+
+const TestConceptFitPage = lazy(() =>
+  import('./pages/dashboard/TestConceptFitPage').then((module) => ({ default: module.default }))
+)
+
+const MenuPage = lazy(() =>
+  import('./pages/dashboard/MenuPage').then((module) => ({ default: module.default }))
+)
+
+const BrandPage = lazy(() =>
+  import('./pages/dashboard/BrandPage').then((module) => ({ default: module.default }))
+)
+
+// Use the NEW strategy-based system as default
+const BrandProfilePage = lazy(() =>
+  import('./pages/dashboard/BrandProfilePageNew').then((module) => ({ default: module.default }))
+)
+
+// Keep old versions for reference
+const BrandProfilePageOld = lazy(() =>
+  import('./pages/dashboard/BrandProfilePage_NEW').then((module) => ({ default: module.default }))
+)
+
+const BrandProfilePageV5 = lazy(() =>
+  import('./pages/dashboard/BrandProfilePageV5').then((module) => ({ default: module.default }))
+)
+
+const SocialMediaPage = lazy(() =>
+  import('./pages/dashboard/SocialMediaPage').then((module) => ({ default: module.default }))
+)
+
 const CalendarPage = lazy(() =>
   import('./pages/dashboard/CalendarPage').then((module) => ({ default: module.CalendarPage }))
 )
 
 const AllPostsPage = lazy(() =>
   import('./pages/dashboard/AllPostsPage').then((module) => ({ default: module.AllPostsPage }))
+)
+
+const PostIdeasPage = lazy(() =>
+  import('./pages/dashboard/PostIdeasPage').then((module) => ({ default: module.PostIdeasPage }))
 )
 
 const PerformancePage = lazy(() =>
@@ -95,6 +145,18 @@ const MyProfilePage = lazy(() =>
 
 const PlansPage = lazy(() =>
   import('./pages/dashboard/PlansPage').then((module) => ({ default: module.PlansPage }))
+)
+
+const TestBusinessGoals = lazy(() =>
+  import('./pages/test/TestBusinessGoals').then((module) => ({ default: module.default }))
+)
+
+const OperationsPage = lazy(() =>
+  import('./pages/dashboard/OperationsPage')
+)
+
+const GoalsPage = lazy(() =>
+  import('./pages/dashboard/GoalsPage').then((module) => ({ default: module.GoalsPage }))
 )
 
 function App() {
@@ -163,9 +225,22 @@ function App() {
               <Route index element={<DashboardOverviewPage />} />
               <Route path="create" element={<CreatePostPage />} />
               <Route path="profile" element={<BusinessProfilePage />} />
+              <Route path="location" element={<LocationIntelligencePage />} />
+              <Route path="concept-fit" element={<ConceptFitPage />} />
+              <Route path="test-location-types" element={<TestLocationTypesPage />} />
+              <Route path="test-location-full" element={<TestLocationIntelligenceFullPage />} />
+              <Route path="test-concept-fit" element={<TestConceptFitPage />} />
+              <Route path="menu" element={<MenuPage />} />
+              <Route path="brand" element={<BrandProfilePage />} /> {/* Now uses NEW strategy system */}
+              <Route path="brand-old" element={<BrandProfilePageOld />} /> {/* Old edge function version */}
+              <Route path="brand-v5" element={<BrandProfilePageV5 />} />
+              <Route path="brand-new" element={<BrandProfilePage />} /> {/* Alias for new system */}
+              <Route path="operations" element={<OperationsPage />} />
+              <Route path="goals" element={<GoalsPage />} />
+              <Route path="social-media" element={<SocialMediaPage />} />
               <Route path="my-profile" element={<MyProfilePage />} />
               <Route path="calendar" element={<CalendarPage />} />
-              <Route path="posts" element={<AllPostsPage />} />
+              <Route path="posts" element={<PostIdeasPage />} />
               <Route path="analytics" element={<PerformancePage />} />
               <Route path="team" element={<TeamPage />} />
               <Route path="settings" element={<SettingsPage />} />
@@ -174,6 +249,7 @@ function App() {
               <Route path="privacy" element={<PrivacyPage />} />
               <Route path="terms" element={<TermsPage />} />
               <Route path="plans" element={<PlansPage />} />
+              <Route path="test/business-goals" element={<TestBusinessGoals />} />
             </Route>
             
             <Route path="*" element={<Navigate to="/" replace />} />

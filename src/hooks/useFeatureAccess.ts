@@ -9,7 +9,7 @@ import { useMemo } from 'react';
 import { useTierStore } from '../stores/tierStore';
 import { 
   TIER_FEATURES, 
-  getAIModel, 
+  getIdeaGenerationModel,
   hasFeature, 
   checkQuota,
   getTierDisplayName,
@@ -80,7 +80,7 @@ export function useFeatureAccess(): UseFeatureAccessReturn {
     hasFeature: (feature: keyof TierFeatures) => hasFeature(tier, feature),
     
     // AI Model access
-    aiModel: getAIModel(tier),
+    aiModel: getIdeaGenerationModel(tier),
     
     // Quota checks
     checkQuota: (

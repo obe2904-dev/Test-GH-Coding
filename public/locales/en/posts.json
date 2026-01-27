@@ -1,0 +1,42 @@
+{
+  "posts": {
+    "title": "Post Ideas",
+    "subtitle": "AI-generated posts based on your business goals",
+    "generate": "Generate new ideas",
+    "generating": "Generating posts...",
+    "noPosts": "No post ideas yet. Click 'Generate new ideas' to get started.",
+    "status": {
+      "draft": "Draft",
+      "approved": "Approved",
+      "scheduled": "Scheduled",
+      "posted": "Posted",
+      "rejected": "Rejected"
+    },
+    "platform": {
+      "instagram": "Instagram",
+      "facebook": "Facebook",
+      "both": "Both"
+    },
+    "actions": {
+      "approve": "Approve",
+      "reject": "Reject",
+      "edit": "Edit",
+      "schedule": "Schedule",
+      "post": "Post now"
+    },
+    "goalAligned": "Goal aligned",
+    "postTime": "Suggested time",
+    "visualTips": "Photo tips",
+    "hashtags": "Hashtags",
+    "caption": "Caption",
+    "composition": "Composition",
+    "lighting": "Lighting",
+    "subject": "Subject",
+    "colors": "Colors",
+    "generationSuccess": "{{count}} new post ideas generated!",
+    "generationError": "Failed to generate posts. Please try again.",
+    "noGoals": "You have no active goals. Create a goal first to generate targeted posts.",
+    "smartLimit": "Smart plan includes 3 post ideas. Upgrade to Pro for more.",
+    "proUnlimited": "Pro plan includes unlimited post ideas."
+  }
+}

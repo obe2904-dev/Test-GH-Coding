@@ -1,6 +1,5 @@
 import { create } from 'zustand'
-import { supabase, profilesTable } from '../lib/supabase'
-import type { Database } from '../types/database'
+import { supabase } from '../lib/supabase'
 
 interface ConnectedAccount {
   id: string
@@ -29,19 +28,11 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
   connecting: false,
 
   connectPlatform: async (platform: string) => {
-    // Immediately add to state for instant UI feedback
-    const newAccount: ConnectedAccount = {
-      id: `${platform}_${Date.now()}`,
-      platform: platform as any,
-      accountName: `My ${platform} Account`,
-      isActive: true,
-      isEnabled: true,
-      connectedAt: new Date().toISOString()
-    }
-    
+    // Add to enabledPlatforms only - not connectedAccounts
+    // connectedAccounts should only be populated after actual OAuth is complete
+    // This ensures ManualPostModal (copy-paste popup) appears when publishing
     set(state => ({
-      connectedAccounts: [...state.connectedAccounts, newAccount],
-      enabledPlatforms: [...state.enabledPlatforms, platform],
+      enabledPlatforms: [...state.enabledPlatforms.filter(p => p !== platform), platform],
       connecting: true
     }))
     
@@ -50,33 +41,28 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         const currentPlatforms = get().enabledPlatforms
-        console.log('💾 Saving platforms to database:', currentPlatforms)
-        const profileUpdate = {
-          selected_platforms: currentPlatforms
-        } satisfies Database['public']['Tables']['profiles']['Update']
-        const { error: updateError } = await profilesTable()
-          .update(profileUpdate)
+        console.log('💾 Saving platforms to database:', currentPlatforms, 'for user:', user.id)
+        
+        // Use direct supabase call with proper update
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ selected_platforms: currentPlatforms })
           .eq('id', user.id)
         
         if (updateError) {
           console.error('❌ Error saving platforms:', updateError)
           throw updateError
         } else {
-          console.log('✅ Platforms saved successfully')
+          console.log('✅ Platforms saved successfully:', currentPlatforms)
         }
       }
       
-      // TODO: Implement OAuth flow
-      // For now, simulate connection
-      await new Promise(resolve => setTimeout(resolve, 1500))
-      
       set({ connecting: false })
-      console.log(`Connected to ${platform}`)
+      console.log(`Platform ${platform} enabled (OAuth not yet implemented)`)
     } catch (error) {
-      console.error(`Failed to connect to ${platform}:`, error)
+      console.error(`Failed to enable ${platform}:`, error)
       // Rollback on error
       set(state => ({
-        connectedAccounts: state.connectedAccounts.filter(acc => acc.id !== newAccount.id),
         enabledPlatforms: state.enabledPlatforms.filter(p => p !== platform),
         connecting: false
       }))
@@ -84,17 +70,10 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
   },
 
   disconnectPlatform: async (platform: string) => {
-    // Store the accounts before removing for potential rollback
-    const accountsToRemove = get().connectedAccounts.filter(
-      account => account.platform === platform
-    )
     const platformsBefore = get().enabledPlatforms
     
-    // Immediately remove from state for instant UI feedback
+    // Remove from enabledPlatforms only
     set(state => ({
-      connectedAccounts: state.connectedAccounts.filter(
-        account => account.platform !== platform
-      ),
       enabledPlatforms: state.enabledPlatforms.filter(p => p !== platform),
       connecting: true
     }))
@@ -104,32 +83,28 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         const currentPlatforms = get().enabledPlatforms
-        console.log('💾 Removing platform from database:', currentPlatforms)
-        const profileUpdate = {
-          selected_platforms: currentPlatforms
-        } satisfies Database['public']['Tables']['profiles']['Update']
-        const { error: updateError } = await profilesTable()
-          .update(profileUpdate)
+        console.log('💾 Removing platform from database:', currentPlatforms, 'for user:', user.id)
+        
+        // Use direct supabase call with proper update
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ selected_platforms: currentPlatforms })
           .eq('id', user.id)
         
         if (updateError) {
           console.error('❌ Error updating platforms:', updateError)
           throw updateError
         } else {
-          console.log('✅ Platforms updated successfully')
+          console.log('✅ Platforms removed successfully:', currentPlatforms)
         }
       }
       
-      // TODO: Implement disconnection API call
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
       set({ connecting: false })
-      console.log(`Disconnected from ${platform}`)
+      console.log(`Platform ${platform} disabled`)
     } catch (error) {
-      console.error(`Failed to disconnect from ${platform}:`, error)
+      console.error(`Failed to disable ${platform}:`, error)
       // Rollback on error
-      set(state => ({
-        connectedAccounts: [...state.connectedAccounts, ...accountsToRemove],
+      set(() => ({
         enabledPlatforms: platformsBefore,
         connecting: false
       }))
@@ -170,13 +145,20 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
+        console.log('🔄 loadPlatformsFromDatabase: No user logged in')
         return
       }
 
-      const { data, error } = await profilesTable()
+      console.log('🔄 loadPlatformsFromDatabase: Loading for user:', user.id)
+
+      // Use direct supabase call
+      const { data, error } = await supabase
+        .from('profiles')
         .select('selected_platforms')
         .eq('id', user.id)
-        .maybeSingle<Pick<Database['public']['Tables']['profiles']['Row'], 'selected_platforms'>>()
+        .maybeSingle()
+
+      console.log('🔄 loadPlatformsFromDatabase: Raw response:', { data, error })
 
       if (error) {
         console.error('❌ Error loading platforms (column may not exist yet):', error.message)
@@ -184,23 +166,23 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
         return
       }
 
-      const savedPlatforms = data?.selected_platforms ?? []
+      // Handle JSONB - it comes back as an array already
+      const rawPlatforms = data?.selected_platforms
+      const savedPlatforms: string[] = Array.isArray(rawPlatforms) ? rawPlatforms : []
+      console.log('🔄 loadPlatformsFromDatabase: Parsed platforms:', savedPlatforms)
 
       if (savedPlatforms.length > 0) {
-        // Create connected accounts for each saved platform
-        const connectedAccounts: ConnectedAccount[] = savedPlatforms.map((platform) => ({
-          id: `${platform}_loaded`,
-          platform: platform as any,
-          accountName: `My ${platform} Account`,
-          isActive: true,
-          isEnabled: true,
-          connectedAt: new Date().toISOString()
-        }))
-        
+        // Only set enabledPlatforms - platforms are NOT connected until OAuth is complete
+        // The social_accounts table tracks actual OAuth connections via is_connected field
+        // Since OAuth is not yet implemented, no platforms should show as connected
+        // This ensures ManualPostModal (copy-paste popup) appears when publishing
         set({ 
           enabledPlatforms: savedPlatforms,
-          connectedAccounts: connectedAccounts
+          connectedAccounts: [] // Clear - no OAuth connections exist yet
         })
+        console.log('✅ loadPlatformsFromDatabase: Set enabledPlatforms to:', savedPlatforms)
+      } else {
+        console.log('⚠️ loadPlatformsFromDatabase: No platforms saved in database')
       }
     } catch (error) {
       console.error('❌ Error loading platforms from database:', error)

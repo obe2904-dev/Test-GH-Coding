@@ -28,12 +28,16 @@ export function useAuthForm(): UseAuthFormReturn {
   const isValidForm = isValidEmail(email) && validatePassword(password).isValid
 
   const handleSignIn = async () => {
+    console.log('🔄 Starting login process...')
     setError('')
     setLoading(true)
 
     try {
+      console.log('📤 Calling signIn...')
       await signIn(email, password)
+      console.log('✅ signIn completed successfully')
     } catch (err) {
+      console.error('❌ Login failed:', err)
       if (err instanceof Error) {
         // Map Supabase errors to user-friendly messages
         if (err.message.includes('Invalid login credentials')) {
@@ -49,6 +53,7 @@ export function useAuthForm(): UseAuthFormReturn {
         setError('Ukendt login fejl. Prøv igen.')
       }
     } finally {
+      console.log('🔚 Login process finished, loading:', false)
       setLoading(false)
     }
   }

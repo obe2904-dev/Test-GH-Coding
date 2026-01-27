@@ -1,0 +1,181 @@
+/**
+ * Language Validator - Detects language leakage (English in non-English content)
+ * 
+ * Purpose: Structural prevention of English words appearing in non-English content
+ * Prevents GPT-4o from defaulting to English phrases like "by the water" instead of "ved åen"
+ * 
+ * Uses centralized language configurations for extensibility
+ */
+
+import { getLanguageConfig, isLanguageSupported } from '../config/language-configs.ts'
+
+export interface LanguageLeakageResult {
+  hasLeakage: boolean
+  englishTokens: string[]
+  severity: 'none' | 'minor' | 'major'
+  recommendation?: string
+}
+
+/**
+ * Detect English word leakage in content for specified language
+ * 
+ * @param text - Content to check (hook + caption_base combined)
+ * @param language - Expected language code (da, sv, de, etc.)
+ * @returns Detection result with severity and recommendations
+ */
+export function detectEnglishLeakage(
+  text: string,
+  language: string
+): LanguageLeakageResult {
+  // Only check for non-English languages
+  if (language === 'en') {
+    return { hasLeakage: false, englishTokens: [], severity: 'none' }
+  }
+
+  // Get language configuration (falls back to Danish if not supported)
+  const config = getLanguageConfig(language)
+  
+  if (!isLanguageSupported(language)) {
+    console.warn(`⚠️ Language '${language}' not supported for validation, using Danish rules`)
+  }
+
+  // Use forbidden tokens from configuration
+  const forbiddenEnglishTokens = config.forbiddenTokens
+
+  const lowerText = text.toLowerCase()
+  
+  // Find all forbidden English tokens present in text
+  // Use word boundary matching to avoid false positives (e.g., "anden" contains "and")
+  const englishFound = forbiddenEnglishTokens.filter(token => {
+    const regex = new RegExp(`\\b${token}\\b`, 'i')
+    return regex.test(lowerText)
+  })
+
+  if (englishFound.length === 0) {
+    return { hasLeakage: false, englishTokens: [], severity: 'none' }
+  }
+
+  // Classify severity based on number of English words
+  let severity: 'none' | 'minor' | 'major' = 'minor'
+  let recommendation: string
+
+  if (englishFound.length >= 5) {
+    severity = 'major'
+    recommendation = 'CRITICAL: Major English leakage detected. Regenerate this slot.'
+  } else if (englishFound.length >= 3) {
+    severity = 'major'
+    recommendation = 'WARNING: Multiple English words detected. Consider regeneration.'
+  } else {
+    severity = 'minor'
+    recommendation = 'Minor English leakage detected. Monitor for patterns.'
+  }
+
+  return {
+    hasLeakage: true,
+    englishTokens: englishFound,
+    severity,
+    recommendation
+  }
+}
+
+/**
+ * Language-specific forbidden token lists for targeted detection
+ * Allows for more nuanced detection per target language
+ */
+export const LANGUAGE_SPECIFIC_CHECKS = {
+  da: {
+    // Common English phrases that slip into Danish
+    forbiddenPhrases: [
+      'by the water', 'by the river', 'in the heart',
+      'come in', 'try our', 'visit us', 'join us',
+      'book now', 'reserve now', 'perfect for'
+    ],
+    // Proper Danish equivalents (for suggestions)
+    danishEquivalents: {
+      'by the water': 'ved vandet',
+      'by the river': 'ved åen',
+      'in the heart': 'i hjertet af',
+      'come in': 'kom ind',
+      'try our': 'prøv vores',
+      'visit us': 'besøg os',
+      'join us': 'kom forbi',
+      'book now': 'book nu',
+      'reserve now': 'reservér nu',
+      'perfect for': 'perfekt til'
+    }
+  },
+  sv: {
+    forbiddenPhrases: [
+      'by the water', 'by the river', 'in the heart',
+      'come in', 'try our', 'visit us', 'join us',
+      'book now', 'reserve now', 'perfect for'
+    ],
+    swedishEquivalents: {
+      'by the water': 'vid vattnet',
+      'by the river': 'vid ån',
+      'in the heart': 'i hjärtat av',
+      'come in': 'kom in',
+      'try our': 'prova vår',
+      'visit us': 'besök oss',
+      'join us': 'kom förbi',
+      'book now': 'boka nu',
+      'reserve now': 'reservera nu',
+      'perfect for': 'perfekt för'
+    }
+  },
+  de: {
+    forbiddenPhrases: [
+      'by the water', 'by the river', 'in the heart',
+      'come in', 'try our', 'visit us', 'join us',
+      'book now', 'reserve now', 'perfect for'
+    ],
+    germanEquivalents: {
+      'by the water': 'am Wasser',
+      'by the river': 'am Fluss',
+      'in the heart': 'im Herzen',
+      'come in': 'kommen Sie herein',
+      'try our': 'probieren Sie unsere',
+      'visit us': 'besuchen Sie uns',
+      'join us': 'kommen Sie vorbei',
+      'book now': 'jetzt buchen',
+      'reserve now': 'jetzt reservieren',
+      'perfect for': 'perfekt für'
+    }
+  }
+}
+
+/**
+ * Detect English phrases (multi-word patterns) in content
+ * More sophisticated than single-word detection
+ */
+export function detectEnglishPhrases(
+  text: string,
+  language: string
+): { found: string[], suggestions: Record<string, string> } {
+  if (language === 'en' || !(language in LANGUAGE_SPECIFIC_CHECKS)) {
+    return { found: [], suggestions: {} }
+  }
+
+  const config = LANGUAGE_SPECIFIC_CHECKS[language as keyof typeof LANGUAGE_SPECIFIC_CHECKS]
+  const lowerText = text.toLowerCase()
+  
+  const foundPhrases = config.forbiddenPhrases.filter(phrase => 
+    lowerText.includes(phrase.toLowerCase())
+  )
+
+  // Get suggestions for found phrases
+  const suggestions: Record<string, string> = {}
+  const equivalentsKey = language === 'da' ? 'danishEquivalents' : 
+                        language === 'sv' ? 'swedishEquivalents' : 
+                        'germanEquivalents'
+  
+  const equivalents = config[equivalentsKey as keyof typeof config] as Record<string, string>
+  
+  foundPhrases.forEach(phrase => {
+    if (phrase in equivalents) {
+      suggestions[phrase] = equivalents[phrase]
+    }
+  })
+
+  return { found: foundPhrases, suggestions }
+}

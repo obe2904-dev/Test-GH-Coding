@@ -87,10 +87,13 @@ BEGIN
     NOW()
   );
 
-  -- Update profiles table (CAST TEXT[] to JSONB)
+  -- Update profiles table (CAST TEXT[] to JSONB and add business info)
   UPDATE public.profiles
   SET
+    business_name = p_business_name,
+    business_category = p_business_vertical,
     selected_platforms = to_jsonb(p_selected_platforms),
+    country = p_country,
     onboarding_completed = TRUE,
     updated_at = NOW()
   WHERE id = p_user_id;

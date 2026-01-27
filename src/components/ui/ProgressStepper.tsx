@@ -50,7 +50,25 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
   }
 
   const denominator = Math.max(1, totalSteps - 1)
-  const progressPercent = totalSteps <= 1 ? 0 : ((currentStep - 1) / denominator) * 100
+  
+  // Calculate progress line width to stop at the center of the current step's circle
+  // The line starts at left-6 (24px), circles are w-10 h-10 (40px, so 20px radius)
+  const getProgressWidth = () => {
+    if (totalSteps <= 1 || currentStep === 1) return '0%'
+    
+    if (totalSteps === 3) {
+      // Step 2: circle center at 50% of container
+      if (currentStep === 2) return 'calc(50% - 50px)' // Line to middle circle
+      // Step 3: circle is right-aligned (right: 0) with padding, extends to near right edge
+      if (currentStep === 3) return 'calc(100% - 24px)' // Account for right padding and circle center
+    }
+    
+    // Fallback for other configurations
+    const percent = ((currentStep - 1) / denominator) * 100
+    return `calc(${percent}% - 50px)`
+  }
+  
+  const progressWidth = getProgressWidth()
 
   return (
     <div className="py-6">
@@ -61,7 +79,7 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
         {/* Progress line */}
         <div
           className="absolute top-1/2 left-6 h-0.5 -translate-y-1/2 bg-[#0F2E32] transition-all duration-500"
-          style={{ width: `${progressPercent}%`, zIndex: 1 }}
+          style={{ width: progressWidth, zIndex: 1 }}
         />
 
         {/* Steps */}
@@ -78,7 +96,8 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
             : baseLeftPercent
           const isFirst = index === 0
           const isLast = index === totalSteps - 1
-          const translateX = isFirst ? 'translateX(-4px)' : 'translateX(-20px)'
+          const isMiddle = index === 1 && totalSteps === 3
+          const translateX = isFirst ? 'translateX(-4px)' : isMiddle ? 'translateX(-50%)' : 'translateX(-20px)'
 
           const circleAlignClass = 'justify-center'
 

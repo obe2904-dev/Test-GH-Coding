@@ -23,39 +23,14 @@ export interface ContextTrigger {
 
 /**
  * Weather API integration (OpenWeatherMap)
+ * DISABLED: Weather should be fetched through backend Edge Functions only
+ * See: supabase/functions/ai-generate-v2/data-sources/weather.ts
  */
 async function fetchWeatherData(city: string): Promise<any | null> {
-  try {
-    const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY
-    
-    if (!apiKey) {
-      console.warn('OpenWeatherMap API key not configured')
-      return null
-    }
-
-    const response = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&units=metric&appid=${apiKey}`
-    )
-
-    if (!response.ok) {
-      console.error('Weather API error:', response.status)
-      return null
-    }
-
-    const data = await response.json()
-
-    return {
-      condition: data.weather[0].main.toLowerCase(), // "rain", "clear", "clouds", etc.
-      description: data.weather[0].description, // "light rain", "broken clouds"
-      temperature: Math.round(data.main.temp),
-      feelsLike: Math.round(data.main.feels_like),
-      humidity: data.main.humidity,
-      mood: getWeatherMood(data.weather[0].main, data.main.temp),
-    }
-  } catch (error) {
-    console.error('Error fetching weather:', error)
-    return null
-  }
+  // Frontend direct weather API calls disabled
+  // Weather data is now handled by backend Edge Functions
+  console.log('⚠️ Frontend weather fetch disabled - use backend Edge Functions')
+  return null
 }
 
 /**

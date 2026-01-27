@@ -6,49 +6,49 @@ export function PlansPage() {
   const plans = [
     {
       name: 'Free',
-      price: t('plans.free.price', '$0'),
-      period: t('plans.free.period', 'forever'),
-      description: t('plans.free.description', 'Perfect for getting started'),
+      price: t('plans.free.price'),
+      period: t('plans.free.period'),
+      description: t('plans.free.description'),
       features: [
-        t('plans.free.features.1', '3 AI-generated post ideas per day'),
-        t('plans.free.features.2', 'Basic text improvements'),
-        t('plans.free.features.3', 'Manual posting only'),
-        t('plans.free.features.4', 'Community support')
+        t('plans.free.features.1'),
+        t('plans.free.features.2'),
+        t('plans.free.features.3'),
+        t('plans.free.features.4')
       ],
-      buttonText: t('plans.free.button', 'Current Plan'),
+      buttonText: t('plans.free.button'),
       buttonStyle: 'bg-slate-100 text-slate-700 cursor-default',
       popular: false
     },
     {
       name: 'Smart',
-      price: t('plans.standardPlus.price', '$9.99'),
-      period: t('plans.standardPlus.period', 'per month'),
-      description: t('plans.standardPlus.description', 'For growing businesses'),
+      price: t('plans.standardPlus.price'),
+      period: t('plans.standardPlus.period'),
+      description: t('plans.standardPlus.description'),
       features: [
-        t('plans.standardPlus.features.1', 'Unlimited AI-generated ideas'),
-        t('plans.standardPlus.features.2', 'Advanced AI text enhancement'),
-        t('plans.standardPlus.features.3', 'Tone and length customization'),
-        t('plans.standardPlus.features.4', 'Scheduled posting'),
-        t('plans.standardPlus.features.5', 'Priority support')
+        t('plans.standardPlus.features.1'),
+        t('plans.standardPlus.features.2'),
+        t('plans.standardPlus.features.3'),
+        t('plans.standardPlus.features.4'),
+        t('plans.standardPlus.features.5')
       ],
-      buttonText: t('plans.standardPlus.button', 'Upgrade'),
+      buttonText: t('plans.standardPlus.button'),
       buttonStyle: 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700',
       popular: true
     },
     {
       name: 'Pro',
-      price: t('plans.premium.price', '$19.99'),
-      period: t('plans.premium.period', 'per month'),
-      description: t('plans.premium.description', 'For professional marketers'),
+      price: t('plans.premium.price'),
+      period: t('plans.premium.period'),
+      description: t('plans.premium.description'),
       features: [
-        t('plans.premium.features.1', 'Everything in Smart'),
-        t('plans.premium.features.2', 'Team collaboration tools'),
-        t('plans.premium.features.3', 'Advanced analytics'),
-        t('plans.premium.features.4', 'Custom AI training'),
-        t('plans.premium.features.5', 'White-label options'),
-        t('plans.premium.features.6', 'Dedicated account manager')
+        t('plans.premium.features.1'),
+        t('plans.premium.features.2'),
+        t('plans.premium.features.3'),
+        t('plans.premium.features.4'),
+        t('plans.premium.features.5'),
+        t('plans.premium.features.6')
       ],
-      buttonText: t('plans.premium.button', 'Go Pro'),
+      buttonText: t('plans.premium.button'),
       buttonStyle: 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700',
       popular: false
     }
@@ -58,10 +58,10 @@ export function PlansPage() {
     <div className="p-6">
       <div className="text-center mb-8">
         <h1 className="text-xl font-bold text-gray-900 mb-4">
-          {t('plans.title', 'Choose Your Plan')}
+          {t('plans.title')}
         </h1>
         <p className="text-sm text-gray-600">
-          {t('plans.subtitle', 'Select the perfect plan for your social media needs')}
+          {t('plans.subtitle')}
         </p>
       </div>
 
@@ -76,7 +76,7 @@ export function PlansPage() {
             {plan.popular && (
               <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
                 <span className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-1 rounded-full text-sm font-medium">
-                  {t('plans.popular', 'Most Popular')}
+                  {t('plans.popular')}
                 </span>
               </div>
             )}
@@ -113,10 +113,10 @@ export function PlansPage() {
 
       <div className="text-center mt-12">
         <p className="text-gray-600 mb-4">
-          {t('plans.questions', 'Have questions about our plans?')}
+          {t('plans.questions')}
         </p>
         <button className="text-indigo-600 hover:text-indigo-800 font-medium">
-          {t('plans.contact', 'Contact our sales team')}
+          {t('plans.contact')}
         </button>
       </div>
     </div>

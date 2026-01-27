@@ -6,6 +6,22 @@ export interface GeneratedIdea {
   description: string
   headline: string
   text: string
+  hashtags?: string // AI-generated hashtags (separate from text)
+  bestTimeToPost?: string
+  impact?: 'low' | 'medium' | 'high'
+  menuItemUsed?: string
+  // CTA object (separate from text for independent styling)
+  _cta?: {
+    text: string  // "Kom forbi" or "Book dit bord"
+    type: 'soft' | 'booking' | 'menu' | 'custom'
+    url?: string  // booking_url for Facebook, undefined for Instagram
+  }
+  // Store raw idea and platform-specific formatted posts
+  _rawIdea?: any
+  _formattedPosts?: {
+    facebook?: any
+    instagram?: any
+  }
 }
 
 export interface TextAdjustments {

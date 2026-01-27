@@ -45,8 +45,8 @@ interface PublishStepProps {
 }
 
 export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsavedChanges }: PublishStepProps) {
-  const { t: tPublish, i18n } = useTranslation(undefined, { keyPrefix: 'publish' })
-  const { postContent, selectedPlatforms, photoContent, photoIdea } = usePostCreationStore()
+  const { t: tPublish, i18n } = useTranslation(undefined, { keyPrefix: 'createPost.publish' })
+  const { postContent, selectedPlatforms, photoContent, photoIdea, selectedIdea, aiIdeas } = usePostCreationStore()
   const { isConnected } = useConnectionsStore()
   const { 
     canSchedulePost, 
@@ -65,6 +65,14 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
   // const [schedulingConflicts, setSchedulingConflicts] = useState<string[]>([])
   const [showManualPostModal, setShowManualPostModal] = useState(false)
   const [copiedPlatform, setCopiedPlatform] = useState<string | null>(null)
+
+  // Find the selected AI idea to access CTA data
+  const selectedAiIdea = useMemo(() => {
+    if (selectedIdea && aiIdeas && aiIdeas.length > 0) {
+      return aiIdeas.find(idea => idea.id === selectedIdea)
+    }
+    return null
+  }, [selectedIdea, aiIdeas])
 
   const unconnectedPlatforms = useMemo(
     () => selectedPlatforms.filter((platform) => !isConnected(platform)),
@@ -284,18 +292,35 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
       }
 
       const { headline, textWithHashtags } = preview
-
+      
+      // Build the base content
+      let content = ''
       if (headline && textWithHashtags) {
-        return `${headline}\n\n${textWithHashtags}`
+        content = `${headline}\n\n${textWithHashtags}`
+      } else if (headline) {
+        content = headline
+      } else {
+        content = textWithHashtags
       }
 
-      if (headline) {
-        return headline
+      // For Facebook: Add CTA and booking URL from V2 API if available
+      if (platform.toLowerCase() === 'facebook' && selectedAiIdea?._cta) {
+        const cta = selectedAiIdea._cta
+        
+        // Add CTA text
+        if (cta.text) {
+          content += `\n\n${cta.text}`
+        }
+        
+        // Add booking URL for Facebook (from V2 API response)
+        if (cta.url) {
+          content += `\n${cta.url}`
+        }
       }
 
-      return textWithHashtags
+      return content
     },
-    [postContent, selectedPlatforms]
+    [postContent, selectedPlatforms, selectedAiIdea]
   )
 
   // Copy to clipboard

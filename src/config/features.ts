@@ -8,7 +8,7 @@
  */
 
 import type { ContextAccess } from './contextSources'
-import { getAIModel, getSpellingCheckModel } from './ai-models'
+import { getAIModel } from './ai-models'
 
 export type UserTier = 'free' | 'standardplus' | 'premium';
 

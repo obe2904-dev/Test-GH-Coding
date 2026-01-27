@@ -170,8 +170,71 @@ export function buildHashtagPrompt(options: BuildHashtagPromptOptions): string {
     ? `Virksomhed: ${businessName} (${businessLocation})${seasonInfo}${eventsInfo}`
     : `Virksomhed: ${businessName}${seasonInfo}${eventsInfo}`
 
-  const finalPrompt = `Lav relevante hashtags til ${contextHeader} med denne tekst:\n\n${enhancedContent.text}\n\nKrav:\n- Returner hashtags på ${languageLabel} til platforme: ${platformList}\n- Brug kun relevante, konkrete hashtags (ingen fyld eller spam).\n- Hvis platforme inkluderer "Facebook":\n  • Hashtags skal være brede, enkle og ikke for niche.\n  • Fokusér på brand, lokation og sæson/stemning (ikke specifikke retter/ingredienser).\n  • Facebook bør primært bruge hashtags fra "primary" og "local".\n- Hvis platforme inkluderer "Instagram":\n  • Det er OK at bruge mere specifikke hashtags om retter, sæson, stemning og mad/drikke.\n  • Samlet antal hashtags (alle arrays til sammen) bør typisk være 3–7.\n  • "foodie" og "extras" er primært tiltænkt Instagram.\n\n- Kategoriser i fire arrays med # foran:\n  • primary: 1–3 essentielle hashtags, der er brede nok til brand/lokation/stemning og kan bruges på alle angivne platforme.\n  • local: 1–2 lokale/geo-relaterede hashtags (by, område, kvarter, region).\n  • foodie: 0–4 mad/drikke-relaterede hashtags (brug kun hvis teksten nævner mad eller drikke; særligt relevante for Instagram).\n  • extras: 0–3 sæson-/stemnings-hashtags (f.eks. jul, hygge, vinter, brunchstemning).\n\n- Undgå spammy eller for brede hashtags som: #love, #happy, #photo, #follow4follow, #instagood, #food.\n- Fokusér på FAKTISKE elementer fra teksten${authenticityInstruction}${brandedInstruction}${seasonInstruction}${topicInstruction}${ingredientInstruction}${locationInstruction}${planGuidance}${extraGuidance}${businessContextBlock}\n\nReturner KUN JSON (ingen forklaring, ingen ekstra tekst):\n{\n  "primary": ["#example"],\n  "local": ["#city"],\n  "foodie": ["#food"],\n  "extras": ["#optional"]\n}`
+  // Get current month to determine appropriate seasonal examples
+  const currentMonth = new Date().getUTCMonth() // 0 = January, 11 = December
+  const currentDay = new Date().getUTCDate()
   
-  console.log(`🏷️  Hashtag prompt language: "${languageLabel}"`)
+  // Determine season-appropriate examples
+  let moodExample = '#Hygge'
+  let foodieExamples = '#Kaffe, #Kage'
+  let extrasExamples = '#Hygge, #AarhusFood'
+  let forbiddenFoodExamples = '#Kaffe, #Vin, #Cocktails, #Retter'
+  let forbiddenMoodExamples = '#CosyCafe'
+  let allowedMoodExamples = '#Hygge (OK - bred)'
+  let specificFoodExamples = '#Brunch, #Cocktails, #Kaffe'
+  let specificMoodExamples = '#CosyCafe, #Hygge'
+  
+  // December: Christmas examples
+  if (currentMonth === 11) {
+    moodExample = '#Julehygge'
+    foodieExamples = '#Gløgg, #Æbleskiver'
+    extrasExamples = '#Julehygge, #AarhusFood'
+    forbiddenMoodExamples = '#CosyCafe, #JulehyggeCafe'
+    allowedMoodExamples = '#Julehygge (OK - bred)\n- #Jul (OK - bred)'
+    specificFoodExamples = '#Gløgg, #Æbleskiver, #Brunch, #Cocktails'
+    specificMoodExamples = '#CosyCafe, #JulehyggeCafe, #Hygge'
+  }
+  // January-February: Winter examples (no Christmas)
+  else if (currentMonth === 0 || currentMonth === 1) {
+    moodExample = '#Vinterhygge'
+    foodieExamples = '#VarmKakao, #Suppe'
+    extrasExamples = '#Vinterhygge, #AarhusFood'
+    forbiddenMoodExamples = '#CosyCafe'
+    allowedMoodExamples = '#Vinterhygge (OK - bred)\n- #Vinter (OK - bred)'
+    specificFoodExamples = '#Brunch, #Cocktails, #VarmDrik'
+    specificMoodExamples = '#CosyCafe, #Vinterhygge, #Hygge'
+  }
+  // March-May: Spring examples
+  else if (currentMonth >= 2 && currentMonth <= 4) {
+    moodExample = '#Forårshygge'
+    foodieExamples = '#Brunch, #Påske'
+    extrasExamples = '#Forårshygge, #AarhusFood'
+    allowedMoodExamples = '#Forårshygge (OK - bred)\n- #Forår (OK - bred)'
+    specificFoodExamples = '#Brunch, #Påskefrokost, #Kaffe'
+    specificMoodExamples = '#CosyCafe, #Forårshygge, #Hygge'
+  }
+  // June-August: Summer examples
+  else if (currentMonth >= 5 && currentMonth <= 7) {
+    moodExample = '#Sommerhygge'
+    foodieExamples = '#Iskaffe, #Cocktails'
+    extrasExamples = '#Sommerhygge, #AarhusFood'
+    forbiddenFoodExamples = '#VarmKakao, #Gløgg, #Suppe'
+    allowedMoodExamples = '#Sommerhygge (OK - bred)\n- #Sommer (OK - bred)'
+    specificFoodExamples = '#Iskaffe, #Cocktails, #Brunch'
+    specificMoodExamples = '#CosyCafe, #Sommerhygge, #Hygge'
+  }
+  // September-November: Autumn examples
+  else {
+    moodExample = '#Efterårshygge'
+    foodieExamples = '#VarmKakao, #Æbletærte'
+    extrasExamples = '#Efterårshygge, #AarhusFood'
+    allowedMoodExamples = '#Efterårshygge (OK - bred)\n- #Efterår (OK - bred)'
+    specificFoodExamples = '#Brunch, #VarmDrik, #Æbletærte'
+    specificMoodExamples = '#CosyCafe, #Efterårshygge, #Hygge'
+  }
+
+  const finalPrompt = `Lav relevante hashtags til ${contextHeader} med denne tekst:\n\n${enhancedContent.text}\n\n🎯 DU GENERERER TO SEPARATE HASHTAG-SÆT:\n\n═══════════════════════════════════════\n📘 FACEBOOK HASHTAGS (2-3 hashtags MAX)\n═══════════════════════════════════════\nFacebook users don't browse via hashtags - keep it SIMPLE!\n\n"facebook": {\n  "brand": ["#${normalizeHashtag(businessName)}"] (virksomhedens navn - INTET andet)\n  "location": ["#${businessCity || 'Aarhus'}"] (KUN by-navn - INGEN kombinationer)\n  "mood": ["${moodExample}"] (VALGFRIT - kun bred sæson/stemning)\n}\n\n⛔ STRENGT FORBUDT i Facebook:\n❌ Mad/drikke hashtags: INGEN ${forbiddenFoodExamples}\n❌ Kombinerede location: INGEN #AarhusFood, #VisitAarhus, #CopenhagenEats\n❌ Niche områder: INGEN #Latinkvarteret, #Nørrebro, #Vesterbro\n❌ Specifikke stemninger: INGEN ${forbiddenMoodExamples}\n\n✅ KORREKT Facebook location: Bare by-navnet\n- #Aarhus (IKKE #AarhusFood)\n- #København (IKKE #CopenhagenFood eller #VisitCopenhagen)\n- #Odense (IKKE #OdenseEats)\n\n✅ KORREKT Facebook mood: Bred sæson kun\n- ${allowedMoodExamples}\n\n═══════════════════════════════════════\n📸 INSTAGRAM-SPECIFIKKE HASHTAGS (4-6 hashtags)\n═══════════════════════════════════════\nInstagram users BROWSE via hashtags - vær specifik!\nDisse hashtags er I TILLÆG til Facebook-hashtags.\n\n"instagram": {\n  "foodie": 2-4 specifikke mad/drikke tags (f.eks. ${foodieExamples})\n  "extras": 1-3 detaljerede tags (f.eks. ${extrasExamples})\n}\n\n✅ Instagram KAN have:\n- Specifikke retter: ${specificFoodExamples}\n- Kombinerede location: #AarhusFood, #CopenhagenEats, #VisitAarhus\n- Niche områder: #Latinkvarteret, #Nørrebro (hvis relevant)\n- Specifikke stemninger: ${specificMoodExamples}\n\n⚠️ UNDGÅ at gentage Facebook-hashtags\n⚠️ UNDGÅ generiske tags (#food, #love, #instagood)\n\n${seasonInstruction}${topicInstruction}${ingredientInstruction}${locationInstruction}${planGuidance}${extraGuidance}${businessContextBlock}\n\n🎯 VIGTIGT:\n- Facebook-hashtags bruges ALTID alene på Facebook\n- Instagram viser: Facebook-hashtags + Instagram-specifikke hashtags\n- Total til Instagram: 6-10 hashtags\n\nReturner på ${languageLabel} som JSON:\n{\n  "facebook": {\n    "brand": ["#${businessName.replace(/\s+/g, '')}"],\n    "location": ["#${businessCity || 'Aarhus'}"],\n    "mood": ["${moodExample}"]\n  },\n  "instagram": {\n    "foodie": [${foodieExamples.split(', ').map(t => `"${t}"`).join(', ')}],\n    "extras": [${extrasExamples.split(', ').map(t => `"${t}"`).join(', ')}]\n  }\n}`
+  
+  console.log(`🏷️  Hashtag prompt language: "${languageLabel}", season examples: ${moodExample}`)
   return finalPrompt
 }

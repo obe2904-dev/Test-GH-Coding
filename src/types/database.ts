@@ -154,31 +154,43 @@ export interface Database {
       business_profile: {
         Row: {
           business_id: string
+          business_category: string | null
           short_description: string | null
           long_description: string | null
           price_level: 'low' | 'medium' | 'high' | null
           target_audience: string | null
           founded_year: number | null
+          menu_description: string | null
+          menu_structure: Json | null
+          booking_url: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           business_id: string
+          business_category?: string | null
           short_description?: string | null
           long_description?: string | null
           price_level?: 'low' | 'medium' | 'high' | null
           target_audience?: string | null
           founded_year?: number | null
+          menu_description?: string | null
+          menu_structure?: Json | null
+          booking_url?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           business_id?: string
+          business_category?: string | null
           short_description?: string | null
           long_description?: string | null
           price_level?: 'low' | 'medium' | 'high' | null
           target_audience?: string | null
           founded_year?: number | null
+          menu_description?: string | null
+          menu_structure?: Json | null
+          booking_url?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -187,30 +199,72 @@ export interface Database {
         Row: {
           business_id: string
           tone_keywords: string[] | null
+          tone_model: Json | null  // NEW: Structured tone model (primary_keywords, writing_rules, good_examples, avoid_examples, formality, emoji_level)
           voice_style: string | null
           values: string[] | null
           certifications: string[] | null
           do_not_say: Json | null
+          // 9 Canonical Brand Voice Variables
+          brand_essence: string | null
+          tone_of_voice: string | null
+          things_to_avoid: string | null
+          target_audience: string | null
+          core_offerings: string | null
+          content_focus: string | null
+          cta_style: string | null
+          communication_goal: string | null
+          image_preferences: string | null
+          social_style: Json | null
+          voice_examples: Json | null
+          booking_link: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
           business_id: string
           tone_keywords?: string[] | null
+          tone_model?: Json | null  // NEW: Structured tone model
           voice_style?: string | null
           values?: string[] | null
           certifications?: string[] | null
           do_not_say?: Json | null
+          // 9 Canonical Brand Voice Variables
+          brand_essence?: string | null
+          tone_of_voice?: string | null
+          things_to_avoid?: string | null
+          target_audience?: string | null
+          core_offerings?: string | null
+          content_focus?: string | null
+          cta_style?: string | null
+          communication_goal?: string | null
+          image_preferences?: string | null
+          social_style?: Json | null
+          voice_examples?: Json | null
+          booking_link?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
           business_id?: string
           tone_keywords?: string[] | null
+          tone_model?: Json | null  // NEW: Structured tone model
           voice_style?: string | null
           values?: string[] | null
           certifications?: string[] | null
           do_not_say?: Json | null
+          // 9 Canonical Brand Voice Variables
+          brand_essence?: string | null
+          tone_of_voice?: string | null
+          things_to_avoid?: string | null
+          target_audience?: string | null
+          core_offerings?: string | null
+          content_focus?: string | null
+          cta_style?: string | null
+          communication_goal?: string | null
+          image_preferences?: string | null
+          social_style?: Json | null
+          voice_examples?: Json | null
+          booking_link?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -292,6 +346,452 @@ export interface Database {
           closed?: boolean
           kind?: 'normal' | 'kitchen' | 'holiday'
           created_at?: string
+        }
+      }
+      menu_extractions: {
+        Row: {
+          id: string
+          business_id: string
+          menu_source_id: string | null
+          menu_name: string
+          menu_type: 'standard' | 'special'
+          extracted_data: Json
+          extracted_at: string | null
+          created_at: string
+          updated_at: string
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          menu_source_id?: string | null
+          menu_name: string
+          menu_type?: 'standard' | 'special'
+          extracted_data: Json
+          extracted_at?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          menu_source_id?: string | null
+          menu_name?: string
+          menu_type?: 'standard' | 'special'
+          extracted_data?: Json
+          extracted_at?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string | null
+        }
+      }
+
+      menu_sources: {
+        Row: {
+          id: string
+          business_id: string
+          source_url: string
+          source_type: 'url' | 'pdf'
+          file_name: string | null
+          menu_type: 'standard' | 'special'
+          source_origin: 'ai_detected' | 'manual_added'
+          status: 'pending' | 'extracting' | 'extracted' | 'ignored' | 'error'
+          error_message: string | null
+          created_at: string
+          updated_at: string
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          source_url: string
+          source_type: 'url' | 'pdf'
+          file_name?: string | null
+          menu_type?: 'standard' | 'special'
+          source_origin: 'ai_detected' | 'manual_added'
+          status?: 'pending' | 'extracting' | 'extracted' | 'ignored' | 'error'
+          error_message?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          source_url?: string
+          source_type?: 'url' | 'pdf'
+          file_name?: string | null
+          menu_type?: 'standard' | 'special'
+          source_origin?: 'ai_detected' | 'manual_added'
+          status?: 'pending' | 'extracting' | 'extracted' | 'ignored' | 'error'
+          error_message?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string | null
+        }
+      }
+
+      menu_results_v2: {
+        Row: {
+          id: string
+          business_id: string
+          source_kind: 'url' | 'storage'
+          source_url: string | null
+          source_content_type: string | null
+          storage_bucket: string | null
+          storage_path: string | null
+          sha256: string | null
+          status: 'queued' | 'processing' | 'done' | 'error'
+          language_code: string | null
+          attempts: number
+          claimed_at: string | null
+          completed_at: string | null
+          extraction_method: string | null
+          raw_text: string | null
+          structured_data: Json | null
+          error_message: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          source_kind?: 'url' | 'storage'
+          source_url?: string | null
+          source_content_type?: string | null
+          storage_bucket?: string | null
+          storage_path?: string | null
+          sha256?: string | null
+          status?: 'queued' | 'processing' | 'done' | 'error'
+          language_code?: string | null
+          attempts?: number
+          claimed_at?: string | null
+          completed_at?: string | null
+          extraction_method?: string | null
+          raw_text?: string | null
+          structured_data?: Json | null
+          error_message?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          source_kind?: 'url' | 'storage'
+          source_url?: string | null
+          source_content_type?: string | null
+          storage_bucket?: string | null
+          storage_path?: string | null
+          sha256?: string | null
+          status?: 'queued' | 'processing' | 'done' | 'error'
+          language_code?: string | null
+          attempts?: number
+          claimed_at?: string | null
+          completed_at?: string | null
+          extraction_method?: string | null
+          raw_text?: string | null
+          structured_data?: Json | null
+          error_message?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+
+      website_analysis_jobs: {
+        Row: {
+          id: string
+          business_id: string
+          website_url: string
+          status: 'queued' | 'processing' | 'done' | 'error'
+          result: Json | null
+          error_message: string | null
+          created_at: string
+          claimed_at: string | null
+          completed_at: string | null
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          website_url: string
+          status: 'queued' | 'processing' | 'done' | 'error'
+          result?: Json | null
+          error_message?: string | null
+          created_at?: string
+          claimed_at?: string | null
+          completed_at?: string | null
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          website_url?: string
+          status?: 'queued' | 'processing' | 'done' | 'error'
+          result?: Json | null
+          error_message?: string | null
+          created_at?: string
+          claimed_at?: string | null
+          completed_at?: string | null
+        }
+      }
+
+      post_drafts: {
+        Row: {
+          id: string
+          user_id: string
+          selected_platforms: string[] | null
+          post_content: Json | null
+          photo_content: Json | null
+          photo_idea: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          selected_platforms?: string[] | null
+          post_content?: Json | null
+          photo_content?: Json | null
+          photo_idea?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          selected_platforms?: string[] | null
+          post_content?: Json | null
+          photo_content?: Json | null
+          photo_idea?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+
+      business_services: {
+        Row: {
+          id: string
+          business_id: string
+          category: string | null
+          name: string
+          description: string | null
+          price: number | null
+          price_to: number | null
+          currency: string | null
+          duration_minutes: number | null
+          requires_booking: boolean | null
+          available_online: boolean | null
+          display_order: number | null
+          is_featured: boolean | null
+          is_active: boolean | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          category?: string | null
+          name: string
+          description?: string | null
+          price?: number | null
+          price_to?: number | null
+          currency?: string | null
+          duration_minutes?: number | null
+          requires_booking?: boolean | null
+          available_online?: boolean | null
+          display_order?: number | null
+          is_featured?: boolean | null
+          is_active?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          category?: string | null
+          name?: string
+          description?: string | null
+          price?: number | null
+          price_to?: number | null
+          currency?: string | null
+          duration_minutes?: number | null
+          requires_booking?: boolean | null
+          available_online?: boolean | null
+          display_order?: number | null
+          is_featured?: boolean | null
+          is_active?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+
+      business_staff: {
+        Row: {
+          id: string
+          business_id: string
+          name: string
+          role: string | null
+          bio: string | null
+          specialties: string[] | null
+          certifications: string[] | null
+          years_experience: number | null
+          photo_url: string | null
+          accepts_bookings: boolean | null
+          booking_url: string | null
+          display_order: number | null
+          is_featured: boolean | null
+          is_active: boolean | null
+          instagram_handle: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          name: string
+          role?: string | null
+          bio?: string | null
+          specialties?: string[] | null
+          certifications?: string[] | null
+          years_experience?: number | null
+          photo_url?: string | null
+          accepts_bookings?: boolean | null
+          booking_url?: string | null
+          display_order?: number | null
+          is_featured?: boolean | null
+          is_active?: boolean | null
+          instagram_handle?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          name?: string
+          role?: string | null
+          bio?: string | null
+          specialties?: string[] | null
+          certifications?: string[] | null
+          years_experience?: number | null
+          photo_url?: string | null
+          accepts_bookings?: boolean | null
+          booking_url?: string | null
+          display_order?: number | null
+          is_featured?: boolean | null
+          is_active?: boolean | null
+          instagram_handle?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+
+      business_products: {
+        Row: {
+          id: string
+          business_id: string
+          name: string
+          brand: string | null
+          category: string | null
+          description: string | null
+          price: number | null
+          currency: string | null
+          stock_status: string | null
+          sku: string | null
+          image_url: string | null
+          display_order: number | null
+          is_featured: boolean | null
+          is_active: boolean | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          name: string
+          brand?: string | null
+          category?: string | null
+          description?: string | null
+          price?: number | null
+          currency?: string | null
+          stock_status?: string | null
+          sku?: string | null
+          image_url?: string | null
+          display_order?: number | null
+          is_featured?: boolean | null
+          is_active?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          name?: string
+          brand?: string | null
+          category?: string | null
+          description?: string | null
+          price?: number | null
+          currency?: string | null
+          stock_status?: string | null
+          sku?: string | null
+          image_url?: string | null
+          display_order?: number | null
+          is_featured?: boolean | null
+          is_active?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+
+      business_classes: {
+        Row: {
+          id: string
+          business_id: string
+          name: string
+          description: string | null
+          category: string | null
+          day_of_week: number | null
+          start_time: string
+          duration_minutes: number
+          max_capacity: number | null
+          requires_booking: boolean | null
+          instructor_id: string | null
+          instructor_name: string | null
+          is_active: boolean | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          name: string
+          description?: string | null
+          category?: string | null
+          day_of_week?: number | null
+          start_time: string
+          duration_minutes: number
+          max_capacity?: number | null
+          requires_booking?: boolean | null
+          instructor_id?: string | null
+          instructor_name?: string | null
+          is_active?: boolean | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          name?: string
+          description?: string | null
+          category?: string | null
+          day_of_week?: number | null
+          start_time?: string
+          duration_minutes?: number
+          max_capacity?: number | null
+          requires_booking?: boolean | null
+          instructor_id?: string | null
+          instructor_name?: string | null
+          is_active?: boolean | null
+          created_at?: string
+          updated_at?: string
         }
       }
       social_accounts: {
@@ -478,9 +978,20 @@ export interface Database {
           status: 'pending' | 'processing' | 'success' | 'error'
           last_run_at: string | null
           raw_result: Json | null
+          raw_html: string | null
+          cta_texts: string[] | null
+          headers: string[] | null
+          nav_items: string[] | null
+          hero_texts: string[] | null
           error_message: string | null
           notes: string | null
           created_at: string
+          homepage_content: string | null
+          about_content: string | null
+          detected_links: Json | null
+          about_block: string | null
+          keywords: string[] | null
+          menu_structure: Json | null
         }
         Insert: {
           id?: string
@@ -489,6 +1000,11 @@ export interface Database {
           status?: 'pending' | 'processing' | 'success' | 'error'
           last_run_at?: string | null
           raw_result?: Json | null
+          raw_html?: string | null
+          cta_texts?: string[] | null
+          headers?: string[] | null
+          nav_items?: string[] | null
+          hero_texts?: string[] | null
           error_message?: string | null
           notes?: string | null
           created_at?: string
@@ -500,6 +1016,11 @@ export interface Database {
           status?: 'pending' | 'processing' | 'success' | 'error'
           last_run_at?: string | null
           raw_result?: Json | null
+          raw_html?: string | null
+          cta_texts?: string[] | null
+          headers?: string[] | null
+          nav_items?: string[] | null
+          hero_texts?: string[] | null
           error_message?: string | null
           notes?: string | null
           created_at?: string

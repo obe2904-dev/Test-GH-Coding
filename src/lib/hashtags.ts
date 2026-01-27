@@ -69,9 +69,10 @@ export const computePlatformHashtagViews = ({
       return
     }
     const hashtagEntry = hashtagByKey.get(key)
-    if (!hashtagEntry || !hashtagEntry.enabled) {
+    if (!hashtagEntry) {
       return
     }
+    // Show all hashtags regardless of enabled status - user can toggle them
     seenKeys.add(key)
     uniqueOrder.push(key)
   })

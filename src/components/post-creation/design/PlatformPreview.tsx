@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { useState, useEffect, useRef, useMemo } from 'react'
+import IconButton from '../../ui/IconButton'
 import { supabase } from '../../../lib/supabase'
 import { MediaItem } from '../../../stores/postCreationStore'
 import type { Database } from '../../../types/database'
@@ -230,11 +231,11 @@ export function PlatformPreview({
                   </svg>
                 </div>
               </div>
-              <button className="text-gray-500 hover:bg-gray-100 p-1 rounded">
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <IconButton ariaLabel="Open post menu" className="text-gray-500 hover:bg-gray-100" iconClassName="w-5 h-5">
+                <svg fill="currentColor" viewBox="0 0 20 20">
                   <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
                 </svg>
-              </button>
+              </IconButton>
             </div>
             
             {/* Facebook Post Text */}
@@ -278,22 +279,26 @@ export function PlatformPreview({
               {/* Multiple Photos Navigation */}
               {uploadedMedia.length > 1 && (
                 <>
-                  <button
+                  <IconButton
+                    ariaLabel="Previous photo"
                     onClick={() => onMediaIndexChange(
                       selectedMediaIndex > 0 ? selectedMediaIndex - 1 : uploadedMedia.length - 1
                     )}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 min-w-10 min-h-10 w-8 h-8 bg-white/90 hover:bg-white rounded-full shadow-lg transition-colors"
+                    iconClassName="w-5 h-5 text-gray-700"
                   >
-                    <ChevronLeft className="w-5 h-5 text-gray-700" />
-                  </button>
-                  <button
+                    <ChevronLeft />
+                  </IconButton>
+                  <IconButton
+                    ariaLabel="Next photo"
                     onClick={() => onMediaIndexChange(
                       selectedMediaIndex < uploadedMedia.length - 1 ? selectedMediaIndex + 1 : 0
                     )}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-white/90 hover:bg-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 min-w-10 min-h-10 w-8 h-8 bg-white/90 hover:bg-white rounded-full shadow-lg transition-colors"
+                    iconClassName="w-5 h-5 text-gray-700"
                   >
-                    <ChevronRight className="w-5 h-5 text-gray-700" />
-                  </button>
+                    <ChevronRight />
+                  </IconButton>
                   <div className="absolute top-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
                     {selectedMediaIndex + 1} / {uploadedMedia.length}
                   </div>
@@ -371,13 +376,13 @@ export function PlatformPreview({
                 {businessName && <p className="text-sm font-semibold text-gray-900">{businessName}</p>}
               </div>
             </div>
-            <button className="text-gray-900">
-              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+            <IconButton ariaLabel="Open post menu" className="text-gray-900" iconClassName="w-6 h-6">
+              <svg fill="currentColor" viewBox="0 0 24 24">
                 <circle cx="12" cy="5" r="1.5"/>
                 <circle cx="12" cy="12" r="1.5"/>
                 <circle cx="12" cy="19" r="1.5"/>
               </svg>
-            </button>
+            </IconButton>
           </div>
 
           {/* Instagram Photo */}
@@ -403,30 +408,40 @@ export function PlatformPreview({
               {/* Multiple Photos Indicator */}
               {uploadedMedia.length > 1 && (
                 <>
-                  <button
+                  <IconButton
+                    ariaLabel="Previous photo"
                     onClick={() => onMediaIndexChange(
                       selectedMediaIndex > 0 ? selectedMediaIndex - 1 : uploadedMedia.length - 1
                     )}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 min-w-10 min-h-10 w-7 h-7 bg-black/50 hover:bg-black/70 rounded-full transition-colors"
+                    iconClassName="w-4 h-4 text-white"
                   >
-                    <ChevronLeft className="w-4 h-4 text-white" />
-                  </button>
-                  <button
+                    <ChevronLeft />
+                  </IconButton>
+                  <IconButton
+                    ariaLabel="Next photo"
                     onClick={() => onMediaIndexChange(
                       selectedMediaIndex < uploadedMedia.length - 1 ? selectedMediaIndex + 1 : 0
                     )}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 bg-black/50 hover:bg-black/70 rounded-full flex items-center justify-center transition-colors"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 min-w-10 min-h-10 w-7 h-7 bg-black/50 hover:bg-black/70 rounded-full transition-colors"
+                    iconClassName="w-4 h-4 text-white"
                   >
-                    <ChevronRight className="w-4 h-4 text-white" />
-                  </button>
+                    <ChevronRight />
+                  </IconButton>
                   <div className="absolute top-3 left-3 flex gap-1">
                     {uploadedMedia.map((_, index) => (
-                      <div
+                      <button
                         key={index}
-                        className={`w-1.5 h-1.5 rounded-full ${
-                          index === selectedMediaIndex ? 'bg-white' : 'bg-white/50'
-                        }`}
-                      />
+                        aria-label={`Select photo ${index + 1}`}
+                        onClick={() => onMediaIndexChange(index)}
+                        className="w-10 h-10 flex items-center justify-center"
+                      >
+                        <div
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            index === selectedMediaIndex ? 'bg-white' : 'bg-white/50'
+                          }`}
+                        />
+                      </button>
                     ))}
                   </div>
                 </>
@@ -458,28 +473,28 @@ export function PlatformPreview({
           <div className="p-3 bg-white">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-4">
-                <button className="hover:opacity-50 transition-opacity">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                <IconButton ariaLabel="Like" className="hover:opacity-50 transition-opacity" iconClassName="w-6 h-6">
+                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
                   </svg>
-                </button>
-                <button className="hover:opacity-50 transition-opacity">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                </IconButton>
+                <IconButton ariaLabel="Comment" className="hover:opacity-50 transition-opacity" iconClassName="w-6 h-6">
+                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                   </svg>
-                </button>
-                <button className="hover:opacity-50 transition-opacity">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                </IconButton>
+                <IconButton ariaLabel="Share" className="hover:opacity-50 transition-opacity" iconClassName="w-6 h-6">
+                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                     <line x1="22" y1="2" x2="11" y2="13"/>
                     <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                   </svg>
-                </button>
+                </IconButton>
               </div>
-              <button className="hover:opacity-50 transition-opacity">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <IconButton ariaLabel="Bookmark" className="hover:opacity-50 transition-opacity" iconClassName="w-6 h-6">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                   <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
                 </svg>
-              </button>
+              </IconButton>
             </div>
             
             <p className="text-sm font-semibold text-gray-900 mb-1">127 likes</p>

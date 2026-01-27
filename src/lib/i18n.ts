@@ -8,8 +8,6 @@ import daTranslations from './locales/da.json'
 
 console.log('EN translations loaded:', enTranslations)
 console.log('DA translations loaded:', daTranslations)
-console.log('EN generate.title:', (enTranslations as any).generate?.title)
-console.log('DA generate.title:', (daTranslations as any).generate?.title)
 
 const resources = {
   en: { translation: enTranslations },
@@ -51,10 +49,6 @@ i18n
     console.log('Has EN?', i18n.hasResourceBundle('en', 'translation'))
     const bundle = i18n.getResourceBundle('en', 'translation')
     console.log('EN bundle:', bundle)
-    if (bundle) {
-      console.log('Has generate?', 'generate' in bundle)
-      console.log('generate object:', bundle.generate)
-    }
   })
 
 export default i18n

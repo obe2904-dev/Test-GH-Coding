@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 export const UNSAVED_CHANGES_MESSAGE =
   'Du har ændringer, der ikke er gemt. Er du sikker på, du vil forlade siden?'
 
-const DRAFT_TABLE = 'post_drafts'
+const DRAFT_TABLE = 'post_ideas'
 
 interface SaveDraftOptions {
   selectedPlatforms: string[]

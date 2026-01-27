@@ -70,18 +70,23 @@ export function useBusinessData(): BusinessData {
           setLocation(locationData as BusinessLocation)
         }
 
-        // Load latest successful website analysis
-        const { data: analysisData } = await supabase
-          .from('website_analyses')
-          .select('*')
-          .eq('business_id', (businessData as Business).id)
-          .eq('status', 'success')
-          .order('last_run_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-        
-        if (analysisData) {
-          setLatestAnalysis(analysisData as WebsiteAnalysis)
+        // Load latest successful website analysis (gracefully handle if table doesn't exist)
+        try {
+          const { data: analysisData, error: analysisError } = await supabase
+            .from('website_analyses')
+            .select('*')
+            .eq('business_id', (businessData as Business).id)
+            .eq('status', 'success')
+            .order('last_run_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          
+          if (analysisData && !analysisError) {
+            setLatestAnalysis(analysisData as WebsiteAnalysis)
+          }
+        } catch (err) {
+          // Silently ignore if website_analyses table doesn't exist yet
+          console.debug('Website analysis feature not available yet')
         }
       }
     } catch (error) {

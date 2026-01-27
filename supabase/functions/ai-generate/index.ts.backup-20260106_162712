@@ -1,0 +1,1377 @@
+// @ts-ignore - Deno runtime import
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { getUserIdFromAuth, getUserQuota, incrementQuota } from '../_shared/quota-utils.ts'
+
+// Minimal Deno env typing for tooling
+declare const Deno: { env: { get(key: string): string | undefined } }
+
+// Updated: 2026-01-04 - Fixed menu item examples to prevent AI from inventing dishes
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// Centralized AI model configuration
+const AI_MODELS = {
+  ideaGeneration: {
+    'free': 'gpt-4o-mini',
+    'standardplus': 'gpt-4o',
+    'premium': 'gpt-4o',
+  }
+} as const
+
+function getAIModelForTier(userTier?: string): string {
+  return AI_MODELS.ideaGeneration[userTier as keyof typeof AI_MODELS.ideaGeneration] || 'gpt-4o-mini'
+}
+
+function extractMenuItemsFromPrompt(prompt: string): string[] {
+  const match = prompt.match(
+    /(MENU ITEMS|MENUPUNKTER).*?:\s*\n([\s\S]*?)(\n===|\nOUTPUT FORMAT:|\nOUTPUTFORMAT|\nGuidelines:|\nOUTPUT RULES:|\nOUTPUT-REGLER:|$)/i
+  )
+  if (!match) return []
+
+  const lines = match[2]
+    .split('\n')
+    .map((s) => s.trim())
+
+  const menuItems: string[] = []
+  for (const line of lines) {
+    if (!line) continue
+
+    // Stop when the prompt transitions from the menu list into rules or another section.
+    if (/^(MENU RULES|REGLER FOR MENUPUNKTER)\b/i.test(line)) break
+    if (/^(OPENING HOURS|ÅBNINGSTIDER)\b/i.test(line)) break
+    if (/^===\s*/.test(line)) break
+
+    // Ignore placeholders / non-items
+    if (/^\(ingen\)$|^ingen$|^\(none\)$|^none$/i.test(line)) continue
+
+    // Strip bullet markers and keep the menu item (don't skip bullets!)
+    if (/^[-*]\s+/.test(line)) {
+      menuItems.push(line.replace(/^[-*]\s+/, '').trim())
+      continue
+    }
+
+    menuItems.push(line)
+  }
+
+  return menuItems
+}
+
+function extractToneAnchorsFromPrompt(prompt: string): string[] {
+  const match = prompt.match(
+    /===\s*(TONE ANCHORS|TONEANKRE)\s*(\(MANDATORY\)|\(OBLIGATORISK\))?\s*===\s*\n([\s\S]*?)(\n===|\nOUTPUT FORMAT:|\nOUTPUTFORMAT|\nOUTPUT RULES:|\nOUTPUT-REGLER:|$)/i
+  )
+  if (!match) return []
+
+  return match[3]
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((line) => line.startsWith('- '))
+    .map((line) => line.replace(/^-\s+/, '').trim())
+    .filter(Boolean)
+}
+
+function extractPromptLanguageFromPrompt(prompt: string | undefined | null): 'da' | 'en' {
+  if (!prompt) return 'en'
+  const match = prompt.match(/PROMPT_(?:LANGUAGE|SPROG):\s*(da|en)\b/i)
+  if (match?.[1]) {
+    return match[1].toLowerCase() as 'da' | 'en'
+  }
+  return 'en'
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function extractJsonObjectAfterLabel(prompt: string, labelRegex: RegExp): string | null {
+  const match = labelRegex.exec(prompt)
+  if (!match) return null
+
+  const startSearch = match.index + match[0].length
+  const braceStart = prompt.indexOf('{', startSearch)
+  if (braceStart < 0) return null
+
+  let depth = 0
+  let inString = false
+  let escape = false
+
+  for (let i = braceStart; i < prompt.length; i++) {
+    const ch = prompt[i]
+    if (escape) {
+      escape = false
+      continue
+    }
+    if (ch === '\\') {
+      if (inString) escape = true
+      continue
+    }
+    if (ch === '"') {
+      inString = !inString
+      continue
+    }
+    if (inString) continue
+
+    if (ch === '{') depth += 1
+    if (ch === '}') {
+      depth -= 1
+      if (depth === 0) {
+        return prompt.slice(braceStart, i + 1)
+      }
+    }
+  }
+
+  return null
+}
+
+function extractHardConstraintsFromPrompt(prompt: string | undefined | null): string[] {
+  if (!prompt) return []
+  
+  // Try JSON format first
+  const jsonStr =
+    extractJsonObjectAfterLabel(prompt, /Ting at undgå:\s*/i) ||
+    extractJsonObjectAfterLabel(prompt, /Things to avoid:\s*/i) ||
+    extractJsonObjectAfterLabel(prompt, /HARD_CONSTRAINTS_JSON\s*===\s*/i)
+
+  if (jsonStr) {
+    try {
+      const parsed = JSON.parse(jsonStr)
+      const language = Array.isArray(parsed?.language_constraints)
+        ? parsed.language_constraints
+        : Array.isArray(parsed?.hard_constraints)
+          ? parsed.hard_constraints
+          : []
+      return language
+        .map((s: any) => String(s || '').trim())
+        .filter((s: string) => s.length >= 3)
+    } catch {
+      // Fall through to bullet list parsing
+    }
+  }
+  
+  // Try bullet-list format: === HARD_TERMS_BANNED === \n- word1 \n- word2
+  const bulletMatch = prompt.match(
+    /===\s*(?:HARD_TERMS_BANNED|BANNED_TERMS)\s*===\s*\n([\s\S]*?)(?:\n===|\n\n[A-Z]|$)/i
+  )
+  if (bulletMatch) {
+    return bulletMatch[1]
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((line) => line.startsWith('- '))
+      .map((line) => line.replace(/^-\s+/, '').trim())
+      .filter((s) => s.length >= 3)
+  }
+  
+  return []
+}
+
+function validateHardConstraints(ideas: any[], hardConstraints: string[]): string[] {
+  const errors: string[] = []
+  if (!Array.isArray(ideas) || ideas.length === 0) return errors
+  if (!hardConstraints || hardConstraints.length === 0) return errors
+
+  for (let i = 0; i < ideas.length; i++) {
+    const idea = ideas[i]
+    const haystacks = [String(idea?.headline || ''), String(idea?.text || ''), String(idea?.photoSuggestion || '')]
+    for (const term of hardConstraints) {
+      const re = new RegExp(escapeRegExp(term), 'i')
+      if (haystacks.some((h) => re.test(h))) {
+        errors.push(`Idea ${i + 1} contains forbidden term from hard constraints: "${term}".`)
+        break
+      }
+    }
+  }
+
+  return errors
+}
+
+function extractBookingUrlFromPrompt(prompt: string | undefined | null): string {
+  if (!prompt) return ''
+
+  // Danish marker used by our prompts
+  const dkMatch = prompt.match(/\bBORDRESERVATION\s*:\s*\n([^\n]+)\n?/i)
+  const enMatch = prompt.match(/\bBOOKING\s*URL\s*:\s*\n([^\n]+)\n?/i)
+  const raw = (dkMatch?.[1] || enMatch?.[1] || '').trim()
+  const url = raw.split(/\s+/)[0]
+  return /^https?:\/\//i.test(url) ? url : ''
+}
+
+function getIdeasSystemPrompt(lang: 'da' | 'en'): string {
+  if (lang === 'da') {
+    return `Du er en dansk SoMe-copywriter for små virksomheder.
+
+Sprog og stil (VIGTIGT):
+- Skriv på naturligt dansk (ikke “oversat” US marketing-sprog).
+- Undgå klichéer og “amerikanske” feel-good åbninger som fx: "Forestil dig...", "Tag en pause fra hverdagen...".
+- Variér startord og sætningsopbygning på tværs af de 3 ideer.
+
+PRIORITERING (følg altid):
+  1) UFRAVIGELIGE REGLER (hvis de findes)
+  2) BRANDPROFIL (højeste prioritet)
+  3) DRIFTSREGLER FOR INDHOLD
+  4) VIRKSOMHEDSKONTEKST
+  5) EKSTRA KONTEKST (vejr, højtider, post-historik osv.)
+
+STRAMME REGLER:
+- Returnér KUN gyldig JSON. Ingen markdown. Ingen forklaringer.
+- Følg BRANDPROFIL helt præcist – den overstyrer alt andet.
+  - Hvis MENUPUNKTER er angivet: Kopiér rettenavne 1:1 (tegn-for-tegn).
+  - Hvis MENUPUNKTER er angivet:
+    - Mindst 1 idé skal være menu-baseret og udfylde "menuItemUsed" med et eksakt match fra listen.
+    - 1–2 ideer må gerne være ikke-menu-idéer (storytelling/vibe/location/daypart osv.).
+      - For en ikke-menu-idé: sæt "menuItemUsed" til "" (tom streng).
+    - "menuItemUsed" skal være FORSKELLIG på tværs af menu-idéer.
+    - VIGTIGT: Menupunkter kan indeholde kategori i parentes som "RET (KATEGORI)".
+      - I kundevendt tekst må du KUN bruge selve retten UDEN kategorien.
+      - Eksempel: hvis menuItemUsed er "PARISERBØF (FROKOST)", skal teksten indeholde "PARISERBØF" (ikke "(FROKOST)").
+  - Hver idé skal indeholde:
+    - "bestTimeToPost": kort tekst med ugedag + tidsvindue (fx "Torsdag 17:00–19:00")
+    - "impact": én af "low" | "medium" | "high"
+  - Opfind aldrig retter, oversæt aldrig retter, og omformuler aldrig rettenavne.
+    - Forbudte generiske eksempler: “vores lækre retter”, “gastronomiske oplevelser”, “prøv vores specialiteter”.
+- Prioritér konkrete detaljer frem for generiske tillægsord.
+- Hold tonen venlig, rolig og jordnær (ikke over-the-top). Undgå FOMO-sprog som "du ikke vil gå glip af".
+- I hver idé: maks. ÉT udråbstegn (!).
+
+Hvis instruktioner konflikter, er det prioriteringen ovenfor der gælder.`
+  }
+
+  return `You are a social media copywriter for small businesses.
+
+Style (IMPORTANT):
+- Write in natural English (avoid cliche, overly “marketing” language).
+- Vary openings and sentence structure across the 3 ideas.
+
+PRIORITY ORDER (always follow):
+  1. HARD RULES / NON-NEGOTIABLE RULES (if present)
+  2. BRAND PROFILE (highest priority signal)
+  3. OPERATIONAL CONTENT RULES / CONTENT RULES
+  4. BUSINESS CONTEXT
+  5. OPTIONAL CONTEXT (weather, holidays, post history, etc.)
+
+STRICT RULES:
+- Return ONLY valid JSON. No markdown. No explanations.
+- Follow the BRAND PROFILE exactly - it overrides all other instructions.
+  - If USAGE OCCASIONS are provided: Each idea MUST primarily map to EXACTLY one occasion.
+    - Fill "occasionUsed" with the used occasion (e.g., "Weekend brunch with kids").
+    - Text must reflect the occasion (include 2-3 keywords from when/situation/behavior).
+  - If MENU ITEMS are provided: you MUST copy exact menu item names character-for-character.
+  - If MENU ITEMS are provided:
+    - At least 1 idea must be menu-based and include "menuItemUsed" as an exact match from the list.
+    - 1–2 ideas may be non-menu ideas (storytelling/vibe/location/daypart etc.).
+      - For a non-menu idea: set "menuItemUsed" to "" (empty string).
+    - "menuItemUsed" must be DIFFERENT across menu-based ideas.
+    - IMPORTANT: Menu items may include category labels in parentheses like "DISH (CATEGORY)".
+      - In customer-facing text, include ONLY the dish name WITHOUT the category suffix.
+  - Each idea must include:
+    - "occasionUsed": the primary usage occasion this idea maps to
+    - "bestTimeToPost": short string with suggested day + time window
+    - "impact": one of "low" | "medium" | "high"
+  - Never invent dish names, never translate dish names, never paraphrase dish names.
+  - BANNED WORDS (personas/demographics): "families", "couples", "friends", "tourists", "students", "locals", "young people".
+- Prefer concrete details over generic adjectives.
+- Keep the tone friendly, calm, and grounded (not over-the-top).
+- In each idea text, use at most ONE exclamation mark (!).
+
+If instructions conflict, the priority order above determines which wins.`
+}
+
+function validateNoPersonas(ideas: any[]): string[] {
+  const errors: string[] = []
+  const bannedPersonas = [
+    'familier', 'børnefamilier', 'par', 'venner',
+    'turister', 'studerende', 'lokale', 'unge', 'seniorer'
+  ]
+
+  for (let i = 0; i < ideas.length; i++) {
+    const haystack = `${ideas[i]?.headline || ''}\n${ideas[i]?.text || ''}\n${ideas[i]?.photoSuggestion || ''}`.toLowerCase()
+    for (const word of bannedPersonas) {
+      if (haystack.includes(word.toLowerCase())) {
+        errors.push(`Idea ${i + 1} contains banned persona/demographic word: "${word}".`)
+        break
+      }
+    }
+  }
+
+  return errors
+}
+
+function validateMenuDaypartMatch(ideas: any[], menuItems: string[]): string[] {
+  const errors: string[] = []
+  if (menuItems.length === 0) return errors
+
+  for (let i = 0; i < ideas.length; i++) {
+    const idea = ideas[i]
+    const menuItemUsed = String(idea?.menuItemUsed || '').trim()
+    if (!menuItemUsed) continue // Non-menu idea, skip
+
+    const text = String(idea?.text || '').toLowerCase()
+    const bestTime = String(idea?.bestTimeToPost || '').trim()
+    
+    // Enhanced daypart detection using both text and time
+    const detectedDaypart = detectDaypart(text, bestTime)
+    if (detectedDaypart === 'unknown') continue // Can't determine daypart, skip validation
+
+    // Find the actual menu line
+    const menuLine = menuItems.find(m => m.includes(menuItemUsed))
+    if (!menuLine) continue
+
+    const category = extractMenuCategory(menuLine)
+    if (!category) continue // No category = no validation needed
+
+    // Validate menu label matches detected daypart
+    let labelMatchesDaypart = false
+    
+    if (detectedDaypart === 'morning') {
+      labelMatchesDaypart = /MORGENMAD|BREAKFAST|BRUNCH/i.test(category)
+    } else if (detectedDaypart === 'lunch') {
+      labelMatchesDaypart = /FROKOST|LUNCH/i.test(category)
+    } else if (detectedDaypart === 'evening') {
+      labelMatchesDaypart = /MIDDAG|DINNER|AFTEN|EVENING|COCKTAIL|DRINK|BAR/i.test(category)
+    }
+
+    if (!labelMatchesDaypart) {
+      errors.push(
+        `Idea ${i + 1} daypart mismatch: "${menuItemUsed}" (${category}) doesn't match detected ${detectedDaypart} context (text + time: "${bestTime}")`
+      )
+    }
+
+    // Kids menu items should only appear in family-friendly contexts
+    if (isKidsMenuItem(menuLine)) {
+      const hasKidsContext = /børn|barn|kid|child|familie/i.test(text)
+      if (!hasKidsContext) {
+        errors.push(
+          `Idea ${i + 1} uses kids menu item "${menuItemUsed}" without family/kids context in text`
+        )
+      }
+    }
+  }
+
+  return errors
+}
+
+function validateMenuContext(ideas: any[], menuItems: string[]): string[] {
+  const errors: string[] = []
+  if (menuItems.length === 0) return errors
+
+  for (let i = 0; i < ideas.length; i++) {
+    const idea = ideas[i]
+    const menuItemUsed = String(idea?.menuItemUsed || '').trim()
+    if (!menuItemUsed) continue // Non-menu idea, skip
+
+    // Find the actual menu line
+    const menuLine = menuItems.find(m => m.includes(menuItemUsed))
+    if (!menuLine) continue
+
+    const category = extractMenuCategory(menuLine)
+    if (!category) continue // No category = no context restrictions
+
+    const text = String(idea?.text || '').toLowerCase()
+    const bestTime = String(idea?.bestTimeToPost || '').toLowerCase()
+    const combinedContext = `${text} ${bestTime}`
+
+    // Define context signals for each daypart/occasion
+    const brunchSignals = /brunch|morgenmad|breakfast|formiddag|morning/i
+    const lunchSignals = /frokost|lunch|middag.*tid|12|13|14/i
+    const dinnerSignals = /aften|dinner|evening|middag(?!.*tid)|18|19|20|21/i
+    const lateSignals = /cocktail|drink|bar|nat|late|22|23/i
+    const kidsSignals = /børn|barn|kid|child|familie|family/i
+
+    // RULE 1: BRUNCH items cannot be used in dinner/evening/late contexts
+    if (/BRUNCH/i.test(category)) {
+      if (dinnerSignals.test(combinedContext) || lateSignals.test(combinedContext)) {
+        errors.push(
+          `Idea ${i + 1} context violation: "${menuItemUsed}" is a BRUNCH item but is presented in dinner/evening/late context`
+        )
+        continue
+      }
+    }
+
+    // RULE 2: FROKOST (lunch) items cannot be presented as brunch or late dinner
+    if (/FROKOST|LUNCH/i.test(category)) {
+      if (brunchSignals.test(combinedContext)) {
+        errors.push(
+          `Idea ${i + 1} context violation: "${menuItemUsed}" is a FROKOST item but is presented as brunch`
+        )
+        continue
+      }
+      if (lateSignals.test(combinedContext)) {
+        errors.push(
+          `Idea ${i + 1} context violation: "${menuItemUsed}" is a FROKOST item but is presented in late/bar/cocktail context`
+        )
+        continue
+      }
+    }
+
+    // RULE 3: MIDDAG/DINNER items cannot be used in morning/brunch contexts
+    if (/MIDDAG|DINNER|AFTEN/i.test(category)) {
+      if (brunchSignals.test(combinedContext)) {
+        errors.push(
+          `Idea ${i + 1} context violation: "${menuItemUsed}" is a DINNER item but is presented in morning/brunch context`
+        )
+        continue
+      }
+    }
+
+    // RULE 4: KIDS items must have family/kids context
+    if (/BØRNE|BARN|KIDS|CHILD/i.test(category)) {
+      if (!kidsSignals.test(combinedContext)) {
+        errors.push(
+          `Idea ${i + 1} context violation: "${menuItemUsed}" is a KIDS menu item but lacks family/kids context in text or timing`
+        )
+        continue
+      }
+    }
+
+    // RULE 5: COCKTAIL/DRINK/BAR items should not appear in morning/lunch contexts
+    if (/COCKTAIL|DRINK|BAR/i.test(category)) {
+      if (brunchSignals.test(combinedContext) || lunchSignals.test(combinedContext)) {
+        errors.push(
+          `Idea ${i + 1} context violation: "${menuItemUsed}" is a COCKTAIL/BAR item but is presented in morning/lunch context`
+        )
+        continue
+      }
+    }
+  }
+
+  return errors
+}
+
+function validateToneConstraints(ideas: any[]): string[] {
+  const errors: string[] = []
+  const fomoRegex = /du\s+ikke\s+vil\s+g\w*\s+glip\s+af/i
+  const soulWarmingRegex = /varmer\s+(både\s+)?(krop\s+og\s+)?sj(?:æ|ae)len/i
+
+  for (let i = 0; i < ideas.length; i++) {
+    const text = String(ideas[i]?.text || '')
+    const exclamationCount = (text.match(/!/g) || []).length
+    if (exclamationCount > 1) {
+      errors.push(`Idea ${i + 1} is too over-the-top: more than 1 exclamation mark.`)
+    }
+    if (fomoRegex.test(text)) {
+      errors.push(`Idea ${i + 1} contains FOMO phrasing ("du ikke vil gå glip af").`)
+    }
+    if (soulWarmingRegex.test(text)) {
+      errors.push(`Idea ${i + 1} is too poetic/over-the-top ("varmer sjælen").`)
+    }
+  }
+
+  return errors
+}
+
+function validateIdeas(ideas: any[], menuItems: string[], toneAnchors: string[], bookingUrl?: string): string[] {
+  const errors: string[] = []
+  const hasMenu = menuItems.length > 0
+  const allowedImpact = new Set(['low', 'medium', 'high'])
+
+  // Note: Concrete terms validation removed - was too aggressive.
+  // Future: Replace with capability flags (hasCoffeeSignals, hasCocktailsSignals, etc.)
+  // from Brand Profile analysis instead of raw menu text matching.
+
+  const normalizeMenuLineToDish = (line: string): string => {
+    return String(line || '').replace(/\s*\([^)]+\)\s*$/, '').trim()
+  }
+
+  const resolveMenuItemUsed = (usedRaw: string): { ok: boolean; resolved?: string; error?: string } => {
+    const used = String(usedRaw || '').trim()
+    if (!used) return { ok: false, error: 'empty' }
+
+    // Exact match is always preferred
+    if (menuItems.includes(used)) return { ok: true, resolved: used }
+
+    // Allow base dish name (without trailing category suffix) if it maps uniquely.
+    const usedBase = normalizeMenuLineToDish(used)
+    if (!usedBase) return { ok: false, error: 'empty' }
+
+    const matches = menuItems.filter((m) => normalizeMenuLineToDish(m) === usedBase)
+    if (matches.length === 1) return { ok: true, resolved: matches[0] }
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        error: `ambiguous (matches multiple menu items: ${matches.join(' | ')})`,
+      }
+    }
+    return { ok: false, error: 'not_found' }
+  }
+
+  if (!Array.isArray(ideas) || ideas.length !== 3) {
+    errors.push('Must return exactly 3 ideas.')
+    return errors
+  }
+
+  // Track resolved menu items (normalized to an exact menu line) for uniqueness/"at least one" checks.
+  const usedMenuItems: string[] = []
+  let nonMenuIdeasCount = 0
+
+  for (let i = 0; i < ideas.length; i++) {
+    const idea = ideas[i]
+    if (!idea?.headline || !idea?.text || !idea?.photoSuggestion) {
+      errors.push(`Idea ${i + 1} missing required fields.`)
+      continue
+    }
+
+    const text: string = String(idea.text || '')
+
+    const bestTimeToPost = String(idea?.bestTimeToPost ?? '').trim()
+    if (!bestTimeToPost) {
+      errors.push(`Idea ${i + 1} missing bestTimeToPost.`)
+    } else if (bestTimeToPost.length > 80 || bestTimeToPost.includes('\n')) {
+      errors.push(`Idea ${i + 1} bestTimeToPost must be a short single-line string.`)
+    }
+
+    const impactRaw = String(idea?.impact ?? '').trim()
+    const impact = impactRaw.toLowerCase()
+    if (!impact) {
+      errors.push(`Idea ${i + 1} missing impact.`)
+    } else if (!allowedImpact.has(impact)) {
+      errors.push(`Idea ${i + 1} impact must be one of: low | medium | high.`)
+    }
+
+    if (hasMenu) {
+      const usedRaw = (idea.menuItemUsed || '').trim()
+      if (!usedRaw) {
+        nonMenuIdeasCount += 1
+
+        // Non-menu idea must not mention any concrete menu item name in text.
+        // If it does, it should be a menu-based idea with menuItemUsed set.
+        for (const menuLine of menuItems) {
+          const dishNameOnly = normalizeMenuLineToDish(menuLine)
+          if (dishNameOnly && text.includes(dishNameOnly)) {
+            errors.push(
+              `Idea ${i + 1} is non-menu (menuItemUsed="") but text mentions the menu item "${dishNameOnly}". If you mention it, set menuItemUsed accordingly.`
+            )
+            break
+          }
+        }
+
+        // Concrete terms validation removed - will be replaced with capability flags
+      } else {
+        const resolved = resolveMenuItemUsed(usedRaw)
+        if (!resolved.ok || !resolved.resolved) {
+          errors.push(`Idea ${i + 1} menuItemUsed not in MENU ITEMS list.`)
+          if (resolved.error && resolved.error !== 'not_found') {
+            errors.push(`Idea ${i + 1} menuItemUsed is ${resolved.error}.`) 
+          }
+          continue
+        }
+
+        usedMenuItems.push(resolved.resolved)
+        // Strip category suffix for text validation: "DISH (CATEGORY)" -> "DISH"
+        const dishNameOnly = normalizeMenuLineToDish(resolved.resolved)
+
+        // Some dish names themselves end with a qualifier in parentheses, e.g. "BØRNEMENU (max. 12 år)".
+        // Allow the post text to include either the full dish name or the base name without the trailing qualifier.
+        const baseDishName = normalizeMenuLineToDish(dishNameOnly)
+
+        const includesFull = dishNameOnly ? text.includes(dishNameOnly) : false
+        const includesBase = baseDishName && baseDishName !== dishNameOnly ? text.includes(baseDishName) : false
+
+        if (!includesFull && !includesBase) {
+          errors.push(`Idea ${i + 1} text does not include dish name "${dishNameOnly}".`)
+        }
+      }
+    }
+  }
+
+  // Booking URL enforcement (only if provided in the prompt)
+  if (bookingUrl) {
+    const texts = ideas.map((idea) => String(idea?.text || ''))
+    const urlRe = new RegExp(`(^|\\n)${escapeRegExp(bookingUrl)}(\\n|$)`)
+    const hasBookingUrlOnOwnLine = texts.some((t) => urlRe.test(t))
+    if (!hasBookingUrlOnOwnLine) {
+      errors.push('Booking URL missing: at least 1 idea must include the booking URL on its own line.')
+    }
+  }
+
+  if (hasMenu && usedMenuItems.length === 0) {
+    errors.push('If MENU ITEMS are provided: at least 1 idea must be menu-based (menuItemUsed must be an exact item from the list).')
+  }
+
+  if (hasMenu && usedMenuItems.length > 1) {
+    const occurrences = new Map<string, number[]>()
+    usedMenuItems.forEach((used, index) => {
+      const arr = occurrences.get(used) || []
+      arr.push(index + 1)
+      occurrences.set(used, arr)
+    })
+
+    for (const [used, indices] of occurrences.entries()) {
+      if (indices.length > 1) {
+        errors.push(`menuItemUsed must be different across all 3 ideas. "${used}" repeated in ideas ${indices.join(' and ')}.`)
+      }
+    }
+  }
+
+  if (toneAnchors.length > 0) {
+    const texts = ideas.map((idea) => String(idea?.text || ''))
+    const hasAnyAnchor = toneAnchors.some((anchor) => texts.some((t) => t.includes(anchor)))
+    if (!hasAnyAnchor) {
+      errors.push(`Tone anchors missing: at least one idea must include one of these exact phrases: ${toneAnchors.join(' | ')}`)
+    }
+  }
+
+  // Guard rails against overly hypey output
+  errors.push(...validateToneConstraints(ideas))
+  
+  // Enforce no demographic/persona words (familier, par, etc.)
+  errors.push(...validateNoPersonas(ideas))
+  
+  // Enforce menu/daypart appropriateness (lunch items at lunch time, etc.)
+  errors.push(...validateMenuDaypartMatch(ideas, menuItems))
+  
+  // Enforce menu label → context appropriateness (BRUNCH not in dinner, KIDS needs family context, etc.)
+  errors.push(...validateMenuContext(ideas, menuItems))
+
+  return errors
+}
+
+function stripTrailingParenSuffix(value: string): string {
+  return String(value || '').replace(/\s*\([^)]+\)\s*$/, '').trim()
+}
+
+function extractMenuCategory(menuLine: string): string | null {
+  const match = /\(([^)]+)\)\s*$/.exec(menuLine)
+  if (!match) return null
+  return match[1].trim().toUpperCase()
+}
+
+function isDaypartMenuItem(menuLine: string, daypart: 'morning' | 'lunch' | 'dinner' | 'late'): boolean {
+  const cat = extractMenuCategory(menuLine)
+  if (!cat) return true // No category = works anytime
+  
+  const morningCats = ['MORGENMAD', 'BREAKFAST', 'BRUNCH']
+  const lunchCats = ['FROKOST', 'LUNCH']
+  const dinnerCats = ['MIDDAG', 'DINNER', 'AFTEN', 'EVENING']
+  const lateCats = ['COCKTAILS', 'DRINKS', 'BAR']
+  
+  if (daypart === 'morning') return morningCats.some(c => cat.includes(c))
+  if (daypart === 'lunch') return lunchCats.some(c => cat.includes(c))
+  if (daypart === 'dinner') return dinnerCats.some(c => cat.includes(c))
+  if (daypart === 'late') return lateCats.some(c => cat.includes(c))
+  return true
+}
+
+function isKidsMenuItem(menuLine: string): boolean {
+  const cat = extractMenuCategory(menuLine)
+  if (!cat) return false
+  return /BØRNE|BARN|KIDS|CHILD/i.test(cat)
+}
+
+function inferDaypartFromTime(bestTimeToPost: string): 'morning' | 'lunch' | 'dinner' | 'late' | null {
+  const lower = bestTimeToPost.toLowerCase()
+  if (/\b([0-6]|7|8|9|10|11)[:.-]|morgen|morning|brunch/i.test(lower)) return 'morning'
+  if (/\b(11|12|13|14|15)[:.-]|frokost|lunch|middag\s+tid/i.test(lower)) return 'lunch'
+  if (/\b(17|18|19|20|21)[:.-]|aften|dinner|evening/i.test(lower)) return 'dinner'
+  if (/\b(21|22|23|0)[:.-]|nat|late|cocktail/i.test(lower)) return 'late'
+  return null
+}
+
+type Daypart = 'morning' | 'lunch' | 'evening' | 'unknown'
+
+function detectDaypart(text: string, bestTimeToPost: string): Daypart {
+  const combinedContext = `${text} ${bestTimeToPost}`.toLowerCase()
+  
+  // Time-based detection (primary signal)
+  const timeMatch = bestTimeToPost.match(/\b(\d{1,2})[:.-]\d{2}/i)
+  if (timeMatch) {
+    const hour = parseInt(timeMatch[1], 10)
+    if (hour >= 7 && hour <= 10) return 'morning'
+    if (hour >= 11 && hour <= 15) return 'lunch'
+    if (hour >= 17 && hour <= 22) return 'evening'
+  }
+  
+  // Text-based detection (secondary signal)
+  const morningSignals = /\b(morgen|morgenmad|breakfast|brunch|formiddag|morning)\b/i
+  const lunchSignals = /\b(frokost|lunch|middag.*tid)\b/i
+  const eveningSignals = /\b(aften|middag(?!.*tid)|dinner|evening|cocktail|drink|bar)\b/i
+  
+  if (morningSignals.test(combinedContext)) return 'morning'
+  if (lunchSignals.test(combinedContext)) return 'lunch'
+  if (eveningSignals.test(combinedContext)) return 'evening'
+  
+  return 'unknown'
+}
+
+function ensureBookingUrlOnOwnLine(ideas: any[], bookingUrl?: string): any[] {
+  if (!bookingUrl) return ideas
+  if (!Array.isArray(ideas) || ideas.length === 0) return ideas
+
+  const urlRe = new RegExp(`(^|\\n)${escapeRegExp(bookingUrl)}(\\n|$)`)
+  const hasAlready = ideas.some((idea) => urlRe.test(String(idea?.text || '')))
+  if (hasAlready) return ideas
+
+  const patched = ideas.map((i) => ({ ...i }))
+  const targetIndex = 0
+  const existingText = String(patched[targetIndex]?.text || '').trimEnd()
+
+  // Remove emoji - will be brand-driven in future based on emoji_usage setting
+  patched[targetIndex] = {
+    ...patched[targetIndex],
+    text: `${existingText}\n\nBook bord her:\n${bookingUrl}`.trim(),
+  }
+
+  return patched
+}
+function repairInvalidMenuItemUsed(ideas: any[], menuItems: string[]): any[] {
+  if (menuItems.length === 0) return ideas
+
+  const normalizeMenuLineToDish = (line: string): string => {
+    return String(line || '').replace(/\s*\([^)]+\)\s*$/, '').trim()
+  }
+
+  const repaired = ideas.map((idea) => ({ ...idea }))
+  let changesMade = false
+
+  for (let i = 0; i < repaired.length; i++) {
+    const idea = repaired[i]
+    const menuItemUsed = String(idea?.menuItemUsed || '').trim()
+    if (!menuItemUsed) continue // Non-menu idea, skip
+
+    const text = String(idea?.text || '').toLowerCase()
+
+    // Check if exact match exists
+    if (menuItems.includes(menuItemUsed)) {
+      // Verify text includes this dish name
+      const dishName = normalizeMenuLineToDish(menuItemUsed).toLowerCase()
+      if (!text.includes(dishName)) {
+        console.warn(`⚠️ Text doesn't mention "${dishName}" (from menuItemUsed "${menuItemUsed}"), converting to non-menu idea`)
+        repaired[i].menuItemUsed = ''
+        changesMade = true
+      }
+      continue
+    }
+
+    // Check if base name (without category) matches uniquely
+    const usedBase = normalizeMenuLineToDish(menuItemUsed)
+    const matches = menuItems.filter((m) => normalizeMenuLineToDish(m) === usedBase)
+    if (matches.length === 1) {
+      // Verify text includes this dish name before correcting
+      const dishName = normalizeMenuLineToDish(matches[0]).toLowerCase()
+      if (text.includes(dishName)) {
+        repaired[i].menuItemUsed = matches[0]
+        changesMade = true
+        console.log(`🔧 Auto-corrected menuItemUsed: "${menuItemUsed}" → "${matches[0]}"`)
+      } else {
+        console.warn(`⚠️ Text doesn't mention "${dishName}", converting to non-menu idea`)
+        repaired[i].menuItemUsed = ''
+        changesMade = true
+      }
+      continue
+    }
+
+    // Try fuzzy matching: find menu item that contains the used value
+    const fuzzyMatches = menuItems.filter((m) => {
+      const dishName = normalizeMenuLineToDish(m).toLowerCase()
+      return dishName.includes(menuItemUsed.toLowerCase())
+    })
+
+    if (fuzzyMatches.length === 1) {
+      // Verify text includes this dish name
+      const dishName = normalizeMenuLineToDish(fuzzyMatches[0]).toLowerCase()
+      if (text.includes(dishName)) {
+        repaired[i].menuItemUsed = fuzzyMatches[0]
+        changesMade = true
+        console.log(`🔧 Fuzzy-matched menuItemUsed: "${menuItemUsed}" → "${fuzzyMatches[0]}"`)
+      } else {
+        console.warn(`⚠️ Text doesn't mention "${dishName}", converting to non-menu idea`)
+        repaired[i].menuItemUsed = ''
+        changesMade = true
+      }
+      continue
+    }
+
+    // Try reverse: menu item name contained in the used value
+    const reverseMatches = menuItems.filter((m) => {
+      const dishName = normalizeMenuLineToDish(m).toLowerCase()
+      return menuItemUsed.toLowerCase().includes(dishName)
+    })
+
+    if (reverseMatches.length === 1) {
+      // Verify text includes this dish name
+      const dishName = normalizeMenuLineToDish(reverseMatches[0]).toLowerCase()
+      if (text.includes(dishName)) {
+        repaired[i].menuItemUsed = reverseMatches[0]
+        changesMade = true
+        console.log(`🔧 Reverse-matched menuItemUsed: "${menuItemUsed}" → "${reverseMatches[0]}"`)
+      } else {
+        console.warn(`⚠️ Text doesn't mention "${dishName}", converting to non-menu idea`)
+        repaired[i].menuItemUsed = ''
+        changesMade = true
+      }
+      continue
+    }
+
+    // Last resort: clear invalid menuItemUsed and convert to non-menu idea
+    console.warn(`⚠️ Could not match menuItemUsed "${menuItemUsed}" to any menu item, converting to non-menu idea`)
+    repaired[i].menuItemUsed = ''
+    changesMade = true
+  }
+
+  return changesMade ? repaired : ideas
+}
+
+function repairPersonaViolations(ideas: any[]): any[] {
+  const bannedPersonas = [
+    'familier', 'børnefamilier', 'par', 'venner',
+    'turister', 'studerende', 'lokale', 'unge', 'seniorer',
+    'families', 'couples', 'friends', 'tourists', 'students', 'locals'
+  ]
+
+  const repaired = ideas.map((idea) => ({ ...idea }))
+  let changesMade = false
+
+  for (let i = 0; i < repaired.length; i++) {
+    const idea = repaired[i]
+    let text = String(idea?.text || '')
+    let headline = String(idea?.headline || '')
+    let photoSuggestion = String(idea?.photoSuggestion || '')
+
+    // Remove persona words with word boundaries to avoid partial matches
+    for (const word of bannedPersonas) {
+      const regex = new RegExp(`\\b${word}\\b`, 'gi')
+      const textBefore = text
+      const headlineBefore = headline
+      const photoSuggestionBefore = photoSuggestion
+
+      text = text.replace(regex, '')
+      headline = headline.replace(regex, '')
+      photoSuggestion = photoSuggestion.replace(regex, '')
+
+      if (text !== textBefore || headline !== headlineBefore || photoSuggestion !== photoSuggestionBefore) {
+        changesMade = true
+        console.log(`🔧 Removed banned persona word "${word}" from idea ${i + 1}`)
+      }
+    }
+
+    // Clean up extra spaces from removal
+    text = text.replace(/\s{2,}/g, ' ').replace(/\s+([.,!?])/g, '$1').trim()
+    headline = headline.replace(/\s{2,}/g, ' ').trim()
+    photoSuggestion = photoSuggestion.replace(/\s{2,}/g, ' ').trim()
+
+    repaired[i].text = text
+    repaired[i].headline = headline
+    repaired[i].photoSuggestion = photoSuggestion
+  }
+
+  return changesMade ? repaired : ideas
+}
+
+function repairMenuDaypartMismatches(ideas: any[], menuItems: string[]): any[] {
+  if (menuItems.length === 0) return ideas
+
+  const repaired = ideas.map((idea) => ({ ...idea }))
+  let changesMade = false
+
+  for (let i = 0; i < repaired.length; i++) {
+    const idea = repaired[i]
+    const menuItemUsed = String(idea?.menuItemUsed || '').trim()
+    if (!menuItemUsed) continue
+
+    const bestTime = String(idea?.bestTimeToPost || '').trim()
+    const daypart = inferDaypartFromTime(bestTime)
+    if (!daypart) continue
+
+    const menuLine = menuItems.find(m => m.includes(menuItemUsed))
+    if (!menuLine) continue
+
+    // If daypart mismatch, try to fix by adjusting bestTimeToPost
+    if (!isDaypartMenuItem(menuLine, daypart)) {
+      const cat = extractMenuCategory(menuLine)
+      if (!cat) continue
+
+      // Suggest better time based on category
+      let suggestedTime = bestTime
+      if (/MORGENMAD|BREAKFAST|BRUNCH/i.test(cat)) {
+        suggestedTime = bestTime.replace(/\d{1,2}[:.]\d{2}[-–]\d{1,2}[:.]\d{2}/, '10:00–12:00')
+      } else if (/FROKOST|LUNCH/i.test(cat)) {
+        suggestedTime = bestTime.replace(/\d{1,2}[:.]\d{2}[-–]\d{1,2}[:.]\d{2}/, '12:00–14:00')
+      } else if (/MIDDAG|DINNER|AFTEN/i.test(cat)) {
+        suggestedTime = bestTime.replace(/\d{1,2}[:.]\d{2}[-–]\d{1,2}[:.]\d{2}/, '18:00–20:00')
+      } else if (/COCKTAIL|DRINK|BAR/i.test(cat)) {
+        suggestedTime = bestTime.replace(/\d{1,2}[:.]\d{2}[-–]\d{1,2}[:.]\d{2}/, '20:00–22:00')
+      }
+
+      if (suggestedTime !== bestTime) {
+        repaired[i].bestTimeToPost = suggestedTime
+        changesMade = true
+        console.log(`🔧 Repaired daypart mismatch: "${menuItemUsed}" (${cat}) → ${suggestedTime}`)
+      }
+    }
+  }
+
+  return changesMade ? repaired : ideas
+}
+serve(async (req: Request) => {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    // 🔐 SERVER-SIDE AUTHENTICATION & QUOTA CHECK
+    const authHeader = req.headers.get('authorization')
+    const userId = getUserIdFromAuth(authHeader)
+    
+    if (!userId) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized - valid token required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Check daily quota
+    const dailyQuota = await getUserQuota(userId, 'aiGenerations', 'daily')
+    if (!dailyQuota.allowed) {
+      const isNoBusiness = dailyQuota.reason?.toLowerCase().includes('no business')
+      const status = isNoBusiness ? 404 : 429
+
+      return new Response(
+        JSON.stringify({ 
+          error: isNoBusiness ? 'Business not found' : 'Daily quota exceeded',
+          tier: dailyQuota.tier,
+          current: dailyQuota.current,
+          limit: dailyQuota.limit,
+          message: dailyQuota.reason
+        }),
+        { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Check monthly quota
+    const monthlyQuota = await getUserQuota(userId, 'aiGenerations', 'monthly')
+    if (!monthlyQuota.allowed) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Monthly quota exceeded',
+          tier: monthlyQuota.tier,
+          current: monthlyQuota.current,
+          limit: monthlyQuota.limit,
+          message: monthlyQuota.reason
+        }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Get request data
+    const requestBody = await req.json()
+    const { 
+      // New AI Ideas mode (prompt-based)
+      prompt,
+      mode,
+      count = 3,
+      // Legacy mode (topic-based)
+      topic, 
+      businessType, 
+      platforms,
+      includeEmojis = true,
+      includeHashtags = true,
+      includeCTA = true,
+      tone = 'objective',
+      length = 'medium',
+      userTier = dailyQuota.tier // Use tier from database, not client
+    } = requestBody
+
+    // Determine which mode we're in
+    // Robustness: if a non-empty prompt is provided, default to AI Ideas mode
+    // (some clients/scripts may omit "mode" during development).
+    const hasPrompt = typeof prompt === 'string' && prompt.trim().length > 0
+    const isAiIdeasMode = hasPrompt && (mode === 'ai-ideas' || mode === 'aiIdeas' || mode === 'ai_ideas' || mode == null)
+
+    // Validate input based on mode
+    if (isAiIdeasMode) {
+      if (!hasPrompt) {
+        return new Response(
+          JSON.stringify({ error: 'Missing required field: prompt' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    } else {
+      if (!topic || !businessType || !platforms) {
+        return new Response(
+          JSON.stringify({ error: 'Missing required fields: topic, businessType, platforms' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    // Get AI model based on tier
+    const aiModel = getAIModelForTier(userTier)
+    console.log('🤖 Using AI model:', aiModel, '(tier:', userTier || 'free', ')', 'mode:', isAiIdeasMode ? 'ai-ideas' : 'legacy')
+
+    let openaiMessages: any[]
+    let menuItems: string[] = []
+    let toneAnchors: string[] = []
+    let bookingUrl: string = ''
+
+    if (isAiIdeasMode) {
+      const promptLang = extractPromptLanguageFromPrompt(prompt)
+      // AI Ideas mode: Use the pre-built prompt from frontend
+      openaiMessages = [
+        {
+          role: 'system',
+          content: getIdeasSystemPrompt(promptLang)
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ]
+
+      menuItems = extractMenuItemsFromPrompt(prompt)
+      toneAnchors = extractToneAnchorsFromPrompt(prompt)
+      bookingUrl = extractBookingUrlFromPrompt(prompt)
+      console.log('📋 Extracted menu items from prompt:', menuItems.length, 'items')
+      if (menuItems.length > 0) {
+        console.log('📋 First 5 menu items:', menuItems.slice(0, 5))
+      } else {
+        console.warn('⚠️ No menu items found in prompt - AI will generate generic ideas')
+      }
+      if (toneAnchors.length > 0) {
+        console.log('🗣️ Extracted tone anchors from prompt:', toneAnchors.length)
+        console.log('🗣️ Tone anchors:', toneAnchors)
+      }
+      if (bookingUrl) {
+        console.log('🔗 Extracted booking URL from prompt')
+      }
+    } else {
+      // Legacy mode: Build prompt from topic/businessType
+      console.log('Generating content for:', { topic, businessType, platforms, includeEmojis, includeHashtags, includeCTA })
+
+      // Build platform-specific instructions
+      const platformInstructions = platforms.map((platform: string) => {
+        if (platform === 'instagram') {
+          return `- Instagram: 50-125 characters, ${includeEmojis ? '5-8 emojis' : 'no emojis'}, ${includeHashtags ? '10-15 hashtags' : 'no hashtags'}`
+        } else if (platform === 'facebook') {
+          return `- Facebook: 150-250 characters, ${includeEmojis ? '2-3 emojis' : 'no emojis'}, ${includeHashtags ? '2-3 hashtags' : 'no hashtags'}`
+        }
+        return ''
+      }).join('\n')
+
+      // Tone mapping
+      const toneDescriptions: Record<string, string> = {
+        'objective': 'Objective, neutral, and informative',
+        'warm': 'Warm, welcoming, and friendly',
+        'passionate': 'Passionate, enthusiastic, and energetic'
+      }
+
+      openaiMessages = [
+        {
+          role: 'system',
+          content: `You are a professional social media copywriter for Danish small businesses. You write in a ${toneDescriptions[tone] || toneDescriptions['objective']} tone. You create engaging posts optimized for each platform.`
+        },
+        {
+          role: 'user',
+          content: `Create ONE social media post about: ${topic}
+
+Business type: ${businessType}
+Target platforms: ${platforms.join(', ')}
+Tone: ${toneDescriptions[tone] || toneDescriptions['objective']}
+
+Platform-specific requirements:
+${platformInstructions}
+
+Additional requirements:
+- Write in Danish
+${includeEmojis ? '- Include emojis as specified per platform' : '- DO NOT include any emojis'}
+${includeHashtags ? '- Add hashtags as specified per platform' : '- DO NOT include any hashtags'}
+${includeCTA ? '- Include a clear call-to-action' : '- No call-to-action needed'}
+
+IMPORTANT: Create separate optimized versions for each platform.
+
+Return ONLY valid JSON in this exact format:
+{
+  "variations": [
+    {
+      "id": 1,
+      "platform": "facebook",
+      "headline": "Engaging headline",
+      "text": "Full post text optimized for Facebook (150-250 chars)",
+      "hashtags": "${includeHashtags ? '#hashtag1 #hashtag2' : ''}",
+      "cta": "${includeCTA ? 'Clear call to action' : ''}",
+      "tone": "${tone}"
+    },
+    {
+      "id": 2,
+      "platform": "instagram", 
+      "headline": "Catchy headline",
+      "text": "Shorter post text for Instagram (50-125 chars)",
+      "hashtags": "${includeHashtags ? '#hashtag1 #hashtag2 ... (10-15 hashtags)' : ''}",
+      "cta": "${includeCTA ? 'Clear call to action' : ''}",
+      "tone": "${tone}"
+    }
+  ]
+}
+
+Only include variations for the selected platforms: ${platforms.join(', ')}`
+        }
+      ]
+    }
+
+    const aiIdeasResponseFormat = {
+      type: 'json_schema',
+      json_schema: {
+        name: 'ai_ideas_response',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['ideas'],
+          properties: {
+            ideas: {
+              type: 'array',
+              minItems: 3,
+              maxItems: 3,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['id', 'title', 'headline', 'text', 'photoSuggestion', 'menuItemUsed', 'occasionUsed', 'bestTimeToPost', 'impact'],
+                properties: {
+                  id: { type: 'string' },
+                  title: { type: 'string' },
+                  headline: { type: 'string' },
+                  text: { type: 'string' },
+                  photoSuggestion: { type: 'string' },
+                  menuItemUsed: { type: 'string' },
+                  occasionUsed: { type: 'string' },
+                  bestTimeToPost: { type: 'string' },
+                  impact: { type: 'string', enum: ['low', 'medium', 'high'] }
+                }
+              }
+            }
+          }
+        },
+        strict: true
+      }
+    }
+
+    const responseFormat = isAiIdeasMode ? aiIdeasResponseFormat : { type: 'json_object' }
+
+    let lastErrors: string[] = []
+    let lastIdeas: any[] | null = null
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const messages = JSON.parse(JSON.stringify(openaiMessages))
+
+      if (attempt === 2 && lastErrors.length > 0) {
+        const menuListForRetry = menuItems.length > 0
+          ? `\n\nMENU ITEMS (copy exactly from this list, one per line):\n${menuItems.slice(0, 30).map((m) => `- ${m}`).join('\n')}`
+          : ''
+
+        messages.push({
+          role: 'user',
+          content: `Previous output violated these rules: ${lastErrors.join(' | ')}. Fix ONLY the violating parts. Keep the same JSON shape.
+
+Required for each idea: bestTimeToPost (short, single-line) and impact (low|medium|high).
+
+If MENU ITEMS are provided:
+- You MUST produce at least 1 menu-based idea: menuItemUsed MUST be a non-empty string for at least one idea.
+- menuItemUsed MUST match the MENU ITEMS list (exact line), OR you may use the dish name without the trailing "(CATEGORY)" suffix only if it maps uniquely to exactly one menu item.
+- The post text MUST include the dish name (without category suffix, e.g. "DISH (CATEGORY)" -> include "DISH" in text).
+- Do NOT leave menuItemUsed empty in all 3 ideas.
+${menuListForRetry}
+
+If TONE ANCHORS are provided: ensure at least one idea includes one of the exact phrases.
+
+If a BOOKING URL is provided in the prompt: at least 1 idea must include that URL on its own line.
+
+Return ONLY valid JSON.`
+        })
+      }
+
+      const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: aiModel,
+          messages,
+          temperature: isAiIdeasMode ? 0.3 : 0.8,
+          max_tokens: isAiIdeasMode ? 1200 : 2000,
+          response_format: responseFormat
+        })
+      })
+
+      if (!openaiResponse.ok) {
+        const error = await openaiResponse.text()
+        console.error('OpenAI API error:', error)
+        return new Response(
+          JSON.stringify({ error: 'OpenAI API request failed' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const data = await openaiResponse.json()
+      const content = data.choices[0].message.content
+
+      console.log('OpenAI response received, content:', content.substring(0, 500))
+
+      // Parse the response
+      const parsedContent = JSON.parse(content)
+      console.log('Parsed content keys:', Object.keys(parsedContent))
+
+      // AI Ideas validation
+      if (isAiIdeasMode) {
+        let ideas: any[]
+
+        if (Array.isArray(parsedContent)) {
+          ideas = parsedContent
+        } else if (parsedContent.ideas && Array.isArray(parsedContent.ideas)) {
+          ideas = parsedContent.ideas
+        } else {
+          // Single idea wrapped in object
+          ideas = [parsedContent]
+        }
+
+        lastIdeas = ideas
+        // Deterministic repairs before validation
+        ideas = ensureBookingUrlOnOwnLine(ideas, bookingUrl)
+        ideas = repairInvalidMenuItemUsed(ideas, menuItems)
+        ideas = repairPersonaViolations(ideas)
+        ideas = repairMenuDaypartMismatches(ideas, menuItems)
+        lastIdeas = ideas
+
+        const hardConstraints = extractHardConstraintsFromPrompt(prompt)
+        const errors = validateIdeas(ideas, menuItems, toneAnchors, bookingUrl)
+        errors.push(...validateHardConstraints(ideas, hardConstraints))
+        if (errors.length === 0) {
+          // ✅ INCREMENT USAGE AFTER SUCCESSFUL GENERATION
+          await incrementQuota(userId, 'aiGenerations')
+          console.log(`✅ AI generation complete for user ${userId} (tier: ${userTier})`)
+
+          console.log(`Returning ${ideas.length} ideas, first idea keys:`, ideas[0] ? Object.keys(ideas[0]) : 'none')
+          return new Response(
+            JSON.stringify({ ideas }),
+            { 
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            }
+          )
+        }
+
+        lastErrors = errors
+        console.warn('Validation failed, attempt', attempt, 'errors:', errors)
+        continue
+      }
+
+      // Legacy mode: return on first successful parse
+      // ✅ INCREMENT USAGE AFTER SUCCESSFUL GENERATION
+      await incrementQuota(userId, 'aiGenerations')
+      console.log(`✅ AI generation complete for user ${userId} (tier: ${userTier})`)
+
+      return new Response(
+        JSON.stringify(parsedContent),
+        { 
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    // --- Targeted repair pass (best-effort) ---
+    // Some models still choose to output all ideas as non-menu (menuItemUsed="") even with clear instructions.
+    // When that happens, do one more pass that edits the last JSON as little as possible.
+    if (isAiIdeasMode && lastIdeas && lastErrors.length > 0) {
+      const needsMenuBasedIdea = lastErrors.some((e) => e.includes('at least 1 idea must be menu-based'))
+      const needsExclamationFix = lastErrors.some((e) => e.includes('exclamation mark'))
+      const needsBookingUrlFix = lastErrors.some((e) => e.includes('Booking URL missing'))
+      const needsHardConstraintFix = lastErrors.some((e) => e.includes('forbidden term'))
+      const hardConstraints = extractHardConstraintsFromPrompt(prompt)
+
+      if (needsMenuBasedIdea || needsExclamationFix || needsBookingUrlFix || needsHardConstraintFix) {
+        const forcedMenuItem = needsMenuBasedIdea && menuItems.length > 0 ? menuItems[0] : ''
+        const forcedDishName = forcedMenuItem ? stripTrailingParenSuffix(forcedMenuItem) : ''
+        const promptLang = extractPromptLanguageFromPrompt(prompt)
+
+        const forcedMenuFixLines = needsMenuBasedIdea && forcedMenuItem
+          ? `- Idea 1 MUST be menu-based: set ideas[0].menuItemUsed to exactly this string: "${forcedMenuItem}".
+- Ensure ideas[0].text includes the dish name "${forcedDishName}" (WITHOUT any trailing category like "(BRUNCH)").`
+          : ''
+
+        const hardConstraintLines = hardConstraints.length > 0
+          ? `- HARD CONSTRAINTS: Remove these exact forbidden terms wherever they appear: ${hardConstraints.map((t) => `"${t}"`).join(' | ')}`
+          : ''
+
+        const repairMessages = [
+          {
+            role: 'system',
+            content: getIdeasSystemPrompt(promptLang)
+          },
+          {
+            role: 'user',
+            content: `You will be given JSON that failed validation. Edit it with minimal changes so it passes.
+
+FAILED JSON:
+${JSON.stringify({ ideas: lastIdeas }, null, 2)}
+
+REQUIRED FIXES:
+${forcedMenuFixLines}
+- For EVERY idea: max ONE exclamation mark (!) in the text.
+- For any NON-MENU idea (menuItemUsed=""): do NOT mention concrete dishes/drinks/products (e.g., kaffe/kakao) unless the exact term appears in MENU ITEMS. Prefer generic wording like "varm drik", "brunch", "frokost", "middag".
+${hardConstraintLines}
+${bookingUrl ? `- At least 1 idea MUST include this booking URL on its own line:\n${bookingUrl}` : ''}
+
+Do NOT invent dishes. Do NOT change the JSON shape.
+Return ONLY valid JSON: { "ideas": [ ... ] }`
+          }
+        ]
+
+        const repairResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: aiModel,
+            messages: repairMessages,
+            temperature: 0.2,
+            max_tokens: 1200,
+            response_format: aiIdeasResponseFormat,
+          })
+        })
+
+        if (repairResponse.ok) {
+          const repairData = await repairResponse.json()
+          const repairContent = repairData.choices?.[0]?.message?.content
+          if (repairContent) {
+            const repairedParsed = JSON.parse(repairContent)
+            let repairedIdeas = Array.isArray(repairedParsed?.ideas) ? repairedParsed.ideas : lastIdeas
+            repairedIdeas = ensureBookingUrlOnOwnLine(repairedIdeas, bookingUrl)
+
+            const repairedErrors = validateIdeas(repairedIdeas, menuItems, toneAnchors, bookingUrl)
+            repairedErrors.push(...validateHardConstraints(repairedIdeas, hardConstraints))
+            if (repairedErrors.length === 0) {
+              await incrementQuota(userId, 'aiGenerations')
+              console.log(`✅ AI generation repaired for user ${userId} (tier: ${userTier})`)
+              return new Response(
+                JSON.stringify({ ideas: repairedIdeas }),
+                { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              )
+            }
+
+            lastErrors = repairedErrors
+            lastIdeas = repairedIdeas
+          }
+        }
+      }
+    }
+
+    // Strict enforcement: No soft fallback - reject if validation fails
+    console.error('❌ Strict validation failed after 2 attempts:', lastErrors)
+    return new Response(
+      JSON.stringify({ error: 'AI output did not meet validation rules', details: lastErrors }),
+      { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Error in ai-generate function:', error)
+    const message = error instanceof Error ? error.message : 'Internal server error'
+    return new Response(
+      JSON.stringify({ error: message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+})

@@ -48,11 +48,13 @@ const PlatformBadge = ({ platform }: { platform: SupportedPlatform }) => {
 const HashtagChip = ({ tag, selected, onToggle }: { tag: string; selected: boolean; onToggle: () => void }) => (
   <button
     onClick={onToggle}
-    className={`pointer-events-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
-      selected ? 'bg-[#124044] border border-[#124044] text-[#88F2D7]' : 'bg-white border border-[#D1D5DB] text-[#374151]'
+    className={`pointer-events-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-all cursor-pointer ${
+      selected 
+        ? 'bg-[#124044] border border-[#124044] text-[#88F2D7] hover:bg-[#0F2E32]' 
+        : 'bg-gray-100 border border-gray-300 text-gray-500 hover:bg-gray-200 hover:border-gray-400'
     }`}
   >
-    <span>{selected ? '✓' : '×'}</span>
+    <span className="text-[10px]">{selected ? '✓' : '○'}</span>
     <span>#{tag}</span>
   </button>
 )

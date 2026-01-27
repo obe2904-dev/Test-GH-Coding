@@ -212,18 +212,24 @@ BEGIN
     -- Enable RLS if not already enabled
     EXECUTE 'ALTER TABLE public.post_drafts ENABLE ROW LEVEL SECURITY';
     
+    -- Drop existing policies first
+    DROP POLICY IF EXISTS "Users can create posts" ON public.post_drafts;
+    DROP POLICY IF EXISTS "Users can view posts" ON public.post_drafts;
+    DROP POLICY IF EXISTS "Users can update posts" ON public.post_drafts;
+    DROP POLICY IF EXISTS "Users can delete own posts or owner deletes all" ON public.post_drafts;
+    
     -- Both owners and team members can create posts
     EXECUTE '
-      CREATE POLICY IF NOT EXISTS "Users can create posts"
+      CREATE POLICY "Users can create posts"
         ON public.post_drafts FOR INSERT
         WITH CHECK (
           EXISTS (
             SELECT 1 FROM public.businesses b
-            WHERE b.owner_id = created_by
+            WHERE b.owner_id = auth.uid()
             OR EXISTS (
               SELECT 1 FROM public.business_team_members btm
               WHERE btm.business_id = b.id
-              AND btm.user_id = created_by
+              AND btm.user_id = auth.uid()
               AND btm.accepted_at IS NOT NULL
             )
           )
@@ -232,12 +238,13 @@ BEGIN
     
     -- Both can view
     EXECUTE '
-      CREATE POLICY IF NOT EXISTS "Users can view posts"
+      CREATE POLICY "Users can view posts"
         ON public.post_drafts FOR SELECT
         USING (
-          EXISTS (
+          user_id = auth.uid()
+          OR EXISTS (
             SELECT 1 FROM public.businesses b
-            WHERE b.owner_id = created_by
+            WHERE b.owner_id = auth.uid()
             OR EXISTS (
               SELECT 1 FROM public.business_team_members btm
               WHERE btm.business_id = b.id
@@ -250,10 +257,10 @@ BEGIN
     
     -- Both can update their own or team posts
     EXECUTE '
-      CREATE POLICY IF NOT EXISTS "Users can update posts"
+      CREATE POLICY "Users can update posts"
         ON public.post_drafts FOR UPDATE
         USING (
-          created_by = auth.uid()
+          user_id = auth.uid()
           OR EXISTS (
             SELECT 1 FROM public.businesses b
             WHERE b.owner_id = auth.uid()
@@ -263,10 +270,10 @@ BEGIN
     
     -- Only creators and owners can delete
     EXECUTE '
-      CREATE POLICY IF NOT EXISTS "Users can delete own posts or owner deletes all"
+      CREATE POLICY "Users can delete own posts or owner deletes all"
         ON public.post_drafts FOR DELETE
         USING (
-          created_by = auth.uid()
+          user_id = auth.uid()
           OR EXISTS (
             SELECT 1 FROM public.businesses b
             WHERE b.owner_id = auth.uid()

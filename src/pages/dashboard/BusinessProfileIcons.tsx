@@ -48,6 +48,14 @@ export const Mail = ({ className }: { className?: string }) => (
   </svg>
 )
 
+// Two-arrow circular analyze icon (reusable, can spin when analyzing)
+export const AnalyzeIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582M20 20v-5H19.418M20 9a8 8 0 10-16 2" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9 4h6M15 20H9" opacity="0.9" />
+  </svg>
+)
+
 // Utility functions and data structures for future business profile features
 
 // Week days structure for opening hours functionality

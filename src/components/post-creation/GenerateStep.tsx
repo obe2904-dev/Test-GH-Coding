@@ -274,6 +274,7 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     generateAiIdeas,
     handleAIUpdate,
     handleSpellingCheck,
+    generateHashtagsOnly,
     handleClarificationDismiss,
     handleClarificationSubmit,
     resetClarificationState,
@@ -343,6 +344,8 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     hashtags,
     setHashtags,
     setSelectedHashtags,
+    setHashtagPlatforms,
+    selectedPlatforms: canonicalSelectedPlatforms,
     setIsEdited,
     setIsSpellingChecked,
     markAsChanged,
@@ -423,6 +426,13 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     onAIModeEnter: handleAIModeEnter
   })
 
+  const selectedAiIdea = useMemo(() => {
+    if (activeTab !== 'ai' || !selectedIdea) {
+      return null
+    }
+    return aiIdeas.find((idea) => idea?.id === selectedIdea) ?? null
+  }, [activeTab, aiIdeas, selectedIdea])
+
   const clarificationProps = useClarificationFlow({
     clarificationQuestion,
     clarificationInput,
@@ -489,7 +499,8 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     clearClarificationPrompt,
     activeTab,
     t,
-    onNext
+    onNext,
+    generateHashtagsOnly
   })
 
   const { validationIssues, showValidation, validateBeforeNext } = useGenerateValidation({
@@ -644,11 +655,31 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
       </div>
 
       {shouldShowEditor && (
-        <EditorPane
-          writeContentProps={writeContentProps}
-          validationBanner={validationBanner}
-          footerProps={footerProps}
-        />
+        <>
+          {selectedAiIdea && (selectedAiIdea.bestTimeToPost || selectedAiIdea.impact) && (
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
+                {selectedAiIdea.bestTimeToPost && (
+                  <div>
+                    <span className="font-semibold text-slate-800">{t('publish.bestTime', 'Best time')}:</span>{' '}
+                    <span>{selectedAiIdea.bestTimeToPost}</span>
+                  </div>
+                )}
+                {selectedAiIdea.impact && (
+                  <div>
+                    <span className="font-semibold text-slate-800">{t('publish.reach', 'Impact')}:</span>{' '}
+                    <span>{t(`photoAnalysis.impact.${String(selectedAiIdea.impact).toLowerCase()}` as any, String(selectedAiIdea.impact))}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <EditorPane
+            writeContentProps={writeContentProps}
+            validationBanner={validationBanner}
+            footerProps={footerProps}
+          />
+        </>
       )}
 
       {!shouldShowEditor && (

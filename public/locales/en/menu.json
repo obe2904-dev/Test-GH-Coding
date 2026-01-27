@@ -1,0 +1,22 @@
+{
+  "metadata": {
+    "title": "Menu Metadata",
+    "subtitle": "AI-generated insights from your menu",
+    "lastUpdated": "Last updated",
+    "never": "Never",
+    "reanalyze": "Re-analyze",
+    "analyzeButton": "Analyze menu automatically",
+    "analyzing": "Analyzing menu...",
+    "noData": "We can automatically analyze your menu and extract information about food philosophy, organic focus, coffee program, and more.",
+    "foodPhilosophy": "Food Philosophy",
+    "totalItems": "Total menu items",
+    "signatureItems": "Signature dishes",
+    "organicCertified": "Organic certified",
+    "localIngredients": "{{percent}}% local ingredients",
+    "specialtyCoffee": "Specialty coffee",
+    "wineList": "Wine list",
+    "fullBar": "Full bar",
+    "loading": "Loading menu data...",
+    "errorNoItems": "No menu items found. Add menu first."
+  }
+}

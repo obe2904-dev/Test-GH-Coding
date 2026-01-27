@@ -608,12 +608,21 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
         {/* LEFT: AI Adjustments & Photo Display */}
         <div className="space-y-3">
           
-          {/* Photo tip - show at top when no photo */}
+          {/* Photo tip or AI photo suggestion - only show when no photo uploaded */}
           {!hasPhoto && (
-            <div className="p-2 bg-slate-50 rounded-lg">
-              <p className="text-xs text-[#6B7280]">
-                💡 {photoIdea || t('create.photoTip', 'Tip: High-quality images get more engagement. Recommended size: 1200x628px')}
-              </p>
+            <div className="p-3 border border-[#D1D5DB] rounded-xl bg-white shadow-sm">
+              {photoIdea && photoIdea.trim().length > 0 ? (
+                <>
+                  <h4 className="text-xs font-semibold text-[#0F2E32] uppercase tracking-wide">
+                    💡 Foto-idé
+                  </h4>
+                  <p className="mt-1 text-sm text-[#374151] leading-snug">{photoIdea}</p>
+                </>
+              ) : (
+                <p className="text-xs text-[#6B7280]">
+                  💡 {t('create.photoTip', 'Tip: High-quality images get more engagement. Recommended size: 1200x628px')}
+                </p>
+              )}
             </div>
           )}
 
@@ -785,15 +794,6 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
             currentTier={currentTier}
             businessName={businessData.business?.name || undefined}
           />
-
-          {photoIdea && photoIdea.trim().length > 0 && (
-            <div className="p-3 border border-[#D1D5DB] rounded-xl bg-white shadow-sm">
-              <h4 className="text-xs font-semibold text-[#0F2E32] uppercase tracking-wide">
-                Foto-idé
-              </h4>
-              <p className="mt-1 text-sm text-[#374151] leading-snug">{photoIdea}</p>
-            </div>
-          )}
         </div>
       </div>
 

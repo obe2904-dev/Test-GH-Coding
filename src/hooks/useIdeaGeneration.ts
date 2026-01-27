@@ -11,6 +11,8 @@ import { useTierStore } from '../stores/tierStore'
 import { buildPostIdeaPrompt, AITier } from '../features/aiPromptBuilder'
 import { generateIdea as localGenerateIdea } from '../features/idea'
 import { extractHashtags, removeHashtags } from '../utils/textUtils'
+import { gatherEnhancedAIContext } from '../services/enhancedAIContext'
+import { supabase } from '../lib/supabase'
 
 export interface GeneratedIdea {
   id: string
@@ -18,6 +20,7 @@ export interface GeneratedIdea {
   description: string
   headline: string
   text: string
+  hashtags?: string // AI-generated hashtags (separate from text)
   type?: 'ai' | 'custom'
   allVariations?: any[]
   originalContent?: any
@@ -29,6 +32,11 @@ export interface BusinessContext {
   location: any
   websiteAnalysis?: any
   latestAnalysis?: any
+  // For enhanced context
+  profileData?: {
+    opening_hours?: any
+    business_offerings?: any
+  }
 }
 
 export interface IdeaGenerationOptions {
@@ -77,6 +85,7 @@ export function useIdeaGeneration(): UseIdeaGenerationReturn {
   /**
    * Generate AI ideas based on business context
    * Requires Smart or Pro tier
+   * For paid tiers: includes enhanced context (brand voice, weather, holidays, history)
    */
   const generateAIIdeas = useCallback(async (businessContext: BusinessContext) => {
     if (!canUseAiIdeas()) {
@@ -87,13 +96,35 @@ export function useIdeaGeneration(): UseIdeaGenerationReturn {
     setIsGenerating(true)
 
     try {
-      const apiUrl = import.meta.env.VITE_SUPABASE_FUNCTION_AI_GENERATE
+      // Use ai-generate-v2 Edge Function
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-generate-v2`
+      
+      // Get current user for enhanced context
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      // Gather enhanced context for paid tiers
+      let enhancedContext = undefined
+      if (currentTier !== 'free' && businessContext.business?.id && user?.id) {
+        try {
+          enhancedContext = await gatherEnhancedAIContext(
+            businessContext.business.id,
+            user.id,
+            businessContext.location?.city,
+            businessContext.location?.country || 'DK'
+          )
+        } catch (e) {
+          console.warn('Could not gather enhanced context:', e)
+          // Continue without enhanced context
+        }
+      }
 
       const promptContext = {
         business: businessContext.business,
         profile: businessContext.profile,
         location: businessContext.location,
-        websiteAnalysis: businessContext.websiteAnalysis || businessContext.latestAnalysis
+        websiteAnalysis: businessContext.websiteAnalysis || businessContext.latestAnalysis,
+        enhancedContext,
+        profileData: businessContext.profileData
       }
 
       const aiPrompt = buildPostIdeaPrompt(promptContext, {
@@ -102,17 +133,20 @@ export function useIdeaGeneration(): UseIdeaGenerationReturn {
         language: i18n.language
       })
 
+      // Get user's access token for authentication
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('Not authenticated')
+      }
+
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
-          prompt: aiPrompt,
-          platforms: ['facebook', 'instagram'],
-          tone: 'objective',
-          length: 'medium',
+          count: 3,
           userTier: currentTier
         })
       })
@@ -124,20 +158,21 @@ export function useIdeaGeneration(): UseIdeaGenerationReturn {
 
       const data = await response.json()
 
-      if (!data || !data.variations || data.variations.length === 0) {
+      if (!data || !data.suggestions || data.suggestions.length === 0) {
         throw new Error('No ideas returned')
       }
 
-      // Convert variations to ideas
-      const ideas: GeneratedIdea[] = data.variations.map((variation: any, index: number) => ({
+      // Convert V2 suggestions to ideas
+      const ideas: GeneratedIdea[] = data.suggestions.map((suggestion: any, index: number) => ({
         id: `ai-${Date.now()}-${index}`,
-        title: variation.headline || `Idea ${index + 1}`,
-        description: variation.text?.substring(0, 100) + '...' || '',
-        headline: variation.headline || '',
-        text: variation.text || '',
+        title: suggestion.headline || `Idea ${index + 1}`,
+        description: suggestion.text?.substring(0, 100) + '...' || '',
+        headline: suggestion.headline || '',
+        text: suggestion.text || '',
+        hashtags: '', // V2 doesn't generate hashtags separately (yet)
         type: 'ai' as const,
-        allVariations: [variation],
-        originalContent: variation
+        allVariations: [suggestion],
+        originalContent: suggestion
       }))
 
       setAiIdeas(ideas)
@@ -193,11 +228,17 @@ export function useIdeaGeneration(): UseIdeaGenerationReturn {
             language: i18n.language
           })
 
+          // Get user's access token for authentication
+          const { data: { session } } = await supabase.auth.getSession()
+          if (!session?.access_token) {
+            throw new Error('Not authenticated')
+          }
+
           const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+              'Authorization': `Bearer ${session.access_token}`
             },
             body: JSON.stringify({
               prompt: aiPrompt,
@@ -264,7 +305,7 @@ export function useIdeaGeneration(): UseIdeaGenerationReturn {
 
       // Extract hashtags and clean text
       const allText = `${firstVariation.text}\n\n${firstVariation.hashtags || ''}`
-      extractHashtags(allText) // Extract for side effects
+      const extractedHashtags = extractHashtags(allText)
 
       let cleanText = removeHashtags(allText)
       cleanText = cleanText.replace(/\s+[^\s.!?]+\s*$/, '').trim()
@@ -274,6 +315,7 @@ export function useIdeaGeneration(): UseIdeaGenerationReturn {
         title: topic,
         headline: firstVariation.headline,
         text: cleanText,
+        hashtags: extractedHashtags.map(tag => `#${tag}`).join(' '), // Store hashtags separately
         description: `AI-generated post for ${firstVariation.platform || 'social media'}`,
         type: 'custom',
         allVariations: data.variations,

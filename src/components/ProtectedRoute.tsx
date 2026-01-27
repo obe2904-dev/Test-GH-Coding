@@ -39,10 +39,29 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       const localCompletionKey = `onboarding:completed:${user.id}`
       const hasLocalCompletion =
         typeof window !== 'undefined' && localStorage.getItem(localCompletionKey) === 'true'
+      
+      // Don't check if navigation is in progress
+      const isNavigating = typeof window !== 'undefined' && localStorage.getItem('onboarding:navigating') === 'true'
+      if (isNavigating) {
+        console.log('🚀 ProtectedRoute: Navigation in progress, skipping check')
+        setCheckingOnboarding(false)
+        setNeedsOnboarding(false)
+        checkInProgress.current = false
+        return
+      }
 
       // Don't check if already on onboarding page
       if (location.pathname === '/onboarding') {
         console.log('✅ ProtectedRoute: Already on onboarding page, allowing access')
+        setCheckingOnboarding(false)
+        setNeedsOnboarding(false)
+        checkInProgress.current = false
+        return
+      }
+
+      // If localStorage says completed, trust it and skip database check
+      if (hasLocalCompletion) {
+        console.log('✅ ProtectedRoute: LocalStorage confirms onboarding complete, skipping DB check')
         setCheckingOnboarding(false)
         setNeedsOnboarding(false)
         checkInProgress.current = false

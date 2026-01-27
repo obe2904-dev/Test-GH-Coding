@@ -15,8 +15,8 @@ const PublishStep = lazy(() => import('../../components/post-creation/PublishSte
 const StepLoader = () => (
   <div className="flex items-center justify-center min-h-[400px]">
     <div className="text-center">
-      <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-      <p className="text-sm text-slate-600">Loading...</p>
+      <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin mx-auto mb-4 motion-reduce:animate-none"></div>
+      <p className="text-sm text-muted">Loading...</p>
     </div>
   </div>
 )

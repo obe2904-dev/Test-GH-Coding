@@ -75,25 +75,8 @@ export function useGenerateValidation({
       }
     })
 
-    if (!hasMediaAttachments) {
-      const missingContent = contentTargets.filter((target) => target.text.length === 0)
-      if (missingContent.length > 0) {
-        if (customizePerPlatform) {
-          const platformList = missingContent.map((target) => target.label).join(', ')
-          issues.push({
-            id: 'text-missing-platform',
-            message: t('generate.missingPlatformText', 'Add text for {{platforms}} before continuing', {
-              platforms: platformList
-            })
-          })
-        } else {
-          issues.push({
-            id: 'text-missing',
-            message: t('generate.completeTextError', 'Please complete headline and text')
-          })
-        }
-      }
-    }
+    // Text is optional in Write step - users can add photos in Design step
+    // No validation needed for content at this stage
 
     contentTargets.forEach((target) => {
       if (target.text.length > VALIDATION.post.maxLength) {

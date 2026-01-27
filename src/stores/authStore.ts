@@ -28,20 +28,56 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signIn: async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    console.log('🔐 Attempting sign in for:', email)
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    
     if (error) {
+      console.error('❌ Sign in error:', error)
       throw error
     }
+    
+    console.log('✅ Sign in successful:', { 
+      userId: data.user?.id,
+      email: data.user?.email,
+      hasSession: !!data.session 
+    })
+    
     // The auth state change listener will handle setting the user
   },
 
   signUp: async (email: string, password: string, metadata?: Record<string, unknown>) => {
-    const { error } = await supabase.auth.signUp({
+    const emailRedirectTo = typeof window !== 'undefined' ? `${window.location.origin}/login` : undefined
+    
+    console.log('🔐 Signing up with:', { email, emailRedirectTo, metadata })
+    
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: metadata ? { data: metadata } : undefined,
+      options: {
+        ...(metadata ? { data: metadata } : {}),
+        emailRedirectTo,
+      },
     })
-    if (error) throw error
+    
+    if (error) {
+      console.error('❌ Signup error:', error)
+      throw error
+    }
+    
+    console.log('✅ Signup response:', {
+      user: data.user,
+      session: data.session,
+      emailConfirmed: data.user?.email_confirmed_at,
+      identities: data.user?.identities?.length
+    })
+    
+    // Log important information
+    if (!data.user?.email_confirmed_at) {
+      console.log('📧 Confirmation email should be sent to:', email)
+      console.log('⏰ Check your email (and spam folder) for confirmation link')
+    } else {
+      console.log('✨ Email auto-confirmed - you can log in immediately')
+    }
   },
 
   signInWithProvider: async (provider) => {

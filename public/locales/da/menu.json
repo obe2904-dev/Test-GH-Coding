@@ -1,0 +1,22 @@
+{
+  "metadata": {
+    "title": "Menu Metadata",
+    "subtitle": "AI-genereret indsigt fra din menu",
+    "lastUpdated": "Sidst opdateret",
+    "never": "Aldrig",
+    "reanalyze": "Genanalyser",
+    "analyzeButton": "Analyser menu automatisk",
+    "analyzing": "Analyserer menu...",
+    "noData": "Vi kan automatisk analysere din menu og udtrække information om madfilosofi, økologisk fokus, kaffe-program, og mere.",
+    "foodPhilosophy": "Madfilosofi",
+    "totalItems": "Total menupunkter",
+    "signatureItems": "Signaturretter",
+    "organicCertified": "Økologisk certificeret",
+    "localIngredients": "{{percent}}% lokale ingredienser",
+    "specialtyCoffee": "Specialty kaffe",
+    "wineList": "Vinkort",
+    "fullBar": "Fuld bar",
+    "loading": "Henter menudata...",
+    "errorNoItems": "Ingen menupunkter fundet. Tilføj menu først."
+  }
+}

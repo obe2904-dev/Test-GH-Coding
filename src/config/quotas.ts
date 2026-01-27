@@ -71,9 +71,9 @@ export interface TierQuotas {
  */
 export const TIER_QUOTAS: Record<UserTier, TierQuotas> = {
   free: {
-    // AI Generation - Limited
+    // AI Generation - Not available for Free tier (AI Ideas is paid-only)
     aiGenerations: {
-      daily: 10,
+      daily: 100,
       monthly: 100,
     },
     

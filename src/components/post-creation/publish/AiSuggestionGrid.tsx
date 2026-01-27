@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Sparkles } from './icons'
 
 export interface AiSuggestion {
@@ -24,6 +25,7 @@ export function AiSuggestionGrid({
   title,
   onSelect
 }: AiSuggestionGridProps) {
+  const { t } = useTranslation(undefined, { keyPrefix: 'createPost.publish' })
   if (suggestions.length === 0) {
     return null
   }
@@ -63,7 +65,7 @@ export function AiSuggestionGrid({
                       : 'bg-amber-100 text-amber-700'
                   }`}
                 >
-                  {suggestion.expectedReach}
+                  {suggestion.expectedReach === 'High' ? t('reachHigh', 'High') : t('reachMedium', 'Medium')}
                 </span>
               </div>
             </button>

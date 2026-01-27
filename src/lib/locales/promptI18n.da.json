@@ -1,0 +1,64 @@
+{
+  "language": {
+    "instruction": "Skriv alt indhold på naturligt dansk (ikke oversat marketing-engelsk)."
+  },
+  "businessContext": {
+    "name": "Virksomhedsnavn",
+    "type": "Type",
+    "location": "Lokation",
+    "description": "Beskrivelse",
+    "website": "Hjemmeside",
+    "keywords": "Nøgleord",
+    "hasMenuPage": "Har menukort-/serviceside",
+    "targetAudience": "Målgruppe",
+    "notSpecified": "Ikke angivet"
+  },
+  "optionalContext": {
+    "sectionTitle": "EKSTRA KONTEKST (brug kun hvis relevant)",
+    "menuContextTitle": "MENUKONTEKST",
+    "menuContextHint": "(til inspiration - brug MENUPUNKTER-listen)"
+  },
+  "platforms": {
+    "platformsLabel": "Platforme",
+    "noHashtagsRule": "Inkludér IKKE hashtags."
+  },
+  "operational": {
+    "noMenuItemsProvidedTitle": "INGEN MENUPUNKTER",
+    "noMenuItemsProvidedRules": "- Nævn ikke konkrete navne."
+  },
+  "schedulingImpact": {
+    "title": "PLANLÆGNING & EFFEKT"
+  },
+  "openingHours": {
+    "title": "ÅBNINGSTIDER",
+    "rulesTitle": "REGLER FOR ÅBNINGSTIDER",
+    "mustReferenceAtLeastOne": "- Mindst 1 idé skal referere til åbningstider."
+  },
+  "booking": {
+    "title": "BORDRESERVATION",
+    "rulesTitle": "REGLER FOR RESERVATION",
+    "ctaMustInclude": "- Mindst 1 idé SKAL indeholde en booking-CTA.",
+    "urlOnOwnLine": "- URL på egen linje.",
+    "formatExactly": "- Formatér præcis."
+  },
+  "task": {
+    "title": "TASK",
+    "aiIdeasIntro": "Generér 3 post-ideer.",
+    "aiIdeasBullets": "Hver idé skal: ...",
+    "eachIdeaMust": ""
+  },
+  "tier": {
+    "title": "NIVEAU-INSTRUKTIONER",
+    "free": "- Hold ideerne korte.",
+    "paid": "- Vær mere specifik."
+  },
+  "output": {
+    "title": "OUTPUTFORMAT",
+    "schemaDaHints": {
+      "title": "Kort titel",
+      "headline": "Headline",
+      "text": "Fuld post-tekst",
+      "photoSuggestion": "Foto-forslag"
+    }
+  }
+}

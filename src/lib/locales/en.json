@@ -91,7 +91,65 @@
     "back": "Back",
     "save": "Save",
     "delete": "Delete",
-    "edit": "Edit"
+    "edit": "Edit",
+    "unsavedChanges": "You have unsaved changes. Are you sure you want to leave the page?"
+  },
+
+  "operations": {
+    "title": "Operations & Opening Hours",
+    "subtitle": "Operational information about your business",
+    "upgrade": {
+      "title": "Upgrade to add operations data",
+      "description": "With Smart or Pro you can add opening hours, capacity, pricing and busy periods. AI uses this to optimize timing for your posts.",
+      "cta": "See pricing & upgrade"
+    },
+    "save": {
+      "saving": "💾 Saving...",
+      "changes": "Save changes",
+      "savedAt": "✓ Saved at"
+    },
+    "notSet": "Not set",
+    "capacity": {
+      "title": "Capacity",
+      "indoorLabel": "Indoor seats",
+      "outdoorLabel": "Outdoor seats"
+    },
+    "service": {
+      "title": "Service Model",
+      "tableService": "Table service",
+      "takeaway": "Takeaway",
+      "delivery": "Delivery",
+      "outdoorSeating": "Outdoor seating",
+      "wifi": "WiFi",
+      "powerOutlets": "Power outlets",
+      "parking": "Parking",
+      "reservationRequired": "Reservation required",
+      "kidsMenu": "Kids menu"
+    },
+    "pricing": {
+      "title": "Pricing",
+      "priceLevel": "Price level",
+      "averageCheck": "Average check per person",
+      "selectPlaceholder": "Select...",
+      "options": {
+        "budget": "Budget",
+        "moderate": "Moderate",
+        "upscale": "Upscale",
+        "luxury": "Luxury"
+      }
+    },
+    "busy": { "title": "Busy Periods" },
+    "slow": { "title": "Slow Periods" },
+    "periods": {
+      "morning": "Morning",
+      "lunch": "Lunch",
+      "evening": "Evening"
+    }
+  },
+  "brandProfile": {
+    "overwriteConfirm": "This will overwrite your current Brand Profile with a new AI-generated version based on your website analysis.\n\nAre you sure?",
+    "generateFailed": "Could not generate Brand Profile. Please try again from the Brand Profile page.",
+    "generateSkipped": "Brand Profile generation was skipped because the AI could not find enough unique differentiators. Add 1–2 unique details and try again."
   },
   "upgrade": {
     "title": "Upgrade to Unlock",
@@ -131,7 +189,53 @@
     "profile": "My Profile",
     "upgrade": "Upgrade"
   },
+  "myProfile": {
+    "title": "My Profile",
+    "subtitle": "Manage your personal account settings and preferences",
+    "accountInfo": "Account Information",
+    "fullName": "Full Name",
+    "notSet": "Not set",
+    "edit": "Edit",
+    "emailAddress": "Email Address",
+    "verified": "Verified",
+    "signInMethod": "Sign-in Method",
+    "userId": "User ID",
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "nameCannotBeEmpty": "Name cannot be empty",
+    "nameUpdated": "Name updated successfully",
+    "failedToUpdateName": "Failed to update name",
+    "enterFullName": "Enter your full name",
+    "roles": {
+      "title": "Business Roles & Permissions",
+      "loading": "Loading roles...",
+      "noAssociations": "No business associations found",
+      "owner": "Owner",
+      "admin": "Admin",
+      "member": "Member",
+      "explanation": "Roles explained: Owners have full control, Admins can manage most settings, and Members have view and basic posting access."
+    },
+    "password": {
+      "title": "Password & Security",
+      "description": "Keep your account secure by using a strong password",
+      "changePassword": "Change Password",
+      "newPassword": "New Password",
+      "confirmPassword": "Confirm Password",
+      "newPasswordPlaceholder": "Enter new password (min. 6 characters)",
+      "confirmPasswordPlaceholder": "Confirm new password",
+      "updatePassword": "Update Password",
+      "updating": "Updating...",
+      "passwordMinLength": "Password must be at least 6 characters",
+      "passwordsDoNotMatch": "Passwords do not match",
+      "passwordUpdated": "Password updated successfully",
+      "failedToUpdatePassword": "Failed to update password",
+      "oauthMessage": "You're signed in with {provider}. Password management is handled by your {provider} account."
+    },
+    "memberSince": "Member since:"
+  },
   "settings": {
+    "timeFormatHint": "Time format & preferences",
     "dateFormat": {
       "title": "Date Format",
       "description": "Choose how dates should be displayed in the system"
@@ -207,6 +311,9 @@
     "analysisSuccess": "Website Analyzed Successfully",
     "analysisError": "Unable to Analyze Website",
     "analysisErrorDesc": "We couldn't extract information from your website. You can enter information manually below.",
+    "analysisFetching": "We are fetching information about your business. This only takes a moment.",
+    "enterWebsiteAbove": "Enter your website above",
+    "changeLater": "You can change this later.",
     "reviewAndEdit": "Review and edit the information below",
     "autoDetected": "Auto-detected",
     "basicInfo": {
@@ -237,6 +344,11 @@
       "locationPlaceholder": "e.g., Copenhagen",
       "saveButton": "Save & Start Creating Better Content"
     },
+    "basicInfo": {
+      "businessNamePlaceholder": "Your business name",
+      "categoryPlaceholder": "e.g., cafe, restaurant, bar, hair salon, clothing store",
+      "categoryHint": "Write what you call your business in everyday language (e.g., \"cafe\", \"barber\", \"clothing store\")."
+    },
     "websiteAnalysis": {
       "badge": "ADVANCED (Optional)",
       "subtitle": "Get even better results",
@@ -255,7 +367,8 @@
       "sunday": "Sunday",
       "closed": "Closed",
       "specialHours": "Special Hours",
-      "addSpecialHour": "Add Special Hour"
+      "addSpecialHour": "Add Special Hour",
+      "emptyHint": "Leave fields empty for closed days"
     },
     "offerings": {
       "title": "Offerings & Services",
@@ -276,6 +389,44 @@
       "saveAll": "Save All Changes",
       "cancel": "Cancel",
       "reset": "Reset to Auto"
+    }
+  },
+  "menu": {
+    "header": {
+      "title": "Menus",
+      "subtitle": "AI-driven menu extraction",
+      "subtitle2": "AI-driven menu extraction and editing"
+    },
+    "free": {
+      "upgradeTitle": "Upgrade for menu extraction",
+      "description": "With Smart or Pro you can automatically extract menus from your website, edit them, and get AI to create context-aware posts based on your menu.",
+      "cta": "See pricing & upgrade"
+    },
+    "error": {
+      "noWebsite": "No website provided",
+      "analyzeFailed": "Could not analyze website",
+      "noMenusFound": "No menus found on the website",
+      "linkAlreadyAdded": "This link has already been added",
+      "addFailed": "Failed to add menu",
+      "analyzeMenuFailed": "Could not analyze menu",
+      "saveEdit": "Could not save changes"
+    },
+    "info": {
+      "noNewMenus": "No new menus found - all detected menus already exist"
+    },
+    "delete": {
+      "inProgress": "Cannot delete menus while an extraction is in progress. Please wait.",
+      "confirm": "Delete this menu?"
+    },
+    "batch": {
+      "extracting": "Extracting menu...",
+      "inQueue": "in queue",
+      "helper": "Menus are processed one at a time to ensure quality. Keep this page open."
+    },
+    "findOn": "Find menus on",
+    "detect": {
+      "searching": "Searching...",
+      "find": "Find menus"
     }
   },
   "createPost": {
@@ -317,6 +468,7 @@
       "selectPlatformError": "Please select at least one platform",
       "selectIdeaError": "Please select an idea",
       "completeTextError": "Please complete headline and text",
+      "noContentError": "Add text or upload a photo before continuing",
       "validationTitle": "Please fix these before continuing",
       "missingPlatformText": "Add text for {{platforms}} before continuing",
       "postTooLong": "Your text is too long. Keep it under {{max}} characters.",
@@ -366,7 +518,7 @@
       "textSubtitle": "It doesn't have to be perfect. Share your idea - and I'll finish the post for you.",
       "textPlaceholder": "Write your idea or draft here...",
       "hashtagSuggestions": "Hashtag suggestions",
-      "hashtagNote": "Tap to enable or remove hashtags before publishing",
+      "hashtagNote": "Tap to enable or remove hashtags. Deselecting shared hashtags removes them from all platforms.",
       "hashtagGroupShared": "Shared across platforms",
       "hashtagGroupInstagramExtra": "Extra for Instagram",
       "hashtagGroupFacebook": "For Facebook",
@@ -568,6 +720,8 @@
       "suggestion1": "Peak evening engagement",
       "suggestion2": "Morning coffee scroll time",
       "suggestion3": "Lunch break browsing",
+      "reachHigh": "High",
+      "reachMedium": "Medium",
       "today": "Today",
       "tomorrow": "Tomorrow",
       "reach": "reach",
@@ -742,6 +896,21 @@
       "back": "Back",
       "next": "Next",
       "selectedPlatforms": "Selected platforms"
+    }
+  },
+  "menu": {
+    "addManual": "Add menu manually",
+    "add": {
+      "link": "Paste link",
+      "text": "Enter menu text",
+      "linkPlaceholder": "https://example.com/menu",
+      "add": "Add",
+      "analyze": "Analyze"
+    },
+    "item": {
+      "name": "Name",
+      "description": "Description",
+      "price": "Price"
     }
   },
   "dateFormat": {
@@ -928,6 +1097,30 @@
       "openTime": "Open",
       "closeTime": "Close"
     },
+    "freeSubtitle": "Manage your basic business information",
+    "basicInfo": "Basic Information",
+    "businessName": "Business Name",
+    "businessNamePlaceholder": "Enter your business name",
+    "businessType": "Business Type",
+    "postalCode": "Postal Code",
+    "city": "City",
+    "country": "Country",
+    "contactInfo": "Contact Information",
+    "phone": "Phone",
+    "email": "Email",
+    "saveSuccess": "Changes saved successfully",
+    "saveError": "Failed to save changes",
+    "upgradeTitle": "Unlock more with Smart or Premium",
+    "upgradeDescription": "Get access to website analysis, brand voice, keywords, and much more.",
+    "viewPlans": "View pricing",
+    "unlockMore": "Unlock More Features",
+    "feature": {
+      "website": "Website URL & AI Analysis",
+      "hours": "Opening Hours Schedule",
+      "description": "Business Description & About Text",
+      "offerings": "Services & Product Offerings",
+      "keywords": "Keywords & Tags"
+    },
     "empty": {
       "noAnalysis": "No Analysis Yet",
       "noAnalysisDesc": "Enter your website URL above and click 'Analyze Website' to auto-fill your profile.",
@@ -972,5 +1165,38 @@
     "notLoggedIn": "You must be logged in",
     "saveFailed": "Could not save. Please try again.",
     "error": "An error occurred. Please try again."
+  },
+  "ui": {
+    "country": {
+      "default_name": "Denmark",
+      "select_label": "Select country"
+    },
+    "menu": {
+      "placeholder": {
+        "example_list": "Type the menu name on the first line, then each menu item on a new line.\n\nExample:\nLunch menu\nSmørrebrød with smoked salmon\nFishcakes"
+      }
+    }
+  },
+  "weather": {
+    "conditions": {
+      "clear_sky": "Clear sky",
+      "few_clouds": "Few clouds",
+      "scattered_clouds": "Scattered clouds",
+      "broken_clouds": "Broken clouds",
+      "overcast_clouds": "Overcast",
+      "shower_rain": "Shower rain",
+      "rain": "Rain",
+      "light_rain": "Light rain",
+      "moderate_rain": "Moderate rain",
+      "heavy_intensity_rain": "Heavy rain",
+      "thunderstorm": "Thunderstorm",
+      "snow": "Snow",
+      "light_snow": "Light snow",
+      "heavy_snow": "Heavy snow",
+      "mist": "Mist",
+      "fog": "Fog",
+      "haze": "Haze",
+      "drizzle": "Drizzle"
+    }
   }
 }

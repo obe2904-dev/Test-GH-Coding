@@ -47,6 +47,7 @@ interface UseIdeaWorkflowOptions {
   activeTab: 'manual' | 'ai'
   t: TFunction
   onNext: () => void
+  generateHashtagsOnly?: (text: string, headline?: string) => Promise<void>
 }
 
 export function useIdeaWorkflow({
@@ -83,7 +84,8 @@ export function useIdeaWorkflow({
   clearClarificationPrompt,
   activeTab,
   t,
-  onNext
+  onNext,
+  generateHashtagsOnly
 }: UseIdeaWorkflowOptions) {
   const processNext = useCallback(
     (currentIdea?: GeneratedIdea | null) => {
@@ -185,18 +187,36 @@ export function useIdeaWorkflow({
     (idea: GeneratedIdea) => {
       setSelectedIdea(idea.id)
 
-      const extracted = extractHashtags(idea.text)
-      const uniqueHashtags = Array.from(new Set(extracted))
+      // Handle case where text might be undefined
+      const ideaText = idea.text || ''
+      
+      // For AI Ideas mode (no hashtags in idea): leave hashtags empty for enhance step
+      // For legacy/custom mode (hashtags in text): extract them
+      let uniqueHashtags: string[] = []
+      let cleanText: string
+      
+      if (idea.hashtags && idea.hashtags.trim()) {
+        // New format: hashtags are in separate field (custom ideas)
+        const hashtagMatches = idea.hashtags.match(/#\w+/g) || []
+        uniqueHashtags = Array.from(new Set(hashtagMatches.map(tag => tag.replace('#', ''))))
+        cleanText = removeHashtags(ideaText).trim()
+      } else {
+        // Check if there are hashtags embedded in text (legacy format)
+        const extracted = extractHashtags(ideaText)
+        if (extracted.length > 0) {
+          uniqueHashtags = Array.from(new Set(extracted))
+        }
+        // For AI Ideas mode without hashtags, uniqueHashtags stays empty
+        cleanText = removeHashtags(ideaText).trim()
+      }
 
-      let cleanText = removeHashtags(idea.text)
-      cleanText = cleanText.trim()
-
-      setHeadline(idea.headline)
+      setHeadline(idea.headline || '')
       setText(cleanText)
       setHashtags(uniqueHashtags)
       setSelectedHashtags(new Set(uniqueHashtags))
       setAiGeneratedHashtags(new Set(uniqueHashtags))
       setHashtagPlatforms({})
+      // Always enable hashtags - they'll be generated during enhance step if empty
       setIncludeHashtags(true)
       setIncludeEmojis(true)
       setIsEdited(false)
@@ -215,6 +235,16 @@ export function useIdeaWorkflow({
       })
 
       markAsChanged?.()
+
+      // Auto-generate hashtags if idea has no hashtags (AI Ideas mode)
+      // This happens asynchronously in the background
+      if (uniqueHashtags.length === 0 && cleanText && generateHashtagsOnly) {
+        console.log('[selectIdea] Auto-generating hashtags for selected idea')
+        // Small delay to ensure state is updated first
+        setTimeout(() => {
+          generateHashtagsOnly(cleanText, idea.headline || '')
+        }, 100)
+      }
     },
     [
       setSelectedIdea,
@@ -233,7 +263,8 @@ export function useIdeaWorkflow({
       setHasHeadlineFromAI,
       setPlatformTexts,
       selectedPlatforms,
-      markAsChanged
+      markAsChanged,
+      generateHashtagsOnly
     ]
   )
 
@@ -244,6 +275,7 @@ export function useIdeaWorkflow({
       const current = getCurrentText()
       const manualIdea = {
         id: `manual-${Date.now()}`,
+        title: current.headline || t('generate.manualContent', 'Manual content'),
         headline: current.headline,
         text: current.text,
         description:
@@ -261,6 +293,7 @@ export function useIdeaWorkflow({
       const current = getCurrentText()
       const manualIdea = {
         id: 'manual-content',
+        title: current.headline || t('generate.manualContent', 'Manual content'),
         headline: current.headline,
         text: current.text,
         description: t('generate.manualContent', 'Manual content')

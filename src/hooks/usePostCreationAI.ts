@@ -2,6 +2,7 @@ import { useState, useCallback, type Dispatch, type SetStateAction } from 'react
 import type { TFunction } from 'i18next'
 import { buildPostIdeaPrompt, type AITier } from '../features/aiPromptBuilder'
 import { supabase } from '../lib/supabase'
+import { gatherEnhancedAIContext, fetchBrandProfileForAI } from '../services/enhancedAIContext'
 import type {
   GeneratedIdea,
   PhotoContent,
@@ -10,15 +11,6 @@ import type {
 import type { Tier } from '../stores/tierStore'
 
 type PlatformTextMap = Record<string, { headline: string; text: string }>
-
-type BusinessProfile = {
-  business_name?: string | null
-  business_category?: string | null
-  address?: string | null
-  opening_hours?: string | null
-  keywords?: string | null
-  country?: string | null
-}
 
 export interface UsePostCreationAIParams {
   t: TFunction
@@ -77,6 +69,7 @@ export interface UsePostCreationAIReturn {
   generateAiIdeas: () => Promise<void>
   handleAIUpdate: () => Promise<void>
   handleSpellingCheck: () => Promise<void>
+  generateHashtagsOnly: (textToUse: string, headlineToUse?: string) => Promise<void>
   handleClarificationDismiss: () => void
   handleClarificationSubmit: () => void
   resetClarificationState: () => void
@@ -173,14 +166,17 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
       let businessProfile: any = null
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('business_name, business_category')
-          .eq('id', user.id)
-          .single()
+        const { data: business } = await supabase
+          .from('businesses')
+          .select('name, vertical')
+          .eq('owner_id', user.id)
+          .maybeSingle()
 
-        if (profile) {
-          businessProfile = profile
+        if (business) {
+          businessProfile = {
+            business_name: business.name,
+            business_category: business.vertical
+          }
         }
       }
 
@@ -235,11 +231,230 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     setIsGenerating(true)
 
     try {
+      // Get current user for enhanced context
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      // Gather enhanced context for paid tiers (brand voice, weather, holidays, post history)
+      let enhancedContext = undefined
+      let brandProfile = undefined
+      
+      if (currentTier !== 'free' && businessData.business?.id && user?.id) {
+        try {
+          // Fetch brand profile and enhanced context in parallel
+          const [brandProfileResult, enhancedContextResult] = await Promise.all([
+            fetchBrandProfileForAI(businessData.business.id),
+            gatherEnhancedAIContext(
+              businessData.business.id,
+              user.id,
+              businessData.location?.city,
+              businessData.location?.country || 'DK'
+            )
+          ])
+          
+          brandProfile = brandProfileResult
+          enhancedContext = enhancedContextResult
+          
+          console.log('Brand profile loaded:', brandProfile ? 'yes' : 'no')
+          console.log('Enhanced context gathered:', enhancedContext?.formattedContext?.substring(0, 200))
+        } catch (e) {
+          console.warn('Could not gather enhanced context:', e)
+        }
+      }
+
+      // Fetch profile data with offerings and opening hours from correct sources
+      let profileData = undefined
+      const businessId = businessData.business?.id
+      
+      if (businessId) {
+        try {
+          // Fetch opening hours from opening_hours table
+          const { data: openingHoursData } = await supabase
+            .from('opening_hours')
+            .select('weekday, open_time, close_time, closed, kind')
+            .eq('business_id', businessId)
+            .eq('kind', 'normal')
+          
+          // Fetch menu_structure from business_profile (has category structure)
+          const { data: businessProfileData } = await supabase
+            .from('business_profile')
+            .select('menu_structure, booking_url')
+            .eq('business_id', businessId)
+            .maybeSingle()
+          
+          // Fetch actual menu items from menu_extractions table (where Menukort page stores them)
+          const { data: menuExtractionsData } = await supabase
+            .from('menu_extractions')
+            .select('extracted_data, menu_name, menu_type')
+            .eq('business_id', businessId)
+            .order('created_at', { ascending: false })
+          
+          console.log('🔍 Menu data sources:', {
+            businessProfileExists: !!businessProfileData,
+            hasMenuStructure: !!(businessProfileData as any)?.menu_structure,
+            menuExtractionsCount: menuExtractionsData?.length || 0,
+            firstExtractionPreview: menuExtractionsData?.[0] ? JSON.stringify(menuExtractionsData[0]).slice(0, 300) : 'none'
+          })
+          
+          // Merge menu extractions into a single offerings structure
+          let mergedMenuItems: any = null
+          if (menuExtractionsData && menuExtractionsData.length > 0) {
+            const normalizeKey = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim()
+
+            // Prefer the most recent extraction per menu_type to avoid mixing old and new versions
+            const latestByType = new Map<string, any>()
+            for (const extraction of menuExtractionsData) {
+              const menuType = String((extraction as any)?.menu_type || 'unknown')
+              if (!latestByType.has(menuType)) {
+                latestByType.set(menuType, extraction)
+              }
+            }
+
+            const selectedExtractions = Array.from(latestByType.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([, extraction]) => extraction)
+
+            const mergedCategoryMap = new Map<
+              string,
+              { id?: string; name: string; items: Array<{ id?: string; name: string; short_desc?: string }> }
+            >()
+
+            for (const extraction of selectedExtractions) {
+              const extractedData = (extraction as any).extracted_data
+              const categories = extractedData?.categories
+              if (!categories || !Array.isArray(categories)) continue
+
+              for (const category of categories) {
+                const categoryName = String(category?.name || '').trim()
+                if (!categoryName) continue
+
+                const categoryKey = normalizeKey(categoryName)
+                const existing = mergedCategoryMap.get(categoryKey)
+
+                const next = existing || {
+                  id: category?.id,
+                  name: categoryName,
+                  items: [] as Array<{ id?: string; name: string; short_desc?: string }>
+                }
+
+                const items = Array.isArray(category?.items) ? category.items : []
+                const seenItemNames = new Set(next.items.map((it) => normalizeKey(String(it?.name || ''))))
+
+                for (const item of items) {
+                  const itemName = String(item?.name || '').trim()
+                  if (!itemName) continue
+                  const itemKey = normalizeKey(itemName)
+                  if (seenItemNames.has(itemKey)) continue
+
+                  next.items.push({
+                    id: item?.id,
+                    name: itemName,
+                    short_desc: item?.short_desc
+                  })
+                  seenItemNames.add(itemKey)
+                }
+
+                mergedCategoryMap.set(categoryKey, next)
+              }
+            }
+
+            const mergedCategories = Array.from(mergedCategoryMap.values())
+              .map((cat) => ({
+                ...cat,
+                items: [...cat.items].sort((a, b) => a.name.localeCompare(b.name))
+              }))
+              .sort((a, b) => a.name.localeCompare(b.name))
+
+            const mergedTotalItems = mergedCategories.reduce((sum, cat) => sum + (cat.items?.length || 0), 0)
+
+            console.log('🍽️ AI menu merge summary:', {
+              selectedMenuTypes: selectedExtractions.map((e) => String((e as any)?.menu_type || 'unknown')),
+              selectedMenus: selectedExtractions.map((e) => ({
+                menu_type: String((e as any)?.menu_type || 'unknown'),
+                menu_name: String((e as any)?.menu_name || ''),
+              })),
+              mergedCategories: mergedCategories.length,
+              mergedTotalItems,
+              firstCategoryPreview: mergedCategories[0]
+                ? {
+                    name: mergedCategories[0].name,
+                    items: mergedCategories[0].items.slice(0, 3).map((it) => it.name)
+                  }
+                : null
+            })
+
+            if (mergedCategories.length > 0) {
+              mergedMenuItems = { categories: mergedCategories }
+            }
+          }
+          
+          // Also check profiles table for business_offerings (fallback)
+          let businessOfferings = null
+          if (user?.id) {
+            const { data: userProfile } = await supabase
+              .from('profiles')
+              .select('business_offerings')
+              .eq('id', user.id)
+              .maybeSingle()
+            businessOfferings = userProfile?.business_offerings
+          }
+          
+          // Convert opening_hours array to object format
+          let openingHoursObj = null
+          if (openingHoursData && openingHoursData.length > 0) {
+            openingHoursObj = {} as any
+            for (const row of openingHoursData) {
+              openingHoursObj[row.weekday] = {
+                open: row.open_time,
+                close: row.close_time,
+                closed: row.closed
+              }
+            }
+          }
+          
+          // Use merged menu_extractions data (has actual menu items), fallback to business_profile or profiles
+          const menuStructure = (businessProfileData as any)?.menu_structure
+          const bookingUrl = (businessProfileData as any)?.booking_url
+          const offerings = mergedMenuItems || menuStructure || businessOfferings
+          
+          profileData = {
+            opening_hours: openingHoursObj,
+            business_offerings: offerings,
+            booking_url: bookingUrl
+          }
+          
+          console.log('Profile data loaded:', {
+            hasOfferings: !!offerings,
+            hasOpeningHours: !!openingHoursObj,
+            hasBookingUrl: !!bookingUrl,
+            offeringsSource: mergedMenuItems ? 'menu_extractions' : (menuStructure ? 'business_profile.menu_structure' : (businessOfferings ? 'profiles.business_offerings' : 'none')),
+            openingHoursDays: openingHoursObj ? Object.keys(openingHoursObj) : [],
+            bookingUrl: bookingUrl || 'none',
+            offeringsStructure: offerings ? JSON.stringify(offerings).slice(0, 200) : 'none'
+          })
+          
+          // Diagnostic: Check if offerings has actual items
+          if (offerings) {
+            const parsed = typeof offerings === 'string' ? JSON.parse(offerings) : offerings
+            const cats = Array.isArray(parsed) ? parsed : (parsed?.categories || [])
+            const totalItems = cats.reduce((sum: number, cat: any) => sum + (cat?.items?.length || 0), 0)
+            console.log(`📊 Menu structure has ${cats.length} categories with ${totalItems} total items`)
+            if (totalItems === 0) {
+              console.warn('⚠️ Menu structure has NO items - AI will use category names or fail validation')
+            }
+          }
+        } catch (e) {
+          console.warn('Could not fetch profile data:', e)
+        }
+      }
+
       const promptContext = {
         business: businessData.business,
         profile: businessData.profile,
         location: businessData.location,
-        websiteAnalysis: businessData.latestAnalysis
+        websiteAnalysis: businessData.latestAnalysis,
+        brandProfile,  // Pass brand profile for AI prompt (highest priority)
+        enhancedContext,
+        profileData
       }
 
       const aiPrompt = buildPostIdeaPrompt(promptContext, {
@@ -250,10 +465,19 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
         targetPlatforms: getOnboardingPlatforms()
       })
 
-      const apiUrl = import.meta.env.VITE_SUPABASE_FUNCTION_AI_GENERATE
+      const aiPromptWithNonce = `${aiPrompt}
 
-      if (!apiUrl) {
-        console.warn('VITE_SUPABASE_FUNCTION_AI_GENERATE not set — using mock ideas')
+    === VARIATION (MANDATORY) ===
+    - The 3 ideas must NOT use the same opening phrase/sentence structure.
+    - Avoid repeating the same CTA wording across ideas.
+
+    REQUEST_ID: ${Date.now()}`
+
+      // Use ai-generate-v2 Edge Function
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-generate-v2`
+
+      if (!import.meta.env.VITE_SUPABASE_URL) {
+        console.warn('VITE_SUPABASE_URL not set — using mock ideas')
         const mockIdeas: GeneratedIdea[] = [
           {
             id: `ai-${Date.now()}-1`,
@@ -296,46 +520,93 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
         return
       }
 
+      // Get user's access token for authentication
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('Not authenticated')
+      }
+
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          Authorization: `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
-          prompt: aiPrompt,
-          platforms: selectedPlatforms,
-          includeEmojis: true,
-          includeHashtags: true,
-          includeCTA: true,
-          mode: 'ai-ideas',
-          count: 3
+          count: 3,
+          userTier: currentTier
         })
       })
 
       if (!response.ok) {
-        throw new Error('Failed to generate AI ideas')
+        const errorData = await response.json().catch(() => null)
+        const backendMessage = (errorData as any)?.message || (errorData as any)?.error
+        const validationDetails = Array.isArray((errorData as any)?.details) ? (errorData as any)?.details : null
+        
+        // Log detailed validation errors from backend
+        if (errorData) {
+          console.error('❌ Backend error response:', JSON.stringify(errorData, null, 2))
+          if ((errorData as any)?.validationErrors) {
+            console.error('Validation errors:', (errorData as any).validationErrors)
+          }
+          if ((errorData as any)?.debug) {
+            console.error('Debug info:', (errorData as any).debug)
+          }
+        }
+
+        if (response.status === 404) {
+          setShowBusinessInfoPrompt(true)
+        }
+
+        const messageWithDetails = validationDetails?.length
+          ? `${backendMessage || 'Failed to generate AI ideas'}: ${validationDetails.join(' | ')}`
+          : backendMessage
+
+        throw new Error(messageWithDetails || 'Failed to generate AI ideas')
       }
 
       const data = await response.json()
 
+      // V2 API returns ideas (platform-neutral) and formatted posts
       if (!data.ideas || data.ideas.length === 0) {
         throw new Error('No ideas returned from API')
       }
 
-      const ideas: GeneratedIdea[] = data.ideas.map((idea: any, index: number) => ({
-        id: `ai-${Date.now()}-${index + 1}`,
-        title: idea.title,
-        headline: idea.headline,
-        text: idea.text,
-        description: idea.description || t('generate.aiIdeaPhoto', 'Suggested photo for this post')
-      }))
+      // Map PostIdea to GeneratedIdea format
+      const ideas: GeneratedIdea[] = data.ideas.map((idea: any, index: number) => {
+        // Use Instagram formatted post for display (has more hashtags)
+        const instagramPost = data.formatted?.instagram?.[index]
+        const facebookPost = data.formatted?.facebook?.[index]
+        
+        return {
+          id: `ai-${Date.now()}-${index + 1}`,
+          title: idea.hook || `Idea ${index + 1}`,
+          headline: idea.hook || '',
+          text: instagramPost?.text || facebookPost?.text || idea.caption_base || '',
+          hashtags: instagramPost?.hashtags?.join(' ') || facebookPost?.hashtags?.join(' ') || '',
+          description: idea.photo_suggestion || t('generate.aiIdeaPhoto', 'Suggested photo for this post'),
+          bestTimeToPost: idea.best_time || undefined,
+          impact: (idea.impact === 'high' || idea.impact === 'medium' || idea.impact === 'low')
+            ? idea.impact
+            : undefined,
+          menuItemUsed: idea.menu_item?.name || undefined,
+          // Store raw idea, formatted posts, and CTA for later use
+          _rawIdea: idea,
+          _formattedPosts: {
+            facebook: facebookPost,
+            instagram: instagramPost
+          },
+          _cta: instagramPost?.cta || facebookPost?.cta
+        }
+      })
 
       setAiIdeas(ideas)
       incrementAiIdeas()
     } catch (error: any) {
       console.error('Error generating AI ideas:', error)
-      alert(t('generate.aiError', `Failed to generate AI ideas: ${error.message}`))
+      const displayMessage = error?.message || 'Failed to generate AI ideas'
+      const translated = t('generate.aiError', displayMessage as any) as unknown
+      showError(typeof translated === 'string' ? translated : String(displayMessage))
     } finally {
       setIsGenerating(false)
     }
@@ -349,6 +620,8 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     language,
     selectedPlatforms,
     setAiIdeas,
+    setShowBusinessInfoPrompt,
+    showError,
     t
   ])
 
@@ -379,9 +652,15 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
       return
     }
 
+    // For paid tiers, show business info prompt if no data exists
+    // But allow them to proceed anyway for testing/development
     if (currentTier !== 'free' && !businessData.profile && !businessData.business) {
-      setShowBusinessInfoPrompt(true)
-      return
+      console.log('⚠️ No business data found for paid tier - showing prompt but allowing enhancement')
+      // Only show prompt once, don't block the enhancement
+      if (!hasUsedClarification) {
+        setShowBusinessInfoPrompt(true)
+      }
+      // Don't return - allow enhancement to proceed
     }
 
     setIsAIEnhancing(true)
@@ -389,36 +668,104 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
 
     try {
       let businessProfile: any = null
+      let businessId: string | null = null
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         // Get business data from businesses table
         const { data: business } = await supabase
           .from('businesses')
-          .select(`
-            name,
-            vertical,
-            business_locations!inner(city, country)
-          `)
+          .select('id, name, vertical')
           .eq('owner_id', user.id)
           .maybeSingle()
 
-        // Get profile data for keywords and opening hours
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('business_category, address, opening_hours, keywords, country')
-          .eq('id', user.id)
-          .single()
+        if (business) {
+          businessId = business.id
 
-        if (business || profile) {
-          businessProfile = {
-            business_name: business?.name || null,
-            business_category: profile?.business_category || business?.vertical || null,
-            address: profile?.address || null,
-            opening_hours: profile?.opening_hours || null,
-            keywords: profile?.keywords || [],
-            city: business?.business_locations?.[0]?.city || null,
-            country: business?.business_locations?.[0]?.country || profile?.country || null
+          // Get location data (primary location, or first with country if no primary)
+          let location = null
+          
+          // First try to get primary location
+          const { data: primaryLocation } = await supabase
+            .from('business_locations')
+            .select('postal_code, city, country')
+            .eq('business_id', business.id)
+            .eq('is_primary', true)
+            .maybeSingle()
+          
+          if (primaryLocation?.country) {
+            location = primaryLocation
+          } else {
+            // Fallback: get any location with country set
+            const { data: anyLocation } = await supabase
+              .from('business_locations')
+              .select('postal_code, city, country')
+              .eq('business_id', business.id)
+              .not('country', 'is', null)
+              .limit(1)
+              .maybeSingle()
+            
+            location = anyLocation
           }
+          
+          console.log('📍 Location query result:', { primaryLocation, location })
+
+          // Get business profile for menu data
+          const { data: businessProfileData } = await supabase
+            .from('business_profile')
+            .select('menu_structure, menu_description')
+            .eq('business_id', business.id)
+            .maybeSingle()
+
+          // Get opening hours
+          const { data: hoursData } = await supabase
+            .from('opening_hours')
+            .select('*')
+            .eq('business_id', business.id)
+
+          // Convert opening hours to weekday format
+          let openingHours = null
+          if (hoursData && hoursData.length > 0) {
+            openingHours = {}
+            hoursData.forEach((h: any) => {
+              if (h.weekday) {
+                openingHours[h.weekday] = {
+                  open: h.open_time?.substring(0, 5) || '',
+                  close: h.close_time?.substring(0, 5) || '',
+                  closed: h.closed || false
+                }
+              }
+            })
+          }
+
+          // Try to get keywords from profiles (optional, may not exist)
+          const { data: userProfile } = await supabase
+            .from('profiles')
+            .select('keywords')
+            .eq('id', user.id)
+            .maybeSingle()
+
+          businessProfile = {
+            business_name: business.name,
+            business_category: business.vertical,
+            address: location?.city || null,
+            opening_hours: openingHours,
+            keywords: userProfile?.keywords || null,
+            country: location?.country ? location.country.trim() : null,
+            city: location?.city || null,
+            menu_structure: businessProfileData?.menu_structure || null,
+            menu_description: businessProfileData?.menu_description || null
+          }
+
+          console.log('📊 Business profile assembled:', {
+            hasMenuStructure: !!businessProfile.menu_structure,
+            hasMenuDescription: !!businessProfile.menu_description,
+            hasOpeningHours: !!businessProfile.opening_hours,
+            country: businessProfile.country,
+            city: businessProfile.city,
+            businessId
+          })
+          
+          console.log('📍 Location data from DB:', location)
         }
       }
 
@@ -444,6 +791,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
           userTier: currentTier,
           language,
           businessProfile,
+          businessId,
           skipClarification: hasUsedClarification,
           hasPhoto,
           clarificationContext: clarificationInput || null
@@ -536,11 +884,28 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
             }
 
             const groups = data.hashtag_groups
+            console.log('📊 Hashtag groups received:', JSON.stringify(groups, null, 2))
+            console.log('🎯 Selected platforms:', selectedPlatforms)
+            
+            const hasInstagram = selectedPlatforms.includes('instagram')
+            const instagramOnlyPlatforms = hasInstagram ? ['instagram'] : []
+            
+            // Primary and local: shared across all platforms (includes Facebook brand, location, and mood)
             assignPlatforms(groups?.primary, sharedPlatforms)
             assignPlatforms(groups?.local, sharedPlatforms)
-            assignPlatforms(groups?.foodie, sharedPlatforms)
-            const instagramPlatforms = selectedPlatforms.includes('instagram') ? ['instagram'] : sharedPlatforms
-            assignPlatforms(groups?.extras, instagramPlatforms)
+            
+            // Foodie and extras: Instagram ONLY (never show on Facebook)
+            assignPlatforms(groups?.foodie, instagramOnlyPlatforms)
+            assignPlatforms(groups?.extras, instagramOnlyPlatforms)
+            
+            console.log('✅ Platform assignments:', {
+              primary: groups?.primary?.length || 0,
+              local: groups?.local?.length || 0,
+              foodie: groups?.foodie?.length || 0,
+              extras: groups?.extras?.length || 0,
+              instagramOnly: instagramOnlyPlatforms,
+              hasInstagram: hasInstagram
+            })
 
             sanitizedAiTags.forEach((tag: string) => {
               const key = normalizeKey(tag)
@@ -646,6 +1011,168 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     t,
     markAsChanged
   ])
+
+  /**
+   * Generate hashtags only (without text enhancement)
+   * Called automatically when selecting an AI idea
+   */
+  const generateHashtagsOnly = useCallback(async (textToUse: string, headlineToUse?: string) => {
+    if (!textToUse || textToUse.trim() === '') {
+      return
+    }
+
+    console.log('[generateHashtagsOnly] Starting hashtag generation for:', textToUse.slice(0, 100))
+
+    try {
+      let businessProfile: any = null
+      let businessId: string | null = null
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (user) {
+        const { data: business } = await supabase
+          .from('businesses')
+          .select('id, name, vertical')
+          .eq('owner_id', user.id)
+          .maybeSingle()
+
+        if (business) {
+          businessId = business.id
+          
+          // Get location data
+          const { data: location } = await supabase
+            .from('business_locations')
+            .select('postal_code, city, country')
+            .eq('business_id', business.id)
+            .eq('is_primary', true)
+            .maybeSingle()
+          
+          // Get business profile - handle missing profile gracefully
+          const { data: profileData, error: profileError } = await supabase
+            .from('business_profile')
+            .select('short_description')
+            .eq('business_id', business.id)
+            .maybeSingle()
+
+          if (profileError) {
+            console.warn('[generateHashtagsOnly] Could not fetch business_profile:', profileError.message)
+          }
+
+          businessProfile = {
+            business_name: business.name,
+            business_category: business.vertical, // Use vertical from businesses table
+            short_description: (profileData as any)?.short_description,
+            city: location?.city,
+            country: location?.country || 'DK'
+          }
+        }
+      }
+
+      const availablePlatforms = ['facebook', 'instagram'].filter((platform) =>
+        isEnabled(platform)
+      )
+
+      const response = await fetch(import.meta.env.VITE_SUPABASE_FUNCTION_AI_ENHANCE, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+        },
+        body: JSON.stringify({
+          text: textToUse,
+          headline: headlineToUse || '',
+          platforms: availablePlatforms,
+          includeEmojis: false,  // Don't modify text
+          includeHashtags: true,  // Just get hashtags
+          userTier: currentTier,
+          language,
+          businessProfile,
+          businessId,
+          skipTextEnhancement: true,  // Signal to skip text changes
+          hasPhoto: false
+        })
+      })
+
+      if (!response.ok) {
+        console.warn('[generateHashtagsOnly] Failed to generate hashtags')
+        return
+      }
+
+      const data = await response.json()
+
+      if (data?.hashtags && Array.isArray(data.hashtags) && data.hashtags.length > 0) {
+        const sanitizeHashtag = (value: string) => value.replace(/^#+/, '').trim()
+        const normalizeKey = (value: string) => sanitizeHashtag(value).replace(/\s+/g, '').toLowerCase()
+        const sanitizedTags: string[] = data.hashtags
+          .map((tag: string) => sanitizeHashtag(tag))
+          .filter((tag: string): tag is string => tag.length > 0)
+
+        if (sanitizedTags.length > 0) {
+          console.log('[generateHashtagsOnly] Generated hashtags:', sanitizedTags)
+          
+          setHashtags(sanitizedTags)
+          setSelectedHashtags(new Set(sanitizedTags))
+          setAiGeneratedHashtags(new Set(sanitizedTags))
+          setIncludeHashtags(true)
+          
+          // Handle platform-specific hashtag assignments
+          {
+            const groups = (data as any)?.hashtag_groups ?? (data as any)?.hashtagGroups
+
+            const selectedPlatformList = selectedPlatforms.length > 0 ? selectedPlatforms : ['facebook']
+            const sharedPlatforms = selectedPlatforms.includes('facebook') && selectedPlatforms.includes('instagram')
+              ? ['facebook', 'instagram']
+              : selectedPlatformList
+
+            const hasInstagram = selectedPlatforms.includes('instagram')
+            const instagramOnlyPlatforms = hasInstagram ? ['instagram'] : []
+
+            const baseMap = new Map<string, Set<string>>()
+
+            const assignPlatforms = (tags: unknown, platforms: string[]) => {
+              if (!Array.isArray(tags)) return
+              tags.forEach((rawTag) => {
+                if (typeof rawTag !== 'string') return
+                const clean = sanitizeHashtag(rawTag)
+                if (!clean) return
+                const key = normalizeKey(clean)
+                if (!key) return
+                const entry = baseMap.get(key) ?? new Set<string>()
+                platforms.forEach((platform) => entry.add(platform))
+                baseMap.set(key, entry)
+              })
+            }
+
+            // Keep the same rules as handleAIUpdate
+            assignPlatforms(groups?.primary, sharedPlatforms)
+            assignPlatforms(groups?.local, sharedPlatforms)
+            assignPlatforms(groups?.foodie, instagramOnlyPlatforms)
+            assignPlatforms(groups?.extras, instagramOnlyPlatforms)
+
+            // Ensure every AI tag has a fallback assignment
+            sanitizedTags.forEach((tag: string) => {
+              const key = normalizeKey(tag)
+              if (!baseMap.has(key)) {
+                baseMap.set(key, new Set(sharedPlatforms))
+              }
+            })
+
+            const record: Record<string, string[]> = {}
+            baseMap.forEach((platforms, key) => {
+              if (platforms.size > 0) {
+                record[key] = Array.from(platforms)
+              }
+            })
+
+            setHashtagPlatforms(record)
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[generateHashtagsOnly] Error generating hashtags:', error)
+      // Silent fail - don't block the user
+    }
+  }, [currentTier, isEnabled, language, selectedPlatforms, setAiGeneratedHashtags, setHashtagPlatforms, setHashtags, setIncludeHashtags, setSelectedHashtags])
 
   const handleSpellingCheck = useCallback(async () => {
     if (!canUseCaptionGeneration()) {
@@ -788,6 +1315,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     generateAiIdeas,
     handleAIUpdate,
     handleSpellingCheck,
+    generateHashtagsOnly,
     handleClarificationDismiss,
     handleClarificationSubmit,
     resetClarificationState,

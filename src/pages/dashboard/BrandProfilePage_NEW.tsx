@@ -1,0 +1,549 @@
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
+import { useTierStore } from '../../stores/tierStore'
+import { useBrandProfile } from '../../hooks/useBrandProfile'
+
+export default function BrandProfilePage() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const currentTier = useTierStore((state) => state.currentTier)
+  
+  // Use the consolidated brand profile hook
+  const {
+    form,
+    isLoading,
+    isGenerating,
+    isSaving,
+    error,
+    lowConfidenceHint,
+    generationSkipped,
+    hasUnsavedChanges,
+    justSaved,
+    currentlyEditingField,
+    updateField,
+    save,
+    generate,
+    reset,
+    setEditingField,
+    canSave,
+    canGenerate
+  } = useBrandProfile()
+  
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  
+  // Helper to check if a specific field is being edited
+  const isEditing = (field: keyof typeof form) => currentlyEditingField === field
+  const startEditing = (field: keyof typeof form) => setEditingField(field)
+  const stopEditing = () => setEditingField(null)
+
+  // Handle generate button click
+  const handleGenerateClick = async () => {
+    setShowConfirmModal(false)
+    try {
+      await generate({ forceRegenerate: true, ignoreDifferentiationGate: true })
+    } catch (err) {
+      // Error already handled in generate() function with toast/setError
+      console.warn('Generate error caught in handleGenerateClick:', err)
+    }
+  }
+
+  // Handle delete button click
+  const handleDeleteBrand = () => {
+    reset()
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-full items-center justify-center py-12">
+        <div className="text-sm text-gray-500">{t('common.loading')}</div>
+      </div>
+    )
+  }
+
+  // Show upgrade prompt for free tier users
+  if (currentTier === 'free') {
+    return (
+      <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-full py-12 px-6">
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-white rounded-lg shadow-lg p-8 text-center">
+            <div className="mb-6">
+              <div className="text-6xl mb-4">🔒</div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">Brand Profil er kun tilgængelig i betalte pakker</h1>
+              <p className="text-gray-600">
+                Opgrader til Smart eller Pro for at oprette en omfattende brand profil med AI-instruktioner.
+              </p>
+            </div>
+            
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg p-6 mb-6">
+              <h3 className="font-semibold text-gray-900 mb-3">Med Brand Profil får du:</h3>
+              <ul className="text-left space-y-2 text-sm text-gray-700">
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 mt-0.5">✓</span>
+                  <span>9 AI prompt-variabler for konsistent kommunikation</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 mt-0.5">✓</span>
+                  <span>Definér din brand essence og tone of voice</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 mt-0.5">✓</span>
+                  <span>Præcisér målgruppe og core offerings</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 mt-0.5">✓</span>
+                  <span>Sæt indholdfokus og CTA-stil</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 mt-0.5">✓</span>
+                  <span>Bedre og mere on-brand AI-genereret indhold</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => navigate('/dashboard/plans')}
+                className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-semibold shadow-md"
+              >
+                Se priser og opgrader
+              </button>
+              <button
+                onClick={() => navigate('/dashboard/profile')}
+                className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all font-medium"
+              >
+                Tilbage til Virksomhedsprofil
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-full py-6 px-6">
+      <div className="max-w-6xl mx-auto">
+        <div className="text-center mb-4">
+          <h1 className="text-xl font-bold text-gray-900 mb-1">Brand Profil</h1>
+          <p className="text-sm text-gray-600">9 AI prompt-variabler for konsistent kommunikation</p>
+        </div>
+
+        {/* AI Generate Section */}
+        <div className="mb-6 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-200 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">🤖 AI-Genereret Brand Profil</h3>
+              <p className="text-xs text-gray-600">
+                Lad AI analysere din virksomhedsdata og generere en omfattende brand profil baseret på dit website, menuer, og virksomhedsoplysninger.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowConfirmModal(true)}
+              disabled={!canGenerate}
+              className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+            >
+              {isGenerating ? 'Genererer...' : isSaving ? 'Gemmer...' : 'Generer Brand Profil'}
+            </button>
+          </div>
+          {error && (
+            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+              ⚠️ {error}
+            </div>
+          )}
+
+          {lowConfidenceHint && !error && (
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              <div className="font-semibold mb-1">{generationSkipped ? 'Vi mangler 1–2 unikke kendetegn' : 'Manglende unikke kendetegn'}</div>
+              <div>{lowConfidenceHint}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Confirmation Modal */}
+        {showConfirmModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Generer Brand Profil med AI?</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                AI vil analysere dine virksomhedsdata og generere forslag til alle 9 brand variabler. 
+                <strong className="text-gray-900"> Eksisterende indhold vil blive overskrevet.</strong>
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowConfirmModal(false)}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  Annuller
+                </button>
+                <button
+                  onClick={handleGenerateClick}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all"
+                >
+                  Generer nu
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {/* 1. Brand Essence ⭐⭐⭐⭐⭐ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Brand Essence ⭐⭐⭐⭐⭐
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.brand_essence || 'Kernen i dit brand - hvad gør jer unikke?'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('brand_essence') ? stopEditing() : startEditing('brand_essence'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('brand_essence') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('brand_essence') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.brand_essence}
+                  onChange={(e) => updateField('brand_essence', e.target.value)}
+                  placeholder="Beskriv kernen i dit brand - hvad gør jer unikke, jeres mission, og jeres kernepersonlighed..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{brand_essence}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 2. Tone of Voice ⭐⭐⭐⭐⭐ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Tone of Voice ⭐⭐⭐⭐⭐
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.tone_of_voice || 'Hvordan skal AI kommunikere på vegne af jeres brand?'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('tone_of_voice') ? stopEditing() : startEditing('tone_of_voice'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('tone_of_voice') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('tone_of_voice') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.tone_of_voice}
+                  onChange={(e) => updateField('tone_of_voice', e.target.value)}
+                  placeholder="Beskriv jeres tone - f.eks. 'venlig og professionel', 'afslappet og humoristisk', 'autoritativ og troværdig'..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{tone_of_voice}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Things to Avoid ⭐⭐⭐⭐⭐ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Things to Avoid ⭐⭐⭐⭐⭐
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.things_to_avoid || 'Hvad skal AI aldrig sige eller gøre?'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('things_to_avoid') ? stopEditing() : startEditing('things_to_avoid'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('things_to_avoid') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('things_to_avoid') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.things_to_avoid}
+                  onChange={(e) => updateField('things_to_avoid', e.target.value)}
+                  placeholder="Liste af ord, vendinger, emner eller tone som AI skal undgå - f.eks. 'ingen slang', 'undgå overdrivelser', 'aldrig nævn konkurrenter'..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{things_to_avoid}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 4. Target Audience ⭐⭐⭐⭐☆ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Target Audience ⭐⭐⭐⭐☆
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.target_audience || 'Hvem taler I til?'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('target_audience') ? stopEditing() : startEditing('target_audience'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('target_audience') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('target_audience') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.target_audience}
+                  onChange={(e) => updateField('target_audience', e.target.value)}
+                  placeholder="Beskriv jeres primære målgruppe - demografi, interesser, behov, adfærd..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{target_audience}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 5. Core Offerings ⭐⭐⭐⭐☆ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Core Offerings ⭐⭐⭐⭐☆
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.core_offerings || 'Jeres primære produkter eller services'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('core_offerings') ? stopEditing() : startEditing('core_offerings'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('core_offerings') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('core_offerings') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.core_offerings}
+                  onChange={(e) => updateField('core_offerings', e.target.value)}
+                  placeholder="Liste de vigtigste produkter, services eller tilbud som AI kan henvise til..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{core_offerings}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 6. Content Focus ⭐⭐⭐⭐☆ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Content Focus ⭐⭐⭐⭐☆
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.content_focus || 'Hvad skal indholdet handle om?'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('content_focus') ? stopEditing() : startEditing('content_focus'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('content_focus') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('content_focus') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.content_focus}
+                  onChange={(e) => updateField('content_focus', e.target.value)}
+                  placeholder="Beskriv indholdsemnerne I vil fokusere på - f.eks. 'produktnyhederog tips', 'kundehistorier', 'brancheindsigter'..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{content_focus}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 7. CTA Style ⭐⭐⭐⭐☆ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  CTA Style ⭐⭐⭐⭐☆
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.cta_style || 'Hvordan skal AI opfordre til handling?'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('cta_style') ? stopEditing() : startEditing('cta_style'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('cta_style') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('cta_style') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.cta_style}
+                  onChange={(e) => updateField('cta_style', e.target.value)}
+                  placeholder="Beskriv jeres foretrukne CTA-stil - f.eks. 'direkte og handlingsorienteret', 'blød og inviterende', 'urgency-baseret'..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{cta_style}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 8. Communication Goal ⭐⭐⭐⭐☆ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Communication Goal ⭐⭐⭐⭐☆
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.communication_goal || 'Hvad vil I opnå med jeres kommunikation?'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('communication_goal') ? stopEditing() : startEditing('communication_goal'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('communication_goal') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('communication_goal') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.communication_goal}
+                  onChange={(e) => updateField('communication_goal', e.target.value)}
+                  placeholder="Beskriv jeres overordnede kommunikationsmål - f.eks. 'bygge tillid og troværdighed', 'drive salg', 'uddanne målgruppen'..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{communication_goal}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 9. Image Preferences ⭐⭐⭐☆☆ */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Image Preferences ⭐⭐⭐☆☆
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.image_preferences || 'Visuel stil og billedpræferencer'}
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('image_preferences') ? stopEditing() : startEditing('image_preferences'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('image_preferences') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('image_preferences') && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={form.image_preferences}
+                  onChange={(e) => updateField('image_preferences', e.target.value)}
+                  placeholder="Beskriv jeres foretrukne billedstil - f.eks. 'autentiske fotos', 'lyse og venlige farver', 'minimalistisk design'..."
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{image_preferences}}'}</code></p>
+              </div>
+            )}
+          </div>
+
+          {/* 10. Recognizable Interior / Visual Identity (CONDITIONAL) */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  Recognizable Interior / Visual Identity 🎨
+                </h3>
+                <p className="text-xs text-gray-600">
+                  {form.recognizable_interior_identity || 'Kun hvis der er dokumenterede visuelle kendetegn (murals, kunst, ikoniske interiør-elementer)'}
+                </p>
+                <p className="text-xs text-amber-600 mt-1 italic">
+                  ⚠️ Conditional field: Only populate with verified visual evidence
+                </p>
+              </div>
+              <button
+                onClick={() => (isEditing('recognizable_interior_identity') ? stopEditing() : startEditing('recognizable_interior_identity'))}
+                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+              >
+                {isEditing('recognizable_interior_identity') ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+            {isEditing('recognizable_interior_identity') && (
+              <div className="mt-3 space-y-2">
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
+                  <p className="text-xs text-amber-800 font-medium mb-1">⚠️ Important:</p>
+                  <p className="text-xs text-amber-700">
+                    Only fill this if you have <strong>explicit visual evidence</strong> (uploaded interior photos, labeled images, or clear descriptions). Examples: murals, wall art, iconic figures/themes, distinctive decor guests notice. Leave empty if uncertain.
+                  </p>
+                </div>
+                <textarea
+                  value={form.recognizable_interior_identity}
+                  onChange={(e) => updateField('recognizable_interior_identity', e.target.value)}
+                  placeholder="Fx: 'Stor mural af en lokal kunstner på bagvæggen', 'Ikonisk vintage radio fra 1950'erne ved baren', 'Hængende planter og træmøbler i skandinavisk stil'... KUN hvis dokumenteret med fotos!"
+                  className="w-full h-32 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                />
+                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{recognizable_interior_identity}}'}</code></p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Save Gate */}
+        <div className="mt-6 bg-white rounded-lg border border-gray-200 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {justSaved && (
+                <div className="flex items-center gap-2 text-sm text-green-600">
+                  <span>✓</span>
+                  <span>Gemt</span>
+                </div>
+              )}
+              {hasUnsavedChanges && !justSaved && (
+                <div className="flex items-center gap-2 text-sm text-amber-600">
+                  <span>●</span>
+                  <span>Ugemte ændringer</span>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleDeleteBrand}
+                disabled={!form.brand_essence && !form.tone_of_voice && !form.target_audience && !form.core_offerings && !form.content_focus && !form.image_preferences && !form.things_to_avoid && !form.cta_style && !form.communication_goal && !form.recognizable_interior_identity}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Ryd alt
+              </button>
+              <button
+                onClick={save}
+                disabled={!canSave}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isSaving ? 'Gemmer...' : 'Gem ændringer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

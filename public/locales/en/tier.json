@@ -1,0 +1,34 @@
+{
+  "tier": {
+    "smart": "Smart",
+    "pro": "Pro",
+    "currentPlan": "Your plan: {{tier}}",
+    "upgradeToPro": "Upgrade to Pro",
+    "upgradePrompt": {
+      "title": "Upgrade to Pro for Full Control",
+      "description": "Smart plan gives you AI-powered marketing with minimal configuration. Pro plan gives you full control to fine-tune everything.",
+      "benefits": {
+        "unlimitedGoals": "Unlimited business goals",
+        "fullEditing": "Edit all AI-generated data",
+        "advancedAnalytics": "Advanced performance analytics",
+        "prioritySupport": "Priority support",
+        "customization": "Full brand profile customization"
+      },
+      "cta": "Upgrade to Pro - DKK 399/month",
+      "keepSmart": "Stay on Smart plan"
+    },
+    "featureLocked": {
+      "title": "Pro Feature",
+      "message": "This feature is only available on the Pro plan",
+      "unlock": "Unlock with Pro"
+    },
+    "smart": {
+      "tagline": "AI does the work. You approve.",
+      "description": "Smart plan is perfect for busy owners who want effective marketing without complexity."
+    },
+    "pro": {
+      "tagline": "Full control. Maximum flexibility.",
+      "description": "Pro plan gives you all AI benefits plus the ability to customize and optimize every detail."
+    }
+  }
+}

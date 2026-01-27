@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '../lib/supabase'
-import type { Database } from '../types/database'
 
 export function OnboardingPage() {
   const { t } = useTranslation()
@@ -12,30 +11,57 @@ export function OnboardingPage() {
   const [businessName, setBusinessName] = useState('')
   const [postalCode, setPostalCode] = useState('')
   const [city, setCity] = useState('')
-  const [country] = useState('Danmark')
+  const defaultCountry = t('ui.country.default_name')
+  const [country] = useState(defaultCountry)
   const [isFetchingCity, setIsFetchingCity] = useState(false)
   const [postalLookupError, setPostalLookupError] = useState<string | null>(null)
   const [businessType] = useState('cafe') // Preselected - café/restaurant
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['facebook']) // Default to Facebook
   const [isSaving, setIsSaving] = useState(false)
+  
+  // Prevent duplicate submissions if component remounts
+  const submittedRef = useRef(false)
+  const mountedRef = useRef(false)
+  const [shouldShowForm, setShouldShowForm] = useState(false)
+  
+  // Check if onboarding was recently submitted on mount
+  useEffect(() => {
+    const submissionTimestampKey = 'onboarding:submitting:timestamp'
+    const lastSubmissionTime = localStorage.getItem(submissionTimestampKey)
+    
+    if (lastSubmissionTime) {
+      const timeSinceLastSubmission = Date.now() - parseInt(lastSubmissionTime, 10)
+      if (timeSinceLastSubmission < 5000) {
+        console.log('⚠️ OnboardingPage mounted but submission happened recently, redirecting away', {
+          timeSinceLastSubmission
+        })
+        navigate('/dashboard/create', { replace: true })
+        return
+      }
+    }
+    
+    mountedRef.current = true
+    setShouldShowForm(true)
+    console.log('✅ OnboardingPage mounted', { timestamp: Date.now() })
+  }, [navigate])
 
   const handleStep1Continue = (e: React.FormEvent) => {
     e.preventDefault()
     
     if (!businessName.trim()) {
-      alert(t('onboarding.fillRequired', 'Udfyld venligst alle felter'))
+      alert(t('onboarding.fillRequired'))
       return
     }
 
     if (isFetchingCity) {
-      alert(t('onboarding.postalLookupInProgress', 'Hang on while we look up your town.'))
+      alert(t('onboarding.postalLookupInProgress'))
       return
     }
 
     const sanitizedPostalCode = postalCode.trim()
 
     if (sanitizedPostalCode.length !== 4 || !city.trim()) {
-      alert(t('onboarding.postalValidation', 'Enter a valid postal code'))
+      alert(t('onboarding.postalValidation'))
       return
     }
 
@@ -74,12 +100,12 @@ export function OnboardingPage() {
           setPostalLookupError(null)
         } else {
           setCity('')
-          setPostalLookupError(t('onboarding.postalLookupNotFound', "Couldn't find a town for that postal code."))
+          setPostalLookupError(t('onboarding.postalLookupNotFound'))
         }
       } catch (error) {
         if (!isActive) return
         setCity('')
-        setPostalLookupError(t('onboarding.postalLookupNotFound', "Couldn't find a town for that postal code."))
+        setPostalLookupError(t('onboarding.postalLookupNotFound'))
       } finally {
         if (isActive) {
           setIsFetchingCity(false)
@@ -103,13 +129,66 @@ export function OnboardingPage() {
   }
 
   const handleFinalSubmit = async (platformsOverride?: string[]) => {
+    // CRITICAL: Set isSaving IMMEDIATELY to disable button
+    setIsSaving(true)
+    
+    console.log('🔵 handleFinalSubmit called', { 
+      submittedRef: submittedRef.current,
+      mountedRef: mountedRef.current,
+      isSaving: true,
+      timestamp: Date.now(),
+      stack: new Error().stack 
+    })
+    
+    // Don't allow submission if component isn't fully mounted
+    if (!mountedRef.current) {
+      console.log('⚠️ Component not fully mounted yet, ignoring submission')
+      setIsSaving(false)
+      return
+    }
+    
+    // Check localStorage for submission in progress (survives remounts)
+    const submissionKey = 'onboarding:submitting'
+    const submissionTimestampKey = 'onboarding:submitting:timestamp'
+    
+    const lastSubmissionTime = localStorage.getItem(submissionTimestampKey)
+    if (lastSubmissionTime) {
+      const timeSinceLastSubmission = Date.now() - parseInt(lastSubmissionTime, 10)
+      if (timeSinceLastSubmission < 3000) {
+        console.log('⚠️ Onboarding submitted less than 3 seconds ago, ignoring duplicate', {
+          timeSinceLastSubmission,
+          lastSubmissionTime
+        })
+        setIsSaving(false)
+        return
+      }
+    }
+    
+    if (localStorage.getItem(submissionKey) === 'true') {
+      console.log('⚠️ Onboarding submission already in progress (localStorage), ignoring')
+      setIsSaving(false)
+      return
+    }
+    
+    // Prevent duplicate submissions
+    if (submittedRef.current) {
+      console.log('⚠️ Onboarding already submitted (ref), ignoring duplicate call')
+      setIsSaving(false)
+      return
+    }
+    
     const sanitizedPostalCode = postalCode.trim()
     if (sanitizedPostalCode.length !== 4 || !city.trim()) {
-      alert(t('onboarding.postalValidation', 'Enter a valid postal code'))
+      alert(t('onboarding.postalValidation'))
+      setIsSaving(false)
       return
     }
 
-    setIsSaving(true)
+    // All guards passed, mark as submitted
+    submittedRef.current = true // Mark as submitted IMMEDIATELY
+    localStorage.setItem(submissionKey, 'true') // Also mark in localStorage
+    localStorage.setItem(submissionTimestampKey, Date.now().toString()) // Timestamp to prevent rapid resubmission
+    console.log('✅ Marked as submitted, proceeding with onboarding', { timestamp: Date.now() })
 
     try {
       const {
@@ -117,8 +196,11 @@ export function OnboardingPage() {
       } = await supabase.auth.getUser()
 
       if (!user) {
-        alert(t('onboarding.notLoggedIn', 'Du skal være logget ind'))
+        alert(t('onboarding.notLoggedIn'))
         navigate('/login')
+        submittedRef.current = false // Reset on error
+        localStorage.removeItem(submissionKey)
+        localStorage.removeItem(submissionTimestampKey)
         return
       }
 
@@ -129,20 +211,20 @@ export function OnboardingPage() {
 
       if (finalPlatforms.length === 0) {
         console.warn('Onboarding: Attempted to submit without any platforms selected')
-        alert(t('onboarding.fillRequired', 'Udfyld venligst alle felter'))
+        alert(t('onboarding.fillRequired'))
         return
       }
 
       if (!user.email) {
         console.error('Error saving onboarding: Missing user email for profile upsert')
-        alert(t('onboarding.saveFailed', 'Kunne ikke gemme. Prøv igen.'))
+        alert(t('onboarding.saveFailed'))
         return
       }
 
       const normalizedCategory = businessType === 'cafe' ? 'café' : businessType
 
       // Call the business onboarding function to create business + location records
-      const { data: businessId, error: onboardingError } = await supabase
+      const { data: businessId, error: onboardingError } = await (supabase as any)
         .rpc('create_business_onboarding', {
           p_user_id: user.id,
           p_business_name: businessName.trim(),
@@ -154,22 +236,25 @@ export function OnboardingPage() {
         })
 
       if (onboardingError) {
-        console.error('Error saving onboarding:', onboardingError)
-        console.error('Error details:', {
-          message: onboardingError.message,
-          details: onboardingError.details,
-          hint: onboardingError.hint,
-          code: onboardingError.code
-        })
+        console.error('❌ Error saving onboarding:', onboardingError)
+        console.error('❌ Error message:', onboardingError.message)
+        console.error('❌ Error details:', onboardingError.details)
+        console.error('❌ Error hint:', onboardingError.hint)
+        console.error('❌ Error code:', onboardingError.code)
+        console.error('❌ Full error object:', JSON.stringify(onboardingError, null, 2))
         alert(`Fejl: ${onboardingError.message || 'Kunne ikke gemme. Prøv igen.'}`)
+        submittedRef.current = false // Reset on error
+        localStorage.removeItem(submissionKey) // Reset localStorage
+        localStorage.removeItem(submissionTimestampKey)
         return
       }
 
+      console.log('✅ Business created:', businessId)
+
+      // CRITICAL: Set localStorage flag IMMEDIATELY before any navigation
       if (typeof window !== 'undefined') {
         localStorage.setItem(`onboarding:completed:${user.id}`, 'true')
       }
-
-      console.log('✅ Business created:', businessId)
 
       // Save selected platforms to localStorage for AI prompt context
       localStorage.setItem('onboarding:platforms', JSON.stringify(finalPlatforms))
@@ -179,11 +264,30 @@ export function OnboardingPage() {
         localStorage.setItem('onboarding:activePlatform', finalPlatforms[0])
       }
 
-      // Redirect to first post creation (Skriv step)
-      navigate('/dashboard/create')
+      // Redirect to first post creation (Skriv/Write page)
+      console.log('✅ Onboarding complete, navigating to /dashboard/create')
+      
+      // Set flag BEFORE navigation to prevent ProtectedRoute from re-checking
+      localStorage.setItem('onboarding:navigating', 'true')
+      
+      // Navigate immediately without requestAnimationFrame delay
+      console.log('🚀 Executing navigation now...')
+      navigate('/dashboard/create', { replace: true })
+      
+      // Clean up flags after navigation completes
+      setTimeout(() => {
+        console.log('🧹 Cleaning up navigation flags')
+        localStorage.removeItem('onboarding:navigating')
+        localStorage.removeItem(submissionKey)
+        // Keep timestamp for 5 seconds to prevent any rapid resubmission
+        setTimeout(() => localStorage.removeItem(submissionTimestampKey), 5000)
+      }, 1000)
     } catch (error) {
       console.error('Error during onboarding:', error)
-      alert(t('onboarding.error', 'Der opstod en fejl. Prøv igen.'))
+      alert(t('onboarding.error'))
+      submittedRef.current = false // Reset on error
+      localStorage.removeItem(submissionKey) // Reset localStorage
+      localStorage.removeItem(submissionTimestampKey)
     } finally {
       setIsSaving(false)
     }
@@ -194,6 +298,18 @@ export function OnboardingPage() {
     const fallbackPlatforms = ['facebook']
     setSelectedPlatforms(fallbackPlatforms)
     await handleFinalSubmit(fallbackPlatforms)
+  }
+
+  // Show loading spinner if form shouldn't be displayed yet
+  if (!shouldShowForm) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-[#0F2E32] border-t-[#88F2D7] rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-700 font-medium">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -209,15 +325,15 @@ export function OnboardingPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            {step === 1 
-              ? t('onboarding.welcome', 'Velkommen! 👋')
-              : t('onboarding.step2Title', 'Hvor vil du poste?')
+                {step === 1 
+              ? t('onboarding.welcome')
+              : t('onboarding.step2Title')
             }
           </h1>
           <p className="text-lg text-gray-700">
             {step === 1
-              ? t('onboarding.subtitle', 'Lad os lære din café at kende')
-              : t('onboarding.step2Subtitle', 'Vælg dine sociale medier')
+              ? t('onboarding.subtitle')
+              : t('onboarding.step2Subtitle')
             }
           </p>
         </div>
@@ -229,15 +345,15 @@ export function OnboardingPage() {
             
             {/* Business Name */}
             <div>
-              <label htmlFor="businessName" className="block text-sm font-semibold text-gray-900 mb-2">
-                {t('onboarding.businessNameLabel', 'Navn på café/restaurant')} *
+                <label htmlFor="businessName" className="block text-sm font-semibold text-gray-900 mb-2">
+                {t('onboarding.businessNameLabel')} *
               </label>
               <input
                 id="businessName"
                 type="text"
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
-                placeholder={t('onboarding.businessNamePlaceholder', 'fx Café Nørrebro')}
+                placeholder={t('onboarding.businessNamePlaceholder')}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#88F2D7] focus:border-[#88F2D7] text-base"
                 required
               />
@@ -245,8 +361,8 @@ export function OnboardingPage() {
 
             {/* City */}
             <div>
-              <label htmlFor="postalCode" className="block text-sm font-semibold text-gray-900 mb-2">
-                {t('onboarding.postalCodeLabel', 'Postnummer')} *
+                <label htmlFor="postalCode" className="block text-sm font-semibold text-gray-900 mb-2">
+                {t('onboarding.postalCodeLabel')} *
               </label>
               <input
                 id="postalCode"
@@ -258,7 +374,7 @@ export function OnboardingPage() {
                   const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 4)
                   setPostalCode(digitsOnly)
                 }}
-                placeholder={t('onboarding.postalCodePlaceholder', 'fx 2200')}
+                placeholder={t('onboarding.postalCodePlaceholder')}
                 className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-[#88F2D7] focus:border-[#88F2D7] text-base ${postalLookupError ? 'border-red-400 focus:border-red-400 focus:ring-red-200' : 'border-gray-300'}`}
                 required
               />
@@ -271,32 +387,32 @@ export function OnboardingPage() {
 
             {/* Auto city lookup */}
             <div>
-              <label htmlFor="city" className="block text-sm font-semibold text-gray-900 mb-2">
-                {t('onboarding.cityAutoLabel', 'By (udfyldes automatisk)')} *
+                <label htmlFor="city" className="block text-sm font-semibold text-gray-900 mb-2">
+                {t('onboarding.cityAutoLabel')} *
               </label>
               <input
                 id="city"
                 type="text"
                 value={city}
                 readOnly
-                placeholder={t('onboarding.cityAutoPlaceholder', 'Vent på bynavn...')}
+                placeholder={t('onboarding.cityAutoPlaceholder')}
                 className="w-full px-4 py-3 border border-gray-200 rounded-lg bg-gray-50 text-base text-gray-700"
               />
               <p className={`text-xs mt-2 ${postalLookupError ? 'text-red-600' : 'text-gray-500'}`}>
                 {postalLookupError
-                  ? t('onboarding.cityAutoHelperError', 'Check the postal code to find the town.')
+                  ? t('onboarding.cityAutoHelperError')
                   : isFetchingCity
-                    ? t('onboarding.postalLookupLoading', 'Looking up postal code...')
+                    ? t('onboarding.postalLookupLoading')
                     : city
-                      ? t('onboarding.postalLookupSuccess', 'Town found automatically from the postal code.')
-                      : t('onboarding.cityAutoHelper', 'The town fills automatically once you enter a valid postal code.')}
+                      ? t('onboarding.postalLookupSuccess')
+                      : t('onboarding.cityAutoHelper')}
               </p>
             </div>
 
             {/* Country */}
             <div>
-              <label htmlFor="country" className="block text-sm font-semibold text-gray-900 mb-2">
-                {t('onboarding.countryLabel', 'Land')}
+                <label htmlFor="country" className="block text-sm font-semibold text-gray-900 mb-2">
+                {t('onboarding.countryLabel')}
               </label>
               <input
                 id="country"
@@ -309,8 +425,8 @@ export function OnboardingPage() {
 
             {/* Business Type (preselected) */}
             <div>
-              <label htmlFor="businessType" className="block text-sm font-semibold text-gray-900 mb-2">
-                {t('onboarding.businessTypeLabel', 'Branche')}
+                <label htmlFor="businessType" className="block text-sm font-semibold text-gray-900 mb-2">
+                {t('onboarding.businessTypeLabel')}
               </label>
               <select
                 id="businessType"
@@ -318,14 +434,14 @@ export function OnboardingPage() {
                 disabled
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 text-base cursor-not-allowed"
               >
-                <option value="cafe">{t('onboarding.cafeRestaurant', 'Café / Restaurant')}</option>
+                <option value="cafe">{t('onboarding.cafeRestaurant')}</option>
               </select>
             </div>
 
             {/* Helper Text */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-sm text-blue-900">
-                💡 {t('onboarding.helperText', 'Det er nok til at jeg kan lave gode forslag til tekst og hashtags. Du kan altid tilføje mere senere.')}
+                <p className="text-sm text-blue-900">
+                💡 {t('onboarding.helperText')}
               </p>
             </div>
 
@@ -335,7 +451,7 @@ export function OnboardingPage() {
               disabled={isFetchingCity}
               className="w-full px-6 py-3 bg-[#0F2E32] text-[#88F2D7] rounded-lg text-base font-semibold shadow-md hover:bg-[#12393D] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {t('onboarding.continue', 'Fortsæt')}
+              {t('onboarding.continue')}
             </button>
           </form>
           )}
@@ -356,8 +472,8 @@ export function OnboardingPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-base font-semibold text-gray-900">Facebook</span>
                     </div>
-                    <p className="text-sm text-gray-600">
-                      {t('onboarding.facebookHashtags', 'Standard: 2-3 hashtags')}
+                      <p className="text-sm text-gray-600">
+                      {t('onboarding.facebookHashtags')}
                     </p>
                   </div>
                 </label>
@@ -375,7 +491,7 @@ export function OnboardingPage() {
                       <span className="text-base font-semibold text-gray-900">Instagram</span>
                     </div>
                     <p className="text-sm text-gray-600">
-                      {t('onboarding.instagramHashtags', 'Standard: 8-12 hashtags')}
+                      {t('onboarding.instagramHashtags')}
                     </p>
                   </div>
                 </label>
@@ -383,8 +499,8 @@ export function OnboardingPage() {
 
               {/* Helper Text */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-900">
-                  💡 {t('onboarding.platformsHelperText', 'Du vælger kun platforme her - du kan tilslutte dem senere. Dette hjælper AI med at lave bedre hashtags og preview.')}
+                  <p className="text-sm text-blue-900">
+                  💡 {t('onboarding.platformsHelperText')}
                 </p>
               </div>
 
@@ -396,8 +512,8 @@ export function OnboardingPage() {
                   className="w-full px-6 py-3 bg-[#0F2E32] text-[#88F2D7] rounded-lg text-base font-semibold shadow-md hover:bg-[#12393D] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSaving 
-                    ? t('onboarding.saving', 'Gemmer...') 
-                    : t('onboarding.continueToFirstPost', 'Fortsæt til dit første opslag')}
+                    ? t('onboarding.saving') 
+                    : t('onboarding.continueToFirstPost')}
                 </button>
 
                 <button
@@ -405,7 +521,7 @@ export function OnboardingPage() {
                   disabled={isSaving}
                   className="w-full px-6 py-3 bg-gray-100 text-gray-700 rounded-lg text-base font-medium hover:bg-gray-200 transition-all disabled:opacity-50"
                 >
-                  {t('onboarding.back', 'Tilbage')}
+                  {t('onboarding.back')}
                 </button>
               </div>
             </div>
@@ -420,7 +536,7 @@ export function OnboardingPage() {
               disabled={isSaving}
               className="text-sm text-gray-600 hover:text-gray-900 underline disabled:opacity-50"
             >
-              {t('onboarding.skipPlatforms', 'Spring over – du kan vælge senere')}
+              {t('onboarding.skipPlatforms')}
             </button>
           </div>
         )}

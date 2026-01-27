@@ -226,99 +226,7 @@ export async function generateHashtags(input: HashtagGenerationInput): Promise<H
     return display ?? keyword
   })
 
-  let simplePrimaryTags: string[] | null = null
-  let simpleInstagramTags: string[] | null = null
-
-  try {
-    const cityLabel = buildLocationLabel(contentContext.location.city?.displayName || businessProfile?.city)
-    const countryLabel = buildLocationLabel(contentContext.location.countryName || businessProfile?.country)
-    const businessDescription = businessProfile?.description
-      ? businessProfile.description
-      : `a cozy, welcoming ${businessProfile?.business_category || 'business'}`
-    const toneDescription = contentContext.tone.toneDescription
-      || 'a warm, conversational tone that makes customers feel at home and highlights comfort, quality, and the social experience'
-    const primaryMax = Math.min(3, contentContext.tier.maxHashtags)
-    const instagramMax = contentContext.tier.tier === 'free'
-      ? Math.min(5, contentContext.tier.maxHashtags)
-      : Math.min(8, contentContext.tier.maxHashtags)
-    const promptPayload: PrimaryInstagramPromptContext = {
-      cityLabel,
-      countryLabel,
-      toneDescription,
-      businessDescription,
-      primaryMax,
-      instagramRange: {
-        min: contentContext.tier.tier === 'free' ? 3 : 3,
-        max: instagramMax
-      },
-      seasonLabel: formatSeasonName(contentContext.location.season),
-      activeEvents: contentContext.location.activeEvents.map((event) => event.label),
-      text: enhancedContent.text?.trim() || ''
-    }
-
-    // Use Danish/localized prompt instead of English
-    const localizedPrompt = buildHashtagPrompt({
-      plan,
-      businessProfile,
-      languageLabel,
-      platforms,
-      enhancedContent,
-      topicKeywords,
-      topicKeywordDisplays,
-      hashtagGuidance,
-    })
-
-    const parsed = await requestHashtagGroupPayload({
-      aiModel,
-      prompt: localizedPrompt,
-    })
-
-    if (parsed && typeof parsed === 'object') {
-      const bucketLookup = parsed as Record<string, unknown>
-      const normalizeGroup = (value: unknown): string[] => {
-        if (!Array.isArray(value)) return []
-        return value.filter((item): item is string => typeof item === 'string')
-      }
-
-      const primaryList = normalizeGroup(
-        bucketLookup.primary ?? bucketLookup.facebook ?? bucketLookup.facebookTags
-      )
-      const instagramList = normalizeGroup(
-        bucketLookup.instagram_only ?? bucketLookup.instagram ?? bucketLookup.instagramTags
-      )
-
-      if (primaryList.length > 0) {
-        simplePrimaryTags = primaryList
-        simpleInstagramTags = instagramList
-      }
-    }
-  } catch (error) {
-    console.error('Simple hashtag request failed:', error)
-  }
-
-  if (simplePrimaryTags) {
-    const normalizedPrimary = applySpellingCorrections(simplePrimaryTags)
-    const normalizedInstagram = applySpellingCorrections(simpleInstagramTags ?? [])
-
-    const primarySet = new Set(normalizedPrimary.map((tag) => tag.toLowerCase()))
-    const instagramExtras = normalizedInstagram.filter((tag) => !primarySet.has(tag.toLowerCase()))
-
-    const combined = [...normalizedPrimary, ...instagramExtras]
-
-    const finalGroups: HashtagGroups = {
-      primary: [...normalizedPrimary],
-      local: [],
-      foodie: [],
-      extras: instagramExtras,
-    }
-
-    return {
-      hashtags: combined,
-      hashtagGroups: finalGroups,
-      hashtagGuidance,
-    }
-  }
-
+  // Generate hashtags with proper 4-category structure
   try {
     const hashtagPrompt = buildHashtagPrompt({
       plan,
@@ -345,33 +253,66 @@ export async function generateHashtags(input: HashtagGenerationInput): Promise<H
         return value.filter((item): item is string => typeof item === 'string')
       }
 
+      // New structure: separate facebook and instagram objects
+      const facebook = bucketLookup.facebook as Record<string, unknown> | undefined
+      const instagram = bucketLookup.instagram as Record<string, unknown> | undefined
+
+      // Collect Facebook hashtags (always shown on Facebook)
+      const facebookBrand = facebook ? normalizeGroup(facebook.brand) : []
+      const facebookLocation = facebook ? normalizeGroup(facebook.location) : []
+      const facebookMood = facebook ? normalizeGroup(facebook.mood) : []
+
+      // Collect Instagram-specific hashtags (added to Facebook hashtags for Instagram)
+      const instagramFoodie = instagram ? normalizeGroup(instagram.foodie) : []
+      const instagramExtras = instagram ? normalizeGroup(instagram.extras) : []
+
+      // Map to our 4-category structure:
+      // - primary: Facebook brand + mood hashtags (used on both platforms)
+      // - local: Facebook location hashtags (used on both platforms)
+      // - foodie: Instagram-specific food hashtags (Instagram only)
+      // - extras: Instagram-specific extras hashtags (Instagram only)
       hashtagGroups = {
-        primary: applySpellingCorrections(normalizeGroup(bucketLookup.primary)),
-        local: applySpellingCorrections(normalizeGroup(bucketLookup.local)),
-        foodie: applySpellingCorrections(normalizeGroup(bucketLookup.foodie)),
-        extras: applySpellingCorrections(normalizeGroup(bucketLookup.extras)),
+        primary: applySpellingCorrections([...facebookBrand, ...facebookMood]),
+        local: applySpellingCorrections([...facebookLocation]),
+        foodie: applySpellingCorrections([...instagramFoodie]),
+        extras: applySpellingCorrections([...instagramExtras]),
       }
 
-      const dedupe = new Set<string>()
-      rawHashtagPool = []
-
-      ;(['primary', 'local', 'foodie', 'extras'] as const).forEach((groupKey) => {
-        hashtagGroups[groupKey] = applySpellingCorrections(hashtagGroups[groupKey])
-        hashtagGroups[groupKey].forEach((tag) => {
-          const normalized = normalizeHashtag(tag)
-          if (!normalized) {
-            return
-          }
-          const lower = normalized.toLowerCase()
-          if (dedupe.has(lower)) {
-            return
-          }
-          dedupe.add(lower)
-          rawHashtagPool.push(normalized)
-        })
+      console.log('📦 Parsed hashtag structure:', {
+        facebook: { brand: facebookBrand, location: facebookLocation, mood: facebookMood },
+        instagram: { foodie: instagramFoodie, extras: instagramExtras },
+        mapped: hashtagGroups
       })
 
-      priorityHashtags = applySpellingCorrections([...rawHashtagPool])
+      // Since AI now generates clean, structured hashtags, use them directly
+      // Collect all hashtags for the flat array (maintaining order: primary, local, foodie, extras)
+      const allHashtags = [
+        ...hashtagGroups.primary,
+        ...hashtagGroups.local,
+        ...hashtagGroups.foodie,
+        ...hashtagGroups.extras,
+      ]
+
+      // Deduplicate while preserving order
+      const seen = new Set<string>()
+      rawHashtagPool = allHashtags.filter(tag => {
+        const normalized = tag.toLowerCase()
+        if (seen.has(normalized)) return false
+        seen.add(normalized)
+        return true
+      })
+
+      priorityHashtags = [...rawHashtagPool]
+      
+      console.log('✅ Final hashtag distribution:', {
+        total: rawHashtagPool.length,
+        byCategory: {
+          primary: hashtagGroups.primary.length,
+          local: hashtagGroups.local.length,
+          foodie: hashtagGroups.foodie.length,
+          extras: hashtagGroups.extras.length
+        }
+      })
     }
   } catch (error) {
     console.error('Hashtag generation pipeline failed:', error)
@@ -382,75 +323,17 @@ export async function generateHashtags(input: HashtagGenerationInput): Promise<H
     }
   }
 
-  if (priorityHashtags.length === 0) {
-    priorityHashtags = [
-      ...hashtagGroups.primary,
-      ...hashtagGroups.local,
-      ...hashtagGroups.foodie,
-    ]
-  }
-
-  const normalizedPriority = Array.from(
-    new Set(priorityHashtags.map((tag) => normalizeHashtag(tag) || tag)),
-  ).filter((tag): tag is string => typeof tag === 'string')
-
-  const finalHashtags = ensureHashtagCoverage({
-    plan,
-    rawHashtags: rawHashtagPool,
-    platforms,
-    text: enhancedContent.text,
-    headline: enhancedContent.headline,
-    businessProfile,
-    userTier,
-    priorityHashtags: normalizedPriority,
-    originalText,
-    locale,
-    flavorModifierKeys,
-  })
-
-  const correctedFinalHashtags = applySpellingCorrections(finalHashtags)
-
-  const assigned = new Set<string>()
-  const finalSet = new Map<string, string>()
-  correctedFinalHashtags.forEach((tag) => {
-    finalSet.set(tag.toLowerCase(), tag)
-  })
-
-  const orderedGroups: [keyof HashtagGroups, string[]][] = [
-    ['primary', []],
-    ['local', []],
-    ['foodie', []],
-    ['extras', []],
-  ]
-
-  orderedGroups.forEach(([groupKey, destination]) => {
-    hashtagGroups[groupKey].forEach((tag) => {
-      const normalized = tag.toLowerCase()
-      if (finalSet.has(normalized) && !assigned.has(normalized)) {
-        destination.push(finalSet.get(normalized)!)
-        assigned.add(normalized)
-      }
-    })
-  })
-
-  correctedFinalHashtags.forEach((tag) => {
-    const normalized = tag.toLowerCase()
-    if (!assigned.has(normalized)) {
-      orderedGroups.find(([key]) => key === 'extras')?.[1].push(tag)
-      assigned.add(normalized)
-    }
-  })
-
-  const finalGroups: HashtagGroups = {
-    primary: orderedGroups[0][1],
-    local: orderedGroups[1][1],
-    foodie: orderedGroups[2][1],
-    extras: orderedGroups[3][1],
-  }
+  // Since AI now generates clean structured hashtags in facebook/instagram format,
+  // we can use them directly without complex coverage logic
+  
+  // Use the already deduplicated and ordered hashtags
+  const allHashtags = priorityHashtags.length > 0 
+    ? priorityHashtags 
+    : [...hashtagGroups.primary, ...hashtagGroups.local, ...hashtagGroups.foodie, ...hashtagGroups.extras]
 
   return {
-    hashtags: correctedFinalHashtags,
-    hashtagGroups: finalGroups,
+    hashtags: allHashtags,
+    hashtagGroups: hashtagGroups,
     hashtagGuidance,
   }
 }

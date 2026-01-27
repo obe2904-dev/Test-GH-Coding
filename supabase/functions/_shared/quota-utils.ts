@@ -40,7 +40,7 @@ interface BusinessUsage {
  */
 export const TIER_QUOTAS = {
   free: {
-    aiGenerations: { daily: 10, monthly: 100 },
+    aiGenerations: { daily: 100, monthly: 100 },
     pdfUploads: { daily: 2, monthly: 10 },
     websiteAnalysis: { daily: 2, monthly: 10 },
   },
@@ -64,6 +64,22 @@ export interface QuotaCheck {
   reason?: string
 }
 
+// Column mapping for quota types
+const columnMap: Record<QuotaType, Record<QuotaPeriod, UsageColumn>> = {
+  aiGenerations: {
+    daily: 'ai_generations_today',
+    monthly: 'ai_generations_this_month'
+  },
+  pdfUploads: {
+    daily: 'pdf_uploads_today',
+    monthly: 'pdf_uploads_this_month'
+  },
+  websiteAnalysis: {
+    daily: 'website_analysis_today',
+    monthly: 'website_analysis_this_month'
+  }
+}
+
 /**
  * Get user's business tier and current usage from database
  * Now fetches from business level, not user level
@@ -78,13 +94,13 @@ export async function getUserQuota(
   const supabase = createClient(supabaseUrl, supabaseKey)
 
   // Get user's business (as owner or team member)
-  const { data: business, error: businessError } = await supabase
+  const { data: business } = await supabase
     .from('businesses')
     .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
     .eq('owner_id', userId)
     .maybeSingle()
 
-  let businessData = business
+  let businessData = business as BusinessUsage | null
 
   // If not owner, check if team member
   if (!businessData) {
@@ -102,7 +118,7 @@ export async function getUserQuota(
         .eq('id', teamMember.business_id)
         .maybeSingle()
       
-      businessData = teamBusiness
+      businessData = teamBusiness as BusinessUsage | null
     }
   }
 
@@ -111,8 +127,17 @@ export async function getUserQuota(
       allowed: false,
       tier: 'free',
       current: 0,
+      limit: 0,
+      reason: 'No business found for user'
+    }
+  }
+
+  // Get tier from business plan
+  const tier: UserTier = (businessData.plan as UserTier) || 'free'
+  
+  // Get usage from the correct column
   const columnKey = columnMap[quotaType][period]
-  const current = Number(usageBusiness[columnKey] ?? 0)
+  const current = Number((businessData as any)[columnKey] ?? 0)
   const limit = TIER_QUOTAS[tier][quotaType][period]
   const isUnlimited = limit === -1
   
@@ -125,14 +150,14 @@ export async function getUserQuota(
       ? undefined 
       : `${period === 'daily' ? 'Daily' : 'Monthly'} quota exceeded (${current}/${limit})`
   }
-}     daily: 'pdf_uploads_today',
-      monthly: 'pdf_uploads_this_month'
+}
+
 /**
  * Increment usage counter in database (at business level)
  */
 export async function incrementQuota(
   userId: string,
-  quotaType: QuotaType
+  _quotaType: QuotaType
 ): Promise<void> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -151,29 +176,6 @@ export async function incrementQuota(
   
   if (error) {
     console.error('Failed to increment business quota:', error)
-  }
-}   reason: isUnlimited || current < limit 
-      ? undefined 
-      : `${period === 'daily' ? 'Daily' : 'Monthly'} quota exceeded (${current}/${limit})`
-  }
-}
-
-/**
- * Increment usage counter in database
- */
-export async function incrementQuota(
-  userId: string,
-  quotaType: QuotaType
-): Promise<void> {
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const supabase = createClient(supabaseUrl, supabaseKey)
-
-  // Increment both daily and monthly counters
-  const { error } = await supabase.rpc('increment_ai_generation', { user_id: userId })
-  
-  if (error) {
-    console.error('Failed to increment quota:', error)
   }
 }
 

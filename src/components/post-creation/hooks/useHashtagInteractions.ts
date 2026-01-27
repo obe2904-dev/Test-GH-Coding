@@ -1,10 +1,13 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react'
 import type { TFunction } from 'i18next'
+import type { CanonicalPlatform } from '../../../lib/hashtags'
 
 interface UseHashtagInteractionsOptions {
   hashtags: string[]
   setHashtags: Dispatch<SetStateAction<string[]>>
   setSelectedHashtags: Dispatch<SetStateAction<Set<string>>>
+  setHashtagPlatforms: Dispatch<SetStateAction<Record<string, string[]>>>
+  selectedPlatforms: CanonicalPlatform[]
   setIsEdited: (edited: boolean) => void
   setIsSpellingChecked: (checked: boolean) => void
   markAsChanged?: () => void
@@ -15,6 +18,8 @@ export function useHashtagInteractions({
   hashtags,
   setHashtags,
   setSelectedHashtags,
+  setHashtagPlatforms,
+  selectedPlatforms,
   setIsEdited,
   setIsSpellingChecked,
   markAsChanged,
@@ -71,13 +76,19 @@ export function useHashtagInteractions({
         return next
       })
 
+      // Assign custom hashtag to all currently selected platforms
+      setHashtagPlatforms((prev) => ({
+        ...prev,
+        [normalized.toLowerCase()]: [...selectedPlatforms]
+      }))
+
       setIsEdited(true)
       setIsSpellingChecked(false)
       markAsChanged?.()
 
       return null
     },
-    [hashtags, markAsChanged, setHashtags, setIsEdited, setIsSpellingChecked, setSelectedHashtags, t]
+    [hashtags, markAsChanged, selectedPlatforms, setHashtagPlatforms, setHashtags, setIsEdited, setIsSpellingChecked, setSelectedHashtags, t]
   )
 
   return {

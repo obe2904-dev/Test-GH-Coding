@@ -1,4 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3'
 import { getToneDescription, getHashtagGuidance } from './tone-cards.ts'
 import { generateHashtags, applyPostProcessing } from './modules/hashtags.ts'
 import { resolveEmojiPolicy, enforceEmojiPolicy } from './modules/emojis.ts'
@@ -98,13 +99,19 @@ const ENHANCEMENT_INSTRUCTIONS: Record<string, EnhancementInstructionSet> = {
   }
 }
 
-serve(async (req) => {
+serve(async (req: Request) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
+    // Initialize Supabase client
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
     // Get request data
     const { 
       text,
@@ -115,9 +122,11 @@ serve(async (req) => {
       userTier = 'free',
       language = 'da',
       businessProfile = null,
+      businessId = null, // Add businessId to fetch brand profile
       skipClarification = false, // When true, skip clarification check
       hasPhoto = false, // Photo provides context
-      clarificationContext = null // Additional context from clarification prompt
+      clarificationContext = null, // Additional context from clarification prompt
+      skipTextEnhancement = false // When true, skip text enhancement and only generate hashtags
     } = await req.json()
 
     // Validate input
@@ -129,6 +138,14 @@ serve(async (req) => {
     }
 
     console.log('Enhancing content for tier:', userTier, 'platforms:', platforms)
+    console.log('📊 businessProfile received:', businessProfile ? {
+      hasName: !!businessProfile.business_name,
+      hasCategory: !!businessProfile.business_category,
+      hasMenuDescription: !!businessProfile.menu_description,
+      hasMenuStructure: !!businessProfile.menu_structure,
+      hasKeywords: !!businessProfile.keywords,
+      hasOpeningHours: !!businessProfile.opening_hours
+    } : 'null')
 
     if (
       includeHashtags &&
@@ -289,8 +306,158 @@ Examples:
         contextParts.push(`Keywords: ${businessProfile.keywords.join(', ')}`)
       }
       
+      // Add menu information if available
+      if (businessProfile.menu_description) {
+        contextParts.push(`Menu Overview: ${businessProfile.menu_description}`)
+      }
+      
+      if (businessProfile.menu_structure) {
+        try {
+          const menuData = typeof businessProfile.menu_structure === 'string'
+            ? JSON.parse(businessProfile.menu_structure)
+            : businessProfile.menu_structure
+          
+          if (Array.isArray(menuData) && menuData.length > 0) {
+            const menuSummary = menuData.map((category: any) => {
+              const itemCount = category.items?.length || 0
+              return `${category.name} (${itemCount} items)`
+            }).join(', ')
+            contextParts.push(`Menu Categories: ${menuSummary}`)
+          }
+        } catch (e) {
+          console.error('Failed to parse menu_structure:', e)
+        }
+      }
+      
       if (contextParts.length > 0) {
         businessContext = `\n\nBUSINESS INFORMATION (use only to avoid mistakes):\n${contextParts.join('\n')}${toneGuidance}`
+      }
+    }
+
+    // Fetch and inject BRAND VOICE section
+    let brandVoiceSection = ''
+    if (businessId) {
+      try {
+        console.log('🔍 Fetching brand profile for business_id:', businessId)
+        const { data: brandProfile, error: brandError } = await supabase
+          .from('business_brand_profile')
+          .select('*')
+          .eq('business_id', businessId)
+          .maybeSingle()
+
+        if (brandError) {
+          console.error('❌ Error fetching brand profile:', brandError)
+        }
+
+        if (brandProfile) {
+          console.log('📋 Brand profile found:', Object.keys(brandProfile).filter(k => brandProfile[k]))
+          const brandParts = []
+
+          const tryParseJson = (value: unknown) => {
+            if (value === null || value === undefined) return null
+            if (typeof value !== 'string') return null
+            const trimmed = value.trim()
+            if (!trimmed) return null
+            if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null
+            try {
+              return JSON.parse(trimmed)
+            } catch {
+              return null
+            }
+          }
+
+          const formatBullets = (items: string[]) => items.map(i => `- ${i}`).join('\n')
+
+          const formatImagePreferences = (value: unknown) => {
+            if (!value) return ''
+            if (typeof value === 'string') return value
+            if (typeof value !== 'object') return String(value)
+
+            const v: any = value
+            const dos = Array.isArray(v.dos) ? v.dos.filter(Boolean) : []
+            const donts = Array.isArray(v.donts) ? v.donts.filter(Boolean) : []
+            const signature = typeof v.signature_shot === 'string' ? v.signature_shot.trim() : ''
+
+            const parts: string[] = []
+            if (dos.length) parts.push(`Do:\n${formatBullets(dos)}`)
+            if (donts.length) parts.push(`Don't:\n${formatBullets(donts)}`)
+            if (signature) parts.push(`Signature shot:\n- ${signature}`)
+            return parts.join('\n')
+          }
+
+          const formatThingsToAvoid = (value: unknown) => {
+            if (!value) return ''
+            if (typeof value === 'string') return value
+            if (typeof value !== 'object') return String(value)
+
+            const v: any = value
+            const language = Array.isArray(v.language_constraints)
+              ? v.language_constraints.filter(Boolean)
+              : Array.isArray(v.hard_constraints)
+                ? v.hard_constraints.filter(Boolean)
+                : []
+            const factual = Array.isArray(v.factual_constraints)
+              ? v.factual_constraints.filter(Boolean)
+              : Array.isArray(v.soft_suggestions)
+                ? v.soft_suggestions.filter(Boolean)
+                : []
+            const parts: string[] = []
+            if (language.length) parts.push(`Avoid (language):\n${formatBullets(language)}`)
+            if (factual.length) parts.push(`Avoid (factual):\n${formatBullets(factual)}`)
+            return parts.join('\n')
+          }
+
+          const formatCoreOfferings = (value: unknown) => {
+            if (!value) return ''
+            if (typeof value === 'string') return value
+            if (typeof value !== 'object') return String(value)
+
+            const v: any = value
+            const meal = Array.isArray(v.meal_anchors) ? v.meal_anchors.filter(Boolean) : []
+            const exp = Array.isArray(v.experience_service_anchors) ? v.experience_service_anchors.filter(Boolean) : []
+            const unknowns = Array.isArray(v.unknowns) ? v.unknowns.filter(Boolean) : []
+
+            const lines: string[] = []
+            if (meal.length) lines.push(`Meal anchors:\n${formatBullets(meal)}`)
+            if (exp.length) lines.push(`Experience/service anchors:\n${formatBullets(exp)}`)
+            if (unknowns.length) lines.push(`Unclear:\n${formatBullets(unknowns)}`)
+            return lines.join('\n')
+          }
+
+          if (brandProfile.brand_essence) brandParts.push(`Brand Essence: ${brandProfile.brand_essence}`)
+          if (brandProfile.tone_of_voice) brandParts.push(`Tone of Voice: ${brandProfile.tone_of_voice}`)
+          const thingsToAvoidValue =
+            (brandProfile as any).things_to_avoid_jsonb ??
+            tryParseJson((brandProfile as any).things_to_avoid) ??
+            (brandProfile as any).things_to_avoid
+          if (thingsToAvoidValue) brandParts.push(`Things to Avoid: ${formatThingsToAvoid(thingsToAvoidValue)}`)
+          if (brandProfile.target_audience) brandParts.push(`Target Audience: ${brandProfile.target_audience}`)
+          const coreOfferingsValue =
+            (brandProfile as any).core_offerings_jsonb ??
+            tryParseJson((brandProfile as any).core_offerings) ??
+            (brandProfile as any).core_offerings
+          if (coreOfferingsValue) brandParts.push(`Core Offerings: ${formatCoreOfferings(coreOfferingsValue)}`)
+          if (brandProfile.content_focus) brandParts.push(`Content Focus: ${brandProfile.content_focus}`)
+          if (brandProfile.cta_style) brandParts.push(`CTA Style: ${brandProfile.cta_style}`)
+          if (brandProfile.communication_goal) brandParts.push(`Communication Goal: ${brandProfile.communication_goal}`)
+          const imagePreferencesValue =
+            (brandProfile as any).image_preferences_jsonb ??
+            tryParseJson((brandProfile as any).image_preferences) ??
+            (brandProfile as any).image_preferences
+          if (imagePreferencesValue) brandParts.push(`Image Preferences: ${formatImagePreferences(imagePreferencesValue)}`)
+
+          if (brandParts.length > 0) {
+            brandVoiceSection = `\n\nBRAND VOICE (follow these guidelines strictly):\n${brandParts.join('\n')}`
+            console.log('✅ Brand voice injected into prompt:', brandParts.length, 'fields')
+          } else {
+            console.log('⚠️  Brand profile exists but no fields populated')
+          }
+        } else {
+          console.log('⚠️  No brand profile found for business_id:', businessId)
+        }
+      } catch (error) {
+        console.error('Failed to fetch brand profile:', error)
+        // Continue without brand voice if fetch fails
       }
     }
 
@@ -314,7 +481,7 @@ Examples:
     // Build the enhancement prompt
     const enhancementPrompt = `Enhance this social media post for ${platformList}.
 
-${headline ? `HEADLINE: ${headline}\n` : 'NO HEADLINE PROVIDED - Please create a short, attention-grabbing headline based on the text.\n'}TEXT: ${text}${clarificationContext ? `\n\nADDITIONAL CONTEXT: ${clarificationContext}\n(The user provided this additional detail to clarify their post. Incorporate it naturally into the enhanced text.)` : ''}${businessContext}
+${headline ? `HEADLINE: ${headline}\n` : 'NO HEADLINE PROVIDED - Please create a short, attention-grabbing headline based on the text.\n'}TEXT: ${text}${clarificationContext ? `\n\nADDITIONAL CONTEXT: ${clarificationContext}\n(The user provided this additional detail to clarify their post. Incorporate it naturally into the enhanced text.)` : ''}${businessContext}${brandVoiceSection}
 
 Business category: ${businessProfile?.business_category || 'local business'}
 Primary language: ${locale.languageLabel}
@@ -345,29 +512,42 @@ IMPORTANT:
 - Do NOT include markdown code blocks or any other formatting
 - Return raw JSON only`
 
-    // Call OpenAI API
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: aiModel,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt
-          },
-          {
-            role: 'user',
-            content: enhancementPrompt
-          }
-        ],
-        temperature: userTier === 'free' ? 0.3 : 0.7, // More conservative for free tier
-        max_tokens: userTier === 'free' ? 500 : 1000,
-      }),
-    })
+    // If skipTextEnhancement is true, skip the OpenAI call and go straight to hashtag generation
+    // This is used when auto-generating hashtags after selecting an AI idea
+    let enhancedContent: any
+    
+    if (skipTextEnhancement) {
+      console.log('⏩ Skipping text enhancement - hashtag-only mode')
+      enhancedContent = {
+        headline: headline || '',
+        text: text,
+        hashtags: [],
+        emojis_used: false
+      }
+    } else {
+      // Call OpenAI API
+      const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: aiModel,
+          messages: [
+            {
+              role: 'system',
+              content: systemPrompt
+            },
+            {
+              role: 'user',
+              content: enhancementPrompt
+            }
+          ],
+          temperature: userTier === 'free' ? 0.3 : 0.7, // More conservative for free tier
+          max_tokens: userTier === 'free' ? 500 : 1000,
+        }),
+      })
 
     if (!openaiResponse.ok) {
       const errorData = await openaiResponse.text()
@@ -385,7 +565,6 @@ IMPORTANT:
     console.log('Raw AI response:', aiResponse)
 
     // Parse the JSON response
-    let enhancedContent
     try {
       // Remove markdown code blocks if present
       const cleanedResponse = aiResponse
@@ -410,8 +589,10 @@ IMPORTANT:
       hashtags: enhancedContent.hashtags?.length || 0,
       clarification: clarificationQuestion ? 'yes' : 'no'
     })
+    } // End of else block for skipTextEnhancement
 
     console.log('🏷️  About to generate hashtags:', { includeHashtags, hasBusinessProfile: !!businessProfile })
+    console.log('📱 Platforms received:', platforms)
     
     if (includeHashtags) {
       console.log('✅ Generating hashtags...')

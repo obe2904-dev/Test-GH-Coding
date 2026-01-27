@@ -34,14 +34,20 @@ export interface BusinessProfileAnalysis {
   businessName?: string
   businessType?: string
   description?: string
+  shortDescription?: string  // NEW: Homepage "about" text for Om forretningen tab
   logoUrl?: string
   openingHours?: {
     [key: string]: { open: string; close: string; closed?: boolean }
   }
   offerings?: {
-    categories: string[]
-    signatureItems: string[]
-    dietaryOptions: string[]
+    categories?: string[]  // Legacy format (may still be used)
+    signatureItems?: string[]  // Legacy format
+    menuStructure?: Array<{  // NEW structured format
+      name: string
+      timeRange: string | null
+      items: string[]
+    }>
+    dietaryOptions?: string[]
   }
   contact?: {
     phone?: string
@@ -56,6 +62,11 @@ export interface BusinessProfileAnalysis {
         }
   }
   takeaway?: boolean | null
+  outdoorSeating?: boolean | null
+  wifi?: boolean | null
+  powerOutlets?: boolean | null
+  parking?: boolean | null
+  establishmentType?: 'FSE' | 'SBO' | null  // FSE = Full-Service Establishment, SBO = Specialized Beverage Outlet
   menuUrl?: string
   bookingUrl?: string
   keywords?: string[]
@@ -64,6 +75,7 @@ export interface BusinessProfileAnalysis {
     type: string
     name: string
   }>
+  detectedMenuUrls?: string[]  // NEW: Menu URLs detected by AI for user confirmation (Menukort tab)
 
   // NYT – matcher dine nye felter i Business Profile
   businessSector?: BusinessSector
@@ -79,6 +91,8 @@ export interface BusinessProfileContext {
   businessType?: string
   location?: { city?: string }
   authToken?: string
+  tier?: string
+  businessId?: string // Optional: enables server-side persistence
 }
 
 // Deterministic helpers so generated IDs stay stable between renders
@@ -160,6 +174,17 @@ class SupabaseBusinessProfilerAI {
       // Add authorization header if token is provided
       if (ctx.authToken) {
         headers['Authorization'] = `Bearer ${ctx.authToken}`
+        if (this.debug) {
+          console.log('🔐 Auth token provided:', ctx.authToken.substring(0, 20) + '...')
+        }
+      } else {
+        if (this.debug) {
+          console.warn('⚠️ No auth token provided')
+        }
+      }
+
+      if (this.debug) {
+        console.log('📤 Request headers:', Object.keys(headers))
       }
 
       const res = await fetch(this.endpoint, {
@@ -169,6 +194,8 @@ class SupabaseBusinessProfilerAI {
           url: normalizedUrl,
           businessName: ctx.businessName,
           businessType: ctx.businessType,
+          tier: ctx.tier,
+          businessId: ctx.businessId, // For server-side persistence
         }),
       })
 
@@ -196,6 +223,21 @@ class SupabaseBusinessProfilerAI {
       const data = (await res.json()) as BusinessProfileAnalysis
       if (this.debug) {
         console.log('✅ Raw analysis result received')
+      }
+
+      const persistenceDebugEnabled =
+        String(import.meta.env.VITE_AI_PROMPT_DEBUG || '').toLowerCase() === 'true' ||
+        String(import.meta.env.VITE_AI_PROMPT_DEBUG || '').toLowerCase() === '1' ||
+        String(import.meta.env.VITE_AI_PROMPT_DEBUG || '').toLowerCase() === 'yes' ||
+        String(import.meta.env.VITE_AI_PROMPT_DEBUG || '').toLowerCase() === 'on' ||
+        String(import.meta.env.VITE_BUSINESS_PROFILER_DEBUG || '').toLowerCase() === 'true' ||
+        String(import.meta.env.VITE_BUSINESS_PROFILER_DEBUG || '').toLowerCase() === '1' ||
+        String(import.meta.env.VITE_BUSINESS_PROFILER_DEBUG || '').toLowerCase() === 'yes' ||
+        String(import.meta.env.VITE_BUSINESS_PROFILER_DEBUG || '').toLowerCase() === 'on'
+
+      if (persistenceDebugEnabled) {
+        // `_persistence` is debug-only metadata from the edge function response
+        console.debug('🧾 analyze-website _persistence:', (data as any)?._persistence)
       }
 
       if (data?.error) {
@@ -340,19 +382,36 @@ class SupabaseBusinessProfilerAI {
     analysis: BusinessProfileAnalysis,
     sector?: BusinessSector,
   ): BusinessOfferingsProfile | undefined {
+    const menuStructure = analysis.offerings?.menuStructure || []
     const signatureItems = analysis.offerings?.signatureItems || []
     const categoriesFromScrape = analysis.offerings?.categories || []
 
-    // Hvis der ikke er noget at gå efter, giver vi bare en tom struktur tilbage,
-    // så app'en kan håndtere det ensartet.
+    const baseSeed = analysis.url || sector || 'unknown'
+
+    // PRIORITY 1: Use new menuStructure if available (preserves restaurant's organization)
+    if (menuStructure.length > 0) {
+      return {
+        categories: menuStructure.map((category) => ({
+          id: makeStableId('category', `${baseSeed}-${category.name}`),
+          name: category.timeRange 
+            ? `${category.name} (${category.timeRange})` 
+            : category.name,
+          items: category.items.map((itemName, index) => ({
+            id: makeStableId('item', `${baseSeed}-${category.name}-${index}-${itemName}`),
+            name: itemName,
+          })),
+        })),
+      }
+    }
+
+    // FALLBACK: Use legacy signatureItems format
     if (signatureItems.length === 0 && categoriesFromScrape.length === 0) {
       return { categories: [] }
     }
 
     const sectorName = sector || this.guessSector(analysis)
-    const baseSeed = analysis.url || sectorName || 'unknown'
 
-    // Simpel mapping: 1–2 kategorier afhængig af sektor
+    // Legacy sector-based mapping (only used if no menuStructure)
     if (sectorName === 'hospitality') {
       return {
         categories: [

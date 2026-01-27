@@ -17,7 +17,7 @@ export function SettingsPage() {
     // Check confirmation text based on current language
     const expectedText = i18n.language === 'da' ? 'slet' : 'delete'
     if (deleteConfirmText.toLowerCase() !== expectedText) {
-      setDeleteError(t('settings.deleteAccount.confirmError', 'Skriv "SLET" for at bekræfte'))
+      setDeleteError(t('settings.deleteAccount.confirmError'))
       return
     }
 
@@ -30,7 +30,7 @@ export function SettingsPage() {
       navigate('/login')
     } catch (error) {
       console.error('Error deleting account:', error)
-      setDeleteError(t('settings.deleteAccount.error', 'Der opstod en fejl. Prøv igen senere.'))
+      setDeleteError(t('settings.deleteAccount.error'))
       setIsDeleting(false)
     }
   }
@@ -38,20 +38,20 @@ export function SettingsPage() {
   return (
     <div className="p-6">
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-6">Indstillinger</h2>
+        <h2 className="text-xl font-semibold mb-6">{t('settings.title')}</h2>
         
         {/* Date Format Section */}
         <div className="mb-6 pb-6 border-b border-slate-200">
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">{t('settings.dateFormat.title', 'Datoformat')}</h3>
+          <h3 className="text-sm font-semibold text-slate-700 mb-3">{t('settings.dateFormat.title')}</h3>
           <div className="flex items-center gap-3">
             <DateFormatSwitcher />
-            <p className="text-sm text-slate-500">{t('settings.dateFormat.description', 'Vælg hvordan datoer skal vises i systemet')}</p>
+            <p className="text-sm text-slate-500">{t('settings.dateFormat.description')}</p>
           </div>
         </div>
 
         {/* Delete Account Section */}
         <div className="mb-6">
-          <h3 className="text-sm font-semibold text-red-600 mb-3">{t('settings.deleteAccount.title', 'Slet min profil')}</h3>
+          <h3 className="text-sm font-semibold text-red-600 mb-3">{t('settings.deleteAccount.title')}</h3>
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
             <div className="flex items-start gap-3">
               <svg className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -59,16 +59,16 @@ export function SettingsPage() {
               </svg>
               <div className="flex-1">
                 <p className="text-sm text-red-900 font-medium mb-2">
-                  {t('settings.deleteAccount.warning', 'Dette vil permanent slette din profil')}
+                  {t('settings.deleteAccount.warning')}
                 </p>
                 <p className="text-sm text-red-800 mb-4">
-                  {t('settings.deleteAccount.description', 'Alle dine data, indlæg, forbindelser og indstillinger vil blive slettet permanent. Denne handling kan ikke fortrydes.')}
+                  {t('settings.deleteAccount.description')}
                 </p>
                 <button
                   onClick={() => setShowDeleteModal(true)}
                   className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
                 >
-                  {t('settings.deleteAccount.button', 'Slet min profil')}
+                  {t('settings.deleteAccount.button')}
                 </button>
               </div>
             </div>
@@ -88,37 +88,37 @@ export function SettingsPage() {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-slate-900">
-                  {t('settings.deleteAccount.modal.title', 'Er du sikker?')}
+                  {t('settings.deleteAccount.modal.title')}
                 </h3>
               </div>
             </div>
 
             <div className="mb-6">
-              <p className="text-sm text-slate-700 mb-4">
-                {t('settings.deleteAccount.modal.description', 'Dette vil permanent slette:')}
+                <p className="text-sm text-slate-700 mb-4">
+                {t('settings.deleteAccount.modal.description')}
               </p>
               <ul className="space-y-2 text-sm text-slate-700">
                 <li className="flex items-center gap-2">
                   <span className="text-red-600">✗</span>
-                  {t('settings.deleteAccount.modal.item1', 'Din konto og profil')}
+                  {t('settings.deleteAccount.modal.item1')}
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="text-red-600">✗</span>
-                  {t('settings.deleteAccount.modal.item2', 'Alle dine opslag og udkast')}
+                  {t('settings.deleteAccount.modal.item2')}
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="text-red-600">✗</span>
-                  {t('settings.deleteAccount.modal.item3', 'Platform forbindelser')}
+                  {t('settings.deleteAccount.modal.item3')}
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="text-red-600">✗</span>
-                  {t('settings.deleteAccount.modal.item4', 'Alle indstillinger og præferencer')}
+                  {t('settings.deleteAccount.modal.item4')}
                 </li>
               </ul>
 
               <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
                 <p className="text-xs text-slate-600 mb-2">
-                  {t('settings.deleteAccount.modal.confirmPrompt', 'Skriv "SLET" for at bekræfte:')}
+                  {t('settings.deleteAccount.modal.confirmPrompt')}
                 </p>
                 <input
                   type="text"
@@ -147,7 +147,7 @@ export function SettingsPage() {
                 className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
                 disabled={isDeleting}
               >
-                {t('settings.deleteAccount.modal.cancel', 'Annuller')}
+                {t('settings.deleteAccount.modal.cancel')}
               </button>
               <button
                 onClick={handleDeleteAccount}
@@ -155,8 +155,8 @@ export function SettingsPage() {
                 className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isDeleting 
-                  ? t('settings.deleteAccount.modal.deleting', 'Sletter...') 
-                  : t('settings.deleteAccount.modal.confirm', 'Slet permanent')}
+                  ? t('settings.deleteAccount.modal.deleting') 
+                  : t('settings.deleteAccount.modal.confirm')}
               </button>
             </div>
           </div>

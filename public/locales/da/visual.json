@@ -1,0 +1,26 @@
+{
+  "identity": {
+    "title": "Visuel Identitet",
+    "subtitle": "AI-genereret fra dine fotos",
+    "lastUpdated": "Sidst opdateret",
+    "never": "Aldrig",
+    "reanalyze": "Genanalyser",
+    "analyzeButton": "Analyser fotos automatisk",
+    "analyzing": "Analyserer fotos...",
+    "uploadPhotos": "Upload fotos",
+    "uploadHint": "Upload 3-10 fotos af dit sted (mad, interiør, eksteriør)",
+    "noPhotos": "Upload fotos af din forretning, så kan AI udtrække din visuelle stil, farvepalette, og fotografiske retningslinjer.",
+    "photosUploaded": "{{count}} fotos uploadet",
+    "aesthetic": "Æstetik",
+    "lighting": "Belysning",
+    "composition": "Komposition",
+    "colorGrading": "Farvetone",
+    "dominantColors": "Dominerende farver",
+    "interiorIdentity": "Genkendelig interiør",
+    "visualElements": "Visuelle elementer",
+    "photographyTips": "Fotografi-tips",
+    "mood": "Stemning",
+    "loading": "Henter visuel identitet...",
+    "errorNoPhotos": "Upload venligst mindst 1 foto først."
+  }
+}

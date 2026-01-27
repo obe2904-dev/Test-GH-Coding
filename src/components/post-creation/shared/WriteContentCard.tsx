@@ -303,7 +303,7 @@ export function WriteContentCard({
           />
         )}
 
-        {hasBusinessProfile && (
+        {hasBusinessProfile && currentTier !== 'free' && (
           <AIFeaturePanel
             includeHashtags={includeHashtags}
             onToggleHashtags={onToggleHashtags}

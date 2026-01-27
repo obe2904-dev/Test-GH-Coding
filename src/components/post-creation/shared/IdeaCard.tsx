@@ -14,6 +14,12 @@ const Camera = ({ className }: { className?: string }) => (
   </svg>
 )
 
+const ExternalLink = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
+  </svg>
+)
+
 interface IdeaCardProps {
   idea: any
   isSelected: boolean
@@ -56,6 +62,39 @@ export function IdeaCard({ idea, isSelected, onSelect, type }: IdeaCardProps) {
       </div>
 
       <p className="text-sm text-slate-700 mb-2 line-clamp-2">{idea.text}</p>
+
+      {/* CTA Section (if available from V2 API) */}
+      {idea._cta && (
+        <div className="mb-2">
+          <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${
+            idea._cta.type === 'booking' 
+              ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+              : 'bg-slate-100 text-slate-700 border border-slate-200'
+          }`}>
+            <span>{idea._cta.text}</span>
+            {idea._cta.url && (
+              <ExternalLink className="w-3 h-3" />
+            )}
+          </div>
+        </div>
+      )}
+
+      {(idea.bestTimeToPost || idea.impact) && (
+        <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+          {idea.bestTimeToPost && (
+            <div>
+              <span className="font-semibold text-slate-700">{t('publish.bestTime', 'Best time')}:</span>{' '}
+              <span>{idea.bestTimeToPost}</span>
+            </div>
+          )}
+          {idea.impact && (
+            <div>
+              <span className="font-semibold text-slate-700">{t('publish.reach', 'Impact')}:</span>{' '}
+              <span>{t(`photoAnalysis.impact.${String(idea.impact).toLowerCase()}` as any, String(idea.impact))}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {idea.description && (
         <div className="flex items-start gap-1.5 p-2 bg-white rounded-lg border border-slate-200">

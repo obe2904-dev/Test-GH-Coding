@@ -91,7 +91,65 @@
     "back": "Tilbage",
     "save": "Gem",
     "delete": "Slet",
-    "edit": "Rediger"
+    "edit": "Rediger",
+    "unsavedChanges": "Du har ændringer, der ikke er gemt. Er du sikker på, du vil forlade siden?"
+  },
+
+  "operations": {
+    "title": "Drift & Åbningstider",
+    "subtitle": "Operationel information om din virksomhed",
+    "upgrade": {
+      "title": "Opgrader for at tilføje driftsdata",
+      "description": "Med Smart eller Pro kan du tilføje åbningstider, kapacitet, priser og travle perioder. AI bruger dette til at optimere timing af dine opslag.",
+      "cta": "Se priser og opgrader"
+    },
+    "save": {
+      "saving": "💾 Gemmer...",
+      "changes": "Gem ændringer",
+      "savedAt": "✓ Gemt kl."
+    },
+    "notSet": "Ikke angivet",
+    "capacity": {
+      "title": "Kapacitet",
+      "indoorLabel": "Indendørs pladser",
+      "outdoorLabel": "Udendørs pladser"
+    },
+    "service": {
+      "title": "Service Model",
+      "tableService": "Bordbetjening",
+      "takeaway": "Takeaway",
+      "delivery": "Levering",
+      "outdoorSeating": "Ude servering",
+      "wifi": "WiFi",
+      "powerOutlets": "Stikkontakter",
+      "parking": "Parkering",
+      "reservationRequired": "Reservation påkrævet",
+      "kidsMenu": "Børnemenu"
+    },
+    "pricing": {
+      "title": "Priser",
+      "priceLevel": "Prisniveau",
+      "averageCheck": "Gennemsnitlig regning per person",
+      "selectPlaceholder": "Vælg...",
+      "options": {
+        "budget": "Budget",
+        "moderate": "Moderat",
+        "upscale": "Upscale",
+        "luxury": "Luksus"
+      }
+    },
+    "busy": { "title": "Travle Perioder" },
+    "slow": { "title": "Stille Perioder" },
+    "periods": {
+      "morning": "Morgen",
+      "lunch": "Frokost",
+      "evening": "Aften"
+    }
+  },
+  "brandProfile": {
+    "overwriteConfirm": "Dette vil overskrive din nuværende Brand Profil med en ny AI-genereret version baseret på din hjemmesideanalyse.\n\nEr du sikker?",
+    "generateFailed": "Kunne ikke generere Brand Profil. Prøv igen fra Brand Profil-siden.",
+    "generateSkipped": "Brand Profil blev ikke genereret, fordi AI ikke kunne finde nok unikke kendetegn. Tilføj 1–2 unikke detaljer og prøv igen."
   },
   "upgrade": {
     "title": "Opgrader for at Låse Op",
@@ -120,6 +178,7 @@
     "createPost": "Lav opslag",
     "businessProfile": "Virksomhedsprofil",
     "calendar": "Kalender",
+    "socialMedia": "Social Medier",
     "allPosts": "Alle opslag",
     "analytics": "Performance",
     "team": "Team & Brugere",
@@ -131,7 +190,53 @@
     "profile": "Min Profil",
     "upgrade": "Opgrader"
   },
+  "myProfile": {
+    "title": "Min Profil",
+    "subtitle": "Administrer dine personlige kontoindstillinger og præferencer",
+    "accountInfo": "Kontooplysninger",
+    "fullName": "Fulde navn",
+    "notSet": "Ikke angivet",
+    "edit": "Rediger",
+    "emailAddress": "E-mailadresse",
+    "verified": "Verificeret",
+    "signInMethod": "Log ind-metode",
+    "userId": "Bruger-ID",
+    "save": "Gem",
+    "saving": "Gemmer...",
+    "cancel": "Annuller",
+    "nameCannotBeEmpty": "Navn kan ikke være tomt",
+    "nameUpdated": "Navn opdateret",
+    "failedToUpdateName": "Kunne ikke opdatere navn",
+    "enterFullName": "Indtast dit fulde navn",
+    "roles": {
+      "title": "Virksomhedsroller & Tilladelser",
+      "loading": "Indlæser roller...",
+      "noAssociations": "Ingen virksomhedstilknytninger fundet",
+      "owner": "Ejer",
+      "admin": "Administrator",
+      "member": "Medlem",
+      "explanation": "Rolleforklaring: Ejere har fuld kontrol, Administratorer kan administrere de fleste indstillinger, og Medlemmer har visnings- og grundlæggende opslags adgang."
+    },
+    "password": {
+      "title": "Adgangskode & Sikkerhed",
+      "description": "Hold din konto sikker ved at bruge en stærk adgangskode",
+      "changePassword": "Skift adgangskode",
+      "newPassword": "Ny adgangskode",
+      "confirmPassword": "Bekræft adgangskode",
+      "newPasswordPlaceholder": "Indtast ny adgangskode (min. 6 tegn)",
+      "confirmPasswordPlaceholder": "Bekræft ny adgangskode",
+      "updatePassword": "Opdater adgangskode",
+      "updating": "Opdaterer...",
+      "passwordMinLength": "Adgangskoden skal være mindst 6 tegn",
+      "passwordsDoNotMatch": "Adgangskoderne matcher ikke",
+      "passwordUpdated": "Adgangskode opdateret",
+      "failedToUpdatePassword": "Kunne ikke opdatere adgangskode",
+      "oauthMessage": "Du er logget ind med {provider}. Adgangskodeadministration håndteres af din {provider}-konto."
+    },
+    "memberSince": "Medlem siden:"
+  },
   "settings": {
+    "timeFormatHint": "Tidsformat & præferencer",
     "dateFormat": {
       "title": "Datoformat",
       "description": "Vælg hvordan datoer skal vises i systemet"
@@ -207,6 +312,9 @@
     "analysisSuccess": "Hjemmeside Analyseret Succesfuldt",
     "analysisError": "Kan ikke Analysere Hjemmeside",
     "analysisErrorDesc": "Vi kunne ikke udtrække information fra din hjemmeside. Du kan indtaste information manuelt nedenfor.",
+    "analysisFetching": "Vi henter information om din forretning. Dette tager kun et øjeblik.",
+    "enterWebsiteAbove": "Indtast din hjemmeside ovenfor",
+    "changeLater": "Du kan altid ændre det senere.",
     "reviewAndEdit": "Gennemse og rediger informationen nedenfor",
     "autoDetected": "Auto-opdaget",
     "basicInfo": {
@@ -237,6 +345,11 @@
       "locationPlaceholder": "f.eks. København",
       "saveButton": "Gem & Begynd at Skabe Bedre Indhold"
     },
+    "basicInfo": {
+      "businessNamePlaceholder": "Din virksomheds navn",
+      "categoryPlaceholder": "fx café, restaurant, bar, frisør, tøjbutik",
+      "categoryHint": "Skriv det, du selv kalder din forretning i hverdagen (fx \"café\", \"herrefrisør\", \"tøjbutik\")."
+    },
     "websiteAnalysis": {
       "badge": "AVANCERET (Valgfri)",
       "subtitle": "Få endnu bedre resultater",
@@ -255,7 +368,8 @@
       "sunday": "Søndag",
       "closed": "Lukket",
       "specialHours": "Særlige Åbningstider",
-      "addSpecialHour": "Tilføj Særlig Åbningstid"
+      "addSpecialHour": "Tilføj Særlig Åbningstid",
+      "emptyHint": "Lad feltet stå tomt for lukkede dage"
     },
     "offerings": {
       "title": "Tilbud & Tjenester",
@@ -276,6 +390,44 @@
       "saveAll": "Gem Alle Ændringer",
       "cancel": "Annuller",
       "reset": "Nulstil til Auto"
+    }
+  },
+  "menu": {
+    "header": {
+      "title": "Menukort",
+      "subtitle": "AI-drevet menu-udtrækning",
+      "subtitle2": "AI-drevet menu-udtrækning og redigering"
+    },
+    "free": {
+      "upgradeTitle": "Opgrader for menu-udtrækning",
+      "description": "Med Smart eller Pro kan du automatisk udtrække menuer fra din hjemmeside, redigere menuret, og få AI til at skabe kontekst-bevidste opslag baseret på dit menukort.",
+      "cta": "Se priser og opgrader"
+    },
+    "error": {
+      "noWebsite": "Ingen hjemmeside angivet",
+      "analyzeFailed": "Kunne ikke analysere hjemmeside",
+      "noMenusFound": "Ingen menukort fundet på hjemmesiden",
+      "linkAlreadyAdded": "Dette link er allerede tilføjet",
+      "addFailed": "Kunne ikke tilføje menu",
+      "analyzeMenuFailed": "Kunne ikke analysere menu",
+      "saveEdit": "Kunne ikke gemme ændringer"
+    },
+    "info": {
+      "noNewMenus": "Ingen nye menuer fundet - alle menuer eksisterer allerede"
+    },
+    "delete": {
+      "inProgress": "Kan ikke slette menuer mens en udtrækning er i gang. Vent venligst.",
+      "confirm": "Slet denne menu?"
+    },
+    "batch": {
+      "extracting": "Udtrækker menu...",
+      "inQueue": "i kø",
+      "helper": "Menuer behandles én ad gangen for at sikre kvalitet. Lad siden være åben."
+    },
+    "findOn": "Find menuer på",
+    "detect": {
+      "searching": "Søger...",
+      "find": "Find menuer"
     }
   },
   "createPost": {
@@ -317,6 +469,7 @@
       "selectPlatformError": "Vælg venligst mindst én platform",
       "selectIdeaError": "Vælg venligst en idé",
       "completeTextError": "Udfyld venligst overskrift og tekst",
+      "noContentError": "Tilføj tekst eller upload et foto før du fortsætter",
       "validationTitle": "Ret venligst dette før du fortsætter",
       "missingPlatformText": "Tilføj tekst til {{platforms}} før du fortsætter",
       "postTooLong": "Din tekst er for lang. Hold den under {{max}} tegn.",
@@ -369,7 +522,7 @@
       "textSubtitle": "Det behøver ikke være perfekt. Skriv bare din idé - så skriver jeg opslaget færdigt for dig.",
       "textPlaceholder": "Skriv din idé eller dit udkast her...",
       "hashtagSuggestions": "Forslag til hashtags",
-      "hashtagNote": "Tryk for at aktivere eller fjerne hashtags",
+      "hashtagNote": "Tryk for at aktivere eller fjerne hashtags. Delte hashtags fjernes fra alle platforme.",
       "hashtagGroupShared": "Til begge platforme",
       "hashtagGroupInstagramExtra": "Ekstra til Instagram",
       "hashtagGroupFacebook": "Til Facebook",
@@ -574,6 +727,8 @@
       "suggestion1": "Peak aften engagement",
       "suggestion2": "Morgen kaffe scroll tid",
       "suggestion3": "Frokost pause browsing",
+      "reachHigh": "Høj",
+      "reachMedium": "Mellem",
       "today": "I dag",
       "tomorrow": "I morgen",
       "friday": "Fredag",
@@ -751,6 +906,21 @@
       "sampleText": "Dit fantastiske opslagsindhold vil vises her!",
       "recentPost1": "Seneste succeshistorie fra vores klienter!",
       "upcomingPost1": "Weekend specielt tilbud til følgere! 🎉"
+    }
+  },
+  "menu": {
+    "addManual": "Tilføj menu manuelt",
+    "add": {
+      "link": "Indsæt link",
+      "text": "Indtast menu selv",
+      "linkPlaceholder": "https://eksempel.dk/menu",
+      "add": "Tilføj",
+      "analyze": "Analysér"
+    },
+    "item": {
+      "name": "Navn",
+      "description": "Beskrivelse",
+      "price": "Pris"
     }
   },
   "dateFormat": {
@@ -939,6 +1109,30 @@
       "openTime": "Åbner",
       "closeTime": "Lukker"
     },
+    "freeSubtitle": "Administrer dine grundlæggende virksomhedsoplysninger",
+    "basicInfo": "Grundlæggende information",
+    "businessName": "Virksomhedsnavn",
+    "businessNamePlaceholder": "Indtast dit virksomhedsnavn",
+    "businessType": "Virksomhedstype",
+    "postalCode": "Postnummer",
+    "city": "By",
+    "country": "Land",
+    "contactInfo": "Kontaktinformation",
+    "phone": "Telefon",
+    "email": "E-mail",
+    "saveSuccess": "Ændringer gemt",
+    "saveError": "Kunne ikke gemme ændringer",
+    "upgradeTitle": "Lås op for mere med Smart eller Premium",
+    "upgradeDescription": "Få adgang til website analyse, brand voice, nøgleord, og meget mere.",
+    "viewPlans": "Se priser",
+    "unlockMore": "Lås op for flere funktioner",
+    "feature": {
+      "website": "Hjemmeside URL & AI-analyse",
+      "hours": "Åbningstider",
+      "description": "Virksomhedsbeskrivelse & Om-tekst",
+      "offerings": "Tjenester & produktudbud",
+      "keywords": "Nøgleord & tags"
+    },
     "empty": {
       "noAnalysis": "Ingen Analyse Endnu",
       "noAnalysisDesc": "Indtast din hjemmeside URL ovenfor og klik 'Analyser Hjemmeside' for at automatisk udfylde din profil.",
@@ -983,5 +1177,38 @@
     "notLoggedIn": "Du skal være logget ind",
     "saveFailed": "Kunne ikke gemme. Prøv igen.",
     "error": "Der opstod en fejl. Prøv igen."
+  },
+  "ui": {
+    "country": {
+      "default_name": "Danmark",
+      "select_label": "Vælg land"
+    },
+    "menu": {
+      "placeholder": {
+        "example_list": "Skriv menunavn på første linje, derefter hver menuret på en ny linje.\n\nEksempel:\nFrokostmenu\nSmørrebrød med røget laks\nFiskefrikadeller"
+      }
+    }
+  },
+  "weather": {
+    "conditions": {
+      "clear_sky": "Klar himmel",
+      "few_clouds": "Få skyer",
+      "scattered_clouds": "Spredte skyer",
+      "broken_clouds": "Overskyet",
+      "overcast_clouds": "Overskyet",
+      "shower_rain": "Byger",
+      "rain": "Regn",
+      "light_rain": "Let regn",
+      "moderate_rain": "Moderat regn",
+      "heavy_intensity_rain": "Kraftig regn",
+      "thunderstorm": "Tordenvejr",
+      "snow": "Sne",
+      "light_snow": "Let sne",
+      "heavy_snow": "Kraftig sne",
+      "mist": "Tåge",
+      "fog": "Tåge",
+      "haze": "Dis",
+      "drizzle": "Støvregn"
+    }
   }
 }

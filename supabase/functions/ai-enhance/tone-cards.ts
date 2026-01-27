@@ -91,20 +91,34 @@ const SEASONAL_HASHTAGS_BY_LOCALE: Record<string, Record<Season, string[]>> = {
     spring: ['foraar', 'foraarshygge', 'foraarstilbud', 'paaske', 'paasketid'],
     summer: ['sommer', 'sommerhygge', 'sommeraften', 'sommerferie', 'iskaffe'],
     autumn: ['efteraar', 'efteraarsmenu', 'efteraarshygge', 'halloween', 'mortensaften'],
-    winter: ['vinter', 'vinterhygge', 'juletid', 'julehygge', 'nytaar', 'vintertilbud']
+    winter: ['vinter', 'vinterhygge', 'vintertilbud', 'nytaar']  // Removed Christmas-specific tags - handled separately
   },
   sv: {
     spring: ['var', 'varkansla', 'pask', 'paskmys', 'varerbjudande'],
     summer: ['sommar', 'sommarmys', 'sommarliv', 'sommarlov', 'iskaffe'],
     autumn: ['host', 'hostmys', 'hosterbjudande', 'halloween', 'lussekatt'],
-    winter: ['vinter', 'vintermys', 'jul', 'julmys', 'nyar', 'vintererbjudande']
+    winter: ['vinter', 'vintermys', 'nyar', 'vintererbjudande']  // Removed Christmas-specific tags - handled separately
   },
   en: {
     spring: ['spring', 'springtime', 'blossom', 'springvibes', 'easterseason'],
     summer: ['summer', 'summervibes', 'sunnydays', 'holiday', 'warmweather'],
     autumn: ['autumn', 'fall', 'cozyseason', 'harvesttime', 'fallvibes'],
-    winter: ['winter', 'wintertime', 'cozyseason', 'holidayseason', 'snowday', 'festiveseason']
+    winter: ['winter', 'wintertime', 'cozyseason', 'snowday']  // Removed Christmas-specific tags - handled separately
   }
+}
+
+// Christmas-specific hashtags - only valid in December (and late November)
+const CHRISTMAS_HASHTAGS_BY_LOCALE: Record<string, string[]> = {
+  da: ['juletid', 'julehygge', 'jul', 'juleaften', 'julestemning'],
+  sv: ['jul', 'julmys', 'julstamning', 'jultid'],
+  en: ['christmas', 'holidayseason', 'festiveseason', 'xmas', 'merrychristmas']
+}
+
+// New Year hashtags - valid in late December and early January
+const NEWYEAR_HASHTAGS_BY_LOCALE: Record<string, string[]> = {
+  da: ['nytaar', 'godtnytaar', 'nytaarsaften'],
+  sv: ['nyar', 'gottnytt', 'nyarsafton'],
+  en: ['newyear', 'happynewyear', 'newyearseve', 'newyear2026']
 }
 
 const ENGLISH_SEASON_KEYWORDS = ['spring', 'summer', 'autumn', 'fall', 'winter', 'holiday', 'season', 'snow', 'cozy', 'cozyszn', 'festive']
@@ -115,9 +129,29 @@ const LOCALE_SEASON_KEYWORDS: Record<string, string[]> = {
   en: []
 }
 
-function getSeasonalHashtagsForLocale(season: Season, languageCode: string): string[] {
+function getSeasonalHashtagsForLocale(season: Season, languageCode: string, referenceDate: Date = new Date()): string[] {
   const localeSet = SEASONAL_HASHTAGS_BY_LOCALE[languageCode] || SEASONAL_HASHTAGS_BY_LOCALE.en
-  return [...(localeSet[season] || [])]
+  const baseHashtags = [...(localeSet[season] || [])]
+  
+  // Only add Christmas/New Year hashtags during appropriate time periods
+  const month = referenceDate.getUTCMonth() // 0 = January, 11 = December
+  const day = referenceDate.getUTCDate()
+  
+  // Christmas hashtags: only December (and late November from the 20th)
+  const isChristmasSeason = month === 11 || (month === 10 && day >= 20)
+  if (isChristmasSeason && season === 'winter') {
+    const christmasHashtags = CHRISTMAS_HASHTAGS_BY_LOCALE[languageCode] || CHRISTMAS_HASHTAGS_BY_LOCALE.en
+    baseHashtags.push(...christmasHashtags)
+  }
+  
+  // New Year hashtags: late December (from 26th) through January 15th
+  const isNewYearSeason = (month === 11 && day >= 26) || (month === 0 && day <= 15)
+  if (isNewYearSeason && season === 'winter') {
+    const newYearHashtags = NEWYEAR_HASHTAGS_BY_LOCALE[languageCode] || NEWYEAR_HASHTAGS_BY_LOCALE.en
+    baseHashtags.push(...newYearHashtags)
+  }
+  
+  return baseHashtags
 }
 
 function isSeasonalTagAllowedForLocale(tag: string, languageCode: string): boolean {

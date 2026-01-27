@@ -74,7 +74,11 @@ interface TierState {
   resetMonthlyQuotas: () => void
 }
 
-// Legacy TIER_LIMITS for backward compatibility - now sourced from centralized config
+// ⚠️ LEGACY TIER_LIMITS - DO NOT MODIFY DIRECTLY
+// This is kept for backward compatibility with old components.
+// All values are now sourced from: src/config/quotas.ts (SINGLE SOURCE OF TRUTH)
+// To change quotas: Edit config/quotas.ts only - changes will apply here automatically.
+// TODO: Deprecate this after migrating all components to use TIER_QUOTAS directly.
 const TIER_LIMITS: Record<Tier, TierLimits> = {
   free: {
     aiIdeasPerDay: TIER_QUOTAS.free.aiGenerations.daily,

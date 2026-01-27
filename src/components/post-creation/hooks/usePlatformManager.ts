@@ -15,7 +15,7 @@ interface UsePlatformManagerResult {
   platformTexts: PlatformTexts
   setPlatformTexts: Dispatch<SetStateAction<PlatformTexts>>
   availablePlatforms: CanonicalPlatform[]
-  getOnboardingPlatforms: () => string[]
+  getOnboardingPlatforms: () => CanonicalPlatform[]
 }
 
 interface UsePlatformManagerOptions {
@@ -79,14 +79,16 @@ export function usePlatformManager({
   const [customizePerPlatform, setCustomizePerPlatform] = useState<boolean>(Boolean(postContent?.platformSpecific))
   const [platformTexts, setPlatformTexts] = useState<PlatformTexts>(() => buildInitialPlatformTexts(postContent))
 
-  const getOnboardingPlatforms = useCallback((): string[] => {
+  const getOnboardingPlatforms = useCallback((): CanonicalPlatform[] => {
     try {
       const stored = localStorage.getItem('onboarding:selectedPlatforms')
       if (!stored) return []
 
       const parsed = JSON.parse(stored)
       if (Array.isArray(parsed)) {
-        return parsed.filter((value): value is string => typeof value === 'string')
+        return canonicalizePlatformList(
+          parsed.filter((value): value is string => typeof value === 'string')
+        )
       }
       return []
     } catch {
@@ -106,7 +108,8 @@ export function usePlatformManager({
         const onboarding = getOnboardingPlatforms()
         if (onboarding.length > 0) {
           if (currentTier === 'free') {
-            const storedActive = localStorage.getItem('onboarding:activePlatform') || onboarding[0]
+            const storedActiveRaw = localStorage.getItem('onboarding:activePlatform') || onboarding[0]
+            const storedActive = canonicalizePlatformList([storedActiveRaw])[0] ?? onboarding[0]
             const fallbackPlatform = storedActive && available.includes(storedActive)
               ? storedActive
               : available[0]

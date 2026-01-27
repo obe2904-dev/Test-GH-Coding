@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { LanguageSwitcher } from '../LanguageSwitcher'
+import CountrySelector from '../CountrySelector'
 import { useAuthStore } from '../../stores/authStore'
+import PlanSwitcher from '../tier/PlanSwitcher'
 
 interface TopBarProps {
   className?: string
@@ -66,9 +67,28 @@ export function TopBar({ className = '' }: TopBarProps) {
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
 
+  // Use fullName from metadata if available, otherwise fall back to email username
+  const fullName = user?.user_metadata?.fullName
+  const displayName = fullName || user?.email?.split('@')[0] || 'User'
+  const displayEmail = user?.email || 'user@example.com'
+  
+  // Get initials: first letter of first name and last name if available, otherwise first letter of display name
+  const getInitials = () => {
+    if (fullName) {
+      const names = fullName.trim().split(' ')
+      if (names.length >= 2) {
+        return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase()
+      }
+      return fullName.charAt(0).toUpperCase()
+    }
+    return displayName.charAt(0).toUpperCase()
+  }
+
   const userData = {
-    name: user?.email?.split('@')[0] || 'User',
-    email: user?.email || 'user@example.com',
+    name: displayName,
+    email: displayEmail,
+    initials: getInitials(),
+    plan: (user?.user_metadata as any)?.plan as string | undefined,
   }
 
   const toggleNotifications = () => {
@@ -85,22 +105,28 @@ export function TopBar({ className = '' }: TopBarProps) {
     setUserMenuOpen((prev) => {
       const next = !prev
       if (next) {
-        setPlanMenuOpen(false)
+        setNotificationOpen(false)
       }
       return next
     })
   }
 
   return (
-    <header className={`bg-white border-b border-slate-200 px-4 flex items-center justify-end ${className}`} style={{ height: '64px' }}>
+    <header className={`bg-white border-b border-slate-200 px-4 flex items-center justify-between ${className}`} style={{ height: '64px' }}>
+      {/* Left Side - Tier Switcher for Testing */}
+      <div className="flex items-center">
+        <PlanSwitcher source="dev" className="text-sm" />
+      </div>
+
+      {/* Right Side - Language, Notifications, User Menu */}
       <div className="flex items-center gap-3">
-        {/* Language Switcher */}
-        <LanguageSwitcher />
+        {/* Country Selector (drives UI language) */}
+        <CountrySelector />
 
         {/* Notifications */}
         <div className="relative">
           <button 
-            onClick={() => setNotificationOpen(!notificationOpen)}
+            onClick={toggleNotifications}
             className="flex items-center gap-2 px-3 py-2 hover:bg-slate-100 rounded-lg transition-all relative"
           >
             <BellIcon className="w-5 h-5 text-slate-600" />
@@ -151,7 +177,7 @@ export function TopBar({ className = '' }: TopBarProps) {
           >
             <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center">
               <span className="text-white font-bold text-sm">
-                {userData.name.charAt(0).toUpperCase()}
+                {userData.initials}
               </span>
             </div>
             <div className="hidden md:block text-left">
@@ -173,7 +199,7 @@ export function TopBar({ className = '' }: TopBarProps) {
               {/* Menu Items */}
               <div className="space-y-1">
                 <button 
-                  onClick={() => navigate('/dashboard/profile')}
+                  onClick={() => navigate('/dashboard/my-profile')}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded transition-all"
                 >
                   <UserIcon className="w-4 h-4" />
@@ -194,7 +220,7 @@ export function TopBar({ className = '' }: TopBarProps) {
                     <UsersIcon className="w-4 h-4" />
                     {t('navigation.team', 'Team & Brugere')}
                   </div>
-                  {userData.plan !== 'Premium' && <span className="text-xs">⭐</span>}
+                  {userData.plan && userData.plan !== 'Premium' && <span className="text-xs">⭐</span>}
                 </button>
                 <button 
                   onClick={() => navigate('/dashboard/settings')}

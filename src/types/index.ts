@@ -1,5 +1,77 @@
 // Shared TypeScript interfaces and types
 
+// =====================================================
+// DATABASE SCHEMA TYPES (Phase 1B)
+// =====================================================
+
+// Shared types
+export * from './database/shared';
+
+// Domain-specific types
+export * from './database/location';
+export * from './database/operations';
+export * from './database/menu';
+export * from './database/brand';
+export * from './database/goals';
+export * from './database/audience';
+export * from './database/platform';
+
+// Re-export main interfaces for convenience
+export type {
+  BusinessLocationIntelligence,
+  CreateLocationIntelligence,
+  UpdateLocationIntelligence,
+} from './database/location';
+
+export type {
+  BusinessOperations,
+  CreateBusinessOperations,
+  UpdateBusinessOperations,
+} from './database/operations';
+
+export type {
+  BusinessMenuMetadata,
+  CreateMenuMetadata,
+  UpdateMenuMetadata,
+} from './database/menu';
+
+export type {
+  BusinessVisualIdentity,
+  CreateVisualIdentity,
+  UpdateVisualIdentity,
+} from './database/brand';
+
+export type {
+  BusinessGoal,
+  CreateBusinessGoal,
+  UpdateBusinessGoal,
+} from './database/goals';
+
+export type {
+  BusinessAudienceProfile,
+  CreateAudienceProfile,
+  UpdateAudienceProfile,
+} from './database/audience';
+
+export type {
+  PlatformIntelligence,
+} from './database/platform';
+
+// Complete business knowledge aggregate type
+export interface BusinessKnowledge {
+  business_id: string;
+  location?: import('./database/location').BusinessLocationIntelligence;
+  operations?: import('./database/operations').BusinessOperations;
+  menu_metadata?: import('./database/menu').BusinessMenuMetadata;
+  visual_identity?: import('./database/brand').BusinessVisualIdentity;
+  goals?: import('./database/goals').BusinessGoal[];
+  audience_profile?: import('./database/audience').BusinessAudienceProfile;
+}
+
+// =====================================================
+// LEGACY TYPES (Keep for backward compatibility)
+// =====================================================
+
 export interface User {
   id: string
   email: string

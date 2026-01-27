@@ -51,7 +51,17 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
         setTimeout(() => navigate('/login'), 3000)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.signUpError', 'Failed to create account'))
+      console.error('❌ Signup error:', err)
+      const errorMessage = err instanceof Error ? err.message : t('auth.signUpError', 'Failed to create account')
+      
+      // Check for common issues
+      if (errorMessage.includes('rate') || errorMessage.includes('limit')) {
+        setError('Email rate limit exceeded. Please wait 1 hour and try again, or contact support.')
+      } else if (errorMessage.includes('already registered') || errorMessage.includes('already exists')) {
+        setError('This email is already registered. Try logging in instead.')
+      } else {
+        setError(errorMessage)
+      }
     } finally {
       setLoading(false)
     }
