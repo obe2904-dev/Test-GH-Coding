@@ -289,11 +289,27 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     ? `${dishProtagonistMap[language] || dishProtagonistMap.da}\n`
     : ''
 
+  // sceneMoodOpeningHint — for behind_scenes/atmosphere/team_people: reinforce brand rule
+  // that openings must be anchored in a concrete moment, not abstract mood.
+  // Also handles the no-venueIdentity case: when photos haven't been analyzed,
+  // direct the model to businessCharacter/contentAnchors instead of inventing atmosphere.
+  const sceneMoodOpeningHintMap: Record<string, string> = {
+    da: `⚠️ ÅBNINGSREGEL FOR DETTE OPSLAG: Brandets egne skriveregler foreskriver konkrete åbninger — IKKE abstrakt stemning. Forbudt som første sætning: stemningsord som åbner ("hygge", "varme", "ro", "stilhed", "hverdagen", "torsdag sætter stemningen", "[ugedag] er perfekt til X"). Åbn i stedet med ét konkret element: en handling der foregår, en genstand i rummet, et faktum om stedet, en direkte sætning med et specifikt tilbud. Hvis Interiørmærker er tilgængelige ovenfor — brug dem som faktuelt fundament.${!opts.venueIdentity ? ' Interiørmærker er ikke tilgængelige — brug BRANDSTEMME-blokkens konceptankre og stedsidentitet som det konkrete fundament i stedet.' : ''}
+`,
+    sv: `⚠️ ÖPPNINGSREGEL FÖR DETTA INLÄGG: Varumärkets egna skrivinstruktioner föreskriver konkreta öppningar — INTE abstrakt stämning. Förbjudet som första mening: stämningsord som öppning ("mysighet", "värme", "ro", "stillhet", "vardagen", "[veckodag] är perfekt för X"). Öppna istället med ett konkret element: en handling som sker, ett föremål i rummet, ett faktum om stället, en direkt mening med ett specifikt erbjudande.${!opts.venueIdentity ? ' Interiörmärken är inte tillgängliga — använd VARUMÄRKESRÖST-blockets konceptankare och platsidentitet som det konkreta fundamentet istället.' : ''}
+`,
+    de: `⚠️ ERÖFFNUNGSREGEL FÜR DIESEN BEITRAG: Die eigenen Schreibregeln der Marke schreiben konkrete Eröffnungen vor — KEINE abstrakte Stimmung. Verboten als erster Satz: Stimmungswörter als Eröffnung ("Gemütlichkeit", "Wärme", "Ruhe", "Stille", "der Alltag", "[Wochentag] ist perfekt für X"). Öffne stattdessen mit einem konkreten Element: eine Handlung die stattfindet, ein Gegenstand im Raum, eine Tatsache über den Ort, ein direkter Satz mit einem spezifischen Angebot.${!opts.venueIdentity ? ' Interiormerkmale sind nicht verfügbar — nutze die Konzeptanker und Ortsidentität aus dem MARKENSTIMME-Block als konkretes Fundament.' : ''}
+`,
+  }
+  const sceneMoodOpeningHint = isSceneMoodPost
+    ? (sceneMoodOpeningHintMap[language] || sceneMoodOpeningHintMap.da)
+    : ''
+
   // atmosphereVoiceHint — atmosphere/seasonal posts with no dish anchor.
   const atmosphereHintMap: Record<string, string> = {
-    da: 'STEMNINGSOPSLAG UDEN MENUINFORMATION: Opfind IKKE stedsatmosfære eller location-fakta. Reducer til: (1) KONTEKST fra INDHOLD som hook-stemning hvis til stede, ellers hook-titlen i ét led, (2) ét konkret tilbud fra ÅBNINGSTID hvis tilgængeligt, (3) CTA.',
-    sv: 'STÄMNINGSINLÄGG UTAN MENYINFORMATION: Uppfinn INTE platsatmosfär. Reducera till: (1) KONTEKST från INNEHÅLL som hook-stämning om tillgängligt, annars hook-titeln i ett led, (2) ett konkret erbjudande från ÖPPETTIDER om tillgängligt, (3) CTA.',
-    de: 'STIMMUNGSBEITRAG OHNE MENÜINFORMATION: Erfinde KEINE Ortsatmosphäre. Reduziere auf: (1) KONTEKST aus dem INHALT als Hook-Stimmung wenn vorhanden, sonst Hook-Titel in einem Satz, (2) ein konkretes Angebot aus ÖFFNUNGSZEITEN wenn verfügbar, (3) CTA.',
+    da: 'STEMNINGSOPSLAG UDEN MENUINFORMATION: Opfind IKKE stedsatmosfære, location-fakta ELLER abstrakt stemning. Abstrakte stemningsord som "hygge", "varme", "ro", "hverdagen trænger til" er forbudt som åbner. Brug i stedet ét KONKRET element som ankerpunkt: en handling der sker i lokalet, en fysisk genstand, et tidspunkt eller et faktum om stedet. Reducer til: (1) konkret element fra INDHOLD eller BRANDSTEMME-blokken, (2) ét faktuelt tilbud fra ÅBNINGSTID hvis tilgængeligt, (3) CTA.',
+    sv: 'STÄMNINGSINLÄGG UTAN MENYINFORMATION: Uppfinn INTE platsatmosphere, platsfakta ELLER abstrakt stämning. Abstrakta stämningsord som "mysighet", "värme", "ro", "vardagen behöver" är förbjudna som öppning. Använd istället ett KONKRET element som ankpunkt: en handling som sker i lokalen, ett fysiskt föremål, en tidpunkt eller ett faktum om stället. Reducera till: (1) konkret element från INNEHÅLL eller VARUMÄRKESRÖST-blocket, (2) ett faktabaserat erbjudande från ÖPPETTIDER om tillgängligt, (3) CTA.',
+    de: 'STIMMUNGSBEITRAG OHNE MENÜINFORMATION: Erfinde KEINE Ortsatmosphäre, Ortsfakten ODER abstrakte Stimmung. Abstrakte Stimmungswörter wie "Gemütlichkeit", "Wärme", "Ruhe", "der Alltag braucht" sind als Eröffnung verboten. Verwende stattdessen ein KONKRETES Element als Ankerpunkt: eine Handlung im Lokal, ein physischer Gegenstand, eine Uhrzeit oder eine Tatsache über den Ort. Reduziere auf: (1) konkretes Element aus INHALT oder MARKENSTIMME-Block, (2) ein faktisches Angebot aus ÖFFNUNGSZEITEN wenn verfügbar, (3) CTA.',
   }
   const isAtmosphereNoMenu = (contentType === 'atmosphere' || contentType === 'seasonal') && !menuItemName
   const atmosphereHint = isAtmosphereNoMenu
@@ -389,7 +405,7 @@ Skriv ÉN social media-tekst til ${businessName} i ${city}.
 ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${contentTypeHint}${atmosphereHint}
 INDHOLD (skriv om KUN dette):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.da}${forbiddenOpener.da}${dishProtagonistHint}
+${brandBlock}${hoursBlock}${faktaforbud.da}${sceneMoodOpeningHint}${forbiddenOpener.da}${dishProtagonistHint}
 ${ctaHeader.da}
 "${selectedCta}"
 KRAV TIL TEKSTEN
@@ -413,7 +429,7 @@ Skriv EN social media-text till ${businessName} i ${city}.
 ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${contentTypeHint}${atmosphereHint}
 INNEHÅLL (skriv om BARA detta):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.sv}${forbiddenOpener.sv}${dishProtagonistHint}
+${brandBlock}${hoursBlock}${faktaforbud.sv}${sceneMoodOpeningHint}${forbiddenOpener.sv}${dishProtagonistHint}
 ${ctaHeader.sv}
 "${selectedCta}"
 KRAV
@@ -437,7 +453,7 @@ Schreibe EINEN Social-Media-Text für ${businessName} in ${city}.
 ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${contentTypeHint}${atmosphereHint}
 INHALT (schreibe NUR über dieses):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.de}${forbiddenOpener.de}${dishProtagonistHint}
+${brandBlock}${hoursBlock}${faktaforbud.de}${sceneMoodOpeningHint}${forbiddenOpener.de}${dishProtagonistHint}
 ${ctaHeader.de}
 "${selectedCta}"
 ANFORDERUNGEN
@@ -594,7 +610,7 @@ Skriv ÉN social media-tekst til ${businessName} i ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INDHOLD (skriv om KUN dette):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.da}
+${brandBlock}${hoursBlock}${faktaforbud.da}${wpSceneMoodOpeningHint}
 ${ctaHeader.da}
 "${selectedCta}"
 KRAV TIL TEKSTEN
@@ -618,7 +634,7 @@ Skriv EN social media-text till ${businessName} i ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INNEHÅLL (skriv om BARA detta):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.sv}
+${brandBlock}${hoursBlock}${faktaforbud.sv}${wpSceneMoodOpeningHint}
 ${ctaHeader.sv}
 "${selectedCta}"
 KRAV
@@ -642,7 +658,7 @@ Schreibe EINEN Social-Media-Text für ${businessName} in ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INHALT (schreibe NUR über dieses):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.de}
+${brandBlock}${hoursBlock}${faktaforbud.de}${wpSceneMoodOpeningHint}
 ${ctaHeader.de}
 "${selectedCta}"
 ANFORDERUNGEN
