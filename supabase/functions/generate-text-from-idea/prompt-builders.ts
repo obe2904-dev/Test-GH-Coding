@@ -210,10 +210,20 @@ function buildBrandBlock(o: BrandBlockOptions): string {
     ? 'BRANDSTEMME (skriv i brandets stemme som om du taler til nogen der allerede kender stedet):'
     : 'BRANDSTEMME (følg denne — stil, ikke fakta):'
   let b = brandBlockHeader
+
+  // For atmosphere/behind_scenes/team_people: photo analysis is the PRIMARY factual anchor.
+  // It goes first so the model treats it as the concrete foundation, not an afterthought.
+  if (o.isSceneMoodPost) {
+    if (o.venueIdentity) {
+      b += `\n📸 PRIMÆR FAKTAKILDE — brug dette som det konkrete fundament for dette opslag (ikke opfundet atmosfære):\n${o.venueIdentity}`
+    } else {
+      b += `\n⚠️ Ingen fotobeskrivelse er tilgængelig. Opfind IKKE visuel atmosfære eller interiørdetaljer. Basér det konkrete element udelukkende på konceptankre og stedsidentitet nedenfor.`
+    }
+  }
+
   if (o.contentAnchors.length)      b += `\nKonceptankre (hvad dette sted faktisk tilbyder): ${o.contentAnchors.join(', ')}`
   if (o.businessCharacter)          b += `\nHvad dette sted er: ${o.businessCharacter}`
   if (o.identityKeywords?.length)   b += `\nStedsidentitet: ${o.identityKeywords.join(', ')}`
-  if (o.venueIdentity && o.isSceneMoodPost) b += `\nInteriørmærker (faktuel venue-beskrivelse): ${o.venueIdentity}`
   if (o.brandTone)                  b += `\n${o.brandTone}`
   if (o.voiceConstraints)           b += `\nPrincip: ${o.voiceConstraints}`
   if (o.brandWritingRules.length)   b += `\nSkriveregler:\n${o.brandWritingRules.map(r => `- ${r}`).join('\n')}`
