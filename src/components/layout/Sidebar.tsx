@@ -209,7 +209,7 @@ export function Sidebar({ className = '' }: SidebarProps) {
               </div>
               <div className="relative">
                 <div className="absolute left-[-12px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-border-strong ring-2 ring-surface"></div>
-                {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand-v5' })}
+                {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand' })}
               </div>
             </div>
           )}
