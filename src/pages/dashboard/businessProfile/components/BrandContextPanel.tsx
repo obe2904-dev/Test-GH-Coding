@@ -12,7 +12,7 @@ interface BrandContextPanelProps {
 
 // Icon components for each category
 const CategoryIcon = ({ type, isPrimary }: { type: string; isPrimary: boolean }) => {
-  const colorClass = isPrimary ? 'text-indigo-500' : 'text-gray-400'
+  const colorClass = isPrimary ? 'text-cta' : 'text-gray-400'
   const strokeWidth = 1.5
   
   const icons: Record<string, JSX.Element> = {
@@ -225,7 +225,7 @@ export function BrandContextPanel({
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-            <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 text-cta" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
             </svg>
             AI Brand Context
@@ -254,7 +254,7 @@ export function BrandContextPanel({
                 console.warn('Generate error caught in BrandContextPanel:', err)
               }
             }}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2"
+            className="px-4 py-2 bg-cta text-white rounded-lg text-sm font-medium hover:bg-cta-hover transition-colors flex items-center gap-2"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -265,9 +265,9 @@ export function BrandContextPanel({
       </div>
 
       {isGenerating && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-6 text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 bg-indigo-100 rounded-full mb-3">
-            <div className="w-6 h-6 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <div className="bg-cta-surface border border-cta-surface rounded-lg p-6 text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 bg-cta-surface rounded-full mb-3">
+            <div className="w-6 h-6 border-3 border-cta border-t-transparent rounded-full animate-spin"></div>
           </div>
           <h4 className="text-sm font-semibold text-gray-900 mb-1">
             Genererer Brand Context...
@@ -340,7 +340,7 @@ export function BrandContextPanel({
                   console.warn('Generate error caught in BrandContextPanel (regenerate):', err)
                 }
               }}
-              className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 transition-colors"
+              className="px-3 py-1.5 bg-cta text-white rounded-lg text-xs font-medium hover:bg-cta-hover transition-colors"
             >
               Generer igen
             </button>
@@ -361,7 +361,7 @@ export function BrandContextPanel({
                   key={category.key}
                   className={`rounded-lg p-4 space-y-2 ${
                     isPrimary 
-                      ? 'bg-indigo-50 border-2 border-indigo-200' 
+                      ? 'bg-cta-surface border-2 border-cta-surface' 
                       : 'bg-gray-50 border border-gray-200'
                   }`}
                 >
@@ -419,13 +419,13 @@ export function BrandContextPanel({
       )}
 
       {isEditing && (
-        <div className="bg-white border-2 border-indigo-300 rounded-lg overflow-hidden">
+        <div className="bg-white border-2 border-cta rounded-lg overflow-hidden">
           <div className="p-4">
             <textarea
               value={editedContext}
               onChange={(e) => setEditedContext(e.target.value)}
               rows={20}
-              className="w-full text-xs text-gray-700 font-mono border border-gray-300 rounded p-3 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              className="w-full text-xs text-gray-700 font-mono border border-gray-300 rounded p-3 focus:ring-2 focus:ring-cta focus:border-cta"
             />
           </div>
 
@@ -438,7 +438,7 @@ export function BrandContextPanel({
             </button>
             <button
               onClick={handleSaveEdit}
-              className="px-4 py-2 bg-indigo-600 text-white rounded text-sm font-medium hover:bg-indigo-700 transition-colors"
+              className="px-4 py-2 bg-cta text-white rounded text-sm font-medium hover:bg-cta-hover transition-colors"
             >
               Gem ændringer
             </button>

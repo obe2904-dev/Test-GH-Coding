@@ -19,6 +19,7 @@ interface AIIdeasModeProps {
   isGenerating: boolean
   selectedIdea: string | null
   onGenerateIdeas: () => void
+  onGenerateIdeasV3?: () => void
   onSelectIdea: (idea: any) => void
 }
 
@@ -27,6 +28,7 @@ export const AIIdeasMode: React.FC<AIIdeasModeProps> = ({
   isGenerating,
   selectedIdea,
   onGenerateIdeas,
+  onGenerateIdeasV3,
   onSelectIdea
 }) => {
   const { t } = useTranslation()
@@ -41,23 +43,35 @@ export const AIIdeasMode: React.FC<AIIdeasModeProps> = ({
           <p className="text-sm text-[#6B7280] mb-3">
             {t('generate.noIdeasYet', 'Click below to generate AI ideas')}
           </p>
-          <button
-            onClick={onGenerateIdeas}
-            disabled={isGenerating}
-            className="px-4 py-2 bg-[#0F2E32] text-[#88F2D7] rounded-lg hover:bg-[#12393D] disabled:opacity-50 transition-all text-sm font-bold shadow-md flex items-center gap-1.5 mx-auto"
-          >
-            {isGenerating ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>{t('generate.generating', 'Generating...')}</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{t('generate.generateIdeas', 'Generate 3 AI Ideas')}</span>
-              </>
+          <div className="flex flex-col gap-2 items-center">
+            <button
+              onClick={onGenerateIdeas}
+              disabled={isGenerating}
+              className="px-4 py-2 bg-brand text-mint rounded-lg hover:bg-[#12393D] disabled:opacity-50 transition-all text-sm font-bold shadow-md flex items-center gap-1.5"
+            >
+              {isGenerating ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>{t('generate.generating', 'Generating...')}</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{t('generate.generateIdeas', 'Generate 3 AI Ideas')}</span>
+                </>
+              )}
+            </button>
+
+            {onGenerateIdeasV3 && (
+              <button
+                onClick={onGenerateIdeasV3}
+                disabled={isGenerating}
+                className="px-4 py-2 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition-all text-sm font-medium"
+              >
+                {t('generate.tryNewGenerator', 'Try new generator (v3)')}
+              </button>
             )}
-          </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">

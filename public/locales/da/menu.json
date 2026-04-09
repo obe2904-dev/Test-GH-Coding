@@ -1,4 +1,54 @@
 {
+  "header": {
+    "title": "Oversigt",
+    "subtitle": "Administrer det du tilbyder, og se AI-udvundet information",
+    "subtitle2": "Administrer det du tilbyder, og se AI-udvundet information"
+  },
+  "findOn": "Find information på",
+  "detect": {
+    "find": "Find information",
+    "searching": "Søger..."
+  },
+  "error": {
+    "noWebsite": "Ingen hjemmeside fundet",
+    "analyzeFailed": "Menuanalyse fejlede",
+    "noMenusFound": "Ingen menuer fundet",
+    "linkAlreadyAdded": "Dette link er allerede tilføjet",
+    "addFailed": "Kunne ikke tilføje menu",
+    "analyzeMenuFailed": "Menuanalyse fejlede",
+    "saveEdit": "Kunne ikke gemme ændringer"
+  },
+  "info": {
+    "noNewMenus": "Ingen nye menuer fundet"
+  },
+  "batch": {
+    "extracting": "Udvinder menuer...",
+    "inQueue": "i kø",
+    "helper": "Menuer udvinder i baggrunden"
+  },
+  "delete": {
+    "inProgress": "Kan ikke slette mens udvinding er i gang",
+    "confirm": "Er du sikker på at du vil slette denne menu?"
+  },
+  "item": {
+    "name": "Navn",
+    "description": "Beskrivelse",
+    "price": "Pris"
+  },
+  "addManual": "Tilføj link",
+  "addManualText": "Skriv det manuelt",
+  "add": {
+    "link": "Tilføj fra link",
+    "text": "Tilføj fra tekst",
+    "linkPlaceholder": "Indsæt menu URL...",
+    "add": "Tilføj",
+    "analyze": "Analyser menu"
+  },
+  "free": {
+    "upgradeTitle": "Opgrader for at tilføje, hvad I tilbyder",
+    "description": "",
+    "cta": "Se planer"
+  },
   "metadata": {
     "title": "Menu Metadata",
     "subtitle": "AI-genereret indsigt fra din menu",

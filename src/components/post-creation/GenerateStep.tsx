@@ -4,8 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import { usePostCreationStore } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useTierStore } from '../../stores/tierStore'
-import { ProgressStepper } from '../ui/ProgressStepper'
-import { ManualMode, AIIdeasMode } from './modes'
 import { useBusinessData } from '../../hooks/useBusinessData'
 import { useTextHelpers } from '../../hooks/useTextHelpers'
 import { usePostCreationAI } from '../../hooks/usePostCreationAI'
@@ -19,24 +17,62 @@ import { usePlatformManager } from './hooks/usePlatformManager'
 import { useIdeaWorkflow } from './hooks/useIdeaWorkflow'
 import { useGenerateValidation } from './hooks/useGenerateValidation'
 import { useHashtagInsight } from './hooks/useHashtagInsight'
-import { usePostCreationMode } from './hooks/usePostCreationMode'
 import { useGenerateState } from './hooks/useGenerateState'
 import { useClarificationFlow } from './hooks/useClarificationFlow'
 import { usePostCreationFooter } from './hooks/usePostCreationFooter'
-import { ModeTabs } from './ModeTabs'
 import { EditorPane } from './EditorPane'
-import { SummaryPane } from './SummaryPane'
 import { ValidationBanner } from './ValidationBanner'
+import { StrategyGeneratedDisplay } from '../StrategyGeneratedDisplay'
+import { AiSuggestionsCard } from './AiSuggestionsCard'
+
+interface GeneratedPost {
+  ideaId: number
+  text: string // Default/shared (Instagram for backward compatibility)
+  hashtags: string[] // All hashtags
+  emojis: string[]
+  platforms: string[]
+  ctaIntent: string
+  // Platform-specific content (Option A: Dual Generation)
+  platformText?: {
+    facebook?: string
+    instagram?: string
+  }
+  platformHashtags?: {
+    facebook?: string[]
+    instagram?: string[]
+  }
+  suggestedMedia?: {
+    type: string
+    direction?: string
+    why?: string
+    photo_count?: number
+  }
+  suggestedDay?: string
+  suggestedTime?: string
+  fromTemplate?: boolean
+}
 
 interface GenerateStepProps {
   onNext: () => void
-  onStepClick?: (step: number) => void
+  onDirectTransfer?: () => void
   markAsChanged?: () => void
   markAsSaved?: () => void
   hasUnsavedChanges?: boolean
+  generatedPost?: GeneratedPost
+  isStrategyMode?: boolean
+  isGenerating?: boolean
 }
 
-export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, hasUnsavedChanges }: GenerateStepProps) {
+export function GenerateStep({ 
+  onNext,
+  onDirectTransfer,
+  markAsChanged, 
+  markAsSaved, 
+  hasUnsavedChanges,
+  generatedPost,
+  isStrategyMode = false,
+  isGenerating = false
+}: GenerateStepProps) {
   const { t, i18n } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const navigate = useNavigate()
 
@@ -51,7 +87,10 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     setPostContent,
     photoIdea,
     setPhotoIdea,
-    photoContent
+    photoContent,
+    selectedSuggestionData,
+    setSelectedSuggestionData,
+    activePath
   } = usePostCreationStore()
 
   const { isEnabled, loadPlatformsFromDatabase } = useConnectionsStore()
@@ -61,8 +100,7 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     canUseAiIdeas,
     canUseCaptionGeneration,
     incrementAiIdeas,
-    incrementCaptionGeneration,
-    quotaUsage
+    incrementCaptionGeneration
   } = useTierStore()
 
   const businessData = useBusinessData()
@@ -157,10 +195,17 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     resetClarificationStateRef.current?.()
   }, [])
 
+  // Track loaded content to avoid resetting isEdited on every postContent reference change
+  const loadedPostContentRef = useRef<typeof postContent>(null)
+
   const [isHeadlineEditorVisible, setIsHeadlineEditorVisible] = useState(false)
   const [hasHeadlineFromAI, setHasHeadlineFromAI] = useState(
     Boolean(postContent?.headline && postContent.headline.trim().length > 0)
   )
+
+  // Strategy mode state
+  const [isEditingGenerated, setIsEditingGenerated] = useState(false)
+  const { strategicIdea, setStrategicIdea, weeklyPlanPost, setWeeklyPlanPost } = usePostCreationStore()
 
   const {
     headline,
@@ -218,16 +263,127 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     })
   }, [selectedPlatforms, getCurrentText, setPlatformTexts])
 
+  // Strategy mode handlers (moved after useGenerateState to access setText)
+  const handleEditGenerated = useCallback(() => {
+    if (generatedPost) {
+      // Load generated content into editor
+      setText(generatedPost.text)
+      setHashtags(generatedPost.hashtags)
+      setSelectedHashtags(new Set(generatedPost.hashtags))
+      setIsEditingGenerated(true)
+      setIsEdited(false)
+    }
+  }, [generatedPost, setText, setHashtags, setSelectedHashtags, setIsEditingGenerated, setIsEdited])
+
+  const handleRegenerateGenerated = useCallback((instructions?: string) => {
+    // This will be called from the RegenerateWithInstructionsModal
+    // The regeneration logic is handled by StrategicPostCreationPage
+    console.log('[GenerateStep] Regenerate requested with instructions:', instructions)
+    // TODO: Implement regeneration trigger to parent
+  }, [])
+
+  const handleGoToDesignFromGenerated = useCallback(() => {
+    if (generatedPost) {
+      // Save the generated content to postCreationStore before proceeding
+      setPostContent({
+        headline: '',
+        text: generatedPost.text,
+        hashtags: generatedPost.hashtags.map(tag => ({
+          tag,
+          enabled: true,
+          platforms: generatedPost.platforms,
+        })),
+        aiGeneratedHashtags: generatedPost.hashtags,
+        adjustments: {
+          includeEmojis: true,
+          includeHashtags: true,
+        },
+      })
+    }
+    onNext()
+  }, [generatedPost, setPostContent, onNext])
+
   const textAreaRef = useRef<HTMLTextAreaElement>(null)
   const [showBusinessSetup, setShowBusinessSetup] = useState(false)
   const [showBusinessInfoPrompt, setShowBusinessInfoPrompt] = useState(false)
 
+  // Track businessId from localStorage or businessData
+  const [businessId, setBusinessId] = useState<string | null>(() => {
+    return localStorage.getItem('onboarding:businessId') || null
+  })
+
+  // Update businessId when businessData loads
+  useEffect(() => {
+    if (!businessId && businessData?.business?.id) {
+      console.log('[GenerateStep] Setting businessId from businessData:', businessData.business.id)
+      setBusinessId(businessData.business.id)
+    }
+  }, [businessData?.business?.id, businessId])
+  
+  // Show tabs if: user has a business and not in strategy mode
+  // Tabs should always be visible (not dependent on dismissal)
+  // Hide when a full Weekly Plan post is loaded (direct transfer available)
+  const showAiSuggestions = Boolean(
+    businessId && 
+    !isStrategyMode &&
+    !weeklyPlanPost
+  )
+
+  // Debug logging
+  console.log('[GenerateStep] AI Suggestions Debug:', {
+    businessId,
+    businessFromData: businessData?.business?.id,
+    isStrategyMode,
+    showAiSuggestions,
+    activePath
+  })
+
   const hasBusinessProfile = Boolean(businessData.profile || businessData.business)
+
+  // Handler for when user selects an AI suggestion
+  const handleSelectSuggestion = useCallback((suggestion: any) => {
+    console.log('[GenerateStep] handleSelectSuggestion called with:', suggestion)
+    
+    if (suggestion.id === 0) {
+      setSelectedSuggestionData(null)
+      return
+    }
+
+    // Store the full suggestion for text generation when user clicks "Next"
+    setSelectedIdea(suggestion.id.toString())
+    setSelectedSuggestionData(suggestion)
+    
+    console.log('[GenerateStep] Stored suggestion in selectedSuggestionData')
+    
+    // Store headline but DON'T switch tabs - let user click Next to generate
+    setHeadline(suggestion.title)
+    
+    // Mark as changed
+    markAsChanged?.()
+  }, [setHeadline, setSelectedIdea, setSelectedSuggestionData, markAsChanged])
 
   useEffect(() => {
     if (!postContent) {
       return
     }
+
+    // Only load content once on mount or when content significantly changes
+    // Don't reset state on every postContent reference change (e.g., auto-save updates)
+    const isInitialLoad = loadedPostContentRef.current === null
+    const hasContentChanged = 
+      loadedPostContentRef.current?.headline !== postContent.headline ||
+      loadedPostContentRef.current?.text !== postContent.text
+    
+    // Skip if this is just a reference change with same content
+    if (!isInitialLoad && !hasContentChanged) {
+      return
+    }
+
+    // Only reset isEdited on INITIAL load, not on subsequent content changes
+    // (subsequent changes might be user edits being synced back)
+    const shouldResetEditState = isInitialLoad
+
+    loadedPostContentRef.current = postContent
 
     const recoveredHeadline = postContent.headline ?? ''
     const recoveredText = postContent.text ?? ''
@@ -259,19 +415,19 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     setIncludeHashtags(adjustments?.includeHashtags ?? true)
     setIncludeEmojis(adjustments?.includeEmojis ?? true)
 
-    setIsEdited(false)
-    setIsSpellingChecked(false)
+    if (shouldResetEditState) {
+      setIsEdited(false)
+      setIsSpellingChecked(false)
+    }
   }, [postContent])
 
   const {
-    isGenerating,
     isAIEnhancing,
     isSpellingChecking,
     isSpellingChecked,
     clarificationQuestion,
     clarificationInput,
     errorMessage,
-    generateAiIdeas,
     handleAIUpdate,
     handleSpellingCheck,
     generateHashtagsOnly,
@@ -329,6 +485,7 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
 
   const updateCurrentText = useCallback(
     (field: 'headline' | 'text', value: string) => {
+      console.log('[GenerateStep] updateCurrentText wrapper called:', { field, valueLength: value.length })
       baseUpdateCurrentText(field, value)
       setIsSpellingChecked(false)
     },
@@ -356,6 +513,13 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
 
   const handleSelectPlatforms = useCallback(
     (platforms: string[]) => {
+      console.log('[GenerateStep] 📱 handleSelectPlatforms called:', {
+        newPlatforms: platforms,
+        currentPlatforms: selectedPlatforms,
+        customizePerPlatform,
+        activePlatform
+      });
+
       setSelectedPlatforms(platforms)
 
       if (customizePerPlatform) {
@@ -372,8 +536,11 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
       }
 
       if (platforms.length > 0 && !platforms.includes(activePlatform)) {
+        console.log('[GenerateStep] 🔄 Switching active platform from', activePlatform, 'to', platforms[0]);
         setActivePlatform(platforms[0])
       }
+
+      console.log('[GenerateStep] ✅ Platform selection complete:', platforms);
       markAsChanged?.()
     },
     [
@@ -395,43 +562,15 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
   }, [navigate])
 
   const handleEnhanceClick = useCallback(async () => {
+    console.log('[GenerateStep] handleEnhanceClick called')
     await handleAIUpdate()
+    console.log('[GenerateStep] Setting hasHeadlineFromAI to true')
     setHasHeadlineFromAI(true)
   }, [handleAIUpdate, setHasHeadlineFromAI])
 
   const handleToggleHeadlineEditor = useCallback(() => {
     setIsHeadlineEditorVisible((prev) => !prev)
   }, [])
-
-  const handleManualModeEnter = useCallback(() => {
-    handleClearContent()
-    setIncludeHashtags(true)
-    setIncludeEmojis(false)
-  }, [handleClearContent, setIncludeHashtags, setIncludeEmojis])
-
-  const handleAIModeEnter = useCallback(() => {
-    handleClearContent()
-    setIncludeEmojis(true)
-    setIncludeHashtags(true)
-  }, [handleClearContent, setIncludeEmojis, setIncludeHashtags])
-
-  const {
-    activeTab,
-    shouldShowEditor,
-    handleManualTabSelect,
-    handleAITabSelect
-  } = usePostCreationMode({
-    selectedIdea,
-    onManualModeEnter: handleManualModeEnter,
-    onAIModeEnter: handleAIModeEnter
-  })
-
-  const selectedAiIdea = useMemo(() => {
-    if (activeTab !== 'ai' || !selectedIdea) {
-      return null
-    }
-    return aiIdeas.find((idea) => idea?.id === selectedIdea) ?? null
-  }, [activeTab, aiIdeas, selectedIdea])
 
   const clarificationProps = useClarificationFlow({
     clarificationQuestion,
@@ -465,7 +604,7 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     markAsSaved
   })
 
-  const { selectIdea, handleNext: proceedToDesign } = useIdeaWorkflow({
+  const { handleNext: proceedToDesign } = useIdeaWorkflow({
     aiIdeas,
     selectedIdea,
     setSelectedIdea,
@@ -497,7 +636,7 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     customizePerPlatform,
     markAsChanged,
     clearClarificationPrompt,
-    activeTab,
+    activeTab: 'manual' as const,
     t,
     onNext,
     generateHashtagsOnly
@@ -516,8 +655,17 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     if (!validateBeforeNext()) {
       return
     }
+    
+    // If an AI suggestion is selected, skip the normal flow and let CreatePostPage handle generation
+    if (selectedSuggestionData && selectedSuggestionData.id !== 0) {
+      console.log('[GenerateStep] AI suggestion selected, calling onNext directly for generation')
+      onNext()  // Call CreatePostPage's handleGenerateNext which will do the AI generation
+      return
+    }
+    
+    // Normal flow: save current editor content and proceed
     proceedToDesign()
-  }, [validateBeforeNext, proceedToDesign])
+  }, [validateBeforeNext, proceedToDesign, selectedSuggestionData, onNext])
 
   const supportedSelectedPlatforms: CanonicalPlatform[] = canonicalSelectedPlatforms
 
@@ -549,22 +697,13 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     }
   }, [canEditHeadline, isHeadlineEditorVisible])
 
-  const limits = getTierLimits(currentTier)
-  const aiIdeasQuota = `${quotaUsage.aiIdeasToday}/${
-    Number.isFinite(limits.aiIdeasPerDay) ? limits.aiIdeasPerDay : '∞'
-  }`
-  const manualTabLabel = t('generate.manualMode', 'Write yourself and get AI help')
-  const aiTabLabel = t('generate.aiIdeas', 'AI Ideas for Posts')
-  const timeEstimateLabel = t('generate.timeEstimate', 'Estimated time')
-  const minutesLabel = t('generate.minutes', 'min')
-  const continueLabel = t('generate.continue', 'Continue to Create')
-  const timeEstimateMinutes = 3
-
   const hashtagInsight = useHashtagInsight({
     includeHashtags,
     hashtags,
     selectedPlatforms: supportedSelectedPlatforms
   })
+
+  console.log('[GenerateStep] State for ActionButtons:', { isEdited, hasHeadlineFromAI })
 
   const writeContentProps = {
     headline: currentContent.headline,
@@ -610,7 +749,8 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
     showHeadlinePrompt: hasHeadlineFromAI,
     hasHashtags: hashtags.length > 0,
     insight: hashtagInsight,
-    platformHashtagViews
+    platformHashtagViews,
+    showClearAll: activePath === 'write'
   }
 
   const footerProps = usePostCreationFooter({
@@ -627,71 +767,117 @@ export function GenerateStep({ onNext, onStepClick, markAsChanged, markAsSaved, 
 
   return (
     <div className="space-y-4">
-      <div className="mb-6">
-        <ProgressStepper currentStep={1} totalSteps={3} onStepClick={onStepClick} />
-      </div>
-
-      <div className="space-y-4">
-        <ModeTabs
-          activeTab={activeTab}
-          onManualSelect={handleManualTabSelect}
-          onAISelect={handleAITabSelect}
-          manualLabel={manualTabLabel}
-          aiLabel={aiTabLabel}
-          aiQuotaLabel={aiIdeasQuota}
-        />
-
-        {activeTab === 'manual' && <ManualMode />}
-
-        {activeTab === 'ai' && (
-          <AIIdeasMode
-            aiIdeas={aiIdeas}
-            isGenerating={isGenerating}
-            selectedIdea={selectedIdea}
-            onGenerateIdeas={generateAiIdeas}
-            onSelectIdea={selectIdea}
-          />
-        )}
-      </div>
-
-      {shouldShowEditor && (
-        <>
-          {selectedAiIdea && (selectedAiIdea.bestTimeToPost || selectedAiIdea.impact) && (
-            <div className="rounded-lg border border-slate-200 bg-white p-3">
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-700">
-                {selectedAiIdea.bestTimeToPost && (
-                  <div>
-                    <span className="font-semibold text-slate-800">{t('publish.bestTime', 'Best time')}:</span>{' '}
-                    <span>{selectedAiIdea.bestTimeToPost}</span>
-                  </div>
+      {/* Weekly Plan — Action Card (when a full plan post is loaded) */}
+      {activePath === 'weekly-plan' && strategicIdea && weeklyPlanPost && !isStrategyMode && (
+        <div className="bg-cta-surface border border-cta-surface rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <div className="text-2xl flex-shrink-0">📅</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-cta uppercase tracking-wide mb-0.5">Fra ugeplanen</div>
+              <div className="text-sm font-bold text-slate-900 mb-1 leading-snug">{strategicIdea.title}</div>
+              {strategicIdea.rationale && (
+                <div className="text-xs text-cta-text leading-relaxed mb-2">💡 {strategicIdea.rationale}</div>
+              )}
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {strategicIdea.contentType && (
+                  <span className="inline-flex text-[10px] font-medium bg-cta-surface text-cta-text px-2 py-0.5 rounded-full capitalize">
+                    {strategicIdea.contentType.replace(/_/g, ' ')}
+                  </span>
                 )}
-                {selectedAiIdea.impact && (
-                  <div>
-                    <span className="font-semibold text-slate-800">{t('publish.reach', 'Impact')}:</span>{' '}
-                    <span>{t(`photoAnalysis.impact.${String(selectedAiIdea.impact).toLowerCase()}` as any, String(selectedAiIdea.impact))}</span>
-                  </div>
+                {strategicIdea.suggestedDay && (
+                  <span className="inline-flex text-[10px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+                    📆 {strategicIdea.suggestedDay}
+                  </span>
+                )}
+                {strategicIdea.suggestedMedia?.type && (
+                  <span className="inline-flex text-[10px] font-medium bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                    📷 {strategicIdea.suggestedMedia.type}
+                  </span>
                 )}
               </div>
+              {strategicIdea.suggestedMedia?.direction && (
+                <div className="mb-3 text-[11px] text-slate-500 italic">
+                  Visuel retning: {strategicIdea.suggestedMedia.direction}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={onDirectTransfer}
+                  className="flex-1 sm:flex-none px-4 py-2 bg-cta hover:bg-cta-hover text-white text-sm font-semibold rounded-lg transition-colors"
+                >
+                  Brug dette opslag →
+                </button>
+                <button
+                  onClick={() => {
+                    setStrategicIdea(null)
+                    setWeeklyPlanPost(null)
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 bg-white border border-slate-200 hover:border-slate-300 rounded-lg transition-colors"
+                >
+                  Skriv selv
+                </button>
+              </div>
             </div>
-          )}
-          <EditorPane
-            writeContentProps={writeContentProps}
-            validationBanner={validationBanner}
-            footerProps={footerProps}
-          />
-        </>
+          </div>
+        </div>
       )}
 
-      {!shouldShowEditor && (
-        <SummaryPane
-          validationBanner={validationBanner}
-          timeEstimateLabel={timeEstimateLabel}
-          timeEstimateMinutes={timeEstimateMinutes}
-          minutesLabel={minutesLabel}
-          continueLabel={continueLabel}
-          onNext={handleValidatedNext}
+      {/* Strategy Mode: Show generated post display if not editing */}
+      {isStrategyMode && generatedPost && !isEditingGenerated ? (
+        <StrategyGeneratedDisplay
+          generatedPost={generatedPost}
+          strategicIdea={strategicIdea ? {
+            title: strategicIdea.title,
+            rationale: strategicIdea.rationale,
+            contentType: strategicIdea.contentType,
+            ctaIntent: strategicIdea.ctaIntent,
+          } : undefined}
+          onEdit={handleEditGenerated}
+          onRegenerate={handleRegenerateGenerated}
+          onGoToDesign={handleGoToDesignFromGenerated}
+          selectedPlatforms={selectedPlatforms}
+          onSelectPlatforms={handleSelectPlatforms}
+          activePlatform={activePlatform as 'facebook' | 'instagram'}
+          onActivePlatformChange={(platform: 'facebook' | 'instagram') => {
+            // console.log('[GenerateStep] Platform toggle clicked:', platform);
+            setActivePlatform(platform);
+          }}
+          isGenerating={isGenerating}
         />
-      )}
+      ) : showAiSuggestions ? (
+        /* Show content locked to the active path — no tab switching */
+        <div className="space-y-4">
+          {/* AI Forslag path */}
+          <div className={activePath === 'ai-ideas' && businessId ? 'block' : 'hidden'}>
+            {businessId && (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <AiSuggestionsCard
+                  onSelectSuggestion={handleSelectSuggestion}
+                  onGenerate={handleValidatedNext}
+                  businessId={businessId}
+                  selectedIdea={selectedIdea}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Skriv Selv path */}
+          <div className={activePath !== 'ai-ideas' ? 'block' : 'hidden'}>
+            <EditorPane
+              writeContentProps={writeContentProps}
+              validationBanner={validationBanner}
+              footerProps={footerProps}
+            />
+          </div>
+        </div>
+      ) : activePath !== 'weekly-plan' || !weeklyPlanPost ? (
+        /* Normal Mode or Editing Mode: Show EditorPane */
+        <EditorPane
+          writeContentProps={writeContentProps}
+          validationBanner={validationBanner}
+          footerProps={footerProps}
+        />
+      ) : null}
 
       <BusinessSetupModal
         isOpen={showBusinessSetup}

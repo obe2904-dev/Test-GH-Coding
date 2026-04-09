@@ -1,7 +1,6 @@
 import { LocaleConfig, SupportedLocale, CountryCode } from '../core/types';
 import { LOCALE_DA_DK } from './da-DK';
-// Future imports:
-// import { LOCALE_EN_US } from './en-US';
+import { LOCALE_EN_US } from './en-US';
 // import { LOCALE_SV_SE } from './sv-SE';
 
 /**
@@ -9,7 +8,7 @@ import { LOCALE_DA_DK } from './da-DK';
  */
 const LOCALE_REGISTRY: Record<SupportedLocale, LocaleConfig> = {
   'da-DK': LOCALE_DA_DK,
-  'en-US': LOCALE_DA_DK, // Fallback to Danish until en-US is created
+  'en-US': LOCALE_EN_US,
   'sv-SE': LOCALE_DA_DK, // Fallback to Danish until sv-SE is created
   'no-NO': LOCALE_DA_DK, // Fallback to Danish until no-NO is created
   'de-DE': LOCALE_DA_DK, // Fallback to Danish until de-DE is created

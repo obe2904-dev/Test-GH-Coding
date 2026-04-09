@@ -57,10 +57,6 @@ const LocationIntelligencePage = lazy(() =>
   import('./pages/dashboard/LocationIntelligencePage').then((module) => ({ default: module.default }))
 )
 
-const ConceptFitPage = lazy(() =>
-  import('./pages/dashboard/ConceptFitPage').then((module) => ({ default: module.default }))
-)
-
 const TestLocationTypesPage = lazy(() =>
   import('./pages/dashboard/TestLocationTypesPage').then((module) => ({ default: module.default }))
 )
@@ -107,8 +103,8 @@ const AllPostsPage = lazy(() =>
   import('./pages/dashboard/AllPostsPage').then((module) => ({ default: module.AllPostsPage }))
 )
 
-const PostIdeasPage = lazy(() =>
-  import('./pages/dashboard/PostIdeasPage').then((module) => ({ default: module.PostIdeasPage }))
+const AIWeeklyPlanPage = lazy(() =>
+  import('./app/content/ai-weekly-plan/page').then((module) => ({ default: module.default }))
 )
 
 const PerformancePage = lazy(() =>
@@ -151,17 +147,9 @@ const TestBusinessGoals = lazy(() =>
   import('./pages/test/TestBusinessGoals').then((module) => ({ default: module.default }))
 )
 
-const OperationsPage = lazy(() =>
-  import('./pages/dashboard/OperationsPage')
-)
-
-const GoalsPage = lazy(() =>
-  import('./pages/dashboard/GoalsPage').then((module) => ({ default: module.GoalsPage }))
-)
-
 function App() {
   const { initialize, user, loading } = useAuthStore()
-  const { loadPlatformsFromDatabase } = useConnectionsStore()
+  const { loadPlatformsFromDatabase, platformsLoaded } = useConnectionsStore()
   
   // Fetch and sync business tier from database
   useBusinessTier()
@@ -170,19 +158,20 @@ function App() {
     initialize()
   }, [initialize])
 
-  // Load platform selections when user is authenticated
+  // Load platform selections when user is authenticated — single source of truth
+  // Individual pages also call this but the store guard prevents duplicate DB calls
   useEffect(() => {
-    if (user) {
+    if (user && !platformsLoaded) {
       loadPlatformsFromDatabase()
     }
-  }, [user, loadPlatformsFromDatabase])
+  }, [user, platformsLoaded, loadPlatformsFromDatabase])
 
   // Show loading screen while auth initializes
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="text-center animate-fade-in">
-          <div className="w-16 h-16 border-4 border-[#0F2E32] border-t-[#88F2D7] rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-16 h-16 border-4 border-brand border-t-mint rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-700 font-medium">Loading...</p>
         </div>
       </div>
@@ -226,7 +215,6 @@ function App() {
               <Route path="create" element={<CreatePostPage />} />
               <Route path="profile" element={<BusinessProfilePage />} />
               <Route path="location" element={<LocationIntelligencePage />} />
-              <Route path="concept-fit" element={<ConceptFitPage />} />
               <Route path="test-location-types" element={<TestLocationTypesPage />} />
               <Route path="test-location-full" element={<TestLocationIntelligenceFullPage />} />
               <Route path="test-concept-fit" element={<TestConceptFitPage />} />
@@ -235,12 +223,10 @@ function App() {
               <Route path="brand-old" element={<BrandProfilePageOld />} /> {/* Old edge function version */}
               <Route path="brand-v5" element={<BrandProfilePageV5 />} />
               <Route path="brand-new" element={<BrandProfilePage />} /> {/* Alias for new system */}
-              <Route path="operations" element={<OperationsPage />} />
-              <Route path="goals" element={<GoalsPage />} />
               <Route path="social-media" element={<SocialMediaPage />} />
               <Route path="my-profile" element={<MyProfilePage />} />
               <Route path="calendar" element={<CalendarPage />} />
-              <Route path="posts" element={<PostIdeasPage />} />
+              <Route path="ai-weekly-plan" element={<AIWeeklyPlanPage />} />
               <Route path="analytics" element={<PerformancePage />} />
               <Route path="team" element={<TeamPage />} />
               <Route path="settings" element={<SettingsPage />} />

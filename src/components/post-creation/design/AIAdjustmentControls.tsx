@@ -77,11 +77,15 @@ export function AIAdjustmentControls({
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const [showManualControls, setShowManualControls] = useState(false)
 
+  const handleAutoEnhanceClick = () => {
+    onAutoEnhance()
+  }
+
   return (
     <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-indigo-600" />
+          <Sparkles className="w-4 h-4 text-cta" />
           {t('create.aiAdjustments', 'AI Photo Enhancement')}
         </h3>
         {hasAdjustedVersion && (
@@ -97,9 +101,9 @@ export function AIAdjustmentControls({
 
       {/* AUTO MODE - Just Do It Button */}
       <button
-        onClick={onAutoEnhance}
+        onClick={handleAutoEnhanceClick}
         disabled={isProcessing}
-        className="w-full px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-bold text-sm flex items-center justify-center gap-2 mb-3 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+        className="w-full px-4 py-3 bg-gradient-to-r from-cta to-purple-600 text-white rounded-lg hover:from-cta-hover hover:to-purple-700 transition-all font-bold text-sm flex items-center justify-center gap-2 mb-3 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
       >
         <Zap className="w-4 h-4" />
         {t('create.autoEnhance', 'Auto Enhance Photo')}
@@ -122,7 +126,7 @@ export function AIAdjustmentControls({
           <div className="border border-slate-200 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                <Crop className="w-4 h-4 text-indigo-600" />
+                <Crop className="w-4 h-4 text-cta" />
                 {t('create.cropAndSize', 'Crop & Size')}
               </h4>
             </div>
@@ -170,7 +174,7 @@ export function AIAdjustmentControls({
                   })}
                   className={`px-2 py-1.5 text-xs font-medium rounded-md transition-all ${
                     adjustments.cropAndSize.platform === 'both'
-                      ? 'bg-indigo-100 text-indigo-700 border border-indigo-300'
+                      ? 'bg-cta-surface text-cta-text border border-cta'
                       : 'border border-slate-300 text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -202,7 +206,7 @@ export function AIAdjustmentControls({
             <button
               onClick={() => onApplyAdjustment('cropAndSize')}
               disabled={isProcessing}
-              className="w-full px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all font-medium text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-3 py-2 bg-cta text-white rounded-lg hover:bg-cta-hover transition-all font-medium text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Sparkles className="w-3.5 h-3.5" />
               {t('create.applyCrop', 'Apply Smart Crop')}
@@ -210,13 +214,13 @@ export function AIAdjustmentControls({
           </div>
 
           {/* Category 2: Cleaning (Most Important) */}
-          <div className="border-2 border-indigo-200 rounded-lg p-3 bg-indigo-50/30">
+          <div className="border-2 border-cta-surface rounded-lg p-3 bg-cta-surface/30">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                <Eraser className="w-4 h-4 text-indigo-600" />
+                <Eraser className="w-4 h-4 text-cta" />
                 {t('create.cleaning', 'Photo Cleaning')}
               </h4>
-              <span className="px-2 py-0.5 bg-indigo-600 text-white text-xs font-bold rounded-full">
+              <span className="px-2 py-0.5 bg-cta text-white text-xs font-bold rounded-full">
                 {t('create.recommended', 'TOP')}
               </span>
             </div>
@@ -303,7 +307,7 @@ export function AIAdjustmentControls({
             <button
               onClick={() => onApplyAdjustment('cleaning')}
               disabled={isProcessing}
-              className="w-full px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all font-medium text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-3 py-2 bg-cta text-white rounded-lg hover:bg-cta-hover transition-all font-medium text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Sparkles className="w-3.5 h-3.5" />
               {t('create.applyCleaning', 'Apply Smart Cleaning')}
@@ -314,7 +318,7 @@ export function AIAdjustmentControls({
           <div className="border border-slate-200 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
               <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                <Palette className="w-4 h-4 text-indigo-600" />
+                <Palette className="w-4 h-4 text-cta" />
                 {t('create.colorGrading', 'Color & Grading')}
               </h4>
             </div>
@@ -356,7 +360,7 @@ export function AIAdjustmentControls({
                     })}
                     className={`px-2 py-1.5 text-xs font-medium rounded-md transition-all ${
                       adjustments.colorGrading.preset === preset
-                        ? 'bg-indigo-100 text-indigo-700 border border-indigo-300'
+                        ? 'bg-cta-surface text-cta-text border border-cta'
                         : 'border border-slate-300 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
@@ -369,7 +373,7 @@ export function AIAdjustmentControls({
             <button
               onClick={() => onApplyAdjustment('colorGrading')}
               disabled={isProcessing}
-              className="w-full px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all font-medium text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-3 py-2 bg-cta text-white rounded-lg hover:bg-cta-hover transition-all font-medium text-xs flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Sparkles className="w-3.5 h-3.5" />
               {t('create.applyGrading', 'Apply Color Grading')}

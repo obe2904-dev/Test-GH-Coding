@@ -25,12 +25,12 @@ export function SummaryPane({
       <div className="flex justify-between items-center pt-2 pb-4">
         <div className="text-xs text-[#6B7280]">
           ⏱️ {timeEstimateLabel}:{' '}
-          <span className="font-semibold text-[#0F2E32]">{timeEstimateMinutes} {minutesLabel}</span>
+          <span className="font-semibold text-brand">{timeEstimateMinutes} {minutesLabel}</span>
         </div>
 
         <button
           onClick={onNext}
-          className="px-6 py-2 bg-[#0F2E32] text-[#88F2D7] rounded-lg hover:bg-[#12393D] transition-all font-bold text-xs shadow-md flex items-center gap-1.5"
+          className="px-6 py-2 bg-brand text-mint rounded-lg hover:bg-[#12393D] transition-all font-bold text-xs shadow-md flex items-center gap-1.5"
         >
           <span>{continueLabel}</span>
           <ChevronRight className="w-4 h-4" />

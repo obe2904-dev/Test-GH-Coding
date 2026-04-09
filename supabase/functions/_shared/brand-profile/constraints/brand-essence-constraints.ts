@@ -29,11 +29,18 @@ export function extractBrandEssenceConstraints(dataSources: DataSources): BrandE
   const location = dataSources?.location
   const menu = dataSources?.menu || []
   
-  // 1. Venue type (from business vertical)
-  const venueType = business?.vertical === 'hospitality' 
-    ? (business?.name?.toLowerCase().includes('café') ? 'Café' : 'Restaurant')
-    : business?.vertical === 'retail' ? 'Butik'
-    : 'Sted'
+  // 1. Venue type (from business vertical / profile category / name)
+  const businessName = (business?.name || '').toLowerCase()
+  const vertical = (business?.vertical || '').toLowerCase()
+  const category = ((dataSources as any)?.profile?.business_category || '').toLowerCase()
+  const combined = `${businessName} ${vertical} ${category}`
+  const venueType = combined.includes('café') || combined.includes('cafe') ? 'Café'
+    : combined.includes('restaurant') ? 'Restaurant'
+    : combined.includes('bar') || combined.includes('bistro') ? 'Bar'
+    : combined.includes('bakery') || combined.includes('bageri') ? 'Bageri'
+    : combined.includes('butik') || combined.includes('retail') || vertical === 'retail' ? 'Butik'
+    : vertical === 'hospitality' ? 'Restaurant'
+    : 'Café'  // sensible default for food/hospitality businesses
   
   // 2. Location phrase (deterministic from enrichment)
   const areaType = location?.enrichment?.micro?.area_type

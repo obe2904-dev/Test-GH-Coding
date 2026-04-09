@@ -42,8 +42,8 @@ export const DEFAULT_OPENAI_CONFIG: OpenAIConfig = {
 export const OPENAI_CONFIG = DEFAULT_OPENAI_CONFIG
 
 export const AI_MODELS = {
-  analysis: 'gpt-4o',     // Prompt A - internal analysis
-  generation: 'gpt-4o'    // Prompt B - user-facing generation
+  analysis: 'gpt-4o-mini', // Prompt A - internal analysis (fast, sufficient quality)
+  generation: 'gpt-4o'     // Prompt B - user-facing generation
 } as const
 
 // ============================================================================

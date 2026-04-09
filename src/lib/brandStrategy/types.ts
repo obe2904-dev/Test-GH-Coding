@@ -220,6 +220,7 @@ export interface StrategyDeductionInputs {
   };
   
   // From businesses
-  businessType: string; // cafe, restaurant, bar, coffee_shop
+  // UPDATED: Supports both legacy string and new hybrid structure
+  businessType: string | { primary: string; secondary?: string[]; hybridLabel?: string; cuisineType?: string; conceptTags?: string[] };
   locale: string; // da-DK, en-US, etc.
 }

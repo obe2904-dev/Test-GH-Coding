@@ -115,7 +115,7 @@ export function useIdeaWorkflow({
             textWithHashtags: appendSelectedHashtags(baseText, undefined, includeHashtags, canonicalPlatform),
             adjustments: {
               length: 'current',
-              tone: 'professional',
+              tone: 'brand',
               includeHashtags,
               includeEmojis,
               includeBookingLink: false
@@ -136,7 +136,7 @@ export function useIdeaWorkflow({
           platformHashtagViews,
           adjustments: {
             length: 'current',
-            tone: 'professional',
+            tone: 'brand',
             includeHashtags,
             includeEmojis,
             includeBookingLink: false
@@ -158,7 +158,7 @@ export function useIdeaWorkflow({
         platformHashtagViews,
         adjustments: {
           length: 'current',
-          tone: 'professional',
+          tone: 'brand',
           includeHashtags,
           includeEmojis,
           includeBookingLink: false

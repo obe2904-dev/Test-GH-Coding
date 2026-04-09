@@ -1,17 +1,22 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { usePostCreationStore, PhotoAdjustments, MediaItem, type PlatformContent } from '../../stores/postCreationStore'
+import { usePostCreationStore, MediaItem, type PlatformContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useTierStore } from '../../stores/tierStore'
-import { uploadImageToStorage } from '../../api/image-processing'
-import { ProgressStepper } from '../ui/ProgressStepper'
+import { TIER_QUOTAS } from '../../config/quotas'
+import { uploadImageToStorage, uploadAdjustedImageToStorage } from '../../api/image-processing'
 import { UpgradeModal } from '../ui/UpgradeModal'
-import { AIAdjustmentControls, PlatformPreview } from './design'
+import { PlatformPreview, CaptionEditModal } from './design'
 import { buildPlatformPreviewContent } from './publish/utils'
 import { PostCreationFooter } from './shared/PostCreationFooter'
 import { usePhotoAnalysis } from '../../hooks/usePhotoAnalysis'
+import { usePhotoEdit } from '../../hooks/usePhotoEdit'
 import { useBusinessData } from '../../hooks/useBusinessData'
+import { MediaAnalysisPanel } from '../media/MediaAnalysisPanel'
+import { CropOverlay } from '../media/CropOverlay'
+import type { Suggestion } from '../media/types'
+import { supabase } from '../../lib/supabase'
 
 interface CreateStepProps {
   onNext: () => void
@@ -20,6 +25,8 @@ interface CreateStepProps {
   markAsChanged?: () => void
   markAsSaved?: () => void
   hasUnsavedChanges?: boolean
+  suggestionId?: string // ID of the daily_suggestion being edited
+  onSwitchIdea?: (index: number) => void // Switch to a different Weekly Plan idea from the tab strip
 }
 
 // Icon Components
@@ -37,10 +44,15 @@ const Sparkles = ({ className }: { className?: string }) => (
   </svg>
 )
 
-export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsSaved, hasUnsavedChanges }: CreateStepProps) {
+export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsSaved, hasUnsavedChanges, suggestionId, onSwitchIdea }: CreateStepProps) {
   const { t, i18n } = useTranslation(undefined, { keyPrefix: 'createPost' })
-  const { postContent, selectedPlatforms, photoContent, photoIdea, setPhotoContent, setSelectedPlatforms } = usePostCreationStore()
-  const { loadPlatformsFromDatabase, isEnabled } = useConnectionsStore()
+  const {
+    postContent, selectedPlatforms, photoContent, photoIdea, strategicIdea,
+    setPhotoContent, setSelectedPlatforms, setPostContent,
+    weeklyContentPlan, weeklyPlanPostIndex, draftMap, weeklyPlanSessionDone,
+    weeklyPlanSuggestion, activePath, selectedIdea,
+  } = usePostCreationStore()
+  const { enabledPlatforms } = useConnectionsStore()
   const { user } = useAuthStore()
   const { currentTier } = useTierStore()
   const businessData = useBusinessData()
@@ -49,27 +61,15 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
     selectedPlatforms[0] === 'instagram' ? 'instagram' : 'facebook'
   )
 
-  // Load platforms when component mounts
-  useEffect(() => {
-    loadPlatformsFromDatabase()
-  }, [loadPlatformsFromDatabase])
-
   // Sync selected platforms with enabled platforms after loading
   useEffect(() => {
-    const availablePlatforms = ['facebook', 'instagram'].filter(platform =>
-      isEnabled(platform)
-    )
-    // Update selected platforms based on tier
-    if (availablePlatforms.length > 0 && selectedPlatforms.length === 0) {
-      if (currentTier === 'free') {
-        // Free tier: default to Facebook only
-        setSelectedPlatforms(['facebook'])
-      } else {
-        // Paid tiers: select all available platforms
-        setSelectedPlatforms(availablePlatforms)
-      }
+    // Use enabledPlatforms from store hook (reactively updates when database load completes)
+    if (enabledPlatforms.length > 0 && selectedPlatforms.length === 0) {
+      // Both FREE and PAID tiers: Show all enabled platforms for preview
+      console.log('✅ CreateStep: Setting platforms to:', enabledPlatforms)
+      setSelectedPlatforms(enabledPlatforms)
     }
-  }, [isEnabled, selectedPlatforms.length, setSelectedPlatforms, currentTier])
+  }, [enabledPlatforms, selectedPlatforms.length, setSelectedPlatforms])
   
   // Sync preview platform with selected platform (for Free tier)
   useEffect(() => {
@@ -79,53 +79,126 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
     }
   }, [selectedPlatforms, currentTier])
 
-  useEffect(() => {
-    if (currentTier === 'free' && selectedPlatforms.length > 1) {
-      const preferred = selectedPlatforms.includes('facebook')
-        ? 'facebook'
-        : selectedPlatforms[0]
-      setSelectedPlatforms([preferred])
-      setPreviewPlatform(preferred as 'facebook' | 'instagram')
-    }
-  }, [currentTier, selectedPlatforms, setSelectedPlatforms, setPreviewPlatform])
+  // Note: FREE tier users can now preview both platforms if they have both enabled
+  // The publishing step will handle tier-based restrictions
 
   // State management
   const [selectedMediaIndex, setSelectedMediaIndex] = useState(0)
-  const [_processingImage, setProcessingImage] = useState(false) // Currently unused, for future loading states
-  const [_viewMode, setViewMode] = useState<'original' | 'adjusted'>('original') // Currently unused, for future view toggle
+  const [, setViewMode] = useState<'original' | 'adjusted'>('original')
+  const [processingImage, setProcessingImage] = useState(false)
   
   // Upgrade modal state
   const [showUpgradeModal, setShowUpgradeModal] = useState<'variations' | 'photo-picker' | 'scheduling' | 'tone-length' | null>(null)
   
   // Photo analysis state
   const { analyzePhoto, isAnalyzing, error: analysisError } = usePhotoAnalysis()
-  const [analysisResult, setAnalysisResult] = useState<any>(null)
-  const [showAnalysis, setShowAnalysis] = useState(false)
-  
-  // User plan from tier store
-  const planLimits = { free: 1, standardplus: 5, premium: 10 }
-  const maxPhotos = planLimits[currentTier]
+  const { editPhoto, isEditing } = usePhotoEdit()
 
-  // AI Adjustment state for current photo
-  const [adjustments, setAdjustments] = useState<PhotoAdjustments>({
-    cropAndSize: {
-      platform: 'both',
-      focusMode: 'auto',
-      enabled: false
-    },
-    cleaning: {
-      removeBackground: false,
-      removeObjects: false,
-      reduceBlemishes: false,
-      intensity: 30,
-      enabled: false
-    },
-    colorGrading: {
-      temperature: 0,
-      preset: 'natural',
-      enabled: false
+  const [showCropOverlay, setShowCropOverlay] = useState(false)
+
+  // Photo suggestion collapsed state
+  const [photoIdeaOpen, setPhotoIdeaOpen] = useState(false)
+
+  // Caption edit modal state
+  const [captionEditOpen, setCaptionEditOpen] = useState(false)
+
+  const handleCaptionSave = useCallback((newText: string) => {
+    if (!postContent) return
+    // When the user has per-platform text, update only the active platform's text
+    if (postContent.platformSpecific && postContent.platformContent?.[previewPlatform]) {
+      setPostContent({
+        ...postContent,
+        platformContent: {
+          ...postContent.platformContent,
+          [previewPlatform]: {
+            ...postContent.platformContent[previewPlatform],
+            text: newText,
+          },
+        },
+      })
+    } else {
+      setPostContent({ ...postContent, text: newText })
     }
-  })
+    markAsChanged?.()
+  }, [postContent, setPostContent, markAsChanged, previewPlatform])
+  
+  // Load saved photo analysis and media when editing an existing suggestion
+  useEffect(() => {
+    if (suggestionId) {
+      console.log('🔍 Loading saved data for suggestion:', suggestionId)
+      supabase
+        .from('daily_suggestions')
+        .select('uploaded_photo_url, photo_analysis, media_items')
+        .eq('id', suggestionId)
+        .single()
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('❌ Failed to load saved data:', error)
+            return
+          }
+          
+          // Load photo analysis + media items together so analysis sits on the right MediaItem
+          if (data?.media_items && Array.isArray(data.media_items)) {
+            console.log('📥 Loading saved media items:', data.media_items.length)
+
+            // Read current store state inside the async callback — avoids stale closure
+            // values for activePath/selectedIdea/weeklyPlanPostIndex which are NOT in the
+            // effect's dependency array.
+            const {
+              activePath: currentPath,
+              selectedIdea: currentIdea,
+              weeklyPlanPostIndex: currentPlanIndex,
+              photoContent: currentPhotoContent,
+            } = usePostCreationStore.getState()
+
+            const contextKey = currentPath === 'ai-ideas'
+              ? `ai-ideas:${currentIdea ?? 'none'}`
+              : currentPath === 'weekly-plan'
+              ? `weekly-plan:${currentPlanIndex}`
+              : 'write'
+
+            const restoredMedia: MediaItem[] = data.media_items.map((item: any, idx: number) => {
+              // Preserve in-memory analysis when DB doesn't have it yet (e.g. DB save failed
+              // or user navigated away before the save completed).
+              const existingCache = idx === 0
+                ? currentPhotoContent?.uploadedMedia?.find(m => m.id === item.id)?.analysisCache
+                : undefined
+
+              return {
+                id: item.id,
+                file: new File([], 'restored'), // Placeholder file object
+                url: item.originalUrl || item.url, // Use storage URL as display URL
+                originalUrl: item.originalUrl,
+                adjustedUrl: item.adjustedUrl,
+                type: item.type || 'image',
+                adjustments: item.adjustments,
+                selectedVersionForPost: item.selectedVersionForPost || 'original',
+                // Prefer DB analysis; fall back to existing in-memory cache so we never
+                // accidentally wipe a valid analysis result.
+                analysisCache: idx === 0
+                  ? (data?.photo_analysis
+                      ? { [contextKey]: data.photo_analysis }
+                      : existingCache)
+                  : undefined,
+              }
+            })
+            
+            setPhotoContent({
+              uploadedMedia: restoredMedia,
+              selectedMedia: null,
+              isOriginal: true,
+              photoAdjustments: null
+            })
+            console.log('✅ Restored', restoredMedia.length, 'media items')
+          } else if (data?.photo_analysis) {
+            // Fallback: no media_items but analysis exists — kept for DB back-compat
+            console.log('📥 Loaded saved analysis (no media items):', data.photo_analysis)
+          }
+        })
+    }
+  }, [suggestionId, setPhotoContent])
+  
+  const maxPhotos = TIER_QUOTAS[currentTier].photoUploadsPerPost
 
   const content = postContent || {
     headline: '',
@@ -238,6 +311,62 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
     }
   }, [postContent, photoContent, photoIdea, selectedPlatforms, markAsSaved])
 
+  // Helper function to save media items to database
+  const saveMediaToDatabase = useCallback(async (mediaItems: MediaItem[]) => {
+    if (!suggestionId) {
+      console.log('ℹ️ No suggestionId - skipping media save')
+      return
+    }
+
+    // Convert MediaItem[] to serializable format (exclude File object)
+    const serializableMedia = mediaItems.map(item => ({
+      id: item.id,
+      url: item.originalUrl || item.url,
+      originalUrl: item.originalUrl,
+      adjustedUrl: item.adjustedUrl,
+      type: item.type,
+      adjustments: item.adjustments,
+      selectedVersionForPost: item.selectedVersionForPost
+    }))
+
+    console.log('💾 Saving media items to suggestion:', suggestionId)
+    console.log('📸 Media count:', serializableMedia.length)
+
+    try {
+      const { error } = await supabase
+        .from('daily_suggestions')
+        .update({ media_items: serializableMedia })
+        .eq('id', suggestionId)
+
+      if (error) {
+        console.error('❌ Failed to save media items:', error)
+      } else {
+        console.log('✅ Media items saved to suggestion:', suggestionId)
+      }
+    } catch (err) {
+      console.error('❌ Exception while saving media items:', err)
+    }
+  }, [suggestionId])
+
+  // Helper to get video duration
+  const getVideoDuration = (file: File): Promise<number> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video')
+      video.preload = 'metadata'
+      
+      video.onloadedmetadata = () => {
+        window.URL.revokeObjectURL(video.src)
+        resolve(video.duration)
+      }
+      
+      video.onerror = () => {
+        reject(new Error('Failed to load video metadata'))
+      }
+      
+      video.src = URL.createObjectURL(file)
+    })
+  }
+
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
     if (!files || files.length === 0) return
@@ -262,12 +391,34 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
       const filesToProcess = Array.from(files).slice(0, availableSlots)
 
       for (const file of filesToProcess) {
-        if (file.type.startsWith('image/')) {
+        const isImage = file.type.startsWith('image/')
+        const isVideo = file.type.startsWith('video/')
+        
+        if (isImage || isVideo) {
           // Create preview URL for display
           const previewUrl = URL.createObjectURL(file)
           
+          // For videos, check duration
+          let duration: number | undefined
+          let canAnalyze = true
+          
+          if (isVideo) {
+            try {
+              duration = await getVideoDuration(file)
+              canAnalyze = duration <= 30 // Only analyze videos ≤30 seconds
+              
+              if (duration > 90) {
+                console.warn(`Video too long: ${duration}s. Skipping.`)
+                continue // Skip videos longer than 90 seconds
+              }
+            } catch (error) {
+              console.warn('Could not read video duration:', error)
+              canAnalyze = false
+            }
+          }
+          
           try {
-            // Upload to Supabase Storage
+            // Upload to Supabase Storage (works for both images and videos)
             const originalUrl = await uploadImageToStorage(file, user.id)
             
             newPhotos.push({
@@ -275,8 +426,10 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
               file,
               url: previewUrl, // Local preview
               originalUrl: originalUrl, // Storage URL
-              type: 'image',
-              selectedVersionForPost: 'original'
+              type: isVideo ? 'video' : 'image',
+              selectedVersionForPost: 'original',
+              duration,
+              canAnalyze
             })
           } catch (uploadError) {
             // Fallback to local blob if upload fails
@@ -285,21 +438,28 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
               file,
               url: previewUrl,
               originalUrl: previewUrl,
-              type: 'image',
-              selectedVersionForPost: 'original'
+              type: isVideo ? 'video' : 'image',
+              selectedVersionForPost: 'original',
+              duration,
+              canAnalyze
             })
           }
         }
       }
 
+      const updatedMedia = [...(photoContent?.uploadedMedia || []), ...newPhotos]
+      
       setPhotoContent({
-        uploadedMedia: [...(photoContent?.uploadedMedia || []), ...newPhotos],
+        uploadedMedia: updatedMedia,
         selectedMedia: null,
         isOriginal: true,
         photoAdjustments: null
       })
       
       markAsChanged?.() // Mark draft as changed when photo is uploaded
+
+      // Save media to database if editing a suggestion
+      await saveMediaToDatabase(updatedMedia)
 
       // Select the first newly uploaded photo
       if (newPhotos.length > 0) {
@@ -308,12 +468,11 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
 
     } catch (error) {
       console.error('Error processing image:', error)
-      alert('Failed to load image. Please try again.')
+      alert(t('create.uploadFailed'))
     } finally {
       setProcessingImage(false)
     }
   }
-
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   // @ts-ignore - Kept for future use
   const _handleReplacePhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -371,8 +530,30 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
     }
   }
 
-  const handleRemovePhoto = (index: number) => {
+  const handleRemovePhoto = async (index: number) => {
+    const currentMedia = photoContent?.uploadedMedia[index]
+
+    // If this photo has an AI-enhanced version, only remove the AI edit — keep the original
+    if (currentMedia?.adjustedUrl) {
+      const updatedMedia = [...(photoContent?.uploadedMedia || [])]
+      updatedMedia[index] = {
+        ...currentMedia,
+        adjustedUrl: undefined,
+        selectedVersionForPost: 'original' as const,
+      }
+      setViewMode('original')
+      setPhotoContent({
+        ...photoContent,
+        uploadedMedia: updatedMedia,
+      })
+      markAsChanged?.()
+      await saveMediaToDatabase(updatedMedia)
+      return
+    }
+
+    // No AI enhancement — remove the entire photo
     const updatedMedia = photoContent?.uploadedMedia.filter((_: MediaItem, i: number) => i !== index) || []
+    
     setPhotoContent({
       uploadedMedia: updatedMedia,
       selectedMedia: null,
@@ -382,6 +563,9 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
 
     markAsChanged?.()
     
+    // Save updated media list to database
+    await saveMediaToDatabase(updatedMedia)
+    
     // Adjust selected index if necessary
     if (selectedMediaIndex >= updatedMedia.length) {
       setSelectedMediaIndex(Math.max(0, updatedMedia.length - 1))
@@ -390,15 +574,16 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
 
   // Helper function to generate contextual upgrade text based on analysis
   const getUpgradePromptText = (): string => {
+    const analysisResult = currentAnalysisResult
     // Check if we have analysis results with improvement categories
     if (
       analysisResult && 
       'improvementCategories' in analysisResult && 
-      analysisResult.improvementCategories && 
-      analysisResult.improvementCategories.length > 0
+      (analysisResult as any).improvementCategories && 
+      (analysisResult as any).improvementCategories.length > 0
     ) {
       // Map categories to localized improvement terms
-      const improvements = analysisResult.improvementCategories
+      const improvements = (analysisResult as any).improvementCategories
         .slice(0, 2)
         .map((category: string) => t(`photoAnalysis.upgradePrompt.categories.${category}`))
         .filter(Boolean)
@@ -423,39 +608,150 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
 
     console.log('Starting photo analysis for:', currentMedia.originalUrl)
 
+    // Check if video can be analyzed (only ≤30 seconds)
+    if (currentMedia.type === 'video' && currentMedia.canAnalyze === false) {
+      const errorMsg = t('create.videoTooLong', { duration: Math.round(currentMedia.duration || 0) })
+      console.warn(errorMsg)
+      alert(errorMsg)
+      return
+    }
+
+    // For FREE tier video analysis, check weekly quota (2 analyses per week)
+    if (currentMedia.type === 'video' && currentTier === 'free') {
+      try {
+        const { data, error } = await supabase.functions.invoke('check-video-quota', {
+          body: { userId: user?.id }
+        })
+        
+        if (error || !data?.allowed) {
+          alert(t('create.videoQuotaExceeded', { current: data?.current || 2, limit: data?.limit || 2 }))
+          return
+        }
+      } catch (error) {
+        console.error('Failed to check video quota:', error)
+        // Allow analysis if quota check fails (graceful degradation)
+      }
+    }
+
     const result = await analyzePhoto(
       currentMedia.originalUrl,
       postContent?.text || '',
       undefined, // businessType - could be fetched from profile
       i18n.language, // language - dynamic based on user preference
-      currentTier // tier
+      currentTier, // tier
+      currentMedia.type, // mediaType - 'image' or 'video'
+      currentMedia.duration, // duration in seconds (for videos)
+      ...(await (async () => {
+        // Detect pixel dimensions client-side — far more reliable than server-side JPEG binary parsing.
+        // Browser Image element handles all formats (JPEG, PNG, HEIC-converted, WebP) correctly.
+        try {
+          const blob = await fetch(currentMedia.originalUrl).then(r => r.blob())
+          const blobUrl = URL.createObjectURL(blob)
+          const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+            const img = new Image()
+            img.onload = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(blobUrl) }
+            img.onerror = () => { URL.revokeObjectURL(blobUrl); reject() }
+            img.src = blobUrl
+          })
+          console.log('📐 Client-side image dimensions:', dims.w, '×', dims.h)
+          return [dims.w, dims.h]
+        } catch {
+          return [undefined, undefined]
+        }
+      })())
     )
 
     if (result) {
       console.log('Analysis successful:', result)
-      setAnalysisResult(result)
-      setShowAnalysis(true)
+
+      // Persist result on the MediaItem under the current context key
+      const updatedMediaWithResult = [...(photoContent?.uploadedMedia || [])]
+      updatedMediaWithResult[selectedMediaIndex] = {
+        ...currentMedia,
+        analysisCache: { ...(currentMedia.analysisCache || {}), [analysisContextKey]: result },
+      }
+      setPhotoContent({
+        ...photoContent,
+        uploadedMedia: updatedMediaWithResult,
+      })
+      
+      // Increment video analysis quota for FREE tier after successful analysis
+      if (currentMedia.type === 'video' && currentTier === 'free') {
+        try {
+          await supabase.functions.invoke('increment-video-quota', {
+            body: { userId: user?.id }
+          })
+        } catch (quotaError) {
+          console.warn('Failed to increment video quota:', quotaError)
+          // Don't block the UI if quota increment fails
+        }
+      }
+      
+      // Save photo and analysis to daily_suggestions if we have a suggestion ID
+      if (suggestionId) {
+        console.log('💾 Attempting to save photo analysis for suggestion:', suggestionId)
+        console.log('📸 Photo URL:', currentMedia.originalUrl)
+        console.log('📊 Analysis data:', JSON.stringify(result, null, 2))
+        
+        try {
+          const { data, error } = await supabase
+            .from('daily_suggestions')
+            .update({
+              uploaded_photo_url: currentMedia.originalUrl,
+              photo_analysis: result
+            })
+            .eq('id', suggestionId)
+            .select()
+          
+          if (error) {
+            console.error('❌ Failed to save photo analysis:', error)
+            console.error('Error details:', JSON.stringify(error, null, 2))
+          } else {
+            console.log('✅ Photo analysis saved to suggestion:', suggestionId)
+            console.log('✅ Updated data:', data)
+          }
+        } catch (err) {
+          console.error('❌ Exception while saving photo analysis:', err)
+        }
+      } else {
+        console.warn('⚠️ No suggestionId provided - photo analysis not saved')
+      }
     } else {
       console.error('Analysis failed - no result returned')
       alert(t('photoAnalysis.analysisError'))
     }
   }
 
-  // NEW: Auto enhance - applies all AI adjustments at once
-  const handleAutoEnhance = async () => {
+  // Handler for applying multiple AI suggestions from photo analysis
+  const handleApplySuggestion = async (suggestionId: string) => {
+    await handleApplySelectedSuggestions([suggestionId])
+  }
+
+  const handleApplySelectedSuggestions = async (selectedIds: string[]) => {
     const currentMedia = photoContent?.uploadedMedia[selectedMediaIndex]
-    if (!currentMedia) return
+    if (!currentMedia || currentMedia.isProcessing || !currentMedia.originalUrl) {
+      console.error('Cannot apply edits: invalid media state')
+      return
+    }
+
+    // Get selected suggestions from analysis result
+    const allSuggestions = (currentPhoto?.analysisCache?.[analysisContextKey] as any)?.suggestions as Suggestion[] | undefined
+    if (!allSuggestions || selectedIds.length === 0) {
+      console.error('No suggestions found or none selected')
+      return
+    }
+
+    const selectedSuggestions = allSuggestions.filter(s => selectedIds.includes(s.id))
+    console.log(`📸 Applying ${selectedSuggestions.length} AI edits to photo`, {
+      suggestionIds: selectedIds,
+      suggestions: selectedSuggestions
+    })
 
     // Set processing state
     const updatedMedia = [...(photoContent?.uploadedMedia || [])]
     updatedMedia[selectedMediaIndex] = {
       ...currentMedia,
-      isProcessing: true,
-      adjustments: {
-        cropAndSize: { platform: 'both', focusMode: 'auto', enabled: true },
-        cleaning: { removeBackground: true, removeObjects: true, reduceBlemishes: true, intensity: 30, enabled: true },
-        colorGrading: { temperature: 0, preset: 'natural', enabled: true }
-      }
+      isProcessing: true
     }
     setPhotoContent({
       ...photoContent,
@@ -463,33 +759,51 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
     })
 
     try {
-      // TODO: Replace with actual AI API call
-      // const response = await applyAutoEnhancement(currentMedia.file)
-      
-      // Simulate AI processing
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      // Mock adjusted URL (in reality, this would come from AI API)
-      const adjustedUrl = currentMedia.url // Replace with actual adjusted image URL
-      
+      // Capture the state before this enhancement for undo
+      const urlBeforeEnhancement: string | null = currentMedia.adjustedUrl ?? null
+
+      let workingUrl = currentMedia.adjustedUrl || currentMedia.originalUrl
+
+      const result = await editPhoto(workingUrl, selectedSuggestions, i18n.language)
+      if (result?.editedImage) workingUrl = result.editedImage
+
+      // Upload the final image to Supabase Storage so it persists beyond this session
+      // and is stored as a proper CDN URL rather than a raw base64 data URL in the DB.
+      let persistedUrl = workingUrl
+      if (workingUrl.startsWith('data:') || workingUrl.startsWith('blob:')) {
+        try {
+          persistedUrl = await uploadAdjustedImageToStorage(workingUrl, user!.id)
+          console.log('✅ Adjusted image uploaded to Storage:', persistedUrl)
+        } catch (uploadErr) {
+          console.warn('⚠️ Could not upload adjusted image to Storage, falling back to data URL:', uploadErr)
+          persistedUrl = workingUrl // fallback — still works, just not persisted
+        }
+      }
+
+      // Update media with the final image (canvas-cropped and/or AI-edited)
       updatedMedia[selectedMediaIndex] = {
         ...currentMedia,
-        adjustedUrl,
+        adjustedUrl: persistedUrl,
+        adjustedUrlHistory: [...(currentMedia.adjustedUrlHistory || []), urlBeforeEnhancement],
         isProcessing: false,
-        selectedVersionForPost: 'adjusted', // Auto-select AI version
-        adjustments: updatedMedia[selectedMediaIndex].adjustments
+        selectedVersionForPost: 'adjusted'
       }
-      
+
       setPhotoContent({
         ...photoContent,
         uploadedMedia: updatedMedia
       })
 
-      // Switch to AI view
+      // Switch to adjusted view
       setViewMode('adjusted')
 
-    } catch (error) {
-      console.error('AI auto-enhancement failed:', error)
+      // Mark as changed
+      markAsChanged?.()
+
+    } catch (error: any) {
+      console.error('❌ AI photo editing failed:', error)
+      
+      // Reset processing state
       updatedMedia[selectedMediaIndex] = {
         ...currentMedia,
         isProcessing: false
@@ -498,86 +812,62 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
         ...photoContent,
         uploadedMedia: updatedMedia
       })
+
+      // Check if error is tier restriction
+      const errorMsg = error.message || String(error)
+      if (errorMsg.includes('Smart') || errorMsg.includes('Pro') || errorMsg.includes('abonnement')) {
+        // Show upgrade modal for tier restriction
+        setShowUpgradeModal('photo-picker')
+      } else {
+        // Show generic error for other failures
+        alert(errorMsg || t('create.photoEditFailed'))
+      }
     }
   }
 
-  const handleApplyAIAdjustments = async (_category: 'cropAndSize' | 'cleaning' | 'colorGrading') => {
+  const handleUndoEdit = () => {
     const currentMedia = photoContent?.uploadedMedia[selectedMediaIndex]
-    if (!currentMedia) return
-
-    // Set processing state
+    // Guard: nothing to undo if there's neither an adjusted URL nor any history
+    if (!currentMedia || (!currentMedia.adjustedUrlHistory?.length && !currentMedia.adjustedUrl)) return
+    const history = [...(currentMedia.adjustedUrlHistory || [])]
+    // If history exists, pop the previous state; otherwise we're undoing from
+    // an enhanced state that has no history (e.g. re-entered Design after applying)
+    // — fall back to clearing the adjustment entirely.
+    const previousState = history.length > 0 ? (history.pop() ?? null) : null
     const updatedMedia = [...(photoContent?.uploadedMedia || [])]
     updatedMedia[selectedMediaIndex] = {
       ...currentMedia,
-      isProcessing: true,
-      adjustments: adjustments
+      adjustedUrl: previousState ?? undefined,
+      adjustedUrlHistory: history,
+      selectedVersionForPost: previousState ? 'adjusted' : 'original',
     }
-    setPhotoContent({
-      ...photoContent,
-      uploadedMedia: updatedMedia
-    })
-
-    try {
-      // TODO: Replace with actual AI API call
-      // const response = await applyAIAdjustments(currentMedia.file, adjustments[category])
-      
-      // Simulate AI processing
-      await new Promise(resolve => setTimeout(resolve, 1500))
-      
-      // Mock adjusted URL (in reality, this would come from AI API)
-      const adjustedUrl = currentMedia.adjustedUrl || currentMedia.url // Replace with actual adjusted image URL
-      
-      updatedMedia[selectedMediaIndex] = {
-        ...currentMedia,
-        adjustedUrl,
-        isProcessing: false,
-        selectedVersionForPost: 'adjusted', // Auto-select AI version
-        adjustments: adjustments
-      }
-      
-      setPhotoContent({
-        ...photoContent,
-        uploadedMedia: updatedMedia
-      })
-
-      // Switch to AI view
-      setViewMode('adjusted')
-
-    } catch (error) {
-      console.error('AI adjustment failed:', error)
-      updatedMedia[selectedMediaIndex] = {
-        ...currentMedia,
-        isProcessing: false
-      }
-      setPhotoContent({
-        ...photoContent,
-        uploadedMedia: updatedMedia
-      })
-    }
+    setPhotoContent({ ...photoContent!, uploadedMedia: updatedMedia })
+    if (!previousState) setViewMode('original')
   }
 
-  const handleResetAdjustments = () => {
+  const handleCropConfirm = async (dataUrl: string) => {
+    setShowCropOverlay(false)
     const currentMedia = photoContent?.uploadedMedia[selectedMediaIndex]
-    if (currentMedia) {
-      const updatedMedia = [...(photoContent?.uploadedMedia || [])]
-      updatedMedia[selectedMediaIndex] = {
-        ...currentMedia,
-        adjustedUrl: undefined,
-        adjustments: undefined,
-        selectedVersionForPost: 'original'
-      }
-      setPhotoContent({
-        ...photoContent,
-        uploadedMedia: updatedMedia
-      })
-      
-      setViewMode('original')
+    if (!currentMedia) return
+    let persistedUrl: string = dataUrl
+    try {
+      persistedUrl = await uploadAdjustedImageToStorage(dataUrl, user!.id)
+    } catch {
+      // fallback to data URL
     }
+    const updatedMedia = [...(photoContent?.uploadedMedia || [])]
+    updatedMedia[selectedMediaIndex] = {
+      ...currentMedia,
+      adjustedUrl: persistedUrl,
+      adjustedUrlHistory: [...(currentMedia.adjustedUrlHistory || []), currentMedia.adjustedUrl ?? null],
+      selectedVersionForPost: 'adjusted',
+    }
+    setPhotoContent({ ...photoContent, uploadedMedia: updatedMedia })
+    setViewMode('adjusted')
+    markAsChanged?.()
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // @ts-ignore - Kept for future use
-  const _handleSelectVersionForPost = (version: 'original' | 'adjusted') => {
+  const handleSelectVersionForPost = (version: 'original' | 'adjusted') => {
     const currentMedia = photoContent?.uploadedMedia[selectedMediaIndex]
     if (currentMedia) {
       const updatedMedia = [...(photoContent?.uploadedMedia || [])]
@@ -595,35 +885,144 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
   // Computed values
   const hasPhoto = photoContent?.uploadedMedia && photoContent.uploadedMedia.length > 0
   const currentPhoto = photoContent?.uploadedMedia?.[selectedMediaIndex]
-  const hasAdjustedVersion = currentPhoto?.adjustedUrl !== undefined
+
+  // Stable key for the current text-idea context — analysis is cached per-key on MediaItem
+  const analysisContextKey = activePath === 'ai-ideas'
+    ? `ai-ideas:${selectedIdea ?? 'none'}`
+    : activePath === 'weekly-plan'
+    ? `weekly-plan:${weeklyPlanPostIndex}`
+    : 'write'
+
+  // The analysis that belongs to the current context (undefined if context changed since last analysis)
+  const currentAnalysisResult = currentPhoto?.analysisCache?.[analysisContextKey]
+
+  // Media suggestion: best available source per active path
+  const mediaFormat = strategicIdea?.platformFormat || weeklyPlanSuggestion?.platformFormat
+  const isReelFormat = ['reel', 'video', 'story', 'short_video'].includes((mediaFormat ?? '').toLowerCase())
+  const mediaEmoji = isReelFormat ? '🎬' : '📷'
+  const mediaSuggestionStructured = activePath === 'weekly-plan' && (
+    weeklyPlanSuggestion?.visualSubject || weeklyPlanSuggestion?.visualAngle || weeklyPlanSuggestion?.visualSetting
+  ) ? {
+    subject: weeklyPlanSuggestion?.visualSubject,
+    angle: weeklyPlanSuggestion?.visualAngle,
+    setting: weeklyPlanSuggestion?.visualSetting,
+  } : null
 
   return (
     <div className="space-y-4">
-      {/* Progress Indicator */}
-      <ProgressStepper currentStep={2} totalSteps={3} onStepClick={onStepClick} />
+
+      {/* ── Weekly Plan idea tab strip ── */}
+      {weeklyContentPlan && onSwitchIdea && weeklyContentPlan.posts.length > 1 && (
+        <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 shadow-sm overflow-x-auto">
+          <div className="flex items-center gap-2 min-w-max">
+            <span className="text-xs text-gray-400 font-medium shrink-0 mr-1">{t('create.ideasInPlan')}</span>
+            {weeklyContentPlan.posts.map((post, idx) => {
+              const isCurrent = idx === weeklyPlanPostIndex
+              const hasDraft = !isCurrent && draftMap[idx] != null
+              const isDone = weeklyPlanSessionDone.includes(idx)
+              const day = post.timing.day.slice(0, 3)
+              const dish = post.contentSubject.dish
+              const label = `${day} · ${dish.length > 20 ? dish.slice(0, 20) + '…' : dish}`
+              return (
+                <button
+                  key={idx}
+                  onClick={() => !isCurrent && onSwitchIdea(idx)}
+                  title={dish}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all whitespace-nowrap ${
+                    isCurrent
+                      ? 'bg-cta-surface border-cta text-cta-text cursor-default shadow-sm'
+                      : hasDraft
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 cursor-pointer'
+                        : isDone
+                          ? 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100 cursor-pointer'
+                          : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 hover:border-gray-300 cursor-pointer'
+                  }`}
+                >
+                  {isCurrent && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-cta shrink-0" />
+                  )}
+                  {!isCurrent && isDone && (
+                    <span className="text-green-600 leading-none">✓</span>
+                  )}
+                  {!isCurrent && hasDraft && !isDone && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                  )}
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Two Column Layout - tighter spacing, columns aligned to top */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-y-4 gap-x-4 items-start">
         
-        {/* LEFT: AI Adjustments & Photo Display */}
+        {/* LEFT: AI Analysis & Enhancement */}
         <div className="space-y-3">
           
-          {/* Photo tip or AI photo suggestion - only show when no photo uploaded */}
-          {!hasPhoto && (
-            <div className="p-3 border border-[#D1D5DB] rounded-xl bg-white shadow-sm">
-              {photoIdea && photoIdea.trim().length > 0 ? (
-                <>
-                  <h4 className="text-xs font-semibold text-[#0F2E32] uppercase tracking-wide">
-                    💡 Foto-idé
+          {/* Media suggestion - always show when there's a specific suggestion; generic tip only before upload */}
+          {(mediaSuggestionStructured || (photoIdea && photoIdea.trim().length > 0) || (!hasPhoto && activePath === 'write')) && (
+            mediaSuggestionStructured ? (
+              <div className="border border-[#D1D5DB] rounded-xl bg-white shadow-sm overflow-hidden">
+                <button
+                  onClick={() => setPhotoIdeaOpen(o => !o)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-gray-50 transition-colors"
+                >
+                  <h4 className="text-xs font-semibold text-brand uppercase tracking-wide">
+                    {mediaEmoji} {t('create.mediaIdeaFromPlan')}
                   </h4>
-                  <p className="mt-1 text-sm text-[#374151] leading-snug">{photoIdea}</p>
-                </>
-              ) : (
+                  <span className="text-slate-400 text-xs">{photoIdeaOpen ? '▲' : '▼'}</span>
+                </button>
+                {photoIdeaOpen && (
+                  <div className="bg-gray-50 px-3 pb-2.5 space-y-1.5">
+                    {(mediaSuggestionStructured.subject || '').split(/\s*\|\s*|\s+(?=[A-ZÆØÅ])(?<=[.!?]\s)/)
+                      .flatMap((s: string) => s.split(/(?<=[.!?])\s+(?=[A-ZÆØÅ])/))
+                      .map((s: string) => s.trim())
+                      .filter((s: string) => s.length > 0)
+                      .map((step: string, i: number) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <span className="text-xs font-semibold text-brand shrink-0 mt-0.5 w-4">{i + 1}.</span>
+                          <p className="text-sm text-[#374151] leading-snug">{step}</p>
+                        </div>
+                      ))
+                    }
+                  </div>
+                )}
+              </div>
+            ) : photoIdea && photoIdea.trim().length > 0 ? (
+              <div className="border border-[#D1D5DB] rounded-xl bg-white shadow-sm overflow-hidden">
+                <button
+                  onClick={() => setPhotoIdeaOpen(o => !o)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-gray-50 transition-colors"
+                >
+                  <h4 className="text-xs font-semibold text-brand uppercase tracking-wide">
+                    {mediaEmoji} {t('create.mediaIdea')}
+                  </h4>
+                  <span className="text-slate-400 text-xs">{photoIdeaOpen ? '▲' : '▼'}</span>
+                </button>
+                {photoIdeaOpen && (
+                  <div className="bg-gray-50 px-3 pb-2.5 space-y-1.5">
+                    {photoIdea
+                      .split(/(?<=[.!?])\s+(?=[A-ZÆØÅ])/)
+                      .filter((s: string) => s.trim().length > 0)
+                      .map((step: string, i: number) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <span className="text-xs font-semibold text-brand shrink-0 mt-0.5 w-4">{i + 1}.</span>
+                          <p className="text-sm text-[#374151] leading-snug">{step.trim()}</p>
+                        </div>
+                      ))
+                    }
+                  </div>
+                )}
+              </div>
+            ) : !hasPhoto && activePath === 'write' ? (
+              <div className="p-3 border border-[#D1D5DB] rounded-xl bg-white shadow-sm">
                 <p className="text-xs text-[#6B7280]">
-                  💡 {t('create.photoTip', 'Tip: High-quality images get more engagement. Recommended size: 1200x628px')}
+                  💡 {t('create.photoTip', 'Tip: Billeder og videoer af høj kvalitet får mere engagement.')}
                 </p>
-              )}
-            </div>
+              </div>
+            ) : null
           )}
 
           {/* Photo Analysis Button - Available for all tiers */}
@@ -631,10 +1030,11 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
             <div className="p-3 bg-white border border-slate-200 rounded-lg">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-slate-800">{t('photoAnalysis.title')}</h3>
-                <button
-                  onClick={handleAnalyzePhoto}
-                  disabled={isAnalyzing}
-                  className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg text-xs font-medium hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleAnalyzePhoto}
+                    disabled={isAnalyzing}
+                  className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-cta text-white rounded-lg text-xs font-medium hover:from-purple-700 hover:to-cta-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
                 >
                   {isAnalyzing ? (
                     <>
@@ -644,97 +1044,40 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
                   ) : (
                     <>
                       <Sparkles className="w-3 h-3" />
-                      <span>{t('photoAnalysis.analyzeButton')}</span>
+                      <span>{currentAnalysisResult ? t('photoAnalysis.reanalyzeButton') : t('photoAnalysis.analyzeButton')}</span>
                     </>
                   )}
                 </button>
+                </div>
               </div>
               {analysisError && (
                 <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-xs text-red-700">Fejl: {analysisError}</p>
+                  <p className="text-xs text-red-700">{t('create.errorPrefix', { error: analysisError })}</p>
                 </div>
               )}
-              {analysisResult && showAnalysis && (
+              {currentAnalysisResult && (
                 <div className="mt-3 space-y-3">
-                  {/* Free Tier - Simplified Display */}
-                  {currentTier === 'free' && 'overallFeedback' in analysisResult && (
-                    <>
-                      {/* Overall Feedback */}
-                      <div className="p-3 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border border-purple-200">
-                        <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{analysisResult.overallFeedback}</p>
-                      </div>
-
-                      {/* Quick Tips */}
-                      {analysisResult.quickTips && analysisResult.quickTips.length > 0 && (
-                        <div className="space-y-2">
-                          <h4 className="text-xs font-semibold text-slate-700">{t('photoAnalysis.quickTips')}</h4>
-                          {analysisResult.quickTips.map((tip: string, idx: number) => (
-                            <div key={idx} className="p-2 bg-white border border-slate-200 rounded-lg">
-                              <p className="text-xs text-slate-700">{tip}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {/* Paid Tier - Detailed Display */}
-                  {currentTier !== 'free' && 'overallScore' in analysisResult && (
-                    <>
-                      {/* Overall Score */}
-                      <div className="p-2 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border border-purple-200">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-slate-700">{t('photoAnalysis.overallScore')}</span>
-                          <span className="text-lg font-bold text-purple-600">{analysisResult.overallScore}/100</span>
-                        </div>
-                      </div>
-
-                      {/* Content Match */}
-                      <div className="p-2 bg-slate-50 rounded-lg border border-slate-200">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-medium text-slate-700">{t('photoAnalysis.contentMatch')}</span>
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                            analysisResult.contentMatch.rating === 'excellent' ? 'bg-green-100 text-green-700' :
-                            analysisResult.contentMatch.rating === 'good' ? 'bg-blue-100 text-blue-700' :
-                            analysisResult.contentMatch.rating === 'fair' ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>
-                            {t(`photoAnalysis.ratings.${analysisResult.contentMatch.rating}`)}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-600">{analysisResult.contentMatch.feedback}</p>
-                      </div>
-
-                      {/* Improvements */}
-                      {analysisResult.improvements.length > 0 && (
-                        <div className="space-y-2">
-                          <h4 className="text-xs font-semibold text-slate-700">{t('photoAnalysis.improvements')}</h4>
-                          {analysisResult.improvements.map((improvement: any, idx: number) => (
-                            <div key={idx} className="p-2 bg-white border border-slate-200 rounded">
-                              <div className="flex items-start justify-between mb-1">
-                                <span className="text-xs font-medium text-slate-800">{improvement.title}</span>
-                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                                  improvement.impact === 'high' ? 'bg-red-100 text-red-600' :
-                                  improvement.impact === 'medium' ? 'bg-yellow-100 text-yellow-600' :
-                                  'bg-blue-100 text-blue-600'
-                                }`}>
-                                  {t(`photoAnalysis.impact.${improvement.impact}`)}
-                                </span>
-                              </div>
-                              <p className="text-xs text-slate-600">{improvement.description}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  <button
-                    onClick={() => setShowAnalysis(false)}
-                    className="w-full text-xs text-slate-500 hover:text-slate-700 transition-colors"
-                  >
-                    {t('photoAnalysis.hideAnalysis')}
-                  </button>
+                  <MediaAnalysisPanel
+                    analysis={{
+                      contentMatch: (currentAnalysisResult as any).contentMatch,
+                      emojiMatch: (currentAnalysisResult as any).emojiMatch ?? null,
+                      whatWorks: (currentAnalysisResult as any).whatWorks,
+                      generalFeedback: (currentAnalysisResult as any).generalFeedback || (currentAnalysisResult as any).overallFeedback || '',
+                      suggestions: (currentAnalysisResult as any).suggestions || [],
+                      humanSuggestions: (currentAnalysisResult as any).humanSuggestions || [],
+                      recommendation: (currentAnalysisResult as any).recommendation,
+                      recommendationText: (currentAnalysisResult as any).recommendationText,
+                    }}
+                    tier={currentTier}
+                    onApply={handleApplySuggestion}
+                    onApplyBatch={handleApplySelectedSuggestions}
+                    isProcessing={currentPhoto?.isProcessing || isEditing}
+                    hasAdjustedVersion={!!(currentPhoto?.adjustedUrl)}
+                    mediaType={currentPhoto?.type}
+                    onUndo={handleUndoEdit}
+                    canUndo={!!(currentPhoto?.adjustedUrlHistory?.length) || !!(currentPhoto?.adjustedUrl)}
+                    onEditText={currentTier !== 'free' ? () => setCaptionEditOpen(true) : undefined}
+                  />
                 </div>
               )}
             </div>
@@ -761,23 +1104,25 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
             </div>
           )}
 
-          {/* AI Photo Enhancement - Only show for paid users when photo exists */}
-          {hasPhoto && currentPhoto && currentTier !== 'free' && (
-            <AIAdjustmentControls
-              hasAdjustedVersion={hasAdjustedVersion}
-              isProcessing={currentPhoto?.isProcessing || false}
-              adjustments={adjustments}
-              onAutoEnhance={handleAutoEnhance}
-              onResetAdjustments={handleResetAdjustments}
-              onApplyAdjustment={handleApplyAIAdjustments}
-              onUpdateAdjustments={setAdjustments}
-            />
-          )}
         </div>
 
         {/* RIGHT: Platform Preview */}
-        <div className="space-y-3">
-          
+        <div className="space-y-3 sticky top-4 self-start">
+
+          {/* Crop button — positioned in top-right corner of the preview frame */}
+          <div className="relative">
+            {hasPhoto && currentPhoto && (
+              <button
+                onClick={() => setShowCropOverlay(true)}
+                className="absolute top-2 right-2 z-10 px-2.5 py-1.5 bg-white/90 backdrop-blur-sm border border-slate-300 text-slate-700 rounded-lg text-xs font-medium hover:bg-white transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/>
+                </svg>
+                <span>{t('create.crop')}</span>
+              </button>
+            )}
+
           <PlatformPreview
             selectedPlatforms={selectedPlatforms}
             previewPlatform={previewPlatform}
@@ -791,17 +1136,21 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
             onMediaIndexChange={setSelectedMediaIndex}
             onPhotoUpload={handlePhotoUpload}
             onRemovePhoto={handleRemovePhoto}
+            onSelectVersionForPost={handleSelectVersionForPost}
             currentTier={currentTier}
             businessName={businessData.business?.name || undefined}
+            onEditCaption={currentTier !== 'free' ? () => setCaptionEditOpen(true) : undefined}
+            platformFormat={strategicIdea?.platformFormat}
           />
+          </div>
         </div>
       </div>
 
       {/* Separator line */}
       <div className="border-t border-[#D1D5DB] mt-4"></div>
 
-      {/* Sticky Bottom Bar - Aligned with Write stage */}
-      <div className="flex items-start justify-between pt-2 pb-2 gap-3">
+      {/* Sticky Bottom Bar */}
+      <div className="flex items-center justify-between pt-2 pb-4 gap-3">
         <button
           onClick={onBack}
           className="px-4 py-2 text-xs font-medium text-[#374151] bg-white border border-[#D1D5DB] rounded-lg hover:bg-[#F9FAFB] transition-colors flex items-center gap-1.5"
@@ -815,15 +1164,34 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
           hasPersistedDraft={hasPersistedDraft}
           onSaveDraft={handleSaveDraft}
           onNext={onNext}
-          nextLabel={t('create.continue', 'Fortsæt til Planlægning')}
+          nextLabel={t('create.continue', 'Fortsæt til Publish')}
         />
       </div>
+
+      {showCropOverlay && currentPhoto && (currentPhoto.adjustedUrl || currentPhoto.originalUrl) && (
+        <CropOverlay
+          imageUrl={currentPhoto.adjustedUrl || currentPhoto.originalUrl!}
+          onConfirm={handleCropConfirm}
+          onCancel={() => setShowCropOverlay(false)}
+        />
+      )}
 
       {/* Upgrade Modal */}
       <UpgradeModal
         isOpen={showUpgradeModal !== null}
         onClose={() => setShowUpgradeModal(null)}
         feature={showUpgradeModal || 'photo-picker'}
+      />
+
+      {/* Caption Edit Modal */}
+      <CaptionEditModal
+        isOpen={captionEditOpen}
+        onClose={() => setCaptionEditOpen(false)}
+        onSave={handleCaptionSave}
+        initialText={platformPreviewContent.text || ''}
+        currentTier={currentTier}
+        language={i18n.language}
+        businessId={businessData.business?.id || undefined}
       />
 
     </div>

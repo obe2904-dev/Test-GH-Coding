@@ -51,8 +51,7 @@ export const Mail = ({ className }: { className?: string }) => (
 // Two-arrow circular analyze icon (reusable, can spin when analyzing)
 export const AnalyzeIcon = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" aria-hidden="true">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582M20 20v-5H19.418M20 9a8 8 0 10-16 2" />
-    <path strokeLinecap="round" strokeLinejoin="round" d="M9 4h6M15 20H9" opacity="0.9" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
   </svg>
 )
 

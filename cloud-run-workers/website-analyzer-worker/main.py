@@ -16,6 +16,8 @@ from config import (
     OPENAI_API_KEY,
 )
 from worker import WebsiteAnalyzerWorker
+from utils.browser_fetcher import fetch_webpage_with_browser
+from utils.web_fetcher import fetch_webpage
 
 # Configure logging
 logging.basicConfig(
@@ -95,6 +97,64 @@ def index():
         "status": "running",
         "version": "1.0.0"
     }), 200
+
+
+@app.route('/scrape', methods=['POST'])
+def scrape():
+    """
+    Scrape a website URL using advanced browser-based scraping.
+    
+    Request body:
+    {
+      "url": "https://example.com",
+      "useBrowser": true,  // optional, defaults to true
+      "timeout": 25000     // optional, defaults to 25000ms
+    }
+    
+    Returns:
+    {
+      "html": "...",
+      "finalUrl": "https://example.com",
+      "method": "browser" | "simple"
+    }
+    """
+    if not _authorized_worker_trigger(request):
+        return jsonify({"error": "unauthorized"}), 401
+    
+    try:
+        data = request.get_json()
+        if not data or 'url' not in data:
+            return jsonify({"error": "url is required"}), 400
+        
+        url = data['url']
+        use_browser = data.get('useBrowser', True)
+        timeout = data.get('timeout', 25000)
+        
+        logger.info(f"Scraping URL: {url} (browser={use_browser})")
+        
+        if use_browser:
+            # Use Playwright browser scraping
+            html, final_url, error = fetch_webpage_with_browser(url, timeout=timeout)
+            method = "browser"
+        else:
+            # Use simple requests-based scraping
+            html, final_url, error = fetch_webpage(url, timeout=timeout // 1000)
+            method = "simple"
+        
+        if not html or error:
+            return jsonify({"error": error or "Failed to fetch content"}), 500
+        
+        logger.info(f"Successfully scraped {len(html)} chars from {final_url}")
+        
+        return jsonify({
+            "html": html,
+            "finalUrl": final_url,
+            "method": method
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Scrape error: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

@@ -52,30 +52,45 @@ function PlatformSelectorComponent({
   onActivePlatformChange,
   availablePlatforms = SUPPORTED_PLATFORMS
 }: PlatformSelectorProps) {
-  const isFreeTier = currentTier === 'free'
+  console.log('[PlatformSelector] 🎨 Rendering with props:', {
+    selectedPlatforms,
+    activePlatform,
+    currentTier,
+    availablePlatforms
+  });
+
   const visiblePlatforms = SUPPORTED_PLATFORMS.filter((platform) =>
     availablePlatforms.includes(platform)
   )
 
+  console.log('[PlatformSelector] Visible platforms:', visiblePlatforms);
+
   const handleSelect = (platform: SupportedPlatform) => {
-    if (isFreeTier) {
-      onSelectPlatforms([platform])
-      onActivePlatformChange?.(platform)
-      return
-    }
+    console.log('[PlatformSelector] 🎯 Platform clicked:', {
+      platform,
+      currentSelected: selectedPlatforms,
+      currentTier,
+      activePlatform
+    });
 
     if (selectedPlatforms.includes(platform)) {
+      console.log('[PlatformSelector] Platform already selected, attempting to deselect');
       if (selectedPlatforms.length > 1) {
         const next = selectedPlatforms.filter((p) => p !== platform)
+        console.log('[PlatformSelector] ✅ Deselecting, new platforms:', next);
         onSelectPlatforms(next)
         if (!next.includes(activePlatform) && next.length > 0) {
+          console.log('[PlatformSelector] Switching active platform to:', next[0]);
           onActivePlatformChange?.(next[0])
         }
+      } else {
+        console.log('[PlatformSelector] ⚠️ Cannot deselect - last platform');
       }
       return
     }
 
     const next = [...selectedPlatforms, platform]
+    console.log('[PlatformSelector] ✅ Adding platform, new platforms:', next);
     onSelectPlatforms(next)
     onActivePlatformChange?.(platform)
   }

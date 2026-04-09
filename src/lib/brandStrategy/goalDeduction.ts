@@ -13,6 +13,7 @@ import {
   CommunicationGoalType,
   TargetAudience 
 } from './types';
+import { getPrimaryType } from '../businessTypeHelpers';
 
 /**
  * Goal selection rules.
@@ -74,7 +75,7 @@ export function calculateGoalScores(
     }
     
     // 2. Business type fit (+20)
-    if (rules.businessTypes.includes(inputs.businessType)) {
+    if (rules.businessTypes.includes(getPrimaryType(inputs.businessType))) {
       score += 20;
     }
     
@@ -125,8 +126,8 @@ export function selectCommunicationGoal(
     reasoning.push(`Passer til målgruppe: ${matchingAudiences.join(', ')}`);
   }
   
-  if (rules.businessTypes.includes(inputs.businessType)) {
-    reasoning.push(`Typisk for ${inputs.businessType}`);
+  if (rules.businessTypes.includes(getPrimaryType(inputs.businessType))) {
+    reasoning.push(`Typisk for ${getPrimaryType(inputs.businessType)}`);
   }
   
   const matchingLocations = rules.locationBoost.filter(loc => 

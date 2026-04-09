@@ -14,6 +14,7 @@ import { DatabaseSaver } from './services/database-saver.ts';
 interface AnalyzeVisualIdentityRequest {
   business_id: string;
   photo_paths: string[]; // Paths in storage bucket
+  locale?: string; // e.g. 'da', 'en', 'nb', 'sv'
 }
 
 serve(async (req) => {
@@ -22,7 +23,7 @@ serve(async (req) => {
   }
 
   try {
-    const { business_id, photo_paths } = await req.json() as AnalyzeVisualIdentityRequest;
+    const { business_id, photo_paths, locale = 'da' } = await req.json() as AnalyzeVisualIdentityRequest;
 
     if (!business_id || !photo_paths || photo_paths.length === 0) {
       return new Response(
@@ -66,7 +67,7 @@ serve(async (req) => {
 
     console.log(`[2/5] Analyzing ${photoUrls.length} photos with GPT-4 Vision...`);
     const analyzer = new PhotoAnalyzer(openaiApiKey);
-    const analysis = await analyzer.analyzePhotos(photoUrls);
+    const analysis = await analyzer.analyzePhotos(photoUrls, locale);
 
     console.log(`[3/5] Extracting color palette...`);
     const colorExtractor = new ColorExtractor();
@@ -77,8 +78,29 @@ serve(async (req) => {
     const visualIdentity = builder.build(analysis, colors);
 
     console.log(`[5/5] Saving to database...`);
-    const saver = new DatabaseSaver(supabase);
-    await saver.saveVisualIdentity(business_id, visualIdentity);
+
+    // Always save recognizable_interior_identity to business_brand_profile —
+    // this is what the caption pipeline reads. Do this first so the response
+    // is still useful even if the secondary save fails.
+    const interiorText = visualIdentity.recognizable_interior_identity;
+    if (interiorText && interiorText !== 'Not yet analyzed') {
+      const { error: brandProfileError } = await supabase
+        .from('business_brand_profile')
+        .update({ recognizable_interior_identity: interiorText })
+        .eq('business_id', business_id);
+      if (brandProfileError) {
+        console.warn('Could not save to business_brand_profile:', brandProfileError.message);
+      }
+    }
+
+    // Also attempt to save full visual identity to business_visual_identity.
+    // Wrapped in try-catch so a missing table does not break the response.
+    try {
+      const saver = new DatabaseSaver(supabase);
+      await saver.saveVisualIdentity(business_id, visualIdentity);
+    } catch (saveError) {
+      console.warn('Could not save to business_visual_identity (table may not exist yet):', saveError);
+    }
 
     console.log('✅ Visual identity analysis complete!');
 

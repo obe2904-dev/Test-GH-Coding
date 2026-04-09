@@ -66,7 +66,13 @@ gcloud run deploy menu-ocr-worker-v2 \
   --source . \
   --region europe-west1 \
   --project aigetmenu \
-  --set-env-vars="SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,OPENAI_API_KEY=..."
+  --memory 1Gi \
+  --cpu 1 \
+  --timeout 180 \
+  --concurrency 1 \
+  --min-instances 0 \
+  --max-instances 3 \
+  --set-env-vars="SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,OPENAI_API_KEY=...,WORKER_BACKGROUND_POLL_ENABLED=false,GPT52_MODEL=gpt-4o-mini"
 ```
 
 ## 📦 Module Overview
@@ -122,9 +128,9 @@ All configuration is via environment variables (see `config.py`):
 | `SUPABASE_URL` | Required | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Required | Supabase service key |
 | `OPENAI_API_KEY` | Required | OpenAI API key |
-| `WORKER_BACKGROUND_POLL_ENABLED` | `true` | Enable background polling |
+| `WORKER_BACKGROUND_POLL_ENABLED` | `false` | Enable background polling (use Cloud Scheduler + `/run-once` instead) |
 | `GPT52_VISION_ENABLED` | `true` | Use GPT-5.2 for hard PDFs |
-| `GPT52_MODEL` | `gpt-5.2` | Vision model name |
+| `GPT52_MODEL` | `gpt-4o` | Vision model name |
 | `HARD_PDF_SKIP_OCR` | `true` | Skip OCR for hard PDFs |
 | `MAX_PAGES_TO_PROCESS` | `12` | Max PDF pages |
 | `STALE_JOB_MINUTES` | `12` | Requeue threshold |

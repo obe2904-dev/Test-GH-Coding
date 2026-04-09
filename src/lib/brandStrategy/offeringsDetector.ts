@@ -28,6 +28,7 @@ import {
   CoreOfferingEvidenceCue,
   CoreOfferingIdentitySource
 } from './types';
+import { getPrimaryType } from '../businessTypeHelpers';
 
 // =============================================================================
 // LOCKED PRINCIPLE:
@@ -359,7 +360,7 @@ function applyBusinessTypePriors(inputs: StrategyDeductionInputs, offeringId: Of
   // Priors are mild and MUST NOT override eligibility thresholds.
   let adjusted = combinedScore;
 
-  const isBarContext = inputs.businessType === 'bar' && inputs.hours.hasLateNight && inputs.menu.hasAlcohol;
+  const isBarContext = getPrimaryType(inputs.businessType) === 'bar' && inputs.hours.hasLateNight && inputs.menu.hasAlcohol;
   if (!isBarContext) return adjusted;
 
   const barPatterns: OfferingId[] = ['late_night_bar', 'cocktails_social', 'craft_beer_bar'];

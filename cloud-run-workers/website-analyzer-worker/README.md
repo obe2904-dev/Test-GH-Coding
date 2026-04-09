@@ -53,8 +53,9 @@ gcloud run deploy website-analyzer-worker \
   --memory 2Gi \
   --cpu 2 \
   --timeout 300 \
+  --min-instances 0 \
   --max-instances 10 \
-  --set-env-vars="SUPABASE_URL=${SUPABASE_URL},SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_KEY},OPENAI_API_KEY=${OPENAI_KEY}"
+  --set-env-vars="SUPABASE_URL=${SUPABASE_URL},SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_KEY},OPENAI_API_KEY=${OPENAI_KEY},WORKER_BACKGROUND_POLL_ENABLED=false"
 ```
 
 ## 📊 Database Setup

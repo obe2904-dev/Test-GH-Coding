@@ -1,4 +1,4 @@
-import { getPhrasesForLocale } from '../../../../../config/i18n'
+import { getPhrasesForLocale } from '../../i18n/index.ts'
 
 /**
  * Render canonical location phrase for given area type and locale.

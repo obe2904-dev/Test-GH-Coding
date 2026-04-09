@@ -21,6 +21,36 @@ import { extractMenu } from '../_shared/ai-extractors/menu-extractor.ts'
 import { extractVenueHooks } from '../_shared/ai-extractors/venue-hooks-extractor.ts'
 import { extractExperiencePillars } from '../_shared/ai-extractors/experience-pillars-extractor.ts'
 import { extractVisualVenueHooks } from '../_shared/ai-extractors/visual-venue-hooks-extractor.ts'
+import { extractMenuSignal } from '../_shared/ai-extractors/menu-signal-extractor.ts'
+import { extractToneOfVoice, formatToneAsText } from '../_shared/ai-extractors/tone-of-voice-extractor.ts'
+
+// Import business type helpers
+import { getPrimaryType, getBusinessTypeLabel } from '../_shared/business-type-helpers.ts'
+import { getExtractorModel } from '../_shared/ai-config.ts'
+
+// Import HTML helpers
+import {
+  extractImageSignals,
+  extractImageUrls,
+  isHospitalityBusiness,
+  isVisualPageCandidate,
+  extractHeroSignalsFromCleanText,
+  extractAboutBlock,
+  needsAdvancedScraping
+} from '../_shared/crawling/html-helpers.ts'
+
+// Import link classification
+import { classifyAndExtractLinks } from '../_shared/crawling/link-classifier.ts'
+import type { Link, ClassifiedLink } from '../_shared/crawling/link-classifier.ts'
+
+// Import website scraping
+import { scrapeWebsite } from '../_shared/crawling/website-scraper.ts'
+
+// Import database persistence
+import { saveWebsiteAnalysis } from '../_shared/persistence/website-analysis-saver.ts'
+
+// Import OpenAI for tone of voice extraction
+import OpenAI from 'https://esm.sh/openai@4.68.4'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -58,13 +88,13 @@ serve(async (req: any) => {
     // Determine AI model based on subscription tier (centralized configuration)
     const getAIModel = (userTier: string | undefined): string => {
       const tierModelMap: Record<string, string> = {
-        'free': 'gpt-4o', // Upgraded from mini for better extraction
-        'standardplus': 'gpt-4o', // Upgraded from mini for better extraction
+        'free': 'gpt-4o-mini', // Cost optimization: ~90% cheaper than gpt-4o
+        'standardplus': 'gpt-4o',
         'standard_plus': 'gpt-4o', // Handle underscore variant
         'premium': 'gpt-4o',
       }
       
-      return tierModelMap[userTier || 'free'] || 'gpt-4o'
+      return tierModelMap[userTier || 'free'] || 'gpt-4o-mini'
     }
     
     const aiModel = getAIModel(tier)
@@ -82,11 +112,11 @@ serve(async (req: any) => {
         description: string
       }> = {
         'free': {
-          maxPriorityPages: 1, // Homepage + 1 priority page (ABOUT or MENU)
-          maxContentChars: 140000, // Homepage (120KB) + 1 page (20KB)
+          maxPriorityPages: 3, // Homepage + About + Menu + Contact for comprehensive free analysis
+          maxContentChars: 180000, // Homepage (120KB) + 3 pages (20KB each)
           allowPdfParsing: false,
           allowAiLinkClassification: false,
-          description: 'Homepage + 1 priority page for better context'
+          description: 'Homepage + About + Menu + Contact (3 priority pages)'
         },
         'standardplus': {
           maxPriorityPages: 3,
@@ -136,211 +166,10 @@ serve(async (req: any) => {
       if (s === 'HOMEPAGE') return 'HOMEPAGE'
       return 'OTHER'
     }
-
-    const extractImageSignals = (html: string, pageUrl: string): string[] => {
-      if (!html) return []
-
-      const tags = html.match(/<img\b[^>]*>/gi) || []
-      const lines: string[] = []
-
-      for (const tag of tags.slice(0, 80)) {
-        const attrs: Record<string, string> = {}
-        const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(["'])(.*?)\2/g
-        let m: RegExpExecArray | null
-        while ((m = attrRe.exec(tag)) !== null) {
-          attrs[m[1].toLowerCase()] = (m[3] || '').trim()
-        }
-
-        const alt = (attrs['alt'] || '').trim()
-        const title = (attrs['title'] || '').trim()
-        const aria = (attrs['aria-label'] || '').trim()
-
-        const srcRaw = (attrs['src'] || attrs['data-src'] || attrs['data-original'] || '').trim()
-        if (!alt && !title && !aria && !srcRaw) continue
-        if (srcRaw.startsWith('data:')) continue
-
-        let absSrc = srcRaw
-        try {
-          if (srcRaw) absSrc = new URL(srcRaw, pageUrl).toString()
-        } catch {
-          // keep raw
-        }
-
-        let fileName = ''
-        try {
-          const u = new URL(absSrc)
-          const last = u.pathname.split('/').pop() || ''
-          fileName = decodeURIComponent(last)
-        } catch {
-          const last = absSrc.split('/').pop() || ''
-          fileName = last.split('?')[0] || ''
-        }
-
-        // Prefer concrete signals: alt/aria/title and filename.
-        const label = alt || aria || title
-        const normalizedFile = (fileName || '').replace(/\s+/g, ' ').trim()
-        const normalizedLabel = (label || '').replace(/\s+/g, ' ').trim()
-
-        const parts: string[] = []
-        if (normalizedLabel) parts.push(`alt: "${normalizedLabel}"`)
-        if (normalizedFile) parts.push(`file: "${normalizedFile}"`)
-        if (!normalizedLabel && absSrc) parts.push(`src: "${absSrc}"`)
-
-        if (parts.length === 0) continue
-        const line = `- IMG ${parts.join(' | ')}`
-        if (!lines.includes(line)) lines.push(line)
-        if (lines.length >= 25) break
-      }
-
-      return lines
-    }
-
-    const extractImageUrls = (html: string, pageUrl: string): string[] => {
-      if (!html) return []
-
-      const urls: string[] = []
-
-      // 1) OpenGraph/Twitter images
-      const metaMatches = html.matchAll(
-        /<meta\s+[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/gi
-      )
-      for (const m of Array.from(metaMatches).slice(0, 3)) {
-        const raw = (m[1] || '').trim()
-        if (!raw) continue
-        try {
-          urls.push(new URL(raw, pageUrl).toString())
-        } catch {
-          urls.push(raw)
-        }
-      }
-
-      const twitterMatches = html.matchAll(
-        /<meta\s+[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["'][^>]*>/gi
-      )
-      for (const m of Array.from(twitterMatches).slice(0, 2)) {
-        const raw = (m[1] || '').trim()
-        if (!raw) continue
-        try {
-          urls.push(new URL(raw, pageUrl).toString())
-        } catch {
-          urls.push(raw)
-        }
-      }
-
-      // 2) <img> src/data-src
-      const tags = html.match(/<img\b[^>]*>/gi) || []
-      for (const tag of tags.slice(0, 60)) {
-        const attrRe = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(["'])(.*?)\2/g
-        const attrs: Record<string, string> = {}
-        let m: RegExpExecArray | null
-        while ((m = attrRe.exec(tag)) !== null) {
-          attrs[m[1].toLowerCase()] = (m[3] || '').trim()
-        }
-        const srcRaw = (attrs['src'] || attrs['data-src'] || attrs['data-original'] || '').trim()
-        if (!srcRaw || srcRaw.startsWith('data:')) continue
-
-        let abs = srcRaw
-        try {
-          abs = new URL(srcRaw, pageUrl).toString()
-        } catch {
-          // keep raw
-        }
-        urls.push(abs)
-      }
-
-      // De-dupe while preserving order
-      const seen = new Set<string>()
-      const out: string[] = []
-      for (const u of urls) {
-        const s = String(u || '').trim()
-        if (!s) continue
-        if (seen.has(s)) continue
-        seen.add(s)
-        out.push(s)
-        if (out.length >= 20) break
-      }
-      return out
-    }
-
-    const isHospitalityBusiness = (value: unknown): boolean => {
-      const s = String(value || '').toLowerCase()
-      return [
-        'restaurant',
-        'cafe',
-        'café',
-        'bar',
-        'bistro',
-        'brasserie',
-        'cocktail',
-        'vinbar',
-        'wine',
-        'pizza',
-        'burger',
-        'brunch',
-      ].some((k) => s.includes(k))
-    }
-
-    const isVisualPageCandidate = (href: string, text: string, ariaLabel: string, title: string): boolean => {
-      const lower = [href, text, ariaLabel, title].join(' ').toLowerCase()
-      const patterns = [
-        'kig-indenfor',
-        'kig indenfor',
-        'indenfor',
-        'galleri',
-        'gallery',
-        'foto',
-        'fotos',
-        'billeder',
-        'stemning',
-        'interiør',
-        'interior',
-        'our space',
-      ]
-      return patterns.some((p) => lower.includes(p))
-    }
-
-    const extractHeroSignalsFromCleanText = (pageText: string): string => {
-      if (!pageText) return ''
-      const lines = pageText.split('\n').map((l) => l.trim()).filter(Boolean)
-      if (lines.length === 0) return ''
-
-      // Prefer the first few semantic heading markers and a couple lines after each.
-      const collected: string[] = []
-      const maxHeadings = 3
-      let headingsSeen = 0
-
-      for (let i = 0; i < lines.length && headingsSeen < maxHeadings; i++) {
-        const line = lines[i]
-        const isHeading =
-          line.startsWith('### H1:') ||
-          line.startsWith('## H2:') ||
-          line.startsWith('# H3:')
-
-        if (!isHeading) continue
-
-        headingsSeen++
-        if (!collected.includes(line)) collected.push(line)
-
-        // Add up to 2 following non-heading lines as context.
-        let added = 0
-        for (let j = i + 1; j < lines.length && added < 2; j++) {
-          const next = lines[j]
-          if (next.startsWith('### H1:') || next.startsWith('## H2:') || next.startsWith('# H3:')) break
-          if (next.length < 3) continue
-          const snippet = next.length > 180 ? next.slice(0, 180) + '…' : next
-          collected.push(`  ${snippet}`)
-          added++
-        }
-      }
-
-      if (collected.length === 0) {
-        // Fallback: first 3 meaningful lines
-        const fallback = lines.slice(0, 3).map((l) => (l.length > 180 ? l.slice(0, 180) + '…' : l))
-        return fallback.length > 0 ? `HERO SIGNALS:\n${fallback.map((l) => `- ${l}`).join('\n')}` : ''
-      }
-
-      return `HERO SIGNALS:\n${collected.map((l) => `- ${l}`).join('\n')}`
-    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DATA STRUCTURES - State variables for crawl results
+    // ═══════════════════════════════════════════════════════════════════════════
     
     const crawledPages: PageData[] = []
     let websiteContent = ''
@@ -364,63 +193,17 @@ serve(async (req: any) => {
       const baseDomain = baseUrl.hostname
       baseDomainForCrawl = baseDomain
       
-      console.log('🌐 Fetching homepage:', url)
+      // ══════════════════════════════════════════════════════════════════════════════
+      // STEP 1: Fetch homepage HTML
+      // ══════════════════════════════════════════════════════════════════════════════
       
-      // Create abort controller for timeout
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+      const scraperWorkerUrl = Deno.env.get('SCRAPER_WORKER_URL')
+      const workerToken = Deno.env.get('WORKER_TRIGGER_TOKEN') || ''
       
-      let homepageResp
-      try {
-        // Fetch homepage (depth 0) with more complete headers
-        homepageResp = await fetch(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'da,en-US;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Cache-Control': 'max-age=0'
-          },
-          signal: controller.signal
-        })
-        
-        clearTimeout(timeoutId)
-      
-        console.log('📡 Homepage response status:', homepageResp.status)
-        
-        if (!homepageResp.ok) {
-          throw new Error(`Failed to fetch website: ${homepageResp.status} ${homepageResp.statusText}`)
-        }
-      } catch (fetchError: any) {
-        clearTimeout(timeoutId)
-        
-        // Provide more specific error messages
-        if (fetchError.name === 'AbortError') {
-          throw new Error(`Website took too long to respond (timeout after 15 seconds)`)
-        }
-        
-        // Handle connection errors with helpful messages
-        const errorMsg = fetchError.message || String(fetchError)
-        if (errorMsg.includes('Connection reset') || errorMsg.includes('ECONNRESET')) {
-          throw new Error(`Website refused connection. The site may be blocking automated requests or temporarily unavailable.`)
-        }
-        if (errorMsg.includes('ETIMEDOUT') || errorMsg.includes('timeout')) {
-          throw new Error(`Website connection timed out. The site may be slow or temporarily unavailable.`)
-        }
-        if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('getaddrinfo')) {
-          throw new Error(`Website not found. Please check the URL is correct.`)
-        }
-        
-        throw new Error(`Could not connect to website: ${errorMsg}`)
-      }
-      
-      let homepageHtml = await homepageResp.text()
-      console.log('📄 Homepage HTML length:', homepageHtml.length)
+      let homepageHtml = (await scrapeWebsite(url, {
+        scraperWorkerUrl,
+        workerToken
+      })).html
       
       // Extract HTML lang attribute for language detection (before truncation)
       const langMatch = homepageHtml.match(/<html[^>]*\slang=["']([a-zA-Z-]+)["']/i)
@@ -444,86 +227,6 @@ serve(async (req: any) => {
       metadata = extractMetadata(homepageHtml)
 
       // Extract "about block" candidate from homepage for better description
-      const extractAboutBlock = (html: string): string => {
-        // Danish keywords (prioritized) - check these first
-        const danishKeywords = [
-          'velkommen', 'om os', 'vores', 'vi er', 'hos os',
-          'restaurant', 'café', 'køkken', 'brunch', 'frokost',
-          'historie', 'tradition', 'passion', 'filosofi',
-          'åbent', 'beliggende', 'serverer', 'tilbyder'
-        ]
-        
-        // English keywords (fallback)
-        const englishKeywords = [
-          'welcome', 'about us', 'about', 'our', 'we are', 'at our',
-          'kitchen', 'story', 'philosophy', 'offers', 'serves'
-        ]
-        
-        // Combined for matching
-        const aboutKeywords = [...danishKeywords, ...englishKeywords]
-        
-        // Helper to check if text is likely Danish (contains æ, ø, å or common Danish words)
-        const isDanish = (text: string): boolean => {
-          const lower = text.toLowerCase()
-          return /[æøå]/.test(lower) || 
-                 danishKeywords.some(kw => lower.includes(kw)) ||
-                 /\b(og|til|med|fra|den|det|er|på|i)\b/.test(lower)
-        }
-        
-        const candidates: Array<{text: string; isDanish: boolean}> = []
-        
-        // Try to find content after H1/H2 headings
-        const headingBlocks = html.matchAll(/<h[12][^>]*>([\s\S]*?)<\/h[12]>([\s\S]{0,1500}?)(?=<h[12]|<footer|<nav|$)/gi)
-        for (const match of headingBlocks) {
-          const headingText = match[1].replace(/<[^>]*>/g, '').toLowerCase()
-          const followingContent = match[2].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-          
-          // Check if heading or content contains about keywords
-          const combined = (headingText + ' ' + followingContent).toLowerCase()
-          if (aboutKeywords.some(kw => combined.includes(kw)) && followingContent.length > 50) {
-            // Return first 2-3 sentences (up to 500 chars)
-            const sentences = followingContent.match(/[^.!?]+[.!?]+/g) || []
-            const result = sentences.slice(0, 3).join(' ').slice(0, 500).trim()
-            if (result.length > 50) {
-              candidates.push({ text: result, isDanish: isDanish(result) })
-            }
-          }
-        }
-        
-        // Fallback: Look for paragraphs containing about keywords
-        const paragraphs = html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)
-        for (const match of paragraphs) {
-          const text = match[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-          if (text.length > 80 && text.length < 800) {
-            const lower = text.toLowerCase()
-            if (aboutKeywords.some(kw => lower.includes(kw))) {
-              // Return first 2-3 sentences
-              const sentences = text.match(/[^.!?]+[.!?]+/g) || []
-              const result = sentences.slice(0, 3).join(' ').slice(0, 500).trim()
-              if (result.length > 50) {
-                candidates.push({ text: result, isDanish: isDanish(result) })
-              }
-            }
-          }
-        }
-        
-        // Prioritize Danish content over English
-        const danishCandidate = candidates.find(c => c.isDanish)
-        if (danishCandidate) {
-          console.log('📝 Found Danish about text (prioritized)')
-          return danishCandidate.text
-        }
-        
-        // Fallback to first candidate (even if English)
-        if (candidates.length > 0) {
-          console.log('📝 Using first about text candidate (no Danish found)')
-          return candidates[0].text
-        }
-        
-        // Last fallback: Use meta description if available
-        return ''
-      }
-      
       homepageAboutCandidate = extractAboutBlock(homepageHtml)
       if (homepageAboutCandidate) {
         console.log('📝 Pre-extracted about block:', homepageAboutCandidate.slice(0, 100) + '...')
@@ -682,255 +385,26 @@ serve(async (req: any) => {
       
       console.log('🔗 Found links (internal + external):', links.length)
       
-      // Known booking platform domains (for external booking links)
-      const bookingPlatformDomains = [
-        'dinnerbooking.com',
-        'thefork.com',
-        'quandoo.dk',
-        'quandoo.com',
-        'opentable.com',
-        'eatapp.co',
-        'resmio.com',
-        'menoo.dk',
-        'bordbooking.dk',
-        'tableonline.dk',
-        'resengo.com',
-        'bookatable.dk',
-        'superbexperience.com',  // SuperB booking platform
-        'booksy.com',            // Popular for beauty/wellness
-        'fresha.com',            // Beauty/wellness booking
-        'treatwell.com',         // Beauty/wellness booking
-      ]
+      // ══════════════════════════════════════════════════════════════════════════════
+      // STEP 4: Classify links and extract special URLs
+      // ══════════════════════════════════════════════════════════════════════════════
       
-      // Classify links using all available signals
-      const classifyLink = (href: string, text: string, ariaLabel: string = '', title: string = '') => {
-        // Combine all signals for better classification
-        const lower = [href, text, ariaLabel, title].join(' ').toLowerCase()
-        
-        // 1) Explicit cancel/afbestilling detection
-        const cancelPatterns = ['afbestilling', 'aflys', 'cancel', 'cancellation']
-        if (cancelPatterns.some(p => lower.includes(p))) {
-          return 'CANCEL'
-        }
-        
-        // 2) Ignore junk pages
-        const ignorePatterns = [
-          'cookie',
-          'privacy',
-          'persondata',
-          'gdpr',
-          'terms',
-          'vilkår',
-          'betingelser',
-          'faq',
-          'jobs',
-          'karriere',
-          'job',
-          'career',
-        ]
-        if (ignorePatterns.some(p => lower.includes(p))) {
-          return 'IGNORE'
-        }
-        
-        // 3) Booking pages – check BEFORE menu to avoid "dinnerbooking" matching "dinner"
-        const bookingRegexes = [
-          /\bbook\b/i,
-          /\bbooking\b/i,
-          /\breservation\b/i,
-          /\breserver\b/i,
-          /\bbestil bord\b/i,
-          /\bbook bord\b/i,
-          /\bbestil tid\b/i,
-          /dinnerbooking/i,  // Explicit booking platform
-        ]
-        
-        if (bookingRegexes.some(re => re.test(lower))) {
-          return 'BOOKING'
-        }
-        
-        // 4) Menu pages - expanded Danish patterns (checked AFTER booking)
-        const menuPatterns = [
-          'menu', 'menukort', 'mad', 'drikke', 'food', 'drinks', 'spise', 'eat',
-          'cocktail', 'vin', 'wine', 'øl', 'beer', 'brunch', 'frokost', 'aften',
-          'julefrokost', 'julemenu', 'morgenmad', 'breakfast', 'lunch',
-          'dessert', 'snack', 'tapas', 'smørrebrød', 'buffet'
-        ]
-        // Use word boundary for 'dinner' to avoid matching 'dinnerbooking'
-        const isDinnerMenu = /\bdinner\b/i.test(lower) && !lower.includes('booking')
-        
-        if (menuPatterns.some(p => lower.includes(p)) || isDinnerMenu) {
-          return 'MENU'
-        }
-        
-        // 5) Contact pages
-        const contactPatterns = ['contact', 'kontakt', 'find', 'location', 'adresse', 'address']
-        if (contactPatterns.some(p => lower.includes(p))) {
-          return 'CONTACT'
-        }
-        
-        // 6) About pages
-        const aboutPatterns = ['about', 'om', 'story', 'historie', 'who', 'hvem']
-        if (aboutPatterns.some(p => lower.includes(p))) {
-          return 'ABOUT'
-        }
-        
-        return 'OTHER'
-      }
-      
-      // Classify internal links + external booking platform links
-      const internalLinks = links.filter(l => l.isInternal)
-      const externalBookingLinks = links.filter(l => 
-        !l.isInternal && bookingPlatformDomains.some(domain => l.href.includes(domain))
-      )
-      
-      // Combine for classification
-      const linksToClassify = [...internalLinks, ...externalBookingLinks]
-      
-      classifiedLinks = linksToClassify.map(link => ({
-        ...link,
-        type: classifyLink(link.href, link.text, link.ariaLabel, link.title)
-      }))
-      
-      console.log('📋 Link classification:', {
-        menu: classifiedLinks.filter(l => l.type === 'MENU').length,
-        booking: classifiedLinks.filter(l => l.type === 'BOOKING').length,
-        cancel: classifiedLinks.filter(l => l.type === 'CANCEL').length,
-        contact: classifiedLinks.filter(l => l.type === 'CONTACT').length,
-        about: classifiedLinks.filter(l => l.type === 'ABOUT').length,
-        other: classifiedLinks.filter(l => l.type === 'OTHER').length,
-        ignored: classifiedLinks.filter(l => l.type === 'IGNORE').length
+      const linkClassificationResult = await classifyAndExtractLinks(links as Link[], {
+        allowAiClassification: tierConfig.allowAiLinkClassification,
+        aiModel,
+        openaiApiKey: Deno.env.get('OPENAI_API_KEY')
       })
       
-      // AI classification for unclear links (type === 'OTHER')
-      const unclearLinks = classifiedLinks.filter(l => l.type === 'OTHER')
-      
-      if (unclearLinks.length > 0 && tierConfig.allowAiLinkClassification) {
-        console.log('🤔 Found unclear links:', unclearLinks.length, '- calling AI for classification...')
-        
-        try {
-          const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
-          if (openaiApiKey) {
-            const linkClassificationPrompt = `Classify these website links into categories: MENU, BOOKING, CONTACT, ABOUT, or IGNORE.
-
-Links to classify:
-${unclearLinks.map((l, idx) => `${idx + 1}. URL: ${l.href}\n   Text: "${l.text}"`).join('\n')}
-
-Return a JSON array with the same order:
-[
-  {"index": 0, "type": "MENU|BOOKING|CONTACT|ABOUT|IGNORE"},
-  {"index": 1, "type": "..."}
-]
-
-Categories:
-- MENU: Menu, food/drink listings
-- BOOKING: Reservations, table booking, appointments
-- CONTACT: Contact info, location, map
-- ABOUT: About us, history, team
-- IGNORE: Not relevant (privacy, terms, social media links, etc.)`
-
-            const aiClassifyResp = await fetch('https://api.openai.com/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${openaiApiKey}`
-              },
-              body: JSON.stringify({
-                model: aiModel,
-                messages: [
-                  { role: 'system', content: 'You are a link classifier. Return only valid JSON.' },
-                  { role: 'user', content: linkClassificationPrompt }
-                ],
-                temperature: 0.1,
-                max_tokens: 500,
-                response_format: { type: 'json_object' }
-              })
-            })
-
-            if (aiClassifyResp.ok) {
-              const aiData = await aiClassifyResp.json()
-              const aiContent = aiData?.choices?.[0]?.message?.content
-              
-              if (aiContent) {
-                const cleanedContent = aiContent
-                  .replace(/```json\n?/g, '')
-                  .replace(/```\n?/g, '')
-                  .trim()
-                
-                const classifications = JSON.parse(cleanedContent)
-                const classArray = Array.isArray(classifications) ? classifications : (classifications.classifications || [])
-                
-                console.log('🤖 AI classified:', classArray.length, 'links')
-                
-                // Update classifications
-                classArray.forEach((item: any) => {
-                  const idx = item.index
-                  if (idx >= 0 && idx < unclearLinks.length) {
-                    const link = unclearLinks[idx]
-                    const originalIdx = classifiedLinks.findIndex(l => l.href === link.href)
-                    if (originalIdx >= 0 && item.type !== 'IGNORE') {
-                      classifiedLinks[originalIdx].type = item.type
-                      console.log(`  ✨ Reclassified: ${link.href} → ${item.type}`)
-                    }
-                  }
-                })
-              }
-            }
-          }
-        } catch (aiError) {
-          console.log('⚠️ AI classification failed, using pattern-only results:', aiError)
-        }
-      }
-      
-      // Extract special URLs (after AI reclassification)
-      // Collect ALL menu URLs (not just the first one) - deduplicated
-      const uniqueMenuUrls = new Set(
-        classifiedLinks
-          .filter(l => l.type === 'MENU')
-          .map(l => l.href)
-      )
-      
-      allMenuUrls = Array.from(uniqueMenuUrls)
-        .sort((a, b) => {
-          // Deprioritize URLs containing 'english' - put them at the end
-          const aIsEnglish = a.toLowerCase().includes('english')
-          const bIsEnglish = b.toLowerCase().includes('english')
-          if (aIsEnglish && !bIsEnglish) return 1  // a goes after b
-          if (!aIsEnglish && bIsEnglish) return -1 // a goes before b
-          return 0 // maintain original order
-        })
-      
+      classifiedLinks = linkClassificationResult.classifiedLinks as typeof classifiedLinks
+      allMenuUrls = linkClassificationResult.menuUrls
       menuUrl = allMenuUrls[0] || null // Keep first one for backward compatibility
-      
-      console.log('🍽️ Found menu URLs:', allMenuUrls.length, allMenuUrls)
-      
-      const bookingCandidates = classifiedLinks.filter(l => l.type === 'BOOKING')
-      
-      console.log('🔖 Booking candidates found:', bookingCandidates.length, bookingCandidates.map(c => ({ href: c.href, text: c.text })))
-      
-      // Prefer external booking providers first (already included in classifiedLinks)
-      const externalBooking = bookingCandidates.find(l =>
-        bookingPlatformDomains.some(domain => l.href.includes(domain))
-      )
-      
-      // Fallback: any booking candidate
-      bookingUrl = externalBooking?.href || bookingCandidates[0]?.href || null
-      
-      // Collect detected PDF files for consent workflow
-      for (const link of classifiedLinks) {
-        if (link.href.toLowerCase().endsWith('.pdf') && ['MENU', 'ABOUT'].includes(link.type)) {
-          const urlParts = link.href.split('/')
-          const fileName = urlParts[urlParts.length - 1] || 'document.pdf'
-          detectedPDFs.push({
-            url: link.href,
-            type: link.type,
-            name: fileName
-          })
-        }
-      }
+      bookingUrl = linkClassificationResult.bookingUrl
+      detectedPDFs.push(...linkClassificationResult.detectedPDFs as typeof detectedPDFs)
       
       console.log('🎯 Final detected URLs:', { menuUrl, bookingUrl, detectedPDFs: detectedPDFs.length })
       
       // Store homepage
+      const internalLinks = links.filter(l => l.isInternal)
       crawledPages.push({
         url: url,
         html: homepageHtml,
@@ -1226,6 +700,8 @@ Categories:
     console.log('🚀 Starting parallel AI extraction with specialized models...')
     
     let analysisResult: any = {}
+    let menuSignal: any = null
+    let toneOfVoice: any = null
     
     try {
       // Run 3 extractors in parallel (basic, contact, keywords use cheap model)
@@ -1259,7 +735,11 @@ Categories:
         console.log('🖼️ Vision image candidates:', imageUrlsForVision.length)
       }
 
-      const [basicInfo, contactInfo, keywords, venueHooksRaw, experiencePillars, visualVenueHooks] = await Promise.all([
+      // Create OpenAI client for tone extraction
+      const openaiClient = new OpenAI({ apiKey: openaiApiKey })
+      const isPaidTier = tier === 'standardplus' || tier === 'premium'
+
+      const [basicInfo, contactInfo, keywords, venueHooksRaw, experiencePillars, visualVenueHooks, extractedMenuSignal, extractedToneOfVoice] = await Promise.all([
         extractBasicInfo(
           websiteContent,
           metadata,
@@ -1296,10 +776,36 @@ Categories:
               openaiApiKey,
               { businessName: businessName || null, businessType: businessType || null, languageHint: htmlLang || null }
             )
-          : Promise.resolve({ uniqueHooks: [] })
+          : Promise.resolve({ uniqueHooks: [] }),
+        // NEW: Menu signal extraction (Gemini 2.5 Flash - all tiers)
+        extractMenuSignal(
+          websiteContent,
+          { 
+            businessName: businessName || null, 
+            businessType: getPrimaryType(businessType),
+            languageHint: htmlLang || null
+          }
+        ),
+        // NEW: Tone of voice extraction (GPT-4o-mini for Free, GPT-4o for Paid)
+        extractToneOfVoice(
+          websiteContent,
+          getExtractorModel('toneOfVoice', tier || 'free'),
+          openaiClient,
+          { 
+            businessName: businessName || null, 
+            businessType: getPrimaryType(businessType),
+            languageHint: htmlLang || null
+          }
+        )
       ])
 
-      console.log('✅ Parallel extraction complete (6/6 extractors)')
+      // Assign to outer scope variables so they're accessible outside try block
+      menuSignal = extractedMenuSignal
+      toneOfVoice = extractedToneOfVoice
+
+      console.log('✅ Parallel extraction complete (8/8 extractors)')
+      console.log('🍽️ Menu signal extracted:', JSON.stringify(menuSignal, null, 2))
+      console.log('🎤 Tone of voice extracted:', toneOfVoice ? '✅' : '❌')
 
       // Normalize + merge venue hooks so downstream can rely on `.text`
       const normalizeVenueHooks = (payload: any): any => {
@@ -1393,8 +899,10 @@ Categories:
       // Extract service model from website content with smart prioritization
       const contentLower = websiteContent.toLowerCase()
       const businessTypeDetected = basicInfo.businessType || businessType || ''
-      const isRestaurant = businessTypeDetected.toLowerCase().includes('restaurant') || 
-                          businessTypeDetected.toLowerCase().includes('cafe')
+      // Use getPrimaryType to handle both string and hybrid businessType
+      const businessTypeString = getPrimaryType(businessTypeDetected)
+      const isRestaurant = businessTypeString.toLowerCase().includes('restaurant') || 
+                          businessTypeString.toLowerCase().includes('cafe')
       
       // For restaurants/cafes, assume table service unless explicitly stated otherwise
       let hasTableService = isRestaurant || 
@@ -1450,7 +958,8 @@ Categories:
       analysisResult = {
         // Basic info
         businessName: basicInfo.businessName,
-        businessType: basicInfo.businessType,
+        businessType: basicInfo.businessType, // Now supports hybrid structure
+        businessTypeLabel: getBusinessTypeLabel(basicInfo.businessType), // Display label for UI
         shortDescription: basicInfo.description, // Homepage "about" text for Om forretningen tab
         logoUrl: basicInfo.logoUrl,
         
@@ -1482,7 +991,13 @@ Categories:
         experiencePillars: experiencePillars,
         
         // Opening hours (pre-extracted)
-        openingHours: extractedHours || {}
+        openingHours: extractedHours || {},
+
+        // NEW: Menu signal (lightweight menu overview - all tiers)
+        menuSignal: menuSignal || null,
+
+        // NEW: Tone of voice (brand voice analysis - all tiers)
+        toneOfVoice: toneOfVoice || null
       }
 
       // DEBUG MODE: Return comprehensive extraction data
@@ -1581,24 +1096,27 @@ Categories:
       console.log('📄 Detected PDFs for potential storage:', detectedPDFs.length)
     }
 
-    const persistenceMeta: {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DATABASE PERSISTENCE - Save analysis results to database
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    let persistenceMeta: {
       attempted: boolean
       businessId?: string
       lastRunAt?: string
-      updated: boolean
-      inserted: boolean
+      updated?: boolean
+      inserted?: boolean
       error?: string
       note?: string
+      success?: boolean
     } = {
       attempted: false,
       updated: false,
       inserted: false,
     }
     
-    // PERSIST TO DATABASE (if businessId provided)
     if (businessId) {
       console.log('💾 Persisting analysis to database for business:', businessId)
-
       persistenceMeta.attempted = true
       persistenceMeta.businessId = businessId
       
@@ -1607,7 +1125,6 @@ Categories:
         const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
         const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
         const authHeader = req.headers.get('Authorization')
-        
         const supabaseKey = supabaseServiceKey || supabaseAnonKey
 
         if (supabaseUrl && supabaseKey) {
@@ -1617,224 +1134,27 @@ Categories:
             },
           })
 
-          if (supabaseServiceKey) {
-            console.log('🔑 Persisting with service role key')
-          } else {
-            console.log('🔑 Persisting with anon key (caller auth header present:', !!authHeader, ')')
-          }
+          // Use new persistence module
+          const result = await saveWebsiteAnalysis({
+            businessId,
+            url,
+            analysisResult,
+            bookingUrl,
+            menuExtraction,
+            menuSignal,
+            toneOfVoice,
+            supabase,
+            authHeader
+          })
 
-          // Merge into existing raw_result (if any) so we don't clobber older shapes.
-          let mergedRawResult: Record<string, any> = {
-            analysis: { ...analysisResult },
-          }
-
-          const { data: existingWA, error: existingWAError } = await supabase
-            .from('website_analyses')
-            .select('raw_result')
-            .eq('business_id', businessId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-
-          if (existingWAError) {
-            console.warn('⚠️ Could not read existing website_analyses.raw_result (will overwrite analysis only):', existingWAError.message)
-          } else if (existingWA?.raw_result && typeof existingWA.raw_result === 'object') {
-            const existingRawResult = existingWA.raw_result as Record<string, any>
-            const existingAnalysis = (existingRawResult.analysis && typeof existingRawResult.analysis === 'object')
-              ? (existingRawResult.analysis as Record<string, any>)
-              : {}
-
-            mergedRawResult = {
-              ...existingRawResult,
-              analysis: {
-                ...existingAnalysis,
-                ...analysisResult,
-              },
-            }
-          }
-          
-          // 1. Save to website_analyses (update latest by business_id; insert if missing)
-          const runAt = new Date().toISOString()
-          const websiteAnalysisUpdate = {
-            source_url: url,
-            status: 'success',
-            last_run_at: runAt,
-            raw_result: mergedRawResult,
-          }
-          persistenceMeta.lastRunAt = runAt
-
-          const { data: updatedRows, error: waUpdateError } = await supabase
-            .from('website_analyses')
-            .update(websiteAnalysisUpdate)
-            .eq('business_id', businessId)
-            .select('id')
-
-          if (waUpdateError) {
-            console.warn('⚠️ Failed to update website_analyses:', waUpdateError.message)
-            persistenceMeta.error = `update_failed: ${waUpdateError.message}`
-          }
-
-          if (!waUpdateError && updatedRows && updatedRows.length > 0) {
-            console.log('✅ Updated website_analyses')
-            persistenceMeta.updated = true
-          } else {
-            const { error: waInsertError } = await supabase
-              .from('website_analyses')
-              .insert({
-                business_id: businessId,
-                ...websiteAnalysisUpdate,
-              })
-
-            if (waInsertError) {
-              console.warn('⚠️ Failed to insert website_analyses:', waInsertError.message)
-              persistenceMeta.error = `insert_failed: ${waInsertError.message}`
-            } else {
-              console.log('✅ Inserted website_analyses')
-              persistenceMeta.inserted = true
-            }
-          }
-
-          // 2. Upsert to business_profile (short_description, keywords, menu_structure, booking_url)
-          const profileData: Record<string, any> = {
-            business_id: businessId,
-            updated_at: new Date().toISOString()
-          }
-          
-          if (analysisResult.shortDescription) {
-            profileData.short_description = analysisResult.shortDescription
-          }
-          if (analysisResult.keywords?.length > 0) {
-            profileData.keywords = analysisResult.keywords
-          }
-          if (menuExtraction && menuExtraction.menuStructure && menuExtraction.menuStructure.length > 0) {
-            profileData.menu_structure = menuExtraction.menuStructure
-          }
-          // Add booking URL if detected (for CTA buttons)
-          if (bookingUrl) {
-            profileData.booking_url = bookingUrl
-            console.log('🎫 Saving booking URL to profile:', bookingUrl)
-          }
-          
-          const { error: bpError } = await supabase
-            .from('business_profile')
-            .upsert(profileData, { onConflict: 'business_id' })
-          
-          if (bpError) {
-            console.warn('⚠️ Failed to save business_profile:', bpError.message)
-          } else {
-            console.log('✅ Saved to business_profile')
-          }
-          
-          // 3. Update contact in business_locations (if contact info extracted)
-          if (analysisResult.contact) {
-            const contact = analysisResult.contact
-            const locationUpdateData: Record<string, any> = {}
-            
-            if (contact.phone) locationUpdateData.phone = contact.phone
-            if (contact.email) locationUpdateData.email = contact.email
-            if (contact.address) {
-              if (typeof contact.address === 'string') {
-                locationUpdateData.address_line1 = contact.address
-              } else {
-                if (contact.address.street) locationUpdateData.address_line1 = contact.address.street
-                if (contact.address.city) locationUpdateData.city = contact.address.city
-                if (contact.address.postalCode) locationUpdateData.postal_code = contact.address.postalCode
-                if (contact.address.country) locationUpdateData.country = contact.address.country
-              }
-            }
-            
-            // Only update if we have some contact data
-            if (Object.keys(locationUpdateData).length > 0) {
-              // First check if primary location exists
-              const { data: existingLoc } = await supabase
-                .from('business_locations')
-                .select('id')
-                .eq('business_id', businessId)
-                .eq('is_primary', true)
-                .maybeSingle()
-              
-              let locError
-              if (existingLoc) {
-                // Update existing primary location
-                const result = await supabase
-                  .from('business_locations')
-                  .update(locationUpdateData)
-                  .eq('business_id', businessId)
-                  .eq('is_primary', true)
-                locError = result.error
-              } else {
-                // Insert new primary location
-                const result = await supabase
-                  .from('business_locations')
-                  .insert({
-                    business_id: businessId,
-                    is_primary: true,
-                    country: 'Denmark',
-                    ...locationUpdateData
-                  })
-                locError = result.error
-              }
-              
-              if (locError) {
-                console.warn('⚠️ Failed to save business_locations:', locError.message)
-              } else {
-                console.log('✅ Saved to business_locations')
-              }
-            }
-          }
-          
-          // 4. Upsert opening hours (if extracted)
-          if (analysisResult.openingHours && Object.keys(analysisResult.openingHours).length > 0) {
-            const hoursToInsert = Object.entries(analysisResult.openingHours).map(([day, hours]: [string, any]) => ({
-              business_id: businessId,
-              weekday: day.toLowerCase(),
-              open_time: hours.closed ? null : hours.open,
-              close_time: hours.closed ? null : hours.close,
-              closed: hours.closed || false,
-              kind: 'normal'
-            }))
-            
-            // Delete existing hours first, then insert new ones
-            await supabase.from('opening_hours').delete().eq('business_id', businessId)
-            
-            const { error: ohError } = await supabase
-              .from('opening_hours')
-              .insert(hoursToInsert)
-            
-            if (ohError) {
-              console.warn('⚠️ Failed to save opening_hours:', ohError.message)
-            } else {
-              console.log('✅ Saved', hoursToInsert.length, 'opening_hours entries')
-            }
-          }
-          
-          // 5. Save establishment type to business_operations (if classified)
-          if (analysisResult.establishmentType) {
-            console.log('🏢 Saving establishment type:', analysisResult.establishmentType)
-            const { error: opsError } = await supabase
-              .from('business_operations')
-              .upsert({
-                business_id: businessId,
-                establishment_type: analysisResult.establishmentType,
-                updated_at: new Date().toISOString()
-              }, { onConflict: 'business_id' })
-            
-            if (opsError) {
-              console.warn('⚠️ Failed to save establishment_type to business_operations:', opsError.message)
-            } else {
-              console.log('✅ Saved establishment_type to business_operations:', analysisResult.establishmentType)
-            }
-          } else {
-            console.log('ℹ️ No establishment type classified (menu structure may be empty)')
-          }
-          
+          // Merge results into persistenceMeta
+          Object.assign(persistenceMeta, result)
         } else {
-          console.warn('⚠️ Skipping persistence: missing SUPABASE_URL or SUPABASE_ANON_KEY/SUPABASE_SERVICE_ROLE_KEY')
+          console.warn('⚠️ Skipping persistence: missing SUPABASE_URL or SUPABASE key')
           persistenceMeta.error = 'missing_supabase_env: SUPABASE_URL or SUPABASE key not configured'
         }
       } catch (dbError) {
         console.error('❌ Database persistence failed:', dbError)
-        // Don't fail the whole request, just log the error
         persistenceMeta.error = dbError instanceof Error ? dbError.message : String(dbError)
       }
     } else {

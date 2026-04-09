@@ -39,7 +39,7 @@ export function AddressPanel({
           value={address}
           onChange={(e) => onAddressChange(e.target.value)}
           placeholder="fx Hovedgaden 123"
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         />
       </div>
 
@@ -56,7 +56,7 @@ export function AddressPanel({
             onChange={(e) => onPostalCodeChange(e.target.value)}
             placeholder={isDanishCountry ? '1234' : 'Postnr.'}
             maxLength={4}
-            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
           />
           {postalLookupError && (
             <p className="text-xs text-red-600 mt-1">{postalLookupError}</p>
@@ -75,7 +75,7 @@ export function AddressPanel({
               onChange={(e) => onCityChange(e.target.value)}
               placeholder="København"
               disabled={isDanishCountry && isFetchingCity}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm disabled:bg-gray-50 disabled:text-gray-500"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm disabled:bg-gray-50 disabled:text-gray-500"
             />
             {isFetchingCity && (
               <div className="absolute right-3 top-1/2 -translate-y-1/2">

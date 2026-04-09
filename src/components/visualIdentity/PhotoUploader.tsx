@@ -8,7 +8,7 @@ interface PhotoUploaderProps {
 }
 
 export function PhotoUploader({ businessId, onUploadComplete }: PhotoUploaderProps) {
-  const { t } = useTranslation('visual');
+  const { t } = useTranslation();
   const [uploading, setUploading] = useState(false);
   const [uploadedPaths, setUploadedPaths] = useState<string[]>([]);
 

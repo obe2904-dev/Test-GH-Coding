@@ -1,203 +1,194 @@
-# AI Photo Analysis - Gemini 2.0 Flash Integration
+# AI Photo Analysis — Gemini 2.5 Flash Integration
 
 ## Overview
 
-The AI Photo Analysis feature uses Google's Gemini 2.0 Flash model to analyze uploaded photos and provide actionable feedback for improving social media post engagement.
+The AI Photo Analysis feature uses Google's Gemini 2.5 Flash model to analyse uploaded photos and provide actionable improvement feedback. Analysis is available to **all tiers** (Free, Smart, Pro), but the depth of output and the number of suggestions returned scale with the tier.
 
-## Implementation
+---
 
-### Backend (Supabase Edge Function)
+## Tier Differentiation
+
+| Tier | Analysis level | Prompt | Max suggestions |
+|------|---------------|--------|-----------------|
+| Free (`free`) | `basic` | Simple (cost-efficient) | 2 |
+| Smart (`standardplus`) | `advanced` | Full | 4 |
+| Pro (`premium`) | `premium` | Full | 6 |
+
+The analysis level is derived from the `tier` field in the request. Free tier uses `buildSimplePrompt`; Smart and Pro use `buildPaidPrompt`. The suggestion cap is enforced server-side before the response is returned.
+
+**Note:** The Gemini model itself (`gemini-2.5-flash`) is the same for all tiers. Differentiation is in prompt complexity and suggestion volume.
+
+---
+
+## Backend (Supabase Edge Function)
 
 **Location:** `supabase/functions/analyze-photo/index.ts`
 
-**API Endpoint:** `https://[project-ref].supabase.co/functions/v1/analyze-photo`
+**Authentication:** Requires a valid Supabase JWT in the `Authorization` header. Returns `401` if absent or invalid.
 
-**Request Format:**
+**Quota:** Each analysis call counts as one `aiGenerations` usage. Daily limits: Free 100, Smart 100 (monthly 1000), Pro unlimited. Returns `429` if limit is exceeded.
+
+**Request:**
 ```typescript
 {
-  imageUrl: string         // URL of the image to analyze (must be publicly accessible)
-  postText?: string        // Optional: Post content for context matching
-  businessType?: string    // Optional: Type of business (café, restaurant, etc.)
-  language?: string        // 'da' (Danish) or 'en' (English), default: 'da'
+  imageUrl: string          // Publicly accessible URL of the image
+  postText?: string         // Optional post caption for content-match scoring
+  businessType?: string     // Optional business type (café, restaurant, etc.)
+  language?: string         // 'da' | 'en', default: 'da'
+  tier?: 'free' | 'standardplus' | 'premium'  // Defaults to quota-resolved tier
+  mediaType?: 'image' | 'video'               // Default: 'image'
+  duration?: number         // Video duration in seconds (videos > 30s are rejected)
+  imageWidth?: number       // Client-detected pixel width (preferred over server parsing)
+  imageHeight?: number      // Client-detected pixel height
 }
 ```
 
-**Response Format:**
+**Response:**
 ```typescript
 {
   contentMatch: {
-    score: number          // 0-100
     rating: 'excellent' | 'good' | 'fair' | 'poor'
-    feedback: string       // Brief explanation
-  },
-  suggestions: {
-    composition: string[]  // Composition tips
-    lighting: string[]     // Lighting improvements
-    styling: string[]      // Styling suggestions
-    subject: string[]      // Subject focus tips
-  },
-  improvements: Array<{
-    category: 'crop' | 'lighting' | 'color' | 'cleanup'
-    title: string
-    description: string
-    impact: 'high' | 'medium' | 'low'
-  }>,
-  overallScore: number     // 0-100
+    feedback: string        // Short explanation of the match
+  }
+  emojiMatch: string | null // Whether emojis in post text match the photo mood
+  whatWorks: string[]       // Positive observations (empty [] on error)
+  generalFeedback: string   // Overall assessment — positive frame only; sub-threshold problems are silently dropped
+  suggestions: Suggestion[] // AI-executable improvement cards — 0 to tier-cap items
+  humanSuggestions: HumanSuggestion[] // Named ingredient/item mismatches the human should address next time ([] when no mismatch)
+  recommendation: 'post-it' | 'good-enough' | 'quick-fix' | 'retake'
+  recommendationText: string
+  platformNote?: string     // Optional platform-specific note (e.g. crop warning)
+}
+
+interface HumanSuggestion {
+  text: string  // Short note: "The text mentions X but it's not visible in the image."
+}
+
+interface Suggestion {
+  id: string
+  category: 'cropping' | 'cleaning' | 'color'
+  title: string            // Short label (max 60 chars)
+  reason: string           // Why this matters (max 120 chars)
+  location: string         // Plain-text description of where the issue is
+  action:
+    | 'crop_to_square'
+    | 'crop_to_portrait_4_5'
+    | 'crop_to_landscape_16_9'
+    | 'remove_object'
+    | 'reduce_clutter'
+    | 'reduce_smudge'
+    | 'adjust_temperature_warm'
+    | 'adjust_temperature_cool'
+    | 'fix_exposure'
 }
 ```
 
-### Frontend Hook
+**Gemini configuration:**
+```typescript
+generationConfig: {
+  temperature: 0.4,
+  topK: 40,
+  topP: 0.95,
+  maxOutputTokens: 4000,
+  responseMimeType: 'application/json'
+}
+```
+
+**Size limits:** images 4 MB max, videos 10 MB max.
+
+---
+
+## Frontend Hook
 
 **Location:** `src/hooks/usePhotoAnalysis.ts`
 
-**Usage:**
 ```typescript
-import { usePhotoAnalysis } from '../hooks/usePhotoAnalysis'
+const { analyzePhoto, isAnalyzing, error } = usePhotoAnalysis()
 
-function MyComponent() {
-  const { analyzePhoto, isAnalyzing, error } = usePhotoAnalysis()
-
-  const handleAnalyze = async () => {
-    const result = await analyzePhoto(
-      imageUrl,
-      'Post text here',
-      'Café',
-      'da'
-    )
-    
-    if (result) {
-      console.log('Analysis:', result)
-    }
-  }
-
-  return (
-    <button onClick={handleAnalyze} disabled={isAnalyzing}>
-      {isAnalyzing ? 'Analyzing...' : 'Analyze Photo'}
-    </button>
-  )
-}
+const result = await analyzePhoto(
+  imageUrl,
+  postText,
+  businessType,
+  language,
+  tier,
+  mediaType,
+  duration,
+  imageWidth,
+  imageHeight
+)
 ```
 
-### Integration in CreateStep
+---
 
-The photo analysis is integrated into the `CreateStep` component (`src/components/post-creation/CreateStep.tsx`):
+## Frontend Display — `MediaAnalysisPanel`
 
-1. **Analyze Button**: Available for all tiers when a photo is uploaded
-2. **Analysis Results**: Displays content match score, overall score, and improvement suggestions
-3. **Visual Feedback**: Color-coded ratings and impact levels
+**Location:** `src/components/media/MediaAnalysisPanel.tsx`
+
+Always shown (all tiers): content match rating, emoji match callout, "what works" highlights, "remember for next time" (`humanSuggestions`) amber section (when non-empty), general feedback.
+
+| Tier | Suggestions display |
+|------|--------------------|
+| Free | Plain bullet list — title + reason text only. No action buttons. Upgrade banner shown. |
+| Smart | Interactive checkbox cards grouped by category. Batch-apply button when ≥1 selected. Max 4 cards. |
+| Pro | Same checkbox cards as Smart. Max 6 cards. Plus `AIAdjustmentControls` manual panel. |
+**Note:** `contentMatch` is only surfaced in the human-actions layer when rating is `fair` or `poor`. Excellent/good matches are not shown — they require no action from the user.
+**Panel structure — three layers:**
+
+1. **Assessment** (always shown): `recommendation` badge + `recommendationText` as headline, followed by `generalFeedback`. This layer closes the loop — `post-it` and `good-enough` are complete answers, not preludes to a list of problems.
+2. **Til dig / For you** (only shown when there is something actionable for the human): `contentMatch` (only when rating is `fair` or `poor`), `emojiMatch` (only when non-null), `humanSuggestions` (only when non-empty). The entire layer is hidden when all conditions are absent.
+3. **AI Forbedringer / AI Enhancements** (always shown): suggestion cards when present; explicit empty-state message when `suggestions` is empty, worded per `recommendation` value so the user always understands why there are no cards. A subline beneath the heading states: "AI kan fjerne, justere og rette — aldrig tilføje" — setting the expectation that AI enhancement preserves authenticity.
+
+**Empty-state messages per recommendation:**
+- `post-it`: "Billedet er klar til opslag — ingen AI-forbedringer nødvendige."
+- `good-enough`: "Billedet ser godt ud. Ingen AI-justeringer ville gøre en meningsfuld forskel."
+- `retake`: "Problemerne her (lys, fokus, komposition) kan ikke rettes af AI. Et nyt billede er den bedste løsning."
+- `video`: "AI-forbedringer er ikke tilgængelige for video."
+
+**Analysis persistence:** Results are stored on the `MediaItem` in `postCreationStore` (field `analysisResult`). Switching between photos keeps each photo's result alive. The "Skjul Analyse" button has been removed — results are always visible once run. The analyse button label changes to "Analyser Igen" when a result already exists.
+
+---
 
 ## Configuration
 
-### Gemini API Key
-
-The API key is currently hardcoded in the Edge Function for quick setup:
-
-```typescript
-const GEMINI_API_KEY = 'AIzaSyBYxwYfj5Dp58pNpTQ0lvLgAUEegRRiwGE'
-```
-
-**Production Recommendation:** Move this to Supabase Secrets:
+**API key:** Read from Supabase Secrets — `Deno.env.get('GEMINI_API_KEY')`. Never hardcoded.
 
 ```bash
-# Set secret
-supabase secrets set GEMINI_API_KEY=your_api_key_here --project-ref kvqdkohdpvmdylqgujpn
-
-# Update function to read from environment
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
+supabase secrets set GEMINI_API_KEY=your_key --project-ref <project-ref>
 ```
 
-### Model Configuration
+**Prompt override (no redeploy needed):**
+```bash
+supabase secrets set PROMPT_VERSION=simple --project-ref <project-ref>
+```
+Setting `PROMPT_VERSION=simple` forces `buildSimplePrompt` for all tiers (useful for cost testing).
 
-**Current Model:** `gemini-2.0-flash-exp` (experimental)
+---
 
-**Configuration:**
-```typescript
-generationConfig: {
-  temperature: 0.7,      // Balanced creativity/consistency
-  topK: 40,              // Token selection diversity
-  topP: 0.95,            // Cumulative probability cutoff
-  maxOutputTokens: 2048  // Response length limit
-}
+## Deployment
+
+```bash
+cd "/Users/olebaek/Test P2G 1"
+npx supabase functions deploy analyze-photo
 ```
 
-## Features
+The function **requires JWT** — do not deploy with `--no-verify-jwt`.
 
-### Content Matching
-- Analyzes how well the image matches the post text
-- Provides a score (0-100) and rating (excellent/good/fair/poor)
-- Gives specific feedback on alignment
-
-### Composition Analysis
-- Rule of thirds evaluation
-- Subject placement
-- Frame balance
-- Visual hierarchy
-
-### Lighting Assessment
-- Exposure levels
-- Shadow/highlight balance
-- Natural vs artificial lighting
-- Mood appropriateness
-
-### Styling Suggestions
-- Color palette
-- Mood and atmosphere
-- Brand consistency
-- Platform-specific optimizations
-
-### Subject Focus
-- Main subject clarity
-- Distracting elements
-- Background clutter
-- Focus points
+---
 
 ## Testing
 
-### Test the Edge Function Directly
-
 ```bash
-curl -X POST https://kvqdkohdpvmdylqgujpn.supabase.co/functions/v1/analyze-photo \
+# Requires a valid user JWT
+curl -X POST https://<project-ref>.supabase.co/functions/v1/analyze-photo \
+  -H "Authorization: Bearer <user-jwt>" \
   -H "Content-Type: application/json" \
-  -d '{
-    "imageUrl": "https://example.com/photo.jpg",
-    "postText": "Nyd en kop kaffe hos os i dag",
-    "language": "da"
-  }'
+  -d '{"imageUrl": "https://example.com/photo.jpg", "postText": "Nyd en kop kaffe", "language": "da", "tier": "premium"}'
 ```
 
-### Test in Browser Console
+---
 
-```javascript
-const { data, error } = await window.supabase.functions.invoke('analyze-photo', {
-  body: {
-    imageUrl: 'https://your-image-url.jpg',
-    postText: 'Your post text',
-    language: 'da'
-  }
-})
-console.log('Result:', data)
-console.log('Error:', error)
-```
+**Last updated:** 20 March 2026
 
-## Pricing
-
-**Gemini 2.0 Flash Pricing (as of Dec 2024):**
-- Input: $0.075 per 1M tokens
-- Output: $0.30 per 1M tokens
-- Images: Counted as ~258 tokens per image
-
-**Estimated Cost per Analysis:**
-- Image: ~258 tokens ($0.00002)
-- Prompt: ~100 tokens ($0.000008)
-- Response: ~500 tokens ($0.00015)
-- **Total: ~$0.00018 per analysis**
-
-For 1000 analyses/month: ~$0.18
-
-## Limitations
-
-1. **Image Accessibility**: Image URL must be publicly accessible
-2. **File Size**: Gemini supports images up to 20MB
 3. **Rate Limits**: Gemini has rate limits (check current quotas)
 4. **Language**: Currently supports Danish and English
 

@@ -128,9 +128,9 @@ export const LOCATION_CATEGORIES: Record<LocationCategoryId, LocationCategory> =
   
   waterfront: {
     id: 'waterfront',
-    name: 'Waterfront / Leisure',
+    name: 'Waterfront',
     icon: '🌊',
-    definition: 'Close to water, parks, or promenades. High weather sensitivity, destination-based visits.',
+    definition: 'Close to water (seafront, harbour, lake or river). High weather sensitivity, destination-based visits.',
     whyItMatters: [
       'Weekend & afternoon peaks',
       'Summer-heavy demand',
@@ -139,11 +139,31 @@ export const LOCATION_CATEGORIES: Record<LocationCategoryId, LocationCategory> =
     ],
     ctaShifts: [
       'Sid i solen',
-      'Perfekt efter gåturen',
+      'Ud til vandet',
       'Nyd udsigten',
       'Kig forbi'
     ],
     seasonalNotes: 'Extreme summer focus, winter challenges'
+  },
+
+  nature_park: {
+    id: 'nature_park',
+    name: 'Park / Nature Area',
+    icon: '🌳',
+    definition: 'Near parks, forests, or green spaces. Attracts walkers, dog owners, cyclists and families doing outdoor activities.',
+    whyItMatters: [
+      'Warm-up and shelter seekers',
+      'Family outings and dog walks',
+      'Seasonal peaks (spring/summer)',
+      'Takeaway and outdoor seating key'
+    ],
+    ctaShifts: [
+      'Perfekt efter gåturen',
+      'Tag hunden med',
+      'Familievenlig',
+      'Kaffe og kage to-go'
+    ],
+    seasonalNotes: 'Summer peak, quieter in winter'
   },
   
   shopping_district: {

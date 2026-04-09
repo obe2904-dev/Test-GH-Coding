@@ -23,10 +23,70 @@ export const AI_MODELS = {
   fast: 'gpt-4o-mini',
   
   // Vision - for image analysis
-  vision: 'gemini-2.0-flash-exp'
+  vision: 'gemini-2.0-flash-exp',
+  
+  // Gemini Flash - very low cost (~$0.075/1M input, $0.30/1M output)
+  geminiFlash: 'gemini-2.0-flash-exp'
 } as const
 
 export type AIModel = typeof AI_MODELS[keyof typeof AI_MODELS]
+
+// ============================================================================
+// EXTRACTOR_MODELS - Per-extractor tier-based model configuration
+// Allows different models for Free vs Paid tiers per extraction task
+// ============================================================================
+
+export const EXTRACTOR_MODELS = {
+  basicInfo: {
+    free: 'gpt-4o-mini',
+    paid: 'gpt-4o-mini'
+  },
+  contact: {
+    free: 'gpt-4o-mini',
+    paid: 'gpt-4o'
+  },
+  menuSignal: {
+    free: 'gemini-2.0-flash-exp',
+    paid: 'gemini-2.0-flash-exp'
+  },
+  toneOfVoice: {
+    free: 'gpt-4o-mini',
+    paid: 'gpt-4o'
+  },
+  keywords: {
+    free: 'gpt-4o-mini',
+    paid: 'gpt-4o'
+  },
+  venueHooks: {
+    free: 'gpt-4o-mini',
+    paid: 'gpt-4o'
+  },
+  experiencePillars: {
+    free: 'gpt-4o-mini',
+    paid: 'gpt-4o'
+  },
+  visualHooks: {
+    free: 'gpt-4o-mini',
+    paid: 'gpt-4o'
+  }
+} as const
+
+export type ExtractorName = keyof typeof EXTRACTOR_MODELS
+
+/**
+ * Get model for extractor based on tier
+ * 
+ * @param extractor - Extractor name
+ * @param tier - User tier (free, standardplus, premium)
+ * @returns Model string to use
+ */
+export function getExtractorModel(
+  extractor: ExtractorName,
+  tier: 'free' | 'standardplus' | 'premium'
+): string {
+  const isPaid = tier === 'standardplus' || tier === 'premium'
+  return EXTRACTOR_MODELS[extractor][isPaid ? 'paid' : 'free']
+}
 
 // ============================================================================
 // TASK CONFIGURATIONS

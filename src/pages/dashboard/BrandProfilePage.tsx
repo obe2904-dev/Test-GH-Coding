@@ -413,7 +413,7 @@ export default function BrandProfilePage() {
               </p>
             </div>
             
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg p-6 mb-6">
+            <div className="bg-gradient-to-br from-cta-surface to-purple-50 rounded-lg p-6 mb-6">
               <h3 className="font-semibold text-gray-900 mb-3">Med Brand Profil får du:</h3>
               <ul className="text-left space-y-2 text-sm text-gray-700">
                 <li className="flex items-start gap-2">
@@ -442,7 +442,7 @@ export default function BrandProfilePage() {
             <div className="flex gap-3 justify-center">
               <button
                 onClick={() => navigate('/dashboard/plans')}
-                className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-semibold shadow-md"
+                className="px-6 py-3 bg-gradient-to-r from-cta to-purple-600 text-white rounded-lg hover:from-cta-hover hover:to-purple-700 transition-all font-semibold shadow-md"
               >
                 Se priser og opgrader
               </button>
@@ -485,14 +485,14 @@ export default function BrandProfilePage() {
               <div className="flex items-center justify-between mb-2">
                 <span className="font-semibold text-gray-800">Hvad I er kendt for</span>
                 <button
-                  className="text-xs text-indigo-600 hover:underline"
+                  className="text-xs text-cta hover:underline"
                   onClick={() => setShowReasoning(s => ({ ...s, kendt: !s.kendt }))}
                 >
                   {showReasoning.kendt ? 'Skjul AI-reasoning' : 'Vis AI-reasoning'}
                 </button>
               </div>
               {showReasoning.kendt && (
-                <div className="text-xs text-gray-600 bg-indigo-50 border border-indigo-100 rounded p-2 mt-1">
+                <div className="text-xs text-gray-600 bg-cta-surface border border-cta-surface rounded p-2 mt-1">
                   <div><strong>Reasoning:</strong> {reasoning.kendt || 'Ingen AI forklaring.'}</div>
                   {analysisEvidence && (
                     <div className="mt-2">
@@ -508,14 +508,14 @@ export default function BrandProfilePage() {
               <div className="flex items-center justify-between mb-2">
                 <span className="font-semibold text-gray-800">Hvem I henvender jer til</span>
                 <button
-                  className="text-xs text-indigo-600 hover:underline"
+                  className="text-xs text-cta hover:underline"
                   onClick={() => setShowReasoning(s => ({ ...s, hvem: !s.hvem }))}
                 >
                   {showReasoning.hvem ? 'Skjul AI-reasoning' : 'Vis AI-reasoning'}
                 </button>
               </div>
               {showReasoning.hvem && (
-                <div className="text-xs text-gray-600 bg-indigo-50 border border-indigo-100 rounded p-2 mt-1">
+                <div className="text-xs text-gray-600 bg-cta-surface border border-cta-surface rounded p-2 mt-1">
                   <div><strong>Reasoning:</strong> {reasoning.hvem || 'Ingen AI forklaring.'}</div>
                   {analysisEvidence && (
                     <div className="mt-2">
@@ -531,14 +531,14 @@ export default function BrandProfilePage() {
               <div className="flex items-center justify-between mb-2">
                 <span className="font-semibold text-gray-800">Jeres kommunikationsmål</span>
                 <button
-                  className="text-xs text-indigo-600 hover:underline"
+                  className="text-xs text-cta hover:underline"
                   onClick={() => setShowReasoning(s => ({ ...s, kommunikationsmaal: !s.kommunikationsmaal }))}
                 >
                   {showReasoning.kommunikationsmaal ? 'Skjul AI-reasoning' : 'Vis AI-reasoning'}
                 </button>
               </div>
               {showReasoning.kommunikationsmaal && (
-                <div className="text-xs text-gray-600 bg-indigo-50 border border-indigo-100 rounded p-2 mt-1">
+                <div className="text-xs text-gray-600 bg-cta-surface border border-cta-surface rounded p-2 mt-1">
                   <div><strong>Reasoning:</strong> {reasoning.kommunikationsmaal || 'Ingen AI forklaring.'}</div>
                   {analysisEvidence && (
                     <div className="mt-2">

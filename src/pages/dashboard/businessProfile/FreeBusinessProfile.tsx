@@ -31,6 +31,9 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [businessName, setBusinessName] = useState('')
   const [businessType, setBusinessType] = useState('')
+  const [hasTableSeating, setHasTableSeating] = useState(false)
+  const [menus, setMenus] = useState<string[]>([])
+  const [serviceModel, setServiceModel] = useState('')
   const [postalCode, setPostalCode] = useState('')
   const [city, setCity] = useState('')
   const defaultCountry = t('ui.country.default_name')
@@ -55,7 +58,7 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
         // Get user's business
         const { data: business, error: businessError } = await supabase
           .from('businesses')
-          .select('id, name, vertical')
+          .select('id, name, vertical, has_table_seating, menus, service_model')
           .eq('owner_id', user.id)
           .maybeSingle()
 
@@ -68,7 +71,10 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
         if (business) {
           setBusinessId(business.id as string)
           setBusinessName((business.name as string) || '')
-          setBusinessType((business.vertical as string) || '')
+            setBusinessType((business.vertical as string) || '')
+            setHasTableSeating(Boolean((business as any).has_table_seating))
+            setMenus((business as any).menus || [])
+            setServiceModel((business as any).service_model || '')
 
           // Get location data
           const { data: location } = await supabase
@@ -160,6 +166,9 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
         .update({
           name: businessName.trim(),
           vertical: businessType,
+          has_table_seating: hasTableSeating,
+          menus: menus && menus.length > 0 ? menus : null,
+          service_model: serviceModel || null,
           updated_at: new Date().toISOString()
         })
         .eq('id', businessId)
@@ -284,6 +293,40 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
                 <option value="service">Service</option>
                 <option value="other">Other</option>
               </select>
+            </div>
+
+            {/* Capabilities (table seating, menus, service model) */}
+            <div className="grid grid-cols-1 gap-4">
+              <div className="flex items-center gap-3">
+                <input id="hasTableSeating" type="checkbox" checked={hasTableSeating} onChange={(e) => setHasTableSeating(e.target.checked)} className="h-4 w-4" />
+                <label htmlFor="hasTableSeating" className="text-sm text-slate-700">Table seating available</label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Menus</label>
+                <div className="flex flex-wrap gap-2">
+                  {['food','drinks','coffee','snacks','sandwich'].map((m) => (
+                    <label key={m} className="inline-flex items-center gap-2 px-2 py-1 bg-blue-50 rounded-md text-sm">
+                      <input type="checkbox" checked={menus.includes(m)} onChange={(e) => {
+                        if (e.target.checked) setMenus(prev => Array.from(new Set([...prev, m])))
+                        else setMenus(prev => prev.filter(x => x !== m))
+                      }} />
+                      <span className="capitalize">{m}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="serviceModel" className="block text-sm font-medium text-slate-700 mb-1">Service Model</label>
+                <select id="serviceModel" value={serviceModel} onChange={(e) => setServiceModel(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg">
+                  <option value="">Select</option>
+                  <option value="full_service">Full service</option>
+                  <option value="limited_service">Limited service</option>
+                  <option value="counter">Counter / Grab-and-go</option>
+                  <option value="delivery">Delivery</option>
+                </select>
+              </div>
             </div>
 
             {/* Location */}

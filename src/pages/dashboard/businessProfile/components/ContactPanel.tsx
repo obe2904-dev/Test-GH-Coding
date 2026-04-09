@@ -33,7 +33,7 @@ export function ContactPanel({
           value={phone}
           onChange={(e) => onPhoneChange(e.target.value)}
           placeholder="fx +45 12 34 56 78"
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         />
       </div>
 
@@ -47,7 +47,7 @@ export function ContactPanel({
           value={email}
           onChange={(e) => onEmailChange(e.target.value)}
           placeholder="fx kontakt@minvirksomhed.dk"
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         />
       </div>
 
@@ -74,7 +74,7 @@ export function ContactPanel({
           value={bookingLink}
           onChange={(e) => onBookingLinkChange(e.target.value)}
           placeholder="fx https://booking.dinvirksomhed.dk"
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         />
         <p className="text-xs text-gray-500 mt-1">
           Link hvor kunder kan booke tid eller bord

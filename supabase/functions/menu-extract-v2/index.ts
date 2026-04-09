@@ -1,7 +1,7 @@
 // @ts-ignore - Deno import
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-// @ts-ignore - Deno ESM import
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// @ts-ignore - Deno ESM import with specific version
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 import { parseMenuPeriods } from '../_shared/menuPeriodParser.ts'
 
 // @ts-ignore - Deno global
@@ -16,6 +16,7 @@ const corsHeaders = {
 const FETCH_TIMEOUT_MS = 12_000
 const MAX_HTML_BYTES = 1_200_000
 const MAX_EDGE_LLM_CHARS = 22_000
+const MAX_PDF_BYTES = 5_000_000 // 5 MB — fast path PDFs only; larger files fall back to Cloud Run
 
 function _stripContentType(ct: string | null): string {
   if (!ct) return ''
@@ -373,42 +374,53 @@ async function parseMenuWithOpenAI(extractedText: string, languageCode: string):
 
 CRITICAL RULES:
 1) **EXTRACT MENU TITLE** - Look for the main menu heading (e.g., "Frokost Menu", "Brunch Menu", "Aften Menu"). Set as "menuTitle".
-2) **EXTRACT AVAILABILITY TIME** - Look for time ranges like "11:00-15:00", "Serveres kl. 12-16", "Tilgængelig 10:00-14:00". Set as "availabilityTime".
-3) **DETECT ALL CATEGORY HEADERS** - Look for section titles like: FORRETTER, HOVEDRETTER, DESSERTER, BURGERE, SALATER, PASTA, BØRNEMENU, KLASSIKERE, etc.
-4) **Each category can have a timeRange** - If a category has specific hours (e.g., "FROKOST 11-15"), extract the time as "timeRange".
-5) **Each category is a separate section** - Do not lump all items into one category.
-6) ONLY extract items explicitly written. Do not invent.
-7) Preserve original dish names (æ, ø, å).
-8) **ALWAYS include full descriptions** - Text between dish name and price is the description.
-9) Capture ALL prices. Danish formats: 95,- | 95 kr | 95,00 kr | 95 DKK
-10) **Multi-line items**: Name → Description → Price = ONE item
-11) **Extras/Add-ons**: Lines like "Ekstra X +20,-" or "Tilvalg Y +15,-" are separate items
-12) **Kids menu**: "BØRNEMENU" or similar = separate category
+2) **EXTRACT MENU SUBTITLE/DESCRIPTION** - Look for any subtitle or description text under the menu title (e.g., "Friske råvarer dagligt", "Klassiske retter"). Set as "menuSubtitle".
+3) **EXTRACT AVAILABILITY TIME** - Look for time ranges like "11:00-15:00", "Serveres kl. 12-16", "Tilgængelig 10:00-14:00". Set as "availabilityTime".
+4) **EXTRACT AVAILABILITY DAYS** - Look for day-specific information (e.g., "Mandag-Fredag", "Kun weekender", "Dagligt"). Set as "availabilityDays".
+5) **DETECT ALL CATEGORY HEADERS** - Look for section titles like: FORRETTER, HOVEDRETTER, DESSERTER, BURGERE, SALATER, PASTA, BØRNEMENU, KLASSIKERE, etc.
+6) **Each category can have a timeRange** - If a category has specific hours (e.g., "FROKOST 11-15"), extract the time as "timeRange".
+7) **Each category can have a description** - Text below the category header describing the section. Set as "categoryDescription".
+8) **Each category is a separate section** - Do not lump all items into one category.
+9) ONLY extract items explicitly written. Do not invent.
+10) Preserve original dish names (æ, ø, å).
+11) **ALWAYS include full descriptions** - Text between dish name and price is the description.
+12) **Capture ALL prices AND currency** - Danish formats: 95,- | 95 kr | 95,00 kr | 95 DKK
+    - Extract numeric price (e.g., "95", "95.00", "12.5")
+    - Detect currency: kr/DKK = "DKK", € = "EUR", $ = "USD", £ = "GBP", etc.
+    - If currency is implied (e.g., "95,-" in Denmark), set to "DKK"
+13) **Multi-line items**: Name → Description → Price = ONE item
+14) **Extras/Add-ons**: Lines like "Ekstra X +20,-" or "Tilvalg Y +15,-" are separate items
+15) **Kids menu**: "BØRNEMENU" or similar = separate category
 
 EXAMPLE INPUT:
 "BRUNCH MENU
+Friske råvarer fra markedet
 Serveres dagligt 10:00-15:00
 
 BURGERE
+Vores signature burgere med pommes frites
 FAUSTBURGER
 med Angus hakkebøf, ost...
-199,-
+199 kr
 
 HANGOVER BURGER
 med 2 x Angus...
-239,-"
+239 DKK"
 
 EXPECTED OUTPUT:
 {
   "menuTitle": "BRUNCH MENU",
+  "menuSubtitle": "Friske råvarer fra markedet",
   "availabilityTime": "10:00-15:00",
+  "availabilityDays": "dagligt",
   "categories": [
     {
       "name": "BURGERE",
+      "categoryDescription": "Vores signature burgere med pommes frites",
       "timeRange": null,
       "items": [
-        {"name": "FAUSTBURGER", "description": "med Angus hakkebøf, ost...", "price": "199,-"},
-        {"name": "HANGOVER BURGER", "description": "med 2 x Angus...", "price": "239,-"}
+        {"name": "FAUSTBURGER", "description": "med Angus hakkebøf, ost...", "price": "199", "currency": "DKK"},
+        {"name": "HANGOVER BURGER", "description": "med 2 x Angus...", "price": "239", "currency": "DKK"}
       ]
     }
   ]
@@ -417,20 +429,29 @@ EXPECTED OUTPUT:
 Return ONLY valid JSON in this schema:
 {
   "menuTitle": "string|null",
+  "menuSubtitle": "string|null",
   "availabilityTime": "string|null",
+  "availabilityDays": "string|null",
   "categories": [
     {
       "name": "string",
+      "categoryDescription": "string|null",
       "timeRange": "string|null",
       "items": [
-        {"name": "string", "description": "string|null", "price": "string|null"}
+        {
+          "name": "string",
+          "description": "string|null",
+          "price": "string|null",
+          "currency": "string|null"
+        }
       ]
     }
   ]
 }
 
-If no menu title or availability time is found, set them to null.
+If no menu title, subtitle, availability time/days, or category description is found, set them to null.
 If no category-specific timeRange is found, set to null.
+If no currency is detected, attempt to infer from context (DKK for Denmark, EUR for Europe, etc.) or set to null.
 
 Content to analyze:
 ${extractedText}`
@@ -466,6 +487,137 @@ ${extractedText}`
   const content = data?.choices?.[0]?.message?.content
   if (!content) throw new Error('OpenAI returned empty response')
   return JSON.parse(content)
+}
+
+/**
+ * Upload a PDF to OpenAI Files API, then extract the menu via Chat Completions.
+ * The file is deleted from OpenAI after parsing (fire-and-forget cleanup).
+ * Throws if the upload fails, the API returns an error, or no categories are found.
+ */
+async function parsePdfMenuWithOpenAI(pdfBytes: Uint8Array, languageCode: string): Promise<any> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY')
+  if (!apiKey) throw new Error('OPENAI_API_KEY environment variable not set')
+
+  // --- 1. Upload PDF to OpenAI Files API ---
+  const formData = new FormData()
+  formData.append('file', new Blob([pdfBytes], { type: 'application/pdf' }), 'menu.pdf')
+  formData.append('purpose', 'user_data')
+
+  const uploadResp = await fetch('https://api.openai.com/v1/files', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}` },
+    body: formData,
+  })
+
+  if (!uploadResp.ok) {
+    const errorData = await uploadResp.json().catch(() => ({}))
+    console.error('❌ OpenAI Files API upload error:', uploadResp.status, errorData)
+    throw new Error(`OpenAI file upload failed: ${uploadResp.status}`)
+  }
+
+  const uploadData = await uploadResp.json()
+  const fileId: string = uploadData.id
+  if (!fileId) throw new Error('OpenAI returned no file id after upload')
+  console.log(`📤 Uploaded PDF to OpenAI Files API: ${fileId}`)
+
+  // --- 2. Call Chat Completions with the file reference ---
+  const lang = (languageCode || 'da').toLowerCase().startsWith('da') ? 'DANISH' : 'the document language'
+
+  const instructionText = `You are parsing a restaurant menu PDF. The menu is in ${lang}.
+
+CRITICAL RULES:
+1) EXTRACT MENU TITLE - Look for the main menu heading. Set as "menuTitle".
+2) EXTRACT MENU SUBTITLE/DESCRIPTION - Text under the title. Set as "menuSubtitle".
+3) EXTRACT AVAILABILITY TIME - Time ranges like "11:00-15:00". Set as "availabilityTime".
+4) EXTRACT AVAILABILITY DAYS - Day info like "Mandag-Fredag". Set as "availabilityDays".
+5) DETECT ALL CATEGORY HEADERS - FORRETTER, HOVEDRETTER, DESSERTER, BURGERE, SALATER, etc.
+6) Each category can have a "timeRange" if it specifies hours.
+7) Each category can have a "categoryDescription".
+8) ONLY extract items explicitly written. Do NOT invent.
+9) Preserve original dish names (æ, ø, å).
+10) ALWAYS include full descriptions.
+11) Capture ALL prices AND currency. Danish: 95,- | 95 kr | 95 DKK → price "95", currency "DKK"
+12) Multi-line items: Name → Description → Price = ONE item.
+13) Extras/Add-ons (e.g. "Ekstra X +20,-") are separate items.
+14) Kids menu: "BØRNEMENU" or similar = separate category.
+
+Return ONLY valid JSON in this schema:
+{
+  "menuTitle": "string|null",
+  "menuSubtitle": "string|null",
+  "availabilityTime": "string|null",
+  "availabilityDays": "string|null",
+  "categories": [
+    {
+      "name": "string",
+      "categoryDescription": "string|null",
+      "timeRange": "string|null",
+      "items": [
+        { "name": "string", "description": "string|null", "price": "string|null", "currency": "string|null" }
+      ]
+    }
+  ]
+}
+
+If a field is not present in the PDF, set it to null.
+If no categories can be found, return {"categories": []}.`
+
+  let chatResp: Response
+  try {
+    chatResp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        max_tokens: 8000,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a precise menu extraction expert. Return only valid JSON.',
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'file', file: { file_id: fileId } },
+              { type: 'text', text: instructionText },
+            ],
+          },
+        ],
+      }),
+    })
+  } finally {
+    // --- 3. Clean up: delete file from OpenAI (fire-and-forget) ---
+    fetch(`https://api.openai.com/v1/files/${fileId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    }).catch((e) => console.warn('⚠️ Failed to delete OpenAI file:', e))
+  }
+
+  if (!chatResp!.ok) {
+    const errorData = await chatResp!.json().catch(() => ({}))
+    console.error('❌ OpenAI Chat API error (PDF):', chatResp!.status, errorData)
+    throw new Error(`OpenAI Chat API failed: ${chatResp!.status}`)
+  }
+
+  const data = await chatResp!.json()
+  const content = data?.choices?.[0]?.message?.content
+  if (!content) throw new Error('OpenAI returned empty response for PDF')
+
+  const parsed = JSON.parse(content)
+
+  // Require at least one category with at least one item — otherwise treat as unreadable.
+  const totalItems = (parsed?.categories ?? []).reduce(
+    (sum: number, cat: any) => sum + (cat?.items?.length ?? 0),
+    0,
+  )
+  if (totalItems === 0) throw new Error('PDF fast-path: no menu items found in PDF')
+
+  return parsed
 }
 
 function normalizeLanguageCode(input: unknown): string {
@@ -513,6 +665,67 @@ async function userHasBusinessAccess(
   }
 
   return Boolean(teamRow)
+}
+
+// ---------------------------------------------------------------------------
+// generateMenuSummary — generates a 5-bullet helicopter summary via GPT-4o-mini
+// Called once at extraction time; result stored in menu_results_v2.ai_summary
+// ---------------------------------------------------------------------------
+async function generateMenuSummary(
+  structuredData: any,
+  sourceUrl: string,
+  languageCode: string,
+): Promise<string | null> {
+  try {
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
+    if (!openaiApiKey) return null
+
+    const menuTitle =
+      structuredData?.menuTitle ||
+      sourceUrl.split('/').filter(Boolean).pop()?.replace(/-/g, ' ') ||
+      'Menu'
+
+    const categories: any[] =
+      structuredData?.categories || structuredData?.menuStructure || []
+    if (categories.length === 0) return null
+
+    const itemLines: string[] = []
+    for (const cat of categories) {
+      const catName: string = cat.name || 'Øvrigt'
+      const names: string[] = ((cat.items || cat.dishes || []) as any[])
+        .slice(0, 8)
+        .map((i: any) => i.name || i.title)
+        .filter(Boolean)
+      if (names.length > 0) itemLines.push(`${catName}: ${names.join(', ')}`)
+    }
+    if (itemLines.length === 0) return null
+
+    const langWord =
+      languageCode === 'da' ? 'dansk' :
+      languageCode === 'en' ? 'engelsk' :
+      languageCode
+
+    const prompt = `Du er ekspert i restaurantmarkedsføring.\nMenu: "${menuTitle}" (${sourceUrl})\nKategorier og eksempel-retter:\n${itemLines.join('\n')}\n\nLav en overordnet opsummering i max 5 korte bullet points.\nKrav:\n- Maks. 5 bullets\n- Beskriv menuen overordnet – hvad tilbyder den, hvem henvender den sig til\n- Nævn gerne 1-3 karakteristiske retter som eksempel\n- Ingen individuelle priser\n- Professionel formulering på ${langWord}\n- Brug • som bullet-tegn\nReturner KUN bullet-listen, intet andet.`
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+        max_tokens: 400,
+      }),
+    })
+    if (!resp.ok) return null
+    const data = await resp.json()
+    return data.choices?.[0]?.message?.content?.trim() || null
+  } catch {
+    return null
+  }
 }
 
 serve(async (req: Request) => {
@@ -611,11 +824,163 @@ serve(async (req: Request) => {
         .update({ source_content_type: probeCt || null })
         .eq('id', resultId)
 
-      // Handle PDFs: create job in menu_results table for Cloud Run worker
+      // Handle PDFs: try Edge fast-path first (≤5 MB), fall back to Cloud Run OCR worker
       if (isPdf) {
-        console.log('📄 PDF detected - creating queue job for Cloud Run OCR worker')
-        
-        // Create job in menu_results table (Cloud Run worker polls this table)
+        console.log('📄 PDF detected')
+
+        // --- Fast path: download full PDF and parse directly with OpenAI ---
+        let usedFastPath = false
+        if (probeBytes.length < MAX_PDF_BYTES) {
+          try {
+            console.log('⚡ Attempting PDF fast-path via OpenAI file input...')
+
+            // Download full PDF (re-fetch; probe only fetched 4096 bytes)
+            const pdfResp = await fetchWithTimeout(url, {
+              method: 'GET',
+              redirect: 'follow',
+              headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenuExtractorBot/1.0)' },
+            }, FETCH_TIMEOUT_MS)
+
+            const pdfBytes = await readAtMostBytes(pdfResp, MAX_PDF_BYTES)
+            if (pdfBytes.length >= MAX_PDF_BYTES) {
+              throw new Error('PDF exceeds fast-path size limit; routing to Cloud Run')
+            }
+
+            // Mark as processing so the Cloud Run worker won't claim the row
+            await supabaseService
+              .from('menu_results_v2')
+              .update({
+                status: 'processing',
+                claimed_at: new Date().toISOString(),
+                attempts: 1,
+                extraction_method: 'edge_pdf',
+              })
+              .eq('id', resultId)
+
+            const structured = await parsePdfMenuWithOpenAI(pdfBytes, languageCode)
+
+            // Fetch business opening hours (same as HTML fast path)
+            const { data: businessData } = await supabaseService
+              .from('businesses')
+              .select('opening_hours')
+              .eq('id', businessId)
+              .single()
+
+            let businessHours: { open: string; close: string } | undefined
+            if (businessData?.opening_hours) {
+              const hours = businessData.opening_hours
+              const allOpen: string[] = []
+              const allClose: string[] = []
+              for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']) {
+                if (hours[day]?.open) allOpen.push(hours[day].open)
+                if (hours[day]?.close) allClose.push(hours[day].close)
+              }
+              if (allOpen.length > 0 && allClose.length > 0) {
+                allOpen.sort(); allClose.sort()
+                businessHours = { open: allOpen[0], close: allClose[allClose.length - 1] }
+                console.log(`🏢 Business hours: ${businessHours.open}-${businessHours.close}`)
+              }
+            }
+
+            // Parse menu periods
+            let menuPeriods: any[] = []
+            const menuAvailabilityTime = structured?.availabilityTime || null
+            if (structured?.categories && Array.isArray(structured.categories)) {
+              menuPeriods = parseMenuPeriods(structured.categories, businessHours, menuAvailabilityTime)
+            }
+            const enrichedStructured = { ...structured, menuPeriods }
+
+            // Infer service periods from menu title
+            const menuTitle = structured.menuTitle || structured.categories?.[0]?.name || ''
+            const menuTitleLower = menuTitle.toLowerCase()
+            let servicePeriods: string[]
+            let servicePeriodName: string
+            if (menuTitleLower.includes('brunch')) {
+              servicePeriods = ['brunch']; servicePeriodName = 'brunch'
+            } else if (menuTitleLower.includes('frokost') || menuTitleLower.includes('lunch')) {
+              servicePeriods = ['lunch']; servicePeriodName = 'lunch'
+            } else if (menuTitleLower.includes('aften') || menuTitleLower.includes('dinner') || menuTitleLower.includes('aftensmad')) {
+              servicePeriods = ['dinner']; servicePeriodName = 'dinner'
+            } else if (menuPeriods.length > 0) {
+              const startHour = parseInt(menuPeriods[0].startTime?.split(':')[0] || '12')
+              if (startHour < 11) { servicePeriods = ['brunch']; servicePeriodName = 'brunch' }
+              else if (startHour >= 17) { servicePeriods = ['dinner']; servicePeriodName = 'dinner' }
+              else { servicePeriods = ['lunch']; servicePeriodName = 'lunch' }
+            } else {
+              servicePeriods = ['lunch', 'dinner']; servicePeriodName = 'lunch'
+            }
+
+            const isSignature =
+              menuTitleLower.includes('signatur') ||
+              menuTitleLower.includes('specialit') ||
+              menuTitleLower.includes('klassiker') ||
+              structured.categories?.some((cat: any) =>
+                cat.name?.toLowerCase().includes('signatur') ||
+                cat.name?.toLowerCase().includes('klassiker') ||
+                cat.name?.toLowerCase().includes('chef')
+              ) || false
+
+            const establishmentType = classifyEstablishmentType(structured)
+
+            await supabaseService
+              .from('menu_results_v2')
+              .update({
+                status: 'done',
+                raw_text: null, // no raw text for PDFs in fast path
+                structured_data: enrichedStructured,
+                completed_at: new Date().toISOString(),
+                source_content_type: probeCt || null,
+                extraction_method: 'edge_pdf',
+                service_periods: servicePeriods,
+                service_period_name: servicePeriodName,
+                is_signature: isSignature,
+              })
+              .eq('id', resultId)
+
+            // Generate and store AI summary (non-blocking)
+            try {
+              const aiSummary = await generateMenuSummary(enrichedStructured, url, languageCode)
+              if (aiSummary) {
+                await supabaseService.from('menu_results_v2')
+                  .update({ ai_summary: aiSummary }).eq('id', resultId)
+                console.log('✅ Menu AI summary stored (PDF)')
+              }
+            } catch (summaryErr) {
+              console.warn('⚠️ Menu summary skipped (PDF):', summaryErr)
+            }
+
+            if (establishmentType && businessId) {
+              const { error: opsError } = await supabaseService
+                .from('business_operations')
+                .upsert({
+                  business_id: businessId,
+                  establishment_type: establishmentType,
+                  has_kids_menu: enrichedStructured.hasKidsMenu ?? null,
+                  updated_at: new Date().toISOString(),
+                }, { onConflict: 'business_id' })
+              if (opsError) console.warn('⚠️ Failed to save establishment_type:', opsError.message)
+            }
+
+            usedFastPath = true
+            console.log('✅ PDF extracted on Edge fast-path')
+            return new Response(
+              JSON.stringify({ success: true, resultId, message: 'PDF menu extracted on Edge (v2)' }),
+              { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+            )
+          } catch (pdfFastErr) {
+            console.warn('⚠️ PDF fast-path failed; falling back to Cloud Run:', pdfFastErr)
+            // Reset status so the Cloud Run worker can claim it
+            await supabaseService
+              .from('menu_results_v2')
+              .update({ status: 'queued', claimed_at: null, extraction_method: 'cloudrun_pdf_ocr' })
+              .eq('id', resultId)
+          }
+        }
+
+        if (usedFastPath) return new Response('', { status: 200 }) // should never reach here
+
+        // --- Slow path: queue PDF for Cloud Run OCR worker ---
+        console.log('📄 Routing PDF to Cloud Run OCR worker')
         const { data: pdfJobData, error: pdfJobError } = await supabaseService
           .from('menu_results')
           .insert({
@@ -640,36 +1005,29 @@ serve(async (req: Request) => {
             .eq('id', resultId)
 
           return new Response(
-            JSON.stringify({
-              success: false,
-              resultId,
-              error: 'Failed to queue PDF for processing',
-            }),
+            JSON.stringify({ success: false, resultId, error: 'Failed to queue PDF for processing' }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
 
-        // Update menu_results_v2 to reference the PDF job
         await supabaseService
           .from('menu_results_v2')
-          .update({
-            status: 'queued',
-            extraction_method: 'pdf_ocr_worker',
-          })
+          .update({ status: 'queued', extraction_method: 'cloudrun_pdf_ocr' })
           .eq('id', resultId)
 
-        console.log(`✅ PDF job queued with ID: ${pdfJobData.id}`)
-        
+        await triggerMenuWorkerOnce()
+        console.log(`✅ PDF queued for Cloud Run OCR with job ID: ${pdfJobData.id}`)
         return new Response(
           JSON.stringify({
             success: true,
             resultId,
             pdfJobId: pdfJobData.id,
-            message: 'PDF menu queued for processing with Tesseract OCR + GPT-4o',
+            message: 'PDF menu queued for OCR processing',
           }),
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+
 
       // Handle HTML menus
       if (true) {
@@ -757,6 +1115,56 @@ serve(async (req: Request) => {
                 menuPeriods
               }
 
+              // ✨ NEW: Determine service periods from menu title/structure
+              const menuTitle = structured.menuTitle || structured.categories?.[0]?.name || ''
+              let servicePeriods: string[] = []
+              let servicePeriodName = 'lunch' // default
+              
+              // Map menu title to service period
+              const menuTitleLower = menuTitle.toLowerCase()
+              if (menuTitle === 'Brunch' || menuTitle === 'BRUNCH' || menuTitleLower.includes('brunch')) {
+                servicePeriods = ['brunch']
+                servicePeriodName = 'brunch'
+              } else if (menuTitle === 'FROKOST' || menuTitle === 'Frokost' || menuTitle === 'LUNCH' || menuTitleLower.includes('frokost') || menuTitleLower.includes('lunch')) {
+                servicePeriods = ['lunch']
+                servicePeriodName = 'lunch'
+              } else if (menuTitle === 'AFTEN' || menuTitle === 'Aften' || menuTitle === 'DINNER' || menuTitleLower.includes('aften') || menuTitleLower.includes('dinner') || menuTitleLower.includes('aftensmad')) {
+                servicePeriods = ['dinner']
+                servicePeriodName = 'dinner'
+              } else if (menuPeriods && menuPeriods.length > 0) {
+                // Use timing from parsed menu periods to infer service type
+                const firstPeriod = menuPeriods[0]
+                const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
+                if (startHour < 11) {
+                  servicePeriods = ['brunch']
+                  servicePeriodName = 'brunch'
+                } else if (startHour >= 17) {
+                  servicePeriods = ['dinner']
+                  servicePeriodName = 'dinner'
+                } else {
+                  servicePeriods = ['lunch']
+                  servicePeriodName = 'lunch'
+                }
+              } else {
+                // Unknown - assume available for lunch and dinner
+                servicePeriods = ['lunch', 'dinner']
+                servicePeriodName = 'lunch'
+              }
+
+              // Detect signature dishes (look for special menu titles or categories)
+              const isSignature = 
+                menuTitleLower.includes('signatur') ||
+                menuTitleLower.includes('specialit') ||
+                menuTitleLower.includes('klassiker') ||
+                structured.categories?.some((cat: any) => 
+                  cat.name?.toLowerCase().includes('signatur') ||
+                  cat.name?.toLowerCase().includes('klassiker') ||
+                  cat.name?.toLowerCase().includes('chef')
+                ) || false
+
+              console.log(`🏷️ Tagged menu with service periods: ${servicePeriods.join(', ')} (primary: ${servicePeriodName})`, 
+                isSignature ? '⭐ SIGNATURE' : '')
+
               // Classify establishment type based on menu structure
               const establishmentType = classifyEstablishmentType(structured)
               
@@ -769,8 +1177,23 @@ serve(async (req: Request) => {
                   completed_at: new Date().toISOString(),
                   source_content_type: htmlCt || probeCt || null,
                   extraction_method: 'edge_html',
+                  service_periods: servicePeriods, // ✨ NEW
+                  service_period_name: servicePeriodName, // ✨ NEW
+                  is_signature: isSignature, // ✨ NEW
                 })
                 .eq('id', resultId)
+
+              // Generate and store AI summary (non-blocking)
+              try {
+                const aiSummary = await generateMenuSummary(enrichedStructured, url, languageCode)
+                if (aiSummary) {
+                  await supabaseService.from('menu_results_v2')
+                    .update({ ai_summary: aiSummary }).eq('id', resultId)
+                  console.log('✅ Menu AI summary stored (HTML)')
+                }
+              } catch (summaryErr) {
+                console.warn('⚠️ Menu summary skipped (HTML):', summaryErr)
+              }
 
               // Save establishment type to business_operations if classified
               if (establishmentType && businessId) {
@@ -780,7 +1203,7 @@ serve(async (req: Request) => {
                   .upsert({
                     business_id: businessId,
                     establishment_type: establishmentType,
-                    has_kids_menu: edgeMenuData.hasKidsMenu ?? null,
+                    has_kids_menu: enrichedStructured.hasKidsMenu ?? null,
                     updated_at: new Date().toISOString()
                   }, { onConflict: 'business_id' })
                 
@@ -788,8 +1211,8 @@ serve(async (req: Request) => {
                   console.warn('⚠️ Failed to save establishment_type:', opsError.message)
                 } else {
                   console.log('✅ Saved establishment_type to business_operations:', establishmentType)
-                  if (edgeMenuData.hasKidsMenu !== null) {
-                    console.log('✅ Saved has_kids_menu:', edgeMenuData.hasKidsMenu)
+                  if (enrichedStructured.hasKidsMenu !== null) {
+                    console.log('✅ Saved has_kids_menu:', enrichedStructured.hasKidsMenu)
                   }
                 }
               }

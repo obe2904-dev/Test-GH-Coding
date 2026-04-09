@@ -5,21 +5,28 @@ interface BrandProfileSectionProps {
   icon?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  badge?: string;
 }
 
 export function BrandProfileSection({ 
   title, 
   icon, 
   children, 
-  className = '' 
+  className = '',
+  badge,
 }: BrandProfileSectionProps) {
   return (
-    <div className={`bg-white rounded-lg border border-gray-200 p-6 ${className}`}>
+    <div className={`bg-surface rounded-lg border border-border p-6 ${className}`}>
       <div className="flex items-center mb-4">
-        {icon && <div className="mr-3 text-blue-600">{icon}</div>}
-        <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+        {icon && <div className="mr-3 text-text-muted">{icon}</div>}
+        <h3 className="text-lg font-semibold text-brand">{title}</h3>
+        {badge && (
+          <span className="ml-auto text-xs text-success-text bg-success-surface border border-success px-2 py-0.5 rounded-full">
+            {badge}
+          </span>
+        )}
       </div>
-      <div className="text-gray-700">
+      <div className="text-text">
         {children}
       </div>
     </div>

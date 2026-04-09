@@ -32,7 +32,7 @@ export function PlansPage() {
         t('plans.standardPlus.features.5')
       ],
       buttonText: t('plans.standardPlus.button'),
-      buttonStyle: 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700',
+      buttonStyle: 'bg-gradient-to-r from-cta to-purple-600 text-white hover:from-cta-hover hover:to-purple-700',
       popular: true
     },
     {
@@ -70,12 +70,12 @@ export function PlansPage() {
           <div
             key={plan.name}
             className={`relative bg-white rounded-xl shadow-lg border-2 ${
-              plan.popular ? 'border-indigo-500' : 'border-gray-200'
+              plan.popular ? 'border-cta' : 'border-gray-200'
             } p-6 ${plan.popular ? 'transform scale-105' : ''}`}
           >
             {plan.popular && (
               <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                <span className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-1 rounded-full text-sm font-medium">
+                <span className="bg-gradient-to-r from-cta to-purple-600 text-white px-4 py-1 rounded-full text-sm font-medium">
                   {t('plans.popular')}
                 </span>
               </div>
@@ -115,7 +115,7 @@ export function PlansPage() {
         <p className="text-gray-600 mb-4">
           {t('plans.questions')}
         </p>
-        <button className="text-indigo-600 hover:text-indigo-800 font-medium">
+        <button className="text-cta hover:text-cta-text font-medium">
           {t('plans.contact')}
         </button>
       </div>

@@ -1,13 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { analyzeLocation, generateLocationProfile } from '@/lib/location/analyzer';
 import { LocationAnalysis } from '@/types/location';
 import LocationAnalysisDisplay from '@/components/setup/LocationAnalysis';
 
 export default function LocationPage() {
-  const router = useRouter();
   const [address, setAddress] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<LocationAnalysis | null>(null);
@@ -76,15 +74,6 @@ export default function LocationPage() {
     saveLocationProfile(updatedAnalysis);
   };
 
-  const handleContinue = () => {
-    router.push('/setup/next-step');
-  };
-
-  const handleSaveAndContinue = async () => {
-    // Auto-save is already enabled, so just navigate to next step
-    router.push('/setup/next-step');
-  };
-
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="mb-8">
@@ -135,20 +124,6 @@ export default function LocationPage() {
             </div>
           )}
 
-          <div className="flex justify-between mt-8">
-            <button
-              onClick={() => setAnalysis(null)}
-              className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              Analyser igen
-            </button>
-            <button
-              onClick={handleSaveAndContinue}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              Fortsæt
-            </button>
-          </div>
         </>
       )}
     </div>

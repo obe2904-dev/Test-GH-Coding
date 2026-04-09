@@ -266,8 +266,8 @@ export function checkQuota(
 export function getTierDisplayName(tier: UserTier): string {
   const names: Record<UserTier, string> = {
     free: 'Free',
-    standardplus: 'Standard Plus',
-    premium: 'Premium',
+    standardplus: 'Smart',
+    premium: 'Pro',
   };
   return names[tier];
 }

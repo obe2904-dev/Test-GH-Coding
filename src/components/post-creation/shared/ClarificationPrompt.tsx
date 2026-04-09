@@ -40,7 +40,7 @@ export function ClarificationPrompt({
         value={inputValue}
         onChange={(event) => onInputChange(event.target.value)}
         placeholder="Skriv 1-2 ord..."
-        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#88F2D7] mb-2"
+        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-mint mb-2"
         onKeyDown={(event) => {
           if (event.key === 'Enter' && inputValue.trim()) {
             event.preventDefault()
@@ -53,7 +53,7 @@ export function ClarificationPrompt({
         <button
           onClick={handleSubmit}
           disabled={!inputValue.trim()}
-          className="px-3 py-1.5 bg-[#0F2E32] text-[#88F2D7] rounded-lg text-xs font-semibold hover:bg-[#12393D] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-3 py-1.5 bg-brand text-mint rounded-lg text-xs font-semibold hover:bg-[#12393D] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Opdater tekst
         </button>

@@ -38,7 +38,7 @@ OPENAI_API_KEY = _clean_env_value(os.getenv("OPENAI_API_KEY"))
 
 # Worker configuration
 WORKER_TRIGGER_TOKEN = os.getenv("WORKER_TRIGGER_TOKEN")
-_bg_poll_env = (os.getenv("WORKER_BACKGROUND_POLL_ENABLED") or "true").strip().lower()
+_bg_poll_env = (os.getenv("WORKER_BACKGROUND_POLL_ENABLED") or "false").strip().lower()
 WORKER_BACKGROUND_POLL_ENABLED = _bg_poll_env in ("1", "true", "yes")
 WORKER_BUILD_ID = (os.getenv("WORKER_BUILD_ID") or "").strip()
 

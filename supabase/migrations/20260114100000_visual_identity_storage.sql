@@ -39,3 +39,9 @@ USING (
 
 COMMENT ON POLICY "Users can upload to their business folder" ON storage.objects IS 
 'Allow authenticated users to upload photos to their business folder in visual-identity bucket';
+
+-- Allow authenticated users to see that buckets exist (required for Storage API bucket lookup)
+CREATE POLICY "Authenticated users can read buckets"
+ON storage.buckets FOR SELECT
+TO authenticated
+USING (true);

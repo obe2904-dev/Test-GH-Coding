@@ -43,7 +43,7 @@ export function LoginPage() {
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             {t('auth.orText')}{' '}
-            <Link to="/signup" className="font-medium text-primary-600 hover:text-primary-500">
+            <Link to="/signup" className="font-medium text-cta hover:text-cta-text">
               {t('auth.createNew')}
             </Link>
           </p>

@@ -36,7 +36,7 @@ export function OpeningHoursSimplePanel({
               type="time"
               value={openingHours[key]?.open || ''}
               onChange={(e) => onOpeningHoursChange(key, 'open', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-cta focus:border-transparent"
               placeholder="Åbner"
             />
           </div>
@@ -45,7 +45,7 @@ export function OpeningHoursSimplePanel({
               type="time"
               value={openingHours[key]?.close || ''}
               onChange={(e) => onOpeningHoursChange(key, 'close', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-cta focus:border-transparent"
               placeholder="Lukker"
             />
           </div>

@@ -38,6 +38,7 @@ export interface LocationContext {
     universities?: number;
     offices?: number;
     transit_stations?: number;
+    parks?: number;
   };
   waterDistance?: number; // meters
   landmarks?: Array<{
@@ -69,6 +70,7 @@ export function analyzeLocationTypes(
   matches.transport_hub = evaluateTransportHub(context, patterns);
   matches.student = evaluateStudent(context, patterns);
   matches.waterfront = evaluateWaterfront(context, patterns);
+  matches.nature_park = evaluateNaturePark(context, patterns);
   matches.shopping_district = evaluateShoppingDistrict(context, patterns);
   matches.mixed_use = evaluateMixedUse(context, patterns);
   matches.destination = evaluateDestination(context, patterns);
@@ -443,7 +445,7 @@ function evaluateStudent(context: LocationContext, patterns: CountryPatterns): L
 }
 
 /**
- * Waterfront: Close to water, parks, promenades
+ * Waterfront: Close to water (sea, harbour, lake or river)
  */
 function evaluateWaterfront(context: LocationContext, patterns: CountryPatterns): LocationTypeMatch {
   let score = 0;
@@ -485,6 +487,56 @@ function evaluateWaterfront(context: LocationContext, patterns: CountryPatterns)
     match_level: level,
     confidence,
     reason: reasons.length > 0 ? reasons.join('. ') : 'Not waterfront'
+  };
+}
+
+/**
+ * Nature Park: Near parks, forests or green spaces — walkers, dog owners, families
+ */
+function evaluateNaturePark(context: LocationContext, patterns: CountryPatterns): LocationTypeMatch {
+  let score = 0;
+  const reasons: string[] = [];
+  let confidence = 0.7;
+
+  const address = (context.address || '').toLowerCase();
+  const neighborhood = (context.neighborhood || '').toLowerCase();
+  const combinedText = address + ' ' + neighborhood;
+
+  // Park keywords in address or neighborhood
+  const hasParkKeyword = patterns.nature_park.parkKeywords.some(keyword =>
+    combinedText.includes(keyword.toLowerCase())
+  );
+  if (hasParkKeyword) {
+    score += 55;
+    reasons.push(patterns.nature_park.nearParkReason);
+    confidence = 0.85;
+  }
+
+  // Parks POI count (Google Maps parks data if available)
+  if (context.nearbyPOIs?.parks) {
+    if (context.nearbyPOIs.parks > 2) {
+      score += 30;
+      reasons.push('Multiple parks nearby');
+      confidence = 0.9;
+    } else if (context.nearbyPOIs.parks > 0) {
+      score += 20;
+      reasons.push('Park nearby');
+    }
+  }
+
+  // Far from water (300m+) and has park keywords → confirms nature_park not waterfront
+  if (hasParkKeyword && context.waterDistance !== undefined && context.waterDistance > 300) {
+    score += 15;
+  }
+
+  score = Math.min(score, 100);
+  const level = score >= 70 ? 'strong' : score >= 40 ? 'moderate' : 'weak';
+
+  return {
+    match_score: score,
+    match_level: level,
+    confidence,
+    reason: reasons.length > 0 ? reasons.join('. ') : 'Not nature park area'
   };
 }
 

@@ -57,17 +57,7 @@ export {
   buildPromptA,
   buildPromptB,
   buildSystemPromptB,
-  BRAND_PROFILE_SCHEMA
-} from './prompts/index.ts'
-
-// A1/A2 Split Architecture (v4.11.0)
-export {
-  buildPromptA1Evidence,
-  buildPromptA2Interpretation
-} from './prompts/index.ts'
-export type {
-  PromptA1Evidence,
-  PromptA2Interpretation
+  computeAllowedSet
 } from './prompts/index.ts'
 
 // Validators
@@ -75,10 +65,10 @@ export {
   validateBrandProfileOutput,
   validateFinalBrandProfile,
   repairBrandProfile,
-  buildAllowedProofTokens,
-  buildNormalizedRefs,
-  META_TEXT_PATTERNS
+  categorizeErrors
 } from './validators.ts'
+export { META_TEXT_PATTERNS, checkBannedWordsConsistency } from './meta-text-validator.ts'
+export { buildAllowedProofTokens, buildNormalizedRefs } from './proof-tokens.ts'
 
 // Database
 export {
@@ -130,19 +120,15 @@ export {
 } from './website-presence.ts'
 export type { WebsitePresence } from './website-presence.ts'
 
-// Soft Repairs (v4.9.0)
+// Location Intelligence (deterministic — from category_scores + marketing_hooks)
 export {
-  categorizeErrors,
-  applySoftRepairs,
-  logRepairResults,
-  isHardError
-} from './soft-repairs.ts'
-export type { RepairResult } from './soft-repairs.ts'
+  buildLocationIntelligence,
+  buildGeoContextBlock
+} from './location-intelligence.ts'
+export type { LocationIntelligence } from './types.ts'
 
-// Proof Grounding (v4.9.0 Phase 2)
+// Voice Options Generator (v2 — two-source model)
 export {
-  cleanProofArray,
-  applyProofGrounding,
-  logProofGroundingResults,
-  validateDishKeywordsInProof
-} from './proof-grounding.ts'
+  generateVoiceOptions
+} from './voice-options-generator.ts'
+export type { VoiceOptions, VoiceOption, VoiceSource, SecondarySignals } from './voice-options-generator.ts'

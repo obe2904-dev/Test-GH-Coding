@@ -62,14 +62,103 @@ def fetch_webpage(url: str, timeout: int = 25, max_size_mb: int = 10) -> Tuple[s
         return "", url, f"Unexpected error: {str(e)}"
 
 
-def extract_text_from_html(html: str) -> str:
-    """Extract clean text from HTML."""
+def extract_main_content(soup: BeautifulSoup) -> Optional[BeautifulSoup]:
+    """
+    Extract the main content area from a BeautifulSoup object.
+    Tries multiple strategies to find the main content and avoid headers/footers/nav.
+    
+    Returns:
+        BeautifulSoup object containing only main content, or None if not found
+    """
+    # Strategy 1: Look for semantic main elements
+    main_selectors = [
+        {'name': 'main'},                           # HTML5 <main> element
+        {'attrs': {'role': 'main'}},                # ARIA role="main"
+        {'attrs': {'id': 'main'}},                  # id="main"
+        {'attrs': {'id': 'content'}},               # id="content"
+        {'attrs': {'id': 'main-content'}},          # id="main-content"
+        {'name': 'article'},                        # HTML5 <article> element
+        {'attrs': {'class': lambda x: x and 'main-content' in ' '.join(x).lower()}},
+        {'attrs': {'class': lambda x: x and 'page-content' in ' '.join(x).lower()}},
+        {'attrs': {'class': lambda x: x and 'site-content' in ' '.join(x).lower()}},
+    ]
+    
+    for selector in main_selectors:
+        element = soup.find(**selector)
+        if element:
+            logger.debug(f"Found main content using selector: {selector}")
+            return element
+    
+    # Strategy 2: If multiple articles, use them all
+    articles = soup.find_all('article')
+    if len(articles) > 0:
+        logger.debug(f"Found {len(articles)} article elements")
+        # Create a wrapper for all articles
+        wrapper = BeautifulSoup('<div></div>', 'html.parser').div
+        for article in articles:
+            wrapper.append(article)
+        return wrapper
+    
+    # Strategy 3: Look for content divs that are NOT header/footer/nav
+    # Find the largest content div
+    content_candidates = []
+    for div in soup.find_all('div'):
+        div_id = (div.get('id') or '').lower()
+        div_classes = ' '.join(div.get('class') or []).lower()
+        
+        # Skip known non-content areas
+        skip_patterns = ['header', 'footer', 'nav', 'sidebar', 'menu', 'cookie', 'modal', 'popup', 'advertisement']
+        if any(pattern in div_id or pattern in div_classes for pattern in skip_patterns):
+            continue
+        
+        # Look for content indicators
+        content_patterns = ['content', 'body', 'main', 'article', 'post', 'page']
+        if any(pattern in div_id or pattern in div_classes for pattern in content_patterns):
+            text_length = len(div.get_text(strip=True))
+            if text_length > 200:  # Must have substantial content
+                content_candidates.append((text_length, div))
+    
+    if content_candidates:
+        # Return the largest content div
+        content_candidates.sort(reverse=True)
+        logger.debug(f"Found {len(content_candidates)} content candidates, using largest ({content_candidates[0][0]} chars)")
+        return content_candidates[0][1]
+    
+    return None
+
+
+def extract_text_from_html(html: str, extract_main_only: bool = True) -> str:
+    """
+    Extract clean text from HTML.
+    
+    Args:
+        html: Raw HTML content
+        extract_main_only: If True, try to extract only main content (recommended)
+    
+    Returns:
+        Cleaned text content
+    """
     try:
         soup = BeautifulSoup(html, 'html.parser')
+        
+        # Try to extract only main content to reduce noise
+        if extract_main_only:
+            main_content = extract_main_content(soup)
+            if main_content:
+                soup = main_content
+                logger.info("✂️ Extracted main content area (reduced noise)")
+            else:
+                logger.debug("No main content area found, using full page")
         
         # Remove script and style elements
         for script in soup(['script', 'style', 'noscript']):
             script.decompose()
+        
+        # Remove known noise elements
+        for noise in soup(['header', 'footer', 'nav', 'aside']):
+            # Only remove if we're using full page (not main content)
+            if not extract_main_only or not main_content:
+                noise.decompose()
         
         # Get text
         text = soup.get_text(separator='\n')

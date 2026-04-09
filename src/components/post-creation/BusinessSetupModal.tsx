@@ -35,13 +35,13 @@ export function BusinessSetupModal({ isOpen, onClose }: BusinessSetupModalProps)
         
         <div className="p-6">
           <div className="text-center py-12">
-            <Sparkles className="w-16 h-16 text-indigo-600 mx-auto mb-4" />
+            <Sparkles className="w-16 h-16 text-cta mx-auto mb-4" />
             <p className="text-slate-600 mb-4">
               {t('redirectToProfile', 'Du vil blive sendt til din profil-side for at tilføje forretningsinfo.')}
             </p>
             <button
               onClick={() => window.location.href = '/dashboard/profile'}
-              className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-bold text-sm shadow-md"
+              className="px-6 py-3 bg-gradient-to-r from-cta to-purple-600 text-white rounded-lg hover:from-cta-hover hover:to-purple-700 transition-all font-bold text-sm shadow-md"
             >
               {t('goToProfile', 'Gå til profil')}
             </button>

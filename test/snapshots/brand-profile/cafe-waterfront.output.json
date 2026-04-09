@@ -1,0 +1,141 @@
+{
+  "business_id": "2037d63c-a138-4247-89c5-5b6b8cef9f3f",
+  "tone_keywords": null,
+  "voice_style": null,
+  "values": null,
+  "certifications": null,
+  "do_not_say": null,
+  "created_at": "2026-02-18 18:15:55.687693+00",
+  "updated_at": "2026-02-26 21:11:44.562+00",
+  "offerings_full": null,
+  "booking_link": "https://book.dinnerbooking.com/dk/da-DK/book/index/263/2",
+  "cta_preference": null,
+  "business_voice": "friendly",
+  "voice_execution": {
+    "typical_openings": [
+      "Café Faust tilbyder...",
+      "Café Faust byder på..."
+    ],
+    "writing_patterns": {
+      "emoji_frequency": "minimal",
+      "sentence_length": "medium",
+      "punctuation_style": "Korrekt og klar, fokuserer på at levere information uden overdrivelse."
+    },
+    "signature_phrases": [
+      {
+        "phrase": "lægger mad",
+        "source": "Forretningsbeskrivelse",
+        "usage_context": "Når der tales om madudbud og kvalitet."
+      },
+      {
+        "phrase": "unikke oplevelser",
+        "source": "Forretningsbeskrivelse",
+        "usage_context": "Når der tales om den samlede gæsteoplevelse, stemning og atmosfære."
+      },
+      {
+        "phrase": "ved åen i Aarhus",
+        "source": "Forretningsbeskrivelse",
+        "usage_context": "Ved lokationsbaseret indhold, for at understrege den attraktive placering."
+      },
+      {
+        "phrase": "alt fra brunch til delikate 3-retters menuer",
+        "source": "Forretningsbeskrivelse",
+        "usage_context": "Når det brede menukort skal fremhæves."
+      },
+      {
+        "phrase": "Café Faust tilbyder",
+        "source": "Forretningsbeskrivelse",
+        "usage_context": "Som en direkte og informativ åbning til at præsentere et tilbud."
+      },
+      {
+        "phrase": "Café Faust byder på",
+        "source": "Detaljeret beskrivelse",
+        "usage_context": "Som en indbydende åbning til at beskrive, hvad gæsterne kan forvente."
+      }
+    ]
+  },
+  "personality": {
+    "formality": "professional casual",
+    "humor_level": "none",
+    "storytelling_style": "contextual"
+  },
+  "brand_context": {
+    "origin_story": null,
+    "local_landmarks": [
+      "Åboulevarden",
+      "Aarhus Å"
+    ],
+    "unique_differentiator": "Deres evne til at levere en fuldendt spiseoplevelse – fra casual brunch til fine dining – udelukkende i en udendørs setting ved Aarhus Å, komplet med bordservice."
+  },
+  "brand_essence": "Lækker mad og unikke udendørs oplevelser ved åen i Aarhus",
+  "tone_of_voice": "{\"primary_tone\":\"Varm, indbydende og kvalitetsbevidst\",\"attributes\":[\"Gæstfri\",\"Engagerende\",\"Autentisk\"],\"formality_level\":\"professional casual\"}",
+  "things_to_avoid": "[\"fantastisk (overbrugt, tomt marketingsprog)\",\"perfekt (medmindre det beskriver en menuret fra kontekst, ellers for generelt)\",\"amazing (ikke dansk, overbrugt)\"]",
+  "core_offerings": "Café Faust positionerer sig som en dynamisk udendørs café ved Aarhus Å, der tilbyder en bred vifte af kulinariske oplevelser fra brunch til delikate 3-retters menuer, alt sammen med bordservice i en hyggelig atmosfære.",
+  "content_focus": "[{\"hook\":\"Unikke oplevelser ved åen i Aarhus\",\"usage\":\"Generel branding, tiltrække turister og lokale, fremhæve stemning.\"},{\"hook\":\"Alt fra brunch til delikate 3-retters menuer\",\"usage\":\"Fremhæve det brede madudbud, appelere til forskellige anledninger og tidspunkter.\"},{\"hook\":\"Udeservering ved Åboulevarden\",\"usage\":\"Fremhæve den unikke udendørs placering og stemning, især i varmere måneder.\"},{\"hook\":\"Café-kultur og aftenliv ved vandet\",\"usage\":\"Appellere til sociale sammenkomster, fremhæve atmosfæren både dag og aften.\"}]",
+  "cta_style": null,
+  "communication_goal": "{\"differentiators\":[\"Den komplette udendørs spiseoplevelse med bordservice ved Aarhus Å (0 indendørs siddepladser for gæster)\",\"Bredt menukort fra afslappet brunch til delikate 3-retters menuer\",\"Positionering som både café og aftenrestaurant\"],\"key_advantages\":[\"Attraktiv og central beliggenhed ved åen\",\"Fleksibilitet i udbud, der appellerer til mange forskellige gæster og anledninger\",\"Fokus på 'unikke oplevelser' udover blot maden\"]}",
+  "image_preferences": null,
+  "last_edited_by": null,
+  "last_edited_at": null,
+  "target_audience": {
+    "primary": "Lokale og turister i Aarhus, der søger en hyggelig og kvalitetsbevidst spiseoplevelse ved vandet.",
+    "characteristics": [
+      "Værdsætter god mad og stemning",
+      "Søger sociale mødesteder",
+      "Nyder udendørs café-kultur",
+      "Åben for både casual brunch og mere formelle middage"
+    ]
+  },
+  "signature_phrases": [
+    "ved åen",
+    "unikke oplevelser",
+    "lægger mad",
+    "fra brunch til 3-retters",
+    "udeservering i Aarhus",
+    "café-kultur ved vandet"
+  ],
+  "never_say": [
+    "#foodporn",
+    "amazing",
+    "atmosphere",
+    "i hjertet af",
+    "incredible",
+    "influencer",
+    "insta-worthy",
+    "instagrammable",
+    "kulinarisk perle"
+  ],
+  "typical_openings": [
+    "Café Faust tilbyder...",
+    "Café Faust byder på..."
+  ],
+  "typical_closings": [
+    "Vi ses ☕",
+    "Kom forbi",
+    "Velkommen",
+    "Vi ses på Åboulevarden"
+  ],
+  "humor_level": "subtle",
+  "formality": "casual",
+  "storytelling_style": "some_context",
+  "emoji_style": "minimal",
+  "punctuation_style": "casual",
+  "brand_origin_story": null,
+  "what_makes_us_different": "Vores unikke placering ved Aarhus Å kombineret med en alsidig menu, der spænder fra brunch til 3-retters menuer, alt sammen serveret udendørs med bordservice, skaber en særlig og mindeværdig oplevelse.",
+  "signature_approach": "At skabe enestående udendørs spiseoplevelser ved åen, der forener lækker mad med en indbydende atmosfære.",
+  "owner_perspective": "Ejeren ser Café Faust som et sted, der leverer 'lægger mad og unikke oplevelser ved åen i Aarhus', og som formår at dække et bredt gastronomisk spektrum 'fra brunch til delikate 3-retters menuer'.",
+  "founded_year": null,
+  "sample_posts": [
+    {
+      "post_text": "Café Faust byder på lækker mad og unikke oplevelser ved åen i Aarhus. Nyd alt fra en hyggelig brunch til en delikat 3-retters menu under åben himmel. Perfekt til både hverdag og fest.",
+      "why_this_works": "Bruger direkte citater som 'lægger mad' og 'unikke oplevelser ved åen i Aarhus'. Fremhæver det brede udbud 'alt fra brunch til delikate 3-retters menuer'. Tonen er indbydende og informativ, og anerkender den udendørs placering indirekte med 'under åben himmel'."
+    },
+    {
+      "post_text": "Trænger du til en pause fra hverdagen? Café Faust tilbyder udeservering ved Åboulevarden, hvor du kan nyde vores brede menukort. Oplev café-kulturen og aftenlivet lige ved vandet.",
+      "why_this_works": "Åbner med en engagerende spørgsmål, følger op med 'Café Faust tilbyder'. Fremhæver 'udeservering ved Åboulevarden' og 'café-kulturen og aftenlivet' som kerne-hooks. Holder en professionel casual tone."
+    }
+  ],
+  "voice_extraction_source": "ai_gpt4o_hybrid",
+  "voice_extracted_at": "2026-02-26 21:11:44.562+00",
+  "voice_confidence_score": 80
+}

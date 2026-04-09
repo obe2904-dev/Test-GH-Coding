@@ -152,7 +152,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                 setShowEmailForm(true)
                 setError('')
               }}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-primary-600 rounded-md hover:bg-primary-700 transition"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-text-inverse bg-cta rounded-md hover:bg-cta-hover transition"
             >
               {t('auth.signUpWithEmail', 'Sign up with email')}
             </button>
@@ -160,7 +160,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
 
           <p className="text-center text-sm text-slate-600">
             {t('auth.alreadyHave', 'Already have an account?')}{' '}
-            <Link to="/login" className="font-medium text-primary-600 hover:text-primary-500">
+            <Link to="/login" className="font-medium text-cta hover:text-cta-text">
               {t('auth.signInButton', 'Sign in')}
             </Link>
           </p>
@@ -173,7 +173,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
               setShowEmailForm(false)
               setError('')
             }}
-            className="text-sm text-primary-600 hover:text-primary-500"
+            className="text-sm text-cta hover:text-cta-text"
           >
             {`< ${t('common.back', 'Back')}`}
           </button>
@@ -184,7 +184,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
             </h2>
             <p className="mt-2 text-center text-sm text-gray-600">
               {t('auth.alreadyHave', 'Already have an account?')}{' '}
-              <Link to="/login" className="font-medium text-primary-600 hover:text-primary-500">
+              <Link to="/login" className="font-medium text-cta hover:text-cta-text">
                 {t('auth.signInButton', 'Sign in')}
               </Link>
             </p>
@@ -209,7 +209,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="mt-1 block w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  className="mt-1 block w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-cta focus:outline-none focus:ring-1 focus:ring-cta"
                   placeholder={t('auth.fullNamePlaceholder', 'Your name')}
                 />
               </div>
@@ -224,7 +224,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                   type="email"
                   autoComplete="email"
                   required
-                  className="mt-1 block w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  className="mt-1 block w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-cta focus:outline-none focus:ring-1 focus:ring-cta"
                   placeholder={t('auth.email', 'Email address')}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -240,7 +240,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                   type="password"
                   autoComplete="new-password"
                   required
-                  className="mt-1 block w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  className="mt-1 block w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-cta focus:outline-none focus:ring-1 focus:ring-cta"
                   placeholder={t('auth.passwordMin', 'Password (min. 6 characters)')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -251,7 +251,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                 <label className="flex items-start gap-3">
                   <input
                     type="checkbox"
-                    className="mt-1 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-cta focus:ring-cta"
                     checked={marketingOptIn}
                     onChange={(e) => setMarketingOptIn(e.target.checked)}
                   />
@@ -266,7 +266,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                 <label className="flex items-start gap-3">
                   <input
                     type="checkbox"
-                    className="mt-1 h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                    className="mt-1 h-4 w-4 rounded border-slate-300 text-cta focus:ring-cta"
                     checked={termsAccepted}
                     onChange={(e) => setTermsAccepted(e.target.checked)}
                     required
@@ -280,7 +280,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                             href="/terms"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-primary-600 hover:text-primary-500 underline"
+                            className="text-cta hover:text-cta-text underline"
                           />
                         ),
                         dataLink: (
@@ -288,7 +288,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                             href="/data-processing"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-primary-600 hover:text-primary-500 underline"
+                            className="text-cta hover:text-cta-text underline"
                           />
                         ),
                       }}
@@ -302,7 +302,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
               <button
                 type="submit"
                 disabled={loading}
-                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-text-inverse bg-cta hover:bg-cta-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cta disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? t('auth.creatingAccount', 'Creating account...') : t('auth.signUpButton', 'Create account')}
               </button>

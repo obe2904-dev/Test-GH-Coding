@@ -106,8 +106,8 @@ export const TextEditor: React.FC<TextEditorProps> = ({
   return (
     <div className="bg-white rounded-lg shadow-md border border-slate-200 p-4">
       <div className="flex items-center gap-2 mb-2">
-        <div className="bg-indigo-100 p-1.5 rounded-lg">
-          <Type className="w-4 h-4 text-indigo-600" />
+        <div className="bg-cta-surface p-1.5 rounded-lg">
+          <Type className="w-4 h-4 text-cta" />
         </div>
         <div>
           <h3 className="text-sm font-bold text-slate-800">
@@ -130,15 +130,15 @@ export const TextEditor: React.FC<TextEditorProps> = ({
           
           {/* Platform Customization Toggle */}
           {selectedPlatforms.length > 1 && (
-            <div className="flex items-center gap-1.5 bg-gradient-to-r from-indigo-50 to-purple-50 px-3 py-1.5 rounded-lg border border-indigo-200">
+            <div className="flex items-center gap-1.5 bg-gradient-to-r from-cta-surface to-purple-50 px-3 py-1.5 rounded-lg border border-cta-surface">
               <input
                 type="checkbox"
                 id="customizePerPlatform"
                 checked={customizePerPlatform}
                 onChange={(e) => onCustomizeToggle(e.target.checked)}
-                className="w-3 h-3 text-indigo-600 rounded focus:ring-indigo-500"
+                className="w-3 h-3 text-cta rounded focus:ring-cta"
               />
-              <label htmlFor="customizePerPlatform" className="text-xs font-bold text-indigo-700 cursor-pointer">
+              <label htmlFor="customizePerPlatform" className="text-xs font-bold text-cta-text cursor-pointer">
                 {t('generate.customizePerPlatform', 'Customize per platform')}
               </label>
             </div>
@@ -161,7 +161,7 @@ export const TextEditor: React.FC<TextEditorProps> = ({
                 onClick={() => onPlatformSwitch(platform)}
                 className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
                   activePlatform === platform
-                    ? 'bg-indigo-100 text-indigo-700'
+                    ? 'bg-cta-surface text-cta-text'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -184,7 +184,7 @@ export const TextEditor: React.FC<TextEditorProps> = ({
             value={getCurrentText().headline}
             onChange={(e) => onUpdateText('headline', e.target.value)}
             placeholder={t('generate.headlinePlaceholder', 'e.g., "Weekend Special 🔥"')}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm font-semibold"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm font-semibold"
           />
         </div>
 
@@ -220,7 +220,7 @@ export const TextEditor: React.FC<TextEditorProps> = ({
             onChange={(e) => onUpdateText('text', e.target.value)}
             placeholder={t('generate.textPlaceholder', 'Write your post here...')}
             rows={4}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm resize-none"
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm resize-none"
           />
         </div>
 
@@ -230,7 +230,7 @@ export const TextEditor: React.FC<TextEditorProps> = ({
           {hashtags.length > 0 && (
           <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
             <div className="flex items-center gap-1 mb-1.5">
-              <Hash className="w-3 h-3 text-indigo-600" />
+              <Hash className="w-3 h-3 text-cta" />
               <span className="text-xs font-semibold text-slate-700">{t('generate.hashtags', 'Hashtags')}</span>
               <span className="text-xs text-slate-500">
                 ({includeHashtags ? Array.from(selectedHashtags).length : 0}/{hashtags.length} selected)
@@ -252,7 +252,7 @@ export const TextEditor: React.FC<TextEditorProps> = ({
                     }}
                     className={`px-1.5 py-0.5 rounded-full text-xs border transition-colors ${
                       isSelected
-                        ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
+                        ? 'bg-cta-surface border-cta text-cta-text'
                         : 'bg-white border-slate-300 text-slate-600 hover:border-slate-400'
                     } ${!includeHashtags ? 'opacity-75' : 'cursor-pointer'}`}
                   >
@@ -270,13 +270,13 @@ export const TextEditor: React.FC<TextEditorProps> = ({
             <div className="flex items-center gap-3">
               <button
                 onClick={() => onToggleHashtagsEnabled(!includeHashtags)}
-                className="flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
+                className="flex items-center gap-1 hover:text-cta transition-colors cursor-pointer"
               >
                 {includeHashtags ? '✅' : '⬜'} {t('generate.hashtagsIncluded', 'Hashtags included')}
               </button>
               <button
                 onClick={() => onToggleCTA(!includeCTA)}
-                className="flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
+                className="flex items-center gap-1 hover:text-cta transition-colors cursor-pointer"
               >
                 {includeCTA ? '✅' : '⬜'} {t('generate.ctaIncluded', 'CTA: Call to action')}
               </button>
@@ -288,7 +288,7 @@ export const TextEditor: React.FC<TextEditorProps> = ({
                 <button
                   onClick={() => {/* TODO: Implement AI update functionality */}}
                   disabled={isGenerating || currentTier === 'free'}
-                  className={`px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-bold text-xs shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed relative ${
+                  className={`px-3 py-1.5 bg-gradient-to-r from-cta to-purple-600 text-white rounded-lg hover:from-cta-hover hover:to-purple-700 transition-all font-bold text-xs shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed relative ${
                     currentTier === 'free' ? 'from-slate-400 to-slate-500 hover:from-slate-400 hover:to-slate-500' : ''
                   }`}
                 >
@@ -309,13 +309,13 @@ export const TextEditor: React.FC<TextEditorProps> = ({
                   isSpellingChecked
                     ? 'bg-emerald-50 border-emerald-500 text-emerald-700 cursor-default'
                     : isGenerating
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-600 cursor-wait'
-                      : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50 cursor-pointer'
+                      ? 'bg-cta-surface border-cta text-cta cursor-wait'
+                      : 'bg-white border-cta text-cta hover:bg-cta-surface cursor-pointer'
                 }`}
               >
                 {isGenerating ? (
                   <>
-                    <div className="w-3.5 h-3.5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                    <div className="w-3.5 h-3.5 border-2 border-cta border-t-transparent rounded-full animate-spin" />
                     <span>{t('generate.checking', 'Checking...')}</span>
                   </>
                 ) : isSpellingChecked ? (

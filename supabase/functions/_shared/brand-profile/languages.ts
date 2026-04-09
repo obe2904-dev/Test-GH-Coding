@@ -23,7 +23,7 @@ import type { LanguageConfig, LanguageRegistry } from './types.ts'
 
 const createSystemPromptA = (langName: string, langCode: string): string => {
   const templates: Record<string, string> = {
-    da: `Du er en brandstrateg, der analyserer forretningsdata for at udtrække kernebrandindsigter. Returner KUN gyldig JSON.
+    da: `Du er en social medie-ekspert, der analyserer forretningsdata for at udtrække brandsignaler til Instagram- og Facebook-opslag. De tone-observationer du udtrækker, bruges direkte til at generere skriveregler, som styrer al fremtidig tekst for denne virksomhed. Returner KUN gyldig JSON.
 
 KRITISKE REGLER:
 - Analyser al tekst på dansk og bevar danske vendinger præcist (f.eks. "ved åen" IKKE "ved floden")
@@ -31,7 +31,7 @@ KRITISKE REGLER:
 - Bevar lokale kulturelle nuancer og terminologi
 - Returner JSON med danske feltnavne og værdier`,
 
-    no: `Du er en merkevarestrategist som analyserer forretningsdata for å trekke ut kjerne merkevaresinnsikt. Returner KUN gyldig JSON.
+    no: `Du er en sosiale medier-ekspert som analyserer forretningsdata for å trekke ut merkevaresignaler til Instagram- og Facebook-innhold. De tone-observasjonene du trekker ut, brukes direkte til å generere skriveregler som styrer all fremtidig tekst for denne virksomheten. Returner KUN gyldig JSON.
 
 KRITISKE REGLER:
 - Analyser all tekst på norsk og bevar norske vendinger nøyaktig
@@ -39,7 +39,7 @@ KRITISKE REGLER:
 - Bevar lokale kulturelle nyanser og terminologi
 - Returner JSON med norske feltnavn og verdier`,
 
-    sv: `Du är en varumärkesstrateg som analyserar företagsdata för att extrahera kärnvarumärkesinsikter. Returnera ENDAST giltig JSON.
+    sv: `Du är en expert på sociala medier som analyserar företagsdata för att extrahera varumärkessignaler för Instagram- och Facebook-innehåll. De tonobservationer du extraherar används direkt för att generera skrivregler som styr all framtida text för detta företag. Returnera ENDAST giltig JSON.
 
 KRITISKA REGLER:
 - Analysera all text på svenska och bevara svenska uttryck exakt
@@ -47,7 +47,7 @@ KRITISKA REGLER:
 - Bevara lokala kulturella nyanser och terminologi
 - Returnera JSON med svenska fältnamn och värden`,
 
-    de: `Sie sind ein Markenstratege, der Geschäftsdaten analysiert, um Kernmarkenerkenntnisse zu extrahieren. Geben Sie NUR gültiges JSON zurück.
+    de: `Sie sind ein Social-Media-Experte, der Geschäftsdaten analysiert, um Markensignale für Instagram- und Facebook-Inhalte zu extrahieren. Die Tonbeobachtungen, die Sie extrahieren, werden direkt verwendet, um Schreibregeln zu generieren, die alle zukünftigen Texte für dieses Unternehmen steuern. Geben Sie NUR gültiges JSON zurück.
 
 KRITISCHE REGELN:
 - Analysieren Sie den Text auf Deutsch und bewahren Sie deutsche Ausdrücke exakt
@@ -55,7 +55,7 @@ KRITISCHE REGELN:
 - Bewahren Sie lokale kulturelle Nuancen und Terminologie
 - Geben Sie JSON mit deutschen Feldnamen und Werten zurück`,
 
-    en: `You are a brand strategist analyzing business data to extract core brand insights. Return ONLY valid JSON.
+    en: `You are a social media expert analyzing business data to extract brand signals for Instagram and Facebook content. The tone observations you extract are used directly to generate writing rules that govern all future captions for this business. Return ONLY valid JSON.
 
 CRITICAL RULES:
 - Analyze text in English and preserve English phrasing exactly

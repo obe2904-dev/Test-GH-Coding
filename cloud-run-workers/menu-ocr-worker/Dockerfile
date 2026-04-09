@@ -17,8 +17,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code (all modules required by the modular structure)
 COPY main.py .
+COPY config.py .
+COPY worker.py .
+COPY extractors/ extractors/
+COPY parsers/ parsers/
+COPY utils/ utils/
 
 # Set environment variables (will be overridden by Cloud Run)
 ENV PYTHONUNBUFFERED=1

@@ -11,7 +11,6 @@ export type Tier = UserTier
 interface TierLimits {
   aiIdeasPerDay: number
   captionGenerationsPerDay: number
-  photoFeedbackLevel: 'lite' | 'full' | 'full-batch'
   scheduledPostsPerMonth: number
   maxChannels: number
   autoReplies: boolean
@@ -83,7 +82,6 @@ const TIER_LIMITS: Record<Tier, TierLimits> = {
   free: {
     aiIdeasPerDay: TIER_QUOTAS.free.aiGenerations.daily,
     captionGenerationsPerDay: TIER_QUOTAS.free.aiGenerations.daily,
-    photoFeedbackLevel: 'lite',
     scheduledPostsPerMonth: TIER_QUOTAS.free.scheduledPosts,
     maxChannels: TIER_QUOTAS.free.socialChannels,
     autoReplies: TIER_QUOTAS.free.autoReplies,
@@ -94,7 +92,6 @@ const TIER_LIMITS: Record<Tier, TierLimits> = {
   standardplus: {
     aiIdeasPerDay: TIER_QUOTAS.standardplus.aiGenerations.daily === -1 ? Infinity : TIER_QUOTAS.standardplus.aiGenerations.daily,
     captionGenerationsPerDay: TIER_QUOTAS.standardplus.aiGenerations.daily === -1 ? Infinity : TIER_QUOTAS.standardplus.aiGenerations.daily,
-    photoFeedbackLevel: 'full',
     scheduledPostsPerMonth: TIER_QUOTAS.standardplus.scheduledPosts === -1 ? Infinity : TIER_QUOTAS.standardplus.scheduledPosts,
     maxChannels: TIER_QUOTAS.standardplus.socialChannels,
     autoReplies: TIER_QUOTAS.standardplus.autoReplies,
@@ -105,7 +102,6 @@ const TIER_LIMITS: Record<Tier, TierLimits> = {
   premium: {
     aiIdeasPerDay: Infinity,
     captionGenerationsPerDay: Infinity,
-    photoFeedbackLevel: 'full-batch',
     scheduledPostsPerMonth: Infinity,
     maxChannels: TIER_QUOTAS.premium.socialChannels === -1 ? Infinity : TIER_QUOTAS.premium.socialChannels,
     autoReplies: TIER_QUOTAS.premium.autoReplies,

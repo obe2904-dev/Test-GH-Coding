@@ -80,6 +80,40 @@
       "connect": "Connect your social media accounts",
       "firstPost": "Create your first post",
       "schedule": "Schedule content for the week"
+    },
+    "suggestionsReady": "Today's AI Ideas",
+    "suggestionsSubtext": "Tap an idea to write the post.",
+    "headlinePromptFallback": "Get AI post ideas",
+    "aiIdeasDescription": "Let AI suggest 3 ideas for today's post based on your menu and the weather 🌤️",
+    "generateIdeas": "Generate ideas",
+    "upgradeNudge": "Want more AI ideas per day?",
+    "upgradeNudgeSubtext": "Upgrade to Smart or Pro for unlimited daily ideas.",
+    "writeOwnIdea": "Write your own idea instead",
+    "regenerateIdeas": "🔄 Generate new ideas",
+    "generatePostWithAI": "Generate post with AI",
+    "whyThisPost": "💡 Why this post?",
+    "cameraOrPhone": "Camera or phone",
+    "weatherIn": "Weather in",
+    "weatherValidUntil": "Valid",
+    "suggestedTimeToday": "today",
+    "suggestedTimeTomorrow": "tomorrow",
+    "contentType": {
+      "menu_item": "Product",
+      "atmosphere": "Atmosphere",
+      "behind_scenes": "Behind the scenes"
+    },
+    "timeReason": {
+      "08:00": "Morning customers arriving",
+      "09:00": "Before brunch starts",
+      "10:00": "Mid-morning break",
+      "11:00": "Lunch decision time",
+      "12:00": "Lunch break",
+      "13:00": "Midday break",
+      "14:00": "Afternoon break",
+      "16:00": "End of work day",
+      "17:00": "Dinner time begins",
+      "18:00": "Evening inspiration",
+      "20:00": "Evening atmosphere"
     }
   },
   "common": {
@@ -94,7 +128,6 @@
     "edit": "Edit",
     "unsavedChanges": "You have unsaved changes. Are you sure you want to leave the page?"
   },
-
   "operations": {
     "title": "Operations & Opening Hours",
     "subtitle": "Operational information about your business",
@@ -138,8 +171,12 @@
         "luxury": "Luxury"
       }
     },
-    "busy": { "title": "Busy Periods" },
-    "slow": { "title": "Slow Periods" },
+    "busy": {
+      "title": "Busy Periods"
+    },
+    "slow": {
+      "title": "Slow Periods"
+    },
     "periods": {
       "morning": "Morning",
       "lunch": "Lunch",
@@ -187,7 +224,29 @@
     "privacy": "Privacy",
     "terms": "Terms",
     "profile": "My Profile",
-    "upgrade": "Upgrade"
+    "upgrade": "Upgrade",
+    "yourBusiness": "Your Business",
+    "whatWeOffer": "What we offer",
+    "setup": {
+      "profile": "1. Business Profile",
+      "menu": "2. What we offer",
+      "location": "3. Location",
+      "brand": "4. Brand Profile (AI)"
+    },
+    "badgeNew": "NEW",
+    "sectionContent": "Content",
+    "writeSelf": "Write yourself",
+    "dailySuggestion": "Today's suggestion",
+    "weeklyPlan": "Weekly plan",
+    "sectionPublishing": "Publishing",
+    "socialMedia": "Social Media",
+    "tier": {
+      "free": "Free Plan",
+      "standard": "Smart Plan",
+      "premium": "Pro Plan",
+      "upgrade": "Upgrade →",
+      "unlocked": "All unlocked"
+    }
   },
   "myProfile": {
     "title": "My Profile",
@@ -300,7 +359,6 @@
       "yesterday": "Yesterday"
     }
   },
-  
   "business": {
     "homepageUrl": "Business Website",
     "homepageDescription": "Enter your business website URL so our AI can analyze your business hours, services, and other important information.",
@@ -317,12 +375,9 @@
     "reviewAndEdit": "Review and edit the information below",
     "autoDetected": "Auto-detected",
     "basicInfo": {
-      "title": "Basic Information",
-      "businessName": "Business Name",
-      "businessType": "Business Type",
-      "description": "Business Description",
-      "logo": "Business Logo",
-      "selectType": "Select business type"
+      "businessNamePlaceholder": "Your business name",
+      "categoryPlaceholder": "e.g., cafe, restaurant, bar, hair salon, clothing store",
+      "categoryHint": "Write what you call your business in everyday language (e.g., \"cafe\", \"barber\", \"clothing store\")."
     },
     "businessTypes": {
       "restaurant": "Restaurant/Cafe",
@@ -343,11 +398,6 @@
       "locationLabel": "City/Location *",
       "locationPlaceholder": "e.g., Copenhagen",
       "saveButton": "Save & Start Creating Better Content"
-    },
-    "basicInfo": {
-      "businessNamePlaceholder": "Your business name",
-      "categoryPlaceholder": "e.g., cafe, restaurant, bar, hair salon, clothing store",
-      "categoryHint": "Write what you call your business in everyday language (e.g., \"cafe\", \"barber\", \"clothing store\")."
     },
     "websiteAnalysis": {
       "badge": "ADVANCED (Optional)",
@@ -392,42 +442,105 @@
     }
   },
   "menu": {
+    "addManual": "Add menu manually",
+    "add": {
+      "link": "Paste link",
+      "text": "Enter menu text",
+      "linkPlaceholder": "https://example.com/menu",
+      "add": "Add",
+      "analyze": "Analyze"
+    },
+    "item": {
+      "name": "Name",
+      "description": "Description",
+      "price": "Price"
+    },
+    "addManualText": "Add menu as text",
+    "findOn": "Find menu on",
+    "noLinksFound": "No menu links found on the website",
+    "extractFailed": "Menu extraction failed. Please try again.",
+    "savePricingFailed": "Could not save pricing. Please try again.",
     "header": {
-      "title": "Menus",
-      "subtitle": "AI-driven menu extraction",
-      "subtitle2": "AI-driven menu extraction and editing"
+      "title": "What we offer",
+      "subtitle": "Add your menu so we can create relevant content",
+      "subtitle2": "Your menu and offerings"
     },
     "free": {
-      "upgradeTitle": "Upgrade for menu extraction",
-      "description": "With Smart or Pro you can automatically extract menus from your website, edit them, and get AI to create context-aware posts based on your menu.",
-      "cta": "See pricing & upgrade"
-    },
-    "error": {
-      "noWebsite": "No website provided",
-      "analyzeFailed": "Could not analyze website",
-      "noMenusFound": "No menus found on the website",
-      "linkAlreadyAdded": "This link has already been added",
-      "addFailed": "Failed to add menu",
-      "analyzeMenuFailed": "Could not analyze menu",
-      "saveEdit": "Could not save changes"
-    },
-    "info": {
-      "noNewMenus": "No new menus found - all detected menus already exist"
-    },
-    "delete": {
-      "inProgress": "Cannot delete menus while an extraction is in progress. Please wait.",
-      "confirm": "Delete this menu?"
+      "upgradeTitle": "Unlock menu features",
+      "cta": "Upgrade to add menu"
     },
     "batch": {
-      "extracting": "Extracting menu...",
+      "extracting": "Extracting...",
       "inQueue": "in queue",
-      "helper": "Menus are processed one at a time to ensure quality. Keep this page open."
+      "helper": "We'll extract menu items automatically from each source"
     },
-    "findOn": "Find menus on",
     "detect": {
-      "searching": "Searching...",
-      "find": "Find menus"
-    }
+      "find": "Find menu pages",
+      "searching": "Searching..."
+    },
+    "error": {
+      "noWebsite": "Please add a website URL to your business profile first",
+      "analyzeFailed": "Could not analyse the website. Please try again.",
+      "noMenusFound": "No menu pages found on the website",
+      "addFailed": "Could not add menu source. Please try again.",
+      "linkAlreadyAdded": "This link has already been added",
+      "saveEdit": "Could not save edit. Please try again.",
+      "analyzeMenuFailed": "Could not analyse menu text. Please try again."
+    },
+    "delete": {
+      "confirm": "Are you sure you want to delete this menu?",
+      "inProgress": "Deleting menu..."
+    },
+    "sources": {
+      "heading": "{{count}} menu page found",
+      "heading_plural": "{{count}} menu pages found",
+      "subheading": "Select the pages you want to import",
+      "selectAll": "Select all",
+      "deselectAll": "Deselect all",
+      "howItWorks": "How it works",
+      "fetchSelected": "Import {{count}} selected",
+      "processing": "Processing {{count}}...",
+      "processingHint": "This may take a moment",
+      "fromLabel": "From: {{label}}",
+      "itemCount": "{{count}} items",
+      "avgPrice": "avg. {{price}} kr.",
+      "statusPending": "Pending",
+      "statusExtracting": "Extracting...",
+      "statusError": "Error",
+      "defaultTitle": "Menu page",
+      "pendingHint": "Waiting to be processed",
+      "collapse": "Collapse",
+      "expand": "Show items",
+      "tooltipCannotDelete": "Cannot delete — currently extracting",
+      "tooltipDeleteSource": "Delete source",
+      "tooltipRemoveFromList": "Remove from list",
+      "emptyCategory": "No items in this category",
+      "emptyTitle": "No menu items found",
+      "emptySubtitle": "Try adding menu items manually",
+      "emptyState": "No menu links added yet",
+      "emptyStateHint": "Detect menu pages from your website or add a link manually",
+      "emptyState2": "No menu text added yet",
+      "emptyState2Hint": "Paste your menu as text to extract items automatically"
+    },
+    "pricing": {
+      "heading": "Pricing",
+      "edit": "Edit pricing",
+      "save": "Save",
+      "saving": "Saving...",
+      "cancel": "Cancel",
+      "levelFieldLabel": "Price level",
+      "levelPlaceholder": "Select price level...",
+      "levelLabel": "Price level: {{level}}",
+      "budget": "Budget",
+      "moderate": "Moderate",
+      "upscale": "Upscale",
+      "fineDining": "Fine dining",
+      "avgCheckLabel": "Average spend per person",
+      "avgLabel": "avg. {{avg}} kr.",
+      "notSet": "Pricing not set"
+    },
+    "backToProfile": "<-Back: Business Profile",
+    "nextLocation": "Next: Location →"
   },
   "createPost": {
     "title": "Create Post",
@@ -451,7 +564,17 @@
       "create": "Design",
       "createSubtitle": "Select image",
       "publish": "Publish",
-      "publishSubtitle": "Schedule & Post"
+      "publishSubtitle": "Schedule & Post",
+      "writeSelf": "Write yourself",
+      "aiIdeas": "AI Ideas",
+      "weeklyPlan": "Weekly plan",
+      "writeText": "Write text",
+      "editText": "Edit text",
+      "textReady": "Text ready",
+      "choosePhoto": "Choose photo",
+      "photoReady": "Photo ready",
+      "pending": "Pending",
+      "schedule": "Schedule"
     },
     "generate": {
       "title": "Create Your Post",
@@ -590,7 +713,15 @@
         "enterTextFirst": "Enter what you want to write before AI can help you",
         "tellMoreAbout": "Tell me a bit more - what should the post be about?",
         "meaningfulText": "The text must have a clear meaning. Write what you want to tell your customers."
-      }
+      },
+      "hashtagInsightSharedExtras": "Hashtags are split into {{sharedCount}} shared tags and {{instagramExtras}} extra for Instagram so you reach both platforms.",
+      "hashtagInsightSharedOnly": "Hashtags work on both Facebook and Instagram without extra platform-specific tags.",
+      "hashtagInsightInstagramOnly": "AI suggested {{count}} Instagram hashtags using your main keywords.",
+      "hashtagInsightFacebookOnly": "Hashtags focus on your key Facebook keywords.",
+      "customIdea": "Custom",
+      "generate": "Generate",
+      "hashtagInsightBoth": "Hashtags work on both Facebook and Instagram without extra platform-specific tags.",
+      "noIdeasYet": "Click below to generate AI ideas"
     },
     "photoAnalysis": {
       "title": "AI Analysis & Suggestions",
@@ -629,7 +760,8 @@
         "low": "LOW"
       },
       "hideAnalysis": "Hide Analysis",
-      "analysisError": "Photo analysis failed. Please try again."
+      "analysisError": "Photo analysis failed. Please try again.",
+      "reanalyzeButton": "Re-analyze Photo"
     },
     "create": {
       "title": "Add Photo & Preview",
@@ -696,7 +828,26 @@
       "aiAddition": "Want to learn more? Contact us today!",
       "characters": "characters",
       "includeEmojis": "Include emojis",
-      "includeHashtags": "Include hashtags"
+      "includeHashtags": "Include hashtags",
+      "applyGrading": "Apply Color Grading",
+      "crop": "Crop",
+      "errorPrefix": "Error: {{error}}",
+      "ideasInPlan": "Ideas in plan",
+      "mediaAngle": "Angle",
+      "mediaIdea": "📷 Media Idea",
+      "mediaIdeaFromPlan": "📷 Media from plan",
+      "mediaMotif": "Motif",
+      "mediaSetting": "Setting",
+      "photoEditFailed": "Photo editing failed. Please try again.",
+      "uploadFailed": "Upload failed. Please try again.",
+      "videoQuotaExceeded": "You've used all {{current}} of your {{limit}} weekly video analyses. Upgrade for more.",
+      "videoTooLong": "This video is {{duration}} seconds – only videos up to 30 seconds can be analyzed.",
+      "chooseYourPhoto": "Choose your photo",
+      "uploadPreviewDesc": "Upload your photo — I'll show you a realistic preview.",
+      "uploadingProcessing": "Uploading and processing image...",
+      "pleaseWait": "Please wait",
+      "clickToUploadMedia": "Click to upload photo or video",
+      "fileFormats": "JPG, PNG, GIF or MP4/MOV (max 30 sec)"
     },
     "publish": {
       "title": "Schedule & Publish",
@@ -736,8 +887,29 @@
       "timeInPast": "Time is in the past",
       "postsTimeline": "Posts Timeline",
       "chronological": "Chronological",
-      "dayNames": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
-      "monthNames": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+      "dayNames": [
+        "Sun",
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat"
+      ],
+      "monthNames": [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December"
+      ],
       "locale": "en-GB",
       "postingTo": "Posting to",
       "back": "Back",
@@ -746,7 +918,13 @@
       "publishing": "Publishing...",
       "scheduling": "Scheduling...",
       "scheduleQuotaExceeded": "You've reached your monthly scheduling limit. Upgrade to Smart for unlimited scheduling!",
-      "usedThisMonth": "used this month"
+      "usedThisMonth": "used this month",
+      "manualPostingRequired": "Manual post required",
+      "prepareManualPost": "Prepare manual post",
+      "publishNowCta": "Publish Post",
+      "friday": "Friday",
+      "monday": "Monday",
+      "saturday": "Saturday"
     },
     "progress": {
       "step": "Step",
@@ -896,21 +1074,19 @@
       "back": "Back",
       "next": "Next",
       "selectedPlatforms": "Selected platforms"
-    }
-  },
-  "menu": {
-    "addManual": "Add menu manually",
-    "add": {
-      "link": "Paste link",
-      "text": "Enter menu text",
-      "linkPlaceholder": "https://example.com/menu",
-      "add": "Add",
-      "analyze": "Analyze"
     },
-    "item": {
-      "name": "Name",
-      "description": "Description",
-      "price": "Price"
+    "editCaption": "Edit Caption",
+    "hashtagGroupFacebook": "For Facebook",
+    "hashtagGroupInstagram": "For Instagram",
+    "hashtagGroupInstagramExtra": "Extra for Instagram",
+    "hashtagGroupShared": "Shared across platforms",
+    "preview": {
+      "heading": "How your post looks",
+      "noPlatformsTitle": "Select your social media to see the right preview",
+      "noPlatformsDesc": "Once I know where you're posting, I can show you a preview that fits each platform — and automatically resize.",
+      "selectSocialMedia": "Select social media",
+      "uploadTitle": "Click to upload",
+      "uploadSubtitle": "Photo or video"
     }
   },
   "dateFormat": {
@@ -1110,7 +1286,7 @@
     "email": "Email",
     "saveSuccess": "Changes saved successfully",
     "saveError": "Failed to save changes",
-    "upgradeTitle": "Unlock more with Smart or Premium",
+    "upgradeTitle": "Unlock more with Smart or Pro",
     "upgradeDescription": "Get access to website analysis, brand voice, keywords, and much more.",
     "viewPlans": "View pricing",
     "unlockMore": "Unlock More Features",
@@ -1128,7 +1304,96 @@
       "analysisFailedDesc": "We found limited information.",
       "fillManually": "Fill Manually",
       "tryAgain": "Try Again"
-    }
+    },
+    "title": "Business Profile",
+    "fullSubtitle": "Complete your business profile to get started",
+    "freeSubtitleBasic": "Fill in the essentials to get started",
+    "loading": "Loading...",
+    "websiteUrlLabel": "Website URL",
+    "websiteUrlPlaceholder": "https://www.yourbusiness.com",
+    "analyzeWebsiteButton": "Analyse website",
+    "analyzeWebsiteHint": "We'll extract your business details automatically",
+    "analyzingWebsiteButton": "Analysing...",
+    "analyzeWebsiteAriaLive": "Analysing website, please wait...",
+    "analyzeButton": "Analyse",
+    "analyzeHint": "Update details from website",
+    "analyzingButton": "Analysing...",
+    "aboutLabel": "About us",
+    "aboutPlaceholder": "Write a short description of your business...",
+    "aboutBusinessLabel": "About the business",
+    "aboutBusinessSuffix": "",
+    "aboutCharacterHint": "Describe your business character and personality",
+    "aboutCharacterPlaceholder": "e.g., Cosy, local, family-friendly, casual",
+    "aboutRunAnalysis": "Generate from content",
+    "aboutUsUrl": "About us page URL",
+    "addressLabel": "Address",
+    "aiSuggestButton": "AI Suggest",
+    "alertAnalysisError": "Analysis failed. Please try again.",
+    "alertEnterWebsite": "Please enter a website URL first",
+    "alertFetchFailed": "Could not fetch website data. Please try again.",
+    "alertFieldsFetched": "Fields updated from website",
+    "alertNameRequired": "Business name is required",
+    "alertNotLoggedIn": "You must be logged in",
+    "alertSaveFailed": "Could not save changes. Please try again.",
+    "basicInfoSection": "Basic information",
+    "bookingLinkLabel": "Booking link",
+    "cityLabel": "City",
+    "closeButton": "Close",
+    "countryLabel": "Country",
+    "days": {
+      "man": "Mon",
+      "tir": "Tue",
+      "ons": "Wed",
+      "tor": "Thu",
+      "fre": "Fri",
+      "lør": "Sat",
+      "søn": "Sun"
+    },
+    "delivery": "Delivery",
+    "editButton": "Edit",
+    "emailLabel": "Email",
+    "generatingCharacter": "Generating business character...",
+    "hoursEmpty": "No opening hours added yet",
+    "hoursHasData": "Opening hours saved",
+    "kidsMenu": "Kids menu",
+    "logoHint": "Upload your business logo",
+    "logoLabel": "Logo",
+    "noChangesStatus": "No changes",
+    "notFilled": "Not filled in",
+    "outdoorSeating": "Outdoor seating",
+    "outdoorSeatingBadge": "Outdoor",
+    "parking": "Parking",
+    "phoneLabel": "Phone",
+    "postalCodeLabel": "Postal code",
+    "powerOutlets": "Power outlets",
+    "reservationRequired": "Reservation required",
+    "revertButton": "Revert",
+    "saveButton": "Save",
+    "savedStatus": "Saved",
+    "sectionAbout": "About",
+    "sectionBusiness": "Business",
+    "sectionContact": "Contact",
+    "sectionHours": "Opening hours",
+    "sectionLocation": "Location",
+    "sectionService": "Services",
+    "sectorPlaceholder": "Select sector...",
+    "serviceNotSet": "Not set",
+    "tableService": "Table service",
+    "taglineAiBadge": "AI",
+    "taglineHint": "A short, memorable tagline for your business",
+    "taglineLabel": "Tagline",
+    "taglinePlaceholder": "e.g., Where every meal is a celebration",
+    "takeaway": "Takeaway",
+    "typeLabel": "Business type",
+    "typePlaceholder": "e.g., Restaurant, Café, Bar",
+    "unsavedStatus": "Unsaved changes",
+    "upgradeBannerCta": "Upgrade",
+    "upgradeBannerDesc": "Unlock all features with a Pro plan",
+    "upgradeBannerTitle": "Unlock more",
+    "websiteLabel": "Website",
+    "websitePlaceholder": "https://www.yourbusiness.com",
+    "wifi": "Wi-Fi",
+    "nextMenu": "Next: What We Offer →"
   },
   "onboarding": {
     "welcome": "Welcome! 👋",
@@ -1198,5 +1463,441 @@
       "haze": "Haze",
       "drizzle": "Drizzle"
     }
+  },
+  "brand": {
+    "backToMenu": "<- Back: Location",
+    "page": {
+      "generating": "Generating brand profile...",
+      "loading": "Loading brand profile...",
+      "errorTitle": "Error",
+      "title": "Brand Profile",
+      "subtitle": "Your AI-generated brand identity and communication guide",
+      "noBusiness": "No business found. Contact support if the problem persists."
+    },
+    "generator": {
+      "title": "Generate your Brand Profile",
+      "description": "Our AI analyses your business, menu and location to create an authentic brand profile that matches your identity.",
+      "includes": "Your profile includes:",
+      "item": {
+        "essence": "Your unique identity in one sentence",
+        "tone": "How you communicate",
+        "hooks": "Specific angles for your posts",
+        "banned": "Words that sound generic or inauthentic",
+        "audience": "Who you're talking to",
+        "positioning": "What makes you unique"
+      },
+      "error": "Error:",
+      "generating": "Generating...",
+      "button": "✨ Generate Brand Profile",
+      "timeEstimate": "Takes approx. 15–25 seconds"
+    },
+    "progress": {
+      "defaultMessage": "Generating brand profile...",
+      "subtitle": "This typically takes 15–25 seconds",
+      "step1": "Collecting business data...",
+      "step2": "Analysing menu and location...",
+      "step3": "Generating brand identity with AI..."
+    },
+    "display": {
+      "regenerate": "🔄 Regenerate",
+      "group1Badge": "Group 1 · Identity · Read on every generation",
+      "businessType": "Business type",
+      "hideDetails": "Hide details",
+      "showPositioning": "Show positioning",
+      "humor": {
+        "low": "Serious",
+        "moderate": "Mildly humorous",
+        "high": "Humorous"
+      },
+      "voice": {
+        "title": "Voice",
+        "badge": "Read on every generation",
+        "legacyWarning": "⚠️ Old format — regenerate profile for rule-based tone guide",
+        "rationale": "How these voice principles were derived",
+        "typicalOpening": "✅ Typical opening",
+        "humorLabel": "😄 Humour"
+      },
+      "pillars": {
+        "title": "Content Pillars",
+        "badge": "Read on every generation",
+        "empty": "No content pillars found — regenerate profile."
+      },
+      "limits": {
+        "title": "Limits",
+        "badge": "Read on every generation",
+        "principle": "⚠️ Writing principle",
+        "avoid": "❌ Avoid e.g.",
+        "signature": "✨ Signature phrases",
+        "copy": "Click to copy",
+        "empty": "No limits defined — regenerate profile."
+      },
+      "strategy": {
+        "title": "Post Strategy",
+        "badge": "Drives weekly post mix",
+        "goals": {
+          "drive_footfall": "Footfall strategy",
+          "build_brand": "Brand building",
+          "retain_loyalty": "Loyalty strategy"
+        },
+        "primaryGoal": "Primary goal",
+        "goalBlend": "Goal distribution",
+        "rationaleTitle": "💡 Why this strategy?",
+        "signalsTitle": "Signals behind the strategy",
+        "tips": {
+          "footfall": "Footfall signal",
+          "brand": "Brand anchor",
+          "loyalty": "Loyalty hook"
+        },
+        "rationale": {
+          "footfall_with_signals": "**{{label}} ({{pct}}%)** chosen as primary goal because the business has clear footfall signals: {{signals}}.",
+          "footfall_no_signals": "**{{label}} ({{pct}}%)** is primary goal — business type attracts guests via concrete visit occasions.",
+          "brand_with_anchors": "**{{label}} ({{pct}}%)** prioritised because the business's signature elements — {{anchors}} — require a clear online identity.",
+          "brand_no_anchors": "**{{label}} ({{pct}}%)** included to build visual and editorial identity over time.",
+          "loyalty_with_hooks": "**{{label}} ({{pct}}%)** supported by returning guests and habits: {{hooks}}.",
+          "loyalty_no_hooks": "**{{label}} ({{pct}}%)** keeps regulars engaged between visits."
+        }
+      },
+      "background": {
+        "title": "Background context",
+        "audience": "Target audience",
+        "unverified": "not verified",
+        "samplePosts": "Sample posts",
+        "generatorInput": "used as generator input",
+        "story": "Brand story",
+        "ourStory": "Our story",
+        "differentiator": "What sets us apart"
+      }
+    },
+    "archetype": {
+      "voiceOptions": "Voice options",
+      "recommended": "recommended",
+      "activeVoice": "Active voice",
+      "inactiveVoice": "Not active",
+      "writingRules": "Writing rules",
+      "examplePosts": "Example posts",
+      "currentVoice": "Current voice",
+      "useThisVoice": "Use this voice",
+      "switching": "Switching…",
+      "fallbackTitle": "VOICE",
+      "error": "Something went wrong — please try again.",
+      "sources": {
+        "website": {
+          "title": "YOUR WEBSITE",
+          "subtitle": "What your website actually communicates today"
+        },
+        "ai_enriched": {
+          "title": "AI RECOMMENDATION",
+          "subtitle": "What works better on social media"
+        }
+      }
+    }
+  },
+  "location": {
+    "title": "Location",
+    "subtitle": "Understand your location's strengths and opportunities",
+    "addressLabel": "Your address",
+    "addressNote": "Fetched from your business profile.",
+    "addressNoteLink": "Update address",
+    "analyzeButton": "Analyse location",
+    "analyzing": "Analysing...",
+    "autoSaving": "Auto-saving...",
+    "backToProfile": "Back to What We Offer",
+    "continue": "Continue",
+    "errorAnalyzeFailed": "Analysis failed. Please try again.",
+    "errorNoAddress": "Please enter an address in your business profile first",
+    "errorSaveFailed": "Could not save. Please try again.",
+    "fitChallenging": "Challenging",
+    "fitModerate": "Moderate fit",
+    "fitStrong": "Strong fit",
+    "fitUnknown": "Unknown",
+    "forceReanalyze": "Re-analyse",
+    "loadingAddress": "Loading address...",
+    "locationScore": "Location score: {{score}}",
+    "marketingStrategy": "Marketing strategy",
+    "nextMenu": "Next: Brand Profile →",
+    "noAddress": "No address added",
+    "noAddressHint": "Add your address in the business profile to analyse your location",
+    "reanalyze": "Re-analyse",
+    "reanalyzeWithAge": "Re-analyse ({{count}} days old)",
+    "cacheValid": "Analysis from {{count}} days ago",
+    "strategyFocus": "Strategy focus",
+    "strengths": "Strengths",
+    "addAddressLink": "Add address →",
+    "breadcrumb": {
+      "profile": "Profile",
+      "menu": "Menu",
+      "location": "Location",
+      "brand": "Brand Profile"
+    }
+  },
+  "weeklyPlan": {
+    "loading": "Loading weekly plan...",
+    "progress": {
+      "stage1Title": "Weekly plan",
+      "stage1Sub": "Select post",
+      "stage2Title": "Design",
+      "imageReady": "Image ready",
+      "pending": "Pending",
+      "stage3Title": "Publish"
+    },
+    "weekToggle": {
+      "current": "This week",
+      "next": "Next week"
+    },
+    "empty": {
+      "welcomeBack": "Welcome back!",
+      "noPlanCurrent": "No plan for this week",
+      "noPlanYet": "No weekly plan yet",
+      "descExisting": "You have a saved plan for this week. Choose to load it or generate a new one.",
+      "descCurrentWeek": "No plan generated for the current week — you can still generate a plan and start creating posts.",
+      "descNextWeek": "Let the AI generate a tailored content plan for next week — built on your business profile, venue type, location and current conditions.",
+      "loadExisting": "Load Existing Plan",
+      "generateNew": "Generate New Plan",
+      "generateWeekly": "Generate Weekly Plan"
+    },
+    "generating": {
+      "title": "🎨 AI is working on your weekly plan...",
+      "subtitle": "This typically takes 2–3 minutes. The AI creates natural, authentic captions for each post.",
+      "step1Title": "Analysing your brand and menu",
+      "step1Desc": "Brand voice, values, season and menu items",
+      "step2Title": "Finding the best content opportunities",
+      "step2Desc": "Based on season, weather and performance",
+      "step3Title": "Generating AI captions with Gemini 2.5 Flash",
+      "step3Desc": "Authentic, brand-consistent, natural tone",
+      "step4Title": "Assembling the final weekly plan",
+      "step4Desc": "Visual direction, timing, platform optimisation",
+      "footer": "The AI is running a full strategic pipeline. The page will update automatically when your plan is ready."
+    },
+    "context": {
+      "label": "Week context",
+      "outdoorOpportunity": "☀️ Outdoor opportunity",
+      "indoorFocus": "🌧 Indoor focus",
+      "payPeriod": "💰 Pay period"
+    },
+    "regenModal": {
+      "title": "Replace existing plan?",
+      "desc": "This will replace your current weekly plan. All changes will be lost. Are you sure you want to continue?",
+      "cancel": "Cancel",
+      "confirm": "Generate New Plan"
+    },
+    "ownerNote": {
+      "label": "Anything special this week? (optional)",
+      "placeholder": "E.g. launching a new brunch dish Saturday, or celebrating our 5-year anniversary..."
+    },
+    "errors": {
+      "noExistingPlan": "Could not find existing plan",
+      "loadFailed": "Could not load plan",
+      "saveFailed": "Could not save changes",
+      "strategyFailed": "Strategy generation timed out. Click \"Generate weekly plan\" to try again."
+    },
+    "archetype": {
+      "morning_cafe": "Morning café",
+      "brunch_cafe": "Brunch café",
+      "all_day_cafe": "All-day café",
+      "lunch_restaurant": "Lunch restaurant",
+      "dinner_restaurant": "Dinner restaurant",
+      "full_service_restaurant": "Full-service",
+      "evening_bar": "Evening bar",
+      "late_night_bar": "Late-night bar",
+      "wine_bar": "Wine bar",
+      "fast_casual": "Fast casual"
+    },
+    "weather": {
+      "staleAlert": "The weather forecast is now more accurate than when the plan was generated — update the weather for the latest estimates for the weekend.",
+      "headerCurrent": "Weather forecast this week",
+      "headerNext": "Weather forecast next week",
+      "headerWeek": "Weather forecast week {{n}}",
+      "updating": "Updating...",
+      "updateBtn": "↻ Update weather",
+      "noChange": "Weather hasn't changed significantly — no reason to generate a new plan.",
+      "changedNoImpact": "Weather has changed, but no posts in the plan appear to be affected.",
+      "changedImpact_one": "Weather has changed significantly — 1 post may be affected: {{posts}}",
+      "changedImpact_other": "Weather has changed significantly — {{count}} posts may be affected: {{posts}}",
+      "considerNew": "Consider generating a new plan so the suggestions account for the updated weather.",
+      "generateNewBtn": "↺ Generate new plan",
+      "condSunny": "sunny",
+      "condPartlyCloudy": "partly cloudy",
+      "condCloudy": "overcast",
+      "condRain": "rainy",
+      "condSnow": "snowy",
+      "condFog": "foggy",
+      "dayMonday": "Monday",
+      "dayTuesday": "Tuesday",
+      "dayWednesday": "Wednesday",
+      "dayThursday": "Thursday",
+      "dayFriday": "Friday",
+      "daySaturday": "Saturday",
+      "daySunday": "Sunday",
+      "heavyRainWeek": "Heavy rain week — {{rainDays}} out of {{totalDays}} days with rain",
+      "winterWeek": "Winter-like week with snow on {{snowDays}} days",
+      "mixedWeek": "Mixed week — {{sunnyDays}} ⛅ days and {{rainDays}} rainy days",
+      "overallWeek": "Predominantly {{emoji}} {{condition}} week",
+      "tempRange": ". Temperatures from {{min}}° to {{max}}° (average max {{avg}}°C).",
+      "warmest": "Warmest {{day}} ({{temp}}°)",
+      "coldest": "coldest {{day}} ({{temp}}°)",
+      "mostRain": "most rain {{day}} ({{pct}}% chance)",
+      "weekendSummary": "Weekend: {{conditions}} — approx. {{avg}}°C.",
+      "weekendGood": " Good for outdoor traffic.",
+      "weekendRain": " Rain at the weekend increases spontaneous indoor visits — use it for atmosphere or experience posts.",
+      "weekendAllRain": "🌧️ rainy"
+    },
+    "overview": {
+      "weekPrefix": "Week",
+      "generateNew": "Generate new plan",
+      "noPostsPlanned": "No posts planned",
+      "doneBadge": "✓ Done",
+      "pastBadge": "⏰ Past",
+      "createPost": "Create post →",
+      "tip": "💡 Tip: Click a post to see the full specification, edit the caption, upload photo/video and approve for publishing.",
+      "focusLabel": "Focus:",
+      "months": {
+        "january": "January",
+        "february": "February",
+        "march": "March",
+        "april": "April",
+        "may": "May",
+        "june": "June",
+        "july": "July",
+        "august": "August",
+        "september": "September",
+        "october": "October",
+        "november": "November",
+        "december": "December"
+      },
+      "days": {
+        "short": {
+          "Mon": "Mon",
+          "Tue": "Tue",
+          "Wed": "Wed",
+          "Thu": "Thu",
+          "Fri": "Fri",
+          "Sat": "Sat",
+          "Sun": "Sun"
+        },
+        "shortFromIndex": [
+          "Sun",
+          "Mon",
+          "Tue",
+          "Wed",
+          "Thu",
+          "Fri",
+          "Sat"
+        ],
+        "longFromIndex": [
+          "Sunday",
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday"
+        ]
+      },
+      "dayLabels": [
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat",
+        "Sun"
+      ],
+      "timing": {
+        "morning": "Morning window",
+        "lunch": "Lunch decision",
+        "dinner": "Dinner planning",
+        "eveningFomo": "Evening FOMO",
+        "eveningEngagement": "Evening engagement",
+        "peak": "Peak engagement",
+        "weekend": "Weekend engagement",
+        "optimal": "Optimal timing"
+      },
+      "cta": {
+        "booking": "🔔 Book a table",
+        "event": "🎉 Event",
+        "engagement": "💬 Engagement",
+        "awareness": "👁️ Share",
+        "traffic": "⚡ Drive traffic",
+        "default": "✨ Visit us"
+      },
+      "status": {
+        "draft": "Draft",
+        "approved": "Approved",
+        "scheduled": "Scheduled",
+        "posted": "Posted"
+      }
+    },
+    "detail": {
+      "title": "Post Specification",
+      "timeAt": "at",
+      "pastTitle": "Post scheduled in the past",
+      "pastDesc": "This post is scheduled for {{date}} at {{time}}, which has passed. You can reschedule the post to a new date below.",
+      "reschedule": "📅 Move to next week (+7 days)",
+      "whyPost": "💡 Why this post?",
+      "timingSection": "📅 Timing",
+      "day": "Day",
+      "date": "Date",
+      "time": "Time",
+      "rationale": "Rationale",
+      "platform": "📱 Platform & Format",
+      "platformLabel": "Platform",
+      "format": "Format",
+      "platformRationale": "Platform Rationale",
+      "formatRationale": "Format Rationale",
+      "postType": "📝 Post Type",
+      "type": "Type",
+      "category": "Category",
+      "priority": "Priority",
+      "reasons": "Reasons",
+      "content": "🎯 Content",
+      "whyThisDish": "Why this item:",
+      "caption": "💬 Caption",
+      "aiGenerated": "AI Generated",
+      "generatingCaption": "Generating...",
+      "regenerate": "Regenerate",
+      "regenerateTitle": "Generate new caption with AI",
+      "editCaption": "Edit",
+      "characters": "{{count}} characters",
+      "cancelEdit": "Cancel",
+      "save": "Save",
+      "hashtags": "Hashtags:",
+      "quality": "Quality:",
+      "visualDirection": "📸 Visual Direction",
+      "subject": "Subject",
+      "angle": "Angle",
+      "setting": "Setting",
+      "lighting": "Lighting",
+      "styling": "Styling",
+      "context": "Context",
+      "technicalSpecs": "Technical specs",
+      "fileFormat": "Format:",
+      "dimensions": "Size:",
+      "aspectRatio": "Ratio:",
+      "media": "📦 Media",
+      "uploading": "Uploading...",
+      "uploadMedia": "Upload photo/video",
+      "dragDrop": "or drag and drop here",
+      "replaceImage": "Replace image",
+      "exportBrief": "Export Photographer Brief (PDF)",
+      "productionNotes": "⏱️ Production Notes",
+      "estimatedTime": "Estimated time",
+      "logistics": "Logistics",
+      "alternatives": "🔄 Alternatives",
+      "altPrefix": "Alt {{n}}:",
+      "statusLabel": "Status:",
+      "statusDraft": "Draft",
+      "statusApproved": "Approved",
+      "statusScheduled": "Scheduled",
+      "statusPosted": "Posted",
+      "close": "Close",
+      "approve": "Approve Post",
+      "uploadError": "Could not upload file. Please try again.",
+      "regenerateError": "Could not regenerate caption. Please try again."
+    }
+  },
+  "identity": {
+    "uploadPhotos": "Upload photos",
+    "uploadHint": "Upload 2–3 photos of your business interior and exterior",
+    "photosUploaded": "{{count}} photos uploaded"
   }
 }

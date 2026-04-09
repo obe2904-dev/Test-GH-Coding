@@ -29,7 +29,7 @@ export function BusinessInfoCard({
   onUpgrade
 }: BusinessInfoCardProps) {
   const showHighlightedState = highlightWebsite || active
-  const activeBorderColor = 'border-[#0F2E32]'
+  const activeBorderColor = 'border-brand'
   const baseBorder = showHighlightedState ? activeBorderColor : 'border-gray-200'
   const borderWidth = showHighlightedState ? 'border-4' : 'border-2'
   const shadowClass = showHighlightedState ? 'shadow-lg' : 'shadow-sm'
@@ -97,13 +97,13 @@ export function BusinessInfoCard({
                 onChange={(event) => onWebsiteChange(event.target.value)}
                 onFocus={onActivate}
                 placeholder={t('businessProfile.frame1.websitePlaceholder')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#88F2D7] focus:border-[#88F2D7] text-sm"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mint focus:border-mint text-sm"
               />
               <button
                 onClick={onAnalyze}
                 disabled={!websiteUrl.trim()}
                 title={!websiteUrl.trim() ? 'Indsæt link til hjemmeside' : ''}
-                className="w-full px-6 py-2 bg-[#0F2E32] text-[#88F2D7] rounded-lg text-sm font-semibold shadow-md hover:bg-[#12393D] transition-all disabled:bg-[#0F2E32] disabled:cursor-not-allowed"
+                className="w-full px-6 py-2 bg-brand text-mint rounded-lg text-sm font-semibold shadow-md hover:bg-[#12393D] transition-all disabled:bg-brand disabled:cursor-not-allowed"
               >
                 {websiteUrl && analysisComplete
                   ? 'Hent informationer igen'

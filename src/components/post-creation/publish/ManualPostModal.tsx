@@ -89,7 +89,7 @@ export function ManualPostModal({
                     {photoUrl && (
                       <button
                         onClick={downloadPhoto}
-                        className="flex-1 px-2 py-2 bg-white border border-[#D1D5DB] text-[#0F2E32] rounded-lg text-xs font-medium hover:bg-[#F9FAFB] flex items-center justify-center gap-1"
+                        className="flex-1 px-2 py-2 bg-white border border-[#D1D5DB] text-brand rounded-lg text-xs font-medium hover:bg-[#F9FAFB] flex items-center justify-center gap-1"
                       >
                         <span className="font-bold">1</span>
                         <Download className="w-3 h-3" />
@@ -98,7 +98,7 @@ export function ManualPostModal({
                     )}
                     <button
                       onClick={() => copyToClipboard(platformName)}
-                      className="flex-1 px-2 py-2 bg-white border border-[#D1D5DB] text-[#0F2E32] rounded-lg text-xs font-medium hover:bg-[#F9FAFB] flex items-center justify-center gap-1"
+                      className="flex-1 px-2 py-2 bg-white border border-[#D1D5DB] text-brand rounded-lg text-xs font-medium hover:bg-[#F9FAFB] flex items-center justify-center gap-1"
                     >
                       <span className="font-bold">{copyStep}</span>
                       <Copy className="w-3 h-3" />
@@ -106,7 +106,7 @@ export function ManualPostModal({
                     </button>
                     <button
                       onClick={() => openPlatform(platformName)}
-                      className="flex-1 px-2 py-2 bg-[#0F2E32] text-[#88F2D7] rounded-lg text-xs font-medium hover:bg-[#12393D] flex items-center justify-center gap-1"
+                      className="flex-1 px-2 py-2 bg-brand text-mint rounded-lg text-xs font-medium hover:bg-[#12393D] flex items-center justify-center gap-1"
                     >
                       <span className="font-bold">{photoUrl ? '3' : '2'}</span>
                       <ExternalLink className="w-3 h-3" />
@@ -135,37 +135,35 @@ export function ManualPostModal({
 
           <div className="mt-4 p-3 bg-[#F9FAFB] rounded-lg border border-[#E5E7EB]">
             <div className="flex items-start gap-2.5">
-              <div className="text-xl">💡</div>
+              <div className="text-xl">⚡</div>
               <div className="flex-1">
-                <h3 className="text-sm font-bold text-[#1F2937] mb-1">{t('manualPostModal.upsellTitle', 'Want to save time?')}</h3>
+                <h3 className="text-sm font-bold text-[#1F2937] mb-1">{t('manualPostModal.upsellTitle', 'Want scheduling & automation?')}</h3>
                 <p className="text-xs text-[#6B7280] mb-2 leading-relaxed">
-                  {t('manualPostModal.upsellDescription', 'Connect your platforms to post automatically and track performance.')}
+                  {t('manualPostModal.upsellDescription', 'Upgrade to Smart or Pro for automatic posting and content planning.')}
                 </p>
 
                 <div className="space-y-1 mb-2.5">
                   <div className="flex items-center gap-2 text-xs text-[#1F2937]">
                     <span className="text-emerald-600">✓</span>
-                    <span>{t('manualPostModal.upsellBullet1', 'One-click posting (no copy-paste)')}</span>
+                    <span>{t('manualPostModal.upsellBullet1', 'Schedule posts in advance')}</span>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-[#1F2937]">
                     <span className="text-emerald-600">✓</span>
-                    <span>{t('manualPostModal.upsellBullet2', 'Automatic performance tracking')}</span>
+                    <span>{t('manualPostModal.upsellBullet2', 'One-click automatic posting')}</span>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-[#1F2937]">
                     <span className="text-emerald-600">✓</span>
-                    <span>{t('manualPostModal.upsellBullet3', 'AI learns what works for YOUR audience')}</span>
+                    <span>{t('manualPostModal.upsellBullet3', 'Performance tracking & AI insights')}</span>
                   </div>
                 </div>
 
                 <div className="flex gap-2">
                   <button
-                    onClick={() => onConnectPlatform(platforms[0])}
-                    className="px-4 py-2 bg-[#0F2E32] text-[#88F2D7] rounded-lg text-xs font-bold hover:bg-[#12393D] flex items-center gap-1.5"
+                    onClick={() => window.location.href = '/settings?tab=subscription'}
+                    className="px-4 py-2 bg-brand text-mint rounded-lg text-xs font-bold hover:bg-[#12393D] flex items-center gap-1.5"
                   >
-                    <Link2 className="w-3.5 h-3.5" />
-                    {t('manualPostModal.connect', 'Connect {platforms}', {
-                      platforms: formattedPlatforms
-                    })}
+                    <span>⭐</span>
+                    {t('manualPostModal.upgrade', 'Upgrade to Smart')}
                   </button>
                   <button onClick={onClose} className="px-3 py-2 text-xs text-[#6B7280] hover:text-[#1F2937]">
                     {t('manualPostModal.maybeLater', 'Maybe later')}

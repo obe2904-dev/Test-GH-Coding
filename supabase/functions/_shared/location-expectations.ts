@@ -503,6 +503,51 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
         autumn: 1.0
       }
     }
+  },
+
+  // 11. PARK / NATURE AREA
+  nature_park: {
+    locationTypeId: "nature_park",
+    displayName: "Park / Nature Area",
+
+    typical_customers: [
+      "walkers/runners/dog owners",
+      "families with kids",
+      "cyclists",
+      "parents with babies/strollers",
+      "local regulars"
+    ],
+
+    typical_motivations: [
+      { motivation: "warm-up/shelter", prevalence: "high" },
+      { motivation: "family outing", prevalence: "high" },
+      { motivation: "routine habit", prevalence: "medium" },
+      { motivation: "treat/reward", prevalence: "medium" }
+    ],
+
+    pace: "medium",
+    price_sensitivity: "medium",
+
+    winning_angles: [
+      "Outdoor seating",
+      "Dog-friendly",
+      "Takeaway coffee",
+      "Family-friendly",
+      "Park views",
+      "Healthy options"
+    ],
+
+    weather_sensitivity: "high",
+
+    seasonality: {
+      pattern: "summer_peak",
+      seasonal_weights: {
+        winter: 0.55,
+        spring: 0.85,
+        summer: 1.0,
+        autumn: 0.75
+      }
+    }
   }
 };
 

@@ -24,10 +24,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
       checkInProgress.current = true
 
-      console.log('🔍 ProtectedRoute: Checking onboarding status', { 
-        user: user?.id, 
-        path: location.pathname 
-      })
+      // console.log('🔍 ProtectedRoute: Checking onboarding status', { 
+      //   user: user?.id, 
+      //   path: location.pathname 
+      // })
 
       if (!user) {
         console.log('⚠️ ProtectedRoute: No user, skipping onboarding check')
@@ -61,7 +61,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
       // If localStorage says completed, trust it and skip database check
       if (hasLocalCompletion) {
-        console.log('✅ ProtectedRoute: LocalStorage confirms onboarding complete, skipping DB check')
+        // console.log('✅ ProtectedRoute: LocalStorage confirms onboarding complete, skipping DB check')
         setCheckingOnboarding(false)
         setNeedsOnboarding(false)
         checkInProgress.current = false
@@ -140,11 +140,11 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   // Show loading state while checking auth and onboarding
   if (loading || checkingOnboarding) {
-    console.log('🔄 ProtectedRoute: Showing loading spinner', { loading, checkingOnboarding })
+    // console.log('🔄 ProtectedRoute: Showing loading spinner', { loading, checkingOnboarding })
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="text-center animate-fade-in">
-          <div className="w-16 h-16 border-4 border-[#0F2E32] border-t-[#88F2D7] rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-16 h-16 border-4 border-brand border-t-mint rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-700 font-medium">Loading...</p>
         </div>
       </div>
@@ -163,6 +163,6 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <Navigate to="/onboarding" replace />
   }
 
-  console.log('✅ ProtectedRoute: Rendering children', { path: location.pathname })
+  // console.log('✅ ProtectedRoute: Rendering children', { path: location.pathname })
   return <>{children}</>
 }

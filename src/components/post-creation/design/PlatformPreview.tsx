@@ -57,8 +57,12 @@ interface PlatformPreviewProps {
   onMediaIndexChange: (index: number) => void
   onPhotoUpload?: (event: React.ChangeEvent<HTMLInputElement>) => void
   onRemovePhoto?: (index: number) => void
+  onSelectVersionForPost?: (version: 'original' | 'adjusted') => void
   currentTier: string
   businessName?: string
+  /** Called when the user clicks the "Rediger tekst" button. Only shown for smart/pro tiers. */
+  onEditCaption?: () => void
+  platformFormat?: string
 }
 
 function getPreviewUrl(media: MediaItem): string {
@@ -78,14 +82,34 @@ export function PlatformPreview({
   onMediaIndexChange,
   onPhotoUpload,
   onRemovePhoto,
+  onSelectVersionForPost,
   currentTier,
-  businessName: businessNameProp
+  businessName: businessNameProp,
+  onEditCaption,
+  platformFormat,
 }: PlatformPreviewProps) {
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const [businessName, setBusinessName] = useState<string>(businessNameProp || '')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const autoDefaultedMediaIdsRef = useRef<Set<string>>(new Set())
   
   const hasPhoto = uploadedMedia && uploadedMedia.length > 0
+  const currentMedia = hasPhoto ? uploadedMedia[selectedMediaIndex] : undefined
+  const hasAdjustedVersion = Boolean(currentMedia?.adjustedUrl)
+
+  useEffect(() => {
+    if (!currentMedia || !currentMedia.id) return
+    if (!hasAdjustedVersion) return
+    if (!onSelectVersionForPost) return
+    if (autoDefaultedMediaIdsRef.current.has(currentMedia.id)) return
+
+    autoDefaultedMediaIdsRef.current.add(currentMedia.id)
+
+    if (currentMedia.selectedVersionForPost !== 'adjusted') {
+      onSelectVersionForPost('adjusted')
+    }
+  }, [currentMedia, hasAdjustedVersion, onSelectVersionForPost])
+
   const displayText = useMemo(() => {
     const baseText = content.text || ''
 
@@ -150,38 +174,38 @@ export function PlatformPreview({
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-200 p-3">
       <h3 className="text-sm font-bold text-slate-800 mb-3">
-        Sådan ser dit opslag ud
+        {t('preview.heading')}
       </h3>
 
       {/* No Platforms Selected - Show prompt */}
       {selectedPlatforms.length === 0 ? (
-        <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-200">
-          <h4 className="text-sm font-semibold text-indigo-900 mb-2">
-            Vælg dine sociale medier for at se den rigtige forhåndsvisning
+        <div className="bg-cta-surface rounded-xl p-4 border border-cta-surface">
+          <h4 className="text-sm font-semibold text-brand mb-2">
+            {t('preview.noPlatformsTitle')}
           </h4>
-          <p className="text-xs text-indigo-700 mb-4 leading-relaxed">
-            Når jeg ved, hvor du poster, kan jeg vise dig en forhåndsvisning, der passer til hver platform — og automatisk tilpasse størrelsen.
+          <p className="text-xs text-cta-text mb-4 leading-relaxed">
+            {t('preview.noPlatformsDesc')}
           </p>
           <button
             onClick={() => {
               window.location.href = '/dashboard/profile#social-media'
             }}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors"
+            className="px-4 py-2 bg-cta text-white rounded-lg text-xs font-semibold hover:bg-cta-hover transition-colors"
           >
-            Vælg sociale medier
+            {t('preview.selectSocialMedia')}
           </button>
         </div>
       ) : (
         <>
-          {/* Platform Toggle - Only show for paid tiers with multiple platforms */}
-          {selectedPlatforms.length > 1 && currentTier !== 'free' && (
-        <div className="flex gap-2 mb-3">
+          {/* Platform Toggle - Show when multiple platforms are selected */}
+          {selectedPlatforms.length > 1 && (
+            <div className="flex gap-2 mb-3">
           {selectedPlatforms.includes('facebook') && (
             <button
               onClick={() => onPreviewPlatformChange('facebook')}
               className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
                 previewPlatform === 'facebook'
-                  ? 'bg-[#F4F1FE] text-[#0F2E32] border border-[#C7BAF7] shadow-sm'
+                  ? 'bg-[#F4F1FE] text-brand border border-accent shadow-sm'
                   : 'bg-white text-[#6B7280] border border-[#E5E7EB] hover:bg-[#F9FAFB]'
               }`}
             >
@@ -193,7 +217,7 @@ export function PlatformPreview({
               onClick={() => onPreviewPlatformChange('instagram')}
               className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
                 previewPlatform === 'instagram'
-                  ? 'bg-[#F4F1FE] text-[#0F2E32] border border-[#C7BAF7] shadow-sm'
+                  ? 'bg-[#F4F1FE] text-brand border border-accent shadow-sm'
                   : 'bg-white text-[#6B7280] border border-[#E5E7EB] hover:bg-[#F9FAFB]'
               }`}
             >
@@ -203,12 +227,39 @@ export function PlatformPreview({
         </div>
       )}
       
-      {/* Single platform label for Free tier */}
-      {currentTier === 'free' && selectedPlatforms.length === 1 && (
-        <div className="mb-3 px-3 py-2 bg-[#F4F1FE] border border-[#C7BAF7] rounded-lg text-center">
-          <span className="text-xs font-medium text-[#0F2E32]">
+      {/* Single platform label when only one platform is selected */}
+      {selectedPlatforms.length === 1 && (
+        <div className="mb-3 px-3 py-2 bg-[#F4F1FE] border border-accent rounded-lg text-center">
+          <span className="text-xs font-medium text-brand">
             {selectedPlatforms[0] === 'facebook' ? 'Facebook' : 'Instagram'}
           </span>
+        </div>
+      )}
+
+      {/* Version Toggle - right side preview */}
+      {hasPhoto && hasAdjustedVersion && onSelectVersionForPost && currentMedia && (
+        <div className="mb-3 p-1 bg-slate-100 rounded-lg border border-slate-200 flex gap-1">
+          <button
+            onClick={() => onSelectVersionForPost('original')}
+            className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+              currentMedia.selectedVersionForPost === 'original'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:bg-white/70'
+            }`}
+          >
+            {t('create.original', 'Original')}
+          </button>
+          <button
+            onClick={() => onSelectVersionForPost('adjusted')}
+            className={`flex-1 px-3 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center justify-center gap-1 ${
+              currentMedia.selectedVersionForPost === 'adjusted'
+                ? 'bg-cta text-white shadow-sm'
+                : 'text-slate-600 hover:bg-white/70'
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            {t('create.aiEnhanced', 'AI Enhanced')}
+          </button>
         </div>
       )}
 
@@ -248,6 +299,18 @@ export function PlatformPreview({
                   {content.text}
                 </p>
               )}
+              {onEditCaption && currentTier !== 'free' && (
+                <button
+                  onClick={onEditCaption}
+                  className="mt-2 flex items-center gap-1 text-xs font-medium text-cta hover:text-cta-text transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                  {t('editCaption', 'Rediger tekst')}
+                </button>
+              )}
               {content.adjustments.includeHashtags && content.hashtags && content.hashtags.length > 0 && (
                 <p className="text-sm text-blue-600 mt-1">
                   {content.hashtags.filter((h: any) => h.enabled).map((h: any) => h.tag).join(' ')}
@@ -258,21 +321,41 @@ export function PlatformPreview({
 
           {/* Facebook Photo */}
           {hasPhoto && uploadedMedia.length > 0 ? (
-            <div className="relative w-full overflow-hidden rounded-xl">
-              <img
-                src={getPreviewUrl(uploadedMedia[selectedMediaIndex])}
-                alt="Post preview"
-                className="w-full h-auto object-cover"
-              />
+            <div className="relative w-full overflow-hidden rounded-xl bg-black" style={{ maxHeight: '420px' }}>
+              {uploadedMedia[selectedMediaIndex].type === 'video' ? (
+                <video
+                  src={getPreviewUrl(uploadedMedia[selectedMediaIndex])}
+                  controls
+                  className="relative z-10 w-full h-auto block bg-black"
+                  style={{ maxHeight: '420px', objectFit: 'contain' }}
+                />
+              ) : (
+                <>
+                  {/* Blurred background fill */}
+                  <img
+                    src={getPreviewUrl(uploadedMedia[selectedMediaIndex])}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 w-full h-full object-cover object-center blur-xl scale-110 opacity-60"
+                  />
+                  {/* Main image - full photo visible */}
+                  <img
+                    src={getPreviewUrl(uploadedMedia[selectedMediaIndex])}
+                    alt="Post preview"
+                    className="relative z-10 w-full h-auto block mx-auto"
+                    style={{ maxHeight: '420px', objectFit: 'contain' }}
+                  />
+                </>
+              )}
 
               {/* Remove Photo Button */}
               {onRemovePhoto && (
                 <button
                   onClick={() => onRemovePhoto(selectedMediaIndex)}
                   className="absolute top-3 right-3 z-20 px-2 py-0.5 bg-white/95 text-red-600 rounded-full shadow-md text-xs font-semibold hover:bg-white transition-colors border border-white/70"
-                  title="Fjern"
+                  title={t('create.remove')}
                 >
-                  Fjern
+                  {t('create.remove')}
                 </button>
               )}
 
@@ -299,16 +382,14 @@ export function PlatformPreview({
                   >
                     <ChevronRight />
                   </IconButton>
-                  <div className="absolute top-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full">
-                    {selectedMediaIndex + 1} / {uploadedMedia.length}
-                  </div>
+
                 </>
               )}
 
               {/* AI Badge */}
               {uploadedMedia[selectedMediaIndex].selectedVersionForPost === 'adjusted' && 
                uploadedMedia[selectedMediaIndex].adjustedUrl && (
-                <div className="absolute bottom-3 left-3 px-2 py-1 bg-indigo-600 text-white rounded text-xs font-bold flex items-center gap-1 shadow-lg">
+                <div className="absolute bottom-3 left-3 px-2 py-1 bg-cta text-white rounded text-xs font-bold flex items-center gap-1 shadow-lg">
                   <Sparkles className="w-3 h-3" />
                   AI Enhanced
                 </div>
@@ -319,10 +400,10 @@ export function PlatformPreview({
               onClick={() => fileInputRef.current?.click()}
               className="relative bg-slate-50 aspect-[1.91/1] overflow-hidden flex items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors"
             >
-              <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-indigo-400 hover:bg-indigo-50 transition-colors">
+              <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-cta hover:bg-cta-surface transition-colors">
                 <Camera className="w-8 h-8 text-slate-400" />
-                <p className="text-slate-700 text-sm font-medium">Klik for at uploade</p>
-                <p className="text-slate-500 text-xs">JPG, PNG eller GIF</p>
+                <p className="text-slate-700 text-sm font-medium">{t('preview.uploadTitle')}</p>
+                <p className="text-slate-500 text-xs">{t('preview.uploadSubtitle')}</p>
               </div>
             </div>
           )}
@@ -387,21 +468,41 @@ export function PlatformPreview({
 
           {/* Instagram Photo */}
           {hasPhoto && uploadedMedia.length > 0 ? (
-            <div className="relative bg-gray-100 aspect-square">
-              <img
-                src={getPreviewUrl(uploadedMedia[selectedMediaIndex])}
-                alt="Post preview"
-                className="w-full h-full object-cover"
-              />
+            <div className="relative w-full overflow-hidden bg-black" style={{ maxHeight: '480px' }}>
+              {uploadedMedia[selectedMediaIndex].type === 'video' ? (
+                <video
+                  src={getPreviewUrl(uploadedMedia[selectedMediaIndex])}
+                  controls
+                  className="relative z-10 w-full h-auto block bg-black"
+                  style={{ maxHeight: '480px', objectFit: 'contain' }}
+                />
+              ) : (
+                <>
+                  {/* Blurred background fill */}
+                  <img
+                    src={getPreviewUrl(uploadedMedia[selectedMediaIndex])}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 w-full h-full object-cover object-center blur-xl scale-110 opacity-60"
+                  />
+                  {/* Main image - full photo visible */}
+                  <img
+                    src={getPreviewUrl(uploadedMedia[selectedMediaIndex])}
+                    alt="Post preview"
+                    className="relative z-10 w-full h-auto block mx-auto"
+                    style={{ maxHeight: '480px', objectFit: 'contain' }}
+                  />
+                </>
+              )}
               
               {/* Remove Photo Button */}
               {onRemovePhoto && (
                 <button
                   onClick={() => onRemovePhoto(selectedMediaIndex)}
                   className="absolute top-3 right-3 z-20 px-2 py-0.5 bg-white/95 text-red-600 rounded-full shadow-md text-xs font-semibold hover:bg-white transition-colors border border-white/70"
-                  title="Fjern"
+                  title={t('create.remove')}
                 >
-                  Fjern
+                  {t('create.remove')}
                 </button>
               )}
 
@@ -450,7 +551,7 @@ export function PlatformPreview({
               {/* AI Badge */}
               {uploadedMedia[selectedMediaIndex].selectedVersionForPost === 'adjusted' && 
                uploadedMedia[selectedMediaIndex].adjustedUrl && (
-                <div className="absolute bottom-3 left-3 px-2 py-1 bg-indigo-600 text-white rounded text-xs font-bold flex items-center gap-1 shadow-lg">
+                <div className="absolute bottom-3 left-3 px-2 py-1 bg-cta text-white rounded text-xs font-bold flex items-center gap-1 shadow-lg">
                   <Sparkles className="w-3 h-3" />
                   AI
                 </div>
@@ -461,10 +562,10 @@ export function PlatformPreview({
               onClick={() => fileInputRef.current?.click()}
               className="relative bg-slate-50 aspect-square overflow-hidden flex items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors"
             >
-              <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-indigo-400 hover:bg-indigo-50 transition-colors">
+              <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-cta hover:bg-cta-surface transition-colors">
                 <Camera className="w-8 h-8 text-slate-400" />
-                <p className="text-slate-700 text-sm font-medium">Klik for at uploade</p>
-                <p className="text-slate-500 text-xs">JPG, PNG eller GIF</p>
+                <p className="text-slate-700 text-sm font-medium">{t('preview.uploadTitle')}</p>
+                <p className="text-slate-500 text-xs">{t('preview.uploadSubtitle')}</p>
               </div>
             </div>
           )}
@@ -521,12 +622,24 @@ export function PlatformPreview({
                 </span>
               )}
             </div>
+            {onEditCaption && currentTier !== 'free' && (
+              <button
+                onClick={onEditCaption}
+                className="mt-2 flex items-center gap-1 text-xs font-medium text-cta hover:text-cta-text transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                {t('editCaption', 'Rediger tekst')}
+              </button>
+            )}
             
             <p className="text-xs text-gray-500 mt-1">{t('create.justNow', 'Just now')}</p>
           </div>
         </div>
       )}
-        </>
+      </>
       )}
 
       {/* Hidden File Input */}
@@ -534,7 +647,7 @@ export function PlatformPreview({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           multiple
           onChange={onPhotoUpload}
           className="hidden"

@@ -13,8 +13,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 export type UserTier = 'free' | 'standardplus' | 'premium'
-type QuotaType = 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis'
-type QuotaPeriod = 'daily' | 'monthly'
+type QuotaType = 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis' | 'videoUploads'
+type QuotaPeriod = 'daily' | 'monthly' | 'weekly'
 
 type UsageColumn =
   | 'ai_generations_today'
@@ -23,6 +23,7 @@ type UsageColumn =
   | 'pdf_uploads_this_month'
   | 'website_analysis_today'
   | 'website_analysis_this_month'
+  | 'video_uploads_this_week'
 
 interface BusinessUsage {
   plan?: string | null
@@ -32,6 +33,7 @@ interface BusinessUsage {
   pdf_uploads_this_month?: number | null
   website_analysis_today?: number | null
   website_analysis_this_month?: number | null
+  video_uploads_this_week?: number | null
 }
 
 /**
@@ -43,16 +45,19 @@ export const TIER_QUOTAS = {
     aiGenerations: { daily: 100, monthly: 100 },
     pdfUploads: { daily: 2, monthly: 10 },
     websiteAnalysis: { daily: 2, monthly: 10 },
+    videoUploads: { weekly: 2 },
   },
   standardplus: {
     aiGenerations: { daily: 100, monthly: 1000 },
     pdfUploads: { daily: 20, monthly: 200 },
     websiteAnalysis: { daily: 20, monthly: 200 },
+    videoUploads: { weekly: -1 },
   },
   premium: {
     aiGenerations: { daily: -1, monthly: -1 },
     pdfUploads: { daily: -1, monthly: -1 },
     websiteAnalysis: { daily: -1, monthly: -1 },
+    videoUploads: { weekly: -1 },
   },
 } as const
 
@@ -65,7 +70,7 @@ export interface QuotaCheck {
 }
 
 // Column mapping for quota types
-const columnMap: Record<QuotaType, Record<QuotaPeriod, UsageColumn>> = {
+const columnMap: Record<QuotaType, Partial<Record<QuotaPeriod, UsageColumn>>> = {
   aiGenerations: {
     daily: 'ai_generations_today',
     monthly: 'ai_generations_this_month'
@@ -77,6 +82,9 @@ const columnMap: Record<QuotaType, Record<QuotaPeriod, UsageColumn>> = {
   websiteAnalysis: {
     daily: 'website_analysis_today',
     monthly: 'website_analysis_this_month'
+  },
+  videoUploads: {
+    weekly: 'video_uploads_this_week'
   }
 }
 
@@ -96,7 +104,7 @@ export async function getUserQuota(
   // Get user's business (as owner or team member)
   const { data: business } = await supabase
     .from('businesses')
-    .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
+    .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month, video_uploads_this_week')
     .eq('owner_id', userId)
     .maybeSingle()
 
@@ -114,7 +122,7 @@ export async function getUserQuota(
     if (teamMember) {
       const { data: teamBusiness } = await supabase
         .from('businesses')
-        .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
+        .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month, video_uploads_this_week')
         .eq('id', teamMember.business_id)
         .maybeSingle()
       
@@ -137,9 +145,14 @@ export async function getUserQuota(
   
   // Get usage from the correct column
   const columnKey = columnMap[quotaType][period]
+  if (!columnKey) {
+    throw new Error(`No column mapping found for ${quotaType} ${period}`)
+  }
   const current = Number((businessData as any)[columnKey] ?? 0)
-  const limit = TIER_QUOTAS[tier][quotaType][period]
+  const limit = TIER_QUOTAS[tier][quotaType][period as keyof typeof TIER_QUOTAS[typeof tier][typeof quotaType]]
   const isUnlimited = limit === -1
+  
+  const periodLabel = period === 'daily' ? 'Daily' : period === 'weekly' ? 'Weekly' : 'Monthly'
   
   return {
     allowed: isUnlimited || current < limit,
@@ -148,7 +161,7 @@ export async function getUserQuota(
     limit: isUnlimited ? -1 : limit,
     reason: isUnlimited || current < limit 
       ? undefined 
-      : `${period === 'daily' ? 'Daily' : 'Monthly'} quota exceeded (${current}/${limit})`
+      : `${periodLabel} quota exceeded (${current}/${limit})`
   }
 }
 
@@ -157,7 +170,7 @@ export async function getUserQuota(
  */
 export async function incrementQuota(
   userId: string,
-  _quotaType: QuotaType
+  quotaType: QuotaType
 ): Promise<void> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -171,11 +184,26 @@ export async function incrementQuota(
     return
   }
 
-  // Increment both daily and monthly counters at business level
-  const { error } = await supabase.rpc('increment_ai_generation_business', { business_uuid: businessId })
-  
-  if (error) {
-    console.error('Failed to increment business quota:', error)
+  // Handle different quota types
+  if (quotaType === 'aiGenerations') {
+    // Use existing RPC for AI generations (increments both daily and monthly)
+    const { error } = await supabase.rpc('increment_ai_generation_business', { business_uuid: businessId })
+    if (error) {
+      console.error('Failed to increment AI generation quota:', error)
+    }
+  } else if (quotaType === 'videoUploads') {
+    // Increment video uploads (weekly counter)
+    const { error } = await supabase
+      .from('businesses')
+      .update({ video_uploads_this_week: supabase.raw('video_uploads_this_week + 1') })
+      .eq('id', businessId)
+    
+    if (error) {
+      console.error('Failed to increment video upload quota:', error)
+    }
+  } else {
+    // For other quota types, we'd add handling here
+    console.warn(`incrementQuota not fully implemented for ${quotaType}`)
   }
 }
 

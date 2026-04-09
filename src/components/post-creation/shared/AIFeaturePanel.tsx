@@ -20,12 +20,12 @@ export function AIFeaturePanel({ includeHashtags, onToggleHashtags, onUpgrade }:
             >
               <div
                 className={`w-4 h-4 rounded flex items-center justify-center ${
-                  includeHashtags ? 'bg-[#88F2D7]' : 'bg-white border border-[#D1D5DB]'
+                  includeHashtags ? 'bg-mint' : 'bg-white border border-[#D1D5DB]'
                 }`}
               >
                 {includeHashtags && (
                   <svg
-                    className="w-3 h-3 text-[#0F2E32]"
+                    className="w-3 h-3 text-brand"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"

@@ -5,13 +5,16 @@
  * This includes: business name, type, description, and logo URL.
  * 
  * Language-aware: Detects and preserves original language (Danish, Swedish, Norwegian, German)
+ * 
+ * UPDATED: Now supports hybrid businessType structure for cafes that are also wine bars, etc.
  */
 
 import { AI_TASKS, CONTENT_LIMITS, getLanguageCode, type LanguageCode } from '../ai-config.ts'
+import type { BusinessType, HybridBusinessType } from '../business-type-helpers.ts'
 
 export interface BasicBusinessInfo {
   businessName: string | null
-  businessType: 'restaurant' | 'cafe' | 'bar' | 'retail' | 'beauty' | 'fitness' | 'services' | 'other' | null
+  businessType: BusinessType | null  // Updated: Now supports both string and hybrid structure
   description: string | null
   logoUrl: string | null
 }
@@ -115,7 +118,10 @@ ${content.slice(0, 3000)}
 
 Extract:
 1. businessName: The exact business/restaurant name as shown on the website
-2. businessType: Categorize as one of: restaurant|cafe|bar|retail|beauty|fitness|services|other
+2. businessType: HYBRID STRUCTURE for businesses with multiple types (e.g., cafe+wine bar)
+   - If single type: { "primary": "cafe", "secondary": [], "hybridLabel": "cafe" }
+   - If hybrid: { "primary": "cafe", "secondary": ["vinbar", "cocktailbar"], "hybridLabel": "Kaffebar & Vinbar", "cuisineType": "Dansk", "conceptTags": ["specialty-coffee"] }
+   - Primary types: restaurant, cafe, bar, hotel, bakery, coffee_shop, retail, beauty, fitness, services, other
 3. description: ${hints.homepageAboutCandidate 
     ? `${langPrompts.descriptionInstruction} Use the PRE-EXTRACTED ABOUT TEXT above. Do NOT invent details not in the source text.`
     : langPrompts.descriptionInstruction}
@@ -124,7 +130,13 @@ Extract:
 Return JSON:
 {
   "businessName": "exact name",
-  "businessType": "category",
+  "businessType": {
+    "primary": "main type",
+    "secondary": ["additional", "types"],
+    "hybridLabel": "Display label for hybrids",
+    "cuisineType": "cuisine if restaurant/cafe",
+    "conceptTags": ["relevant", "tags"]
+  },
   "description": "brief description in ${langName}",
   "logoUrl": "logo URL or null"
 }`
@@ -163,12 +175,46 @@ Return JSON:
     const data = await response.json()
     const result = JSON.parse(data.choices[0].message.content)
 
+    // Backwards compatibility: Handle both old string format and new object format
+    // If AI returns old format (string), convert to new format
+    if (result.businessType && typeof result.businessType === 'string') {
+      const oldType = result.businessType
+      result.businessType = {
+        primary: oldType,
+        secondary: [],
+        hybridLabel: oldType
+      }
+      console.log(`🔄 Converted legacy businessType string to hybrid format: ${oldType}`)
+    }
+
+    // Validate hybrid format structure
+    if (result.businessType && typeof result.businessType === 'object') {
+      // Ensure required fields exist
+      if (!result.businessType.primary) {
+        console.warn('⚠️ Invalid businessType object - missing primary field')
+        result.businessType = hints.businessType || null
+      } else {
+        // Normalize structure
+        result.businessType = {
+          primary: result.businessType.primary,
+          secondary: Array.isArray(result.businessType.secondary) ? result.businessType.secondary : [],
+          hybridLabel: result.businessType.hybridLabel || result.businessType.primary,
+          cuisineType: result.businessType.cuisineType || undefined,
+          conceptTags: Array.isArray(result.businessType.conceptTags) ? result.businessType.conceptTags : undefined
+        }
+      }
+    }
+
     // Use pre-extracted logo if AI didn't find one
     if (!result.logoUrl && extractedLogoUrl) {
       result.logoUrl = extractedLogoUrl
     }
 
-    console.log('✅ Basic info extracted:', result.businessName, '-', result.businessType)
+    const typeLabel = typeof result.businessType === 'string' 
+      ? result.businessType 
+      : result.businessType?.hybridLabel || result.businessType?.primary || 'unknown'
+    
+    console.log('✅ Basic info extracted:', result.businessName, '-', typeLabel)
     return result
 
   } catch (error) {

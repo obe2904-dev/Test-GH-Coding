@@ -12,7 +12,7 @@ interface PublishModeSelectorProps {
   scheduleSubtitle: string
 }
 
-const activeClasses = 'border-[#C7BAF7] bg-[#F4F1FE] shadow-sm'
+const activeClasses = 'border-accent bg-[#F4F1FE] shadow-sm'
 const inactiveClasses = 'border-[#E5E7EB] bg-white hover:bg-[#F9FAFB]'
 
 export function PublishModeSelector({
@@ -33,16 +33,16 @@ export function PublishModeSelector({
       >
         <div className="flex flex-col items-center gap-2">
           <div className={`p-2 rounded-full ${mode === 'now' ? 'bg-[#F4F1FE]' : 'bg-[#F9FAFB]'}`}>
-            <Send className={`w-5 h-5 ${mode === 'now' ? 'text-[#0F2E32]' : 'text-[#9CA3AF]'}`} />
+            <Send className={`w-5 h-5 ${mode === 'now' ? 'text-brand' : 'text-[#9CA3AF]'}`} />
           </div>
           <div>
-            <h3 className={`text-xs font-bold mb-0.5 ${mode === 'now' ? 'text-[#0F2E32]' : 'text-[#374151]'}`}>
+            <h3 className={`text-xs font-bold mb-0.5 ${mode === 'now' ? 'text-brand' : 'text-[#374151]'}`}>
               {nowTitle}
             </h3>
             <p className="text-xs text-[#6B7280]">{nowSubtitle}</p>
           </div>
           {mode === 'now' && (
-            <div className="absolute top-2 right-2 w-5 h-5 bg-[#E3E8F8] border border-[#C7BAF7] rounded-full flex items-center justify-center">
+            <div className="absolute top-2 right-2 w-5 h-5 bg-[#E3E8F8] border border-accent rounded-full flex items-center justify-center">
               <Check className="w-3 h-3 text-[#7DECCE] stroke-[2.5]" />
             </div>
           )}
@@ -57,16 +57,16 @@ export function PublishModeSelector({
       >
         <div className="flex flex-col items-center gap-2">
           <div className={`p-2 rounded-full ${mode === 'schedule' ? 'bg-[#F4F1FE]' : 'bg-[#F9FAFB]'}`}>
-            <Calendar className={`w-5 h-5 ${mode === 'schedule' ? 'text-[#0F2E32]' : 'text-[#9CA3AF]'}`} />
+            <Calendar className={`w-5 h-5 ${mode === 'schedule' ? 'text-brand' : 'text-[#9CA3AF]'}`} />
           </div>
           <div>
-            <h3 className={`text-xs font-bold mb-0.5 ${mode === 'schedule' ? 'text-[#0F2E32]' : 'text-[#374151]'}`}>
+            <h3 className={`text-xs font-bold mb-0.5 ${mode === 'schedule' ? 'text-brand' : 'text-[#374151]'}`}>
               {scheduleTitle}
             </h3>
             <p className="text-xs text-[#6B7280]">{scheduleSubtitle}</p>
           </div>
           {mode === 'schedule' && (
-            <div className="absolute top-2 right-2 w-5 h-5 bg-[#E3E8F8] border border-[#C7BAF7] rounded-full flex items-center justify-center">
+            <div className="absolute top-2 right-2 w-5 h-5 bg-[#E3E8F8] border border-accent rounded-full flex items-center justify-center">
               <Check className="w-3 h-3 text-[#7DECCE] stroke-[2.5]" />
             </div>
           )}

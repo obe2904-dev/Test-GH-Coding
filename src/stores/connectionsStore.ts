@@ -13,6 +13,7 @@ interface ConnectedAccount {
 interface ConnectionsState {
   connectedAccounts: ConnectedAccount[]
   enabledPlatforms: string[]
+  platformsLoaded: boolean
   connecting: boolean
   connectPlatform: (platform: string) => Promise<void>
   disconnectPlatform: (platform: string) => Promise<void>
@@ -25,6 +26,7 @@ interface ConnectionsState {
 export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
   connectedAccounts: [],
   enabledPlatforms: [], // No default platforms - user must select in Business Profile
+  platformsLoaded: false,
   connecting: false,
 
   connectPlatform: async (platform: string) => {
@@ -142,6 +144,7 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
   },
 
   loadPlatformsFromDatabase: async () => {
+    if (get().platformsLoaded) return
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
@@ -149,7 +152,7 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
         return
       }
 
-      console.log('🔄 loadPlatformsFromDatabase: Loading for user:', user.id)
+      // console.log('🔄 loadPlatformsFromDatabase: Loading for user:', user.id)
 
       // Use direct supabase call
       const { data, error } = await supabase
@@ -158,7 +161,7 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
         .eq('id', user.id)
         .maybeSingle()
 
-      console.log('🔄 loadPlatformsFromDatabase: Raw response:', { data, error })
+      // console.log('🔄 loadPlatformsFromDatabase: Raw response:', { data, error })
 
       if (error) {
         console.error('❌ Error loading platforms (column may not exist yet):', error.message)
@@ -169,7 +172,7 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
       // Handle JSONB - it comes back as an array already
       const rawPlatforms = data?.selected_platforms
       const savedPlatforms: string[] = Array.isArray(rawPlatforms) ? rawPlatforms : []
-      console.log('🔄 loadPlatformsFromDatabase: Parsed platforms:', savedPlatforms)
+      // console.log('🔄 loadPlatformsFromDatabase: Parsed platforms:', savedPlatforms)
 
       if (savedPlatforms.length > 0) {
         // Only set enabledPlatforms - platforms are NOT connected until OAuth is complete
@@ -178,10 +181,12 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
         // This ensures ManualPostModal (copy-paste popup) appears when publishing
         set({ 
           enabledPlatforms: savedPlatforms,
-          connectedAccounts: [] // Clear - no OAuth connections exist yet
+          connectedAccounts: [], // Clear - no OAuth connections exist yet
+          platformsLoaded: true
         })
-        console.log('✅ loadPlatformsFromDatabase: Set enabledPlatforms to:', savedPlatforms)
+        console.log('✅ loadPlatformsFromDatabase: Set enabledPlatforms to:', JSON.stringify(savedPlatforms))
       } else {
+        set({ platformsLoaded: true })
         console.log('⚠️ loadPlatformsFromDatabase: No platforms saved in database')
       }
     } catch (error) {

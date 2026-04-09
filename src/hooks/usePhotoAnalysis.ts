@@ -38,7 +38,11 @@ interface UsePhotoAnalysisReturn {
     postText?: string,
     businessType?: string,
     language?: string,
-    tier?: 'free' | 'standardplus' | 'premium'
+    tier?: 'free' | 'standardplus' | 'premium',
+    mediaType?: 'image' | 'video',
+    duration?: number,
+    imageWidth?: number,
+    imageHeight?: number
   ) => Promise<PhotoAnalysisResult | null>
   isAnalyzing: boolean
   error: string | null
@@ -53,7 +57,11 @@ export function usePhotoAnalysis(): UsePhotoAnalysisReturn {
     postText?: string,
     businessType?: string,
     language: string = 'da',
-    tier: 'free' | 'standardplus' | 'premium' = 'free'
+    tier: 'free' | 'standardplus' | 'premium' = 'free',
+    mediaType: 'image' | 'video' = 'image',
+    duration?: number,
+    imageWidth?: number,
+    imageHeight?: number
   ): Promise<PhotoAnalysisResult | null> => {
     setIsAnalyzing(true)
     setError(null)
@@ -65,7 +73,11 @@ export function usePhotoAnalysis(): UsePhotoAnalysisReturn {
           postText,
           businessType,
           language,
-          tier
+          tier,
+          mediaType,
+          duration,
+          imageWidth,
+          imageHeight
         }
       })
 

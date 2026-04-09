@@ -31,7 +31,7 @@ export function LinksPanel({
           value={aboutUsUrl}
           onChange={(e) => onAboutUsUrlChange(e.target.value)}
           placeholder="fx https://www.dinvirksomhed.dk/om-os"
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         />
         <p className="text-xs text-gray-500 mt-1">
           Direkte link til jeres "Om os" eller "Om virksomheden" side
@@ -48,7 +48,7 @@ export function LinksPanel({
           value={openingHoursUrl}
           onChange={(e) => onOpeningHoursUrlChange(e.target.value)}
           placeholder="fx https://www.dinvirksomhed.dk/aabningstider"
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         />
         <p className="text-xs text-gray-500 mt-1">
           Direkte link til jeres åbningstider side

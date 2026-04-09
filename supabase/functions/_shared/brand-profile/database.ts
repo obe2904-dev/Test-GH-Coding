@@ -5,7 +5,7 @@
  * Includes legacy column support for backwards compatibility.
  */
 
-import type { BrandProfile } from './types.ts'
+import type { BrandProfile, LocationIntelligence } from './types.ts'
 
 /**
  * Converts a value to JSON string for legacy TEXT columns.
@@ -81,6 +81,22 @@ function deriveCoreOfferingsJsonb(coreOfferingsText: unknown): any {
 }
 
 /**
+ * Extracts the example phrases (Eksempel: lines) from a tone_of_voice value string.
+ * These become `typical_openings` — the register-only example sentences shown in the UI.
+ * 
+ * Input  : "- Brug du-form\nEksempel: \"Trænger du til en pause?\"\nEksempel: \"Det er tid til noget godt\""
+ * Output : ["Trænger du til en pause?", "Det er tid til noget godt"]
+ */
+function extractEksempelLines(tovValue: string | null | undefined): string[] {
+  if (!tovValue || typeof tovValue !== 'string') return []
+  return tovValue
+    .split('\n')
+    .filter(l => l.trimStart().startsWith('Eksempel:'))
+    .map(l => l.replace(/^\s*Eksempel:\s*"?/, '').replace(/"?\s*$/, '').trim())
+    .filter(Boolean)
+}
+
+/**
  * Saves a brand profile to the database.
  * 
  * Supports both new JSONB columns and legacy TEXT columns.
@@ -96,14 +112,56 @@ export async function saveBrandProfile(
   brandProfile: BrandProfile,
   qualityStatus?: 'green' | 'yellow' | 'red',
   generationErrors?: any[],
-  versionHash?: string
+  versionHash?: string,
+  locationIntelligence?: LocationIntelligence | null,
+  voiceOptions?: any | null,
+  voiceArchetype?: string | null
 ): Promise<void> {
+  // Pre-fetch protected fields — content_strategy is written once and survives regeneration.
+  // typical_openings is always refreshed from the latest Eksempel: lines on every regeneration.
+  // To enable owner-lock for manually curated openings, apply ADD_TYPICAL_OPENINGS_LOCKED_COLUMN.sql
+  // and update this select to include typical_openings_locked.
+  const { data: existingRow } = await supabase
+    .from('business_brand_profile')
+    .select('content_strategy')
+    .eq('business_id', businessId)
+    .maybeSingle()
+  const hasExistingContentStrategy = existingRow?.content_strategy != null
+
   // Prepare data for database
   const profileData = {
     business_id: businessId,
+    updated_at: new Date().toISOString(), // ✅ FIX: always force update detected by poller
     brand_essence: brandProfile.brand_essence.value,
     tone_of_voice: brandProfile.tone_of_voice.value,
     tone_model: brandProfile.tone_model,  // NEW: Structured tone model (JSONB)
+
+    // V2 Brand Profile fields (Marts 2026)
+    ...(brandProfile.brand_essence_elaboration?.value !== undefined && {
+      brand_essence_elaboration: brandProfile.brand_essence_elaboration.value
+    }),
+    ...(brandProfile.identity_keywords?.value !== undefined && {
+      identity_keywords: brandProfile.identity_keywords.value
+    }),
+    ...(brandProfile.voice_constraints?.value !== undefined && {
+      voice_constraints: brandProfile.voice_constraints.value
+    }),
+    // Plain-text business descriptor consumed by WeekContext.business_character
+    ...(brandProfile.business_character !== undefined && {
+      business_character: brandProfile.business_character
+    }),
+
+    // Voice derivation rationale — why these rules, what signals were used
+    ...((brandProfile as any).voice_rationale !== undefined && {
+      voice_rationale: (brandProfile as any).voice_rationale
+    }),
+
+    // Content strategy — drives Phase 1 slot assignment (goal_mode + content_category per post)
+    // PROTECTED: only written once; regeneration does NOT overwrite a manually curated strategy.
+    ...(brandProfile.content_strategy !== undefined && !hasExistingContentStrategy && {
+      content_strategy: brandProfile.content_strategy
+    }),
+
     // Legacy TEXT columns (kept as fallback for older clients)
     things_to_avoid: toJsonString(brandProfile.things_to_avoid.value),
     target_audience: brandProfile.target_audience.value,
@@ -112,7 +170,6 @@ export async function saveBrandProfile(
     content_pillars: toJsonString(brandProfile.content_pillars.value),
     cta_style: brandProfile.cta_style.value,
     communication_goal: brandProfile.communication_goal.value,
-    recognizable_interior_identity: brandProfile.recognizable_interior_identity?.value || null,
     image_preferences: toJsonString(brandProfile.image_preferences.value),
 
     // New JSONB columns (source of truth)
@@ -131,7 +188,19 @@ export async function saveBrandProfile(
     ...(generationErrors && { generation_errors: generationErrors }),
     
     // Version hash for change detection (when migration is applied)
-    ...(versionHash && { version_hash: versionHash })
+    ...(versionHash && { version_hash: versionHash }),
+
+    // Location intelligence — deterministic, zero-latency, queryable by post generator
+    ...(locationIntelligence !== undefined && { location_intelligence: locationIntelligence }),
+
+    // Voice archetype options — both generated options (recommended + alternative)
+    ...(voiceOptions !== undefined && voiceOptions !== null && { voice_options: voiceOptions }),
+    // Active archetype key (= recommended on first generation; changes when owner uses "Skift stemme")
+    ...(voiceArchetype !== undefined && voiceArchetype !== null && { voice_archetype: voiceArchetype }),
+
+    // Derive typical_openings from the Eksempel: lines in tone_of_voice.value.
+    // Always refreshed on regeneration — ensures stale openings from old prompt versions are replaced.
+    typical_openings: extractEksempelLines(brandProfile.tone_of_voice.value),
   }
 
   // Save to database
@@ -139,38 +208,29 @@ export async function saveBrandProfile(
     .from('business_brand_profile')
     .upsert(profileData, { onConflict: 'business_id' })
 
-  // Safety: if migrations haven't been applied yet, retry without JSONB columns
+  // Safety: if migrations haven't been applied yet, retry with only guaranteed base columns
   if (error) {
-    const msg = String(error.message || '')
-    const missingNewColumn =
-      msg.includes('image_preferences_jsonb') ||
-      msg.includes('things_to_avoid_jsonb') ||
-      msg.includes('core_offerings_jsonb') ||
-      msg.includes('content_pillars_jsonb') ||
-      msg.includes('content_pillars')
-
-    if (missingNewColumn) {
-      const legacyOnly = { ...profileData }
-      delete (legacyOnly as any).image_preferences_jsonb
-      delete (legacyOnly as any).things_to_avoid_jsonb
-      delete (legacyOnly as any).core_offerings_jsonb
-      delete (legacyOnly as any).content_pillars_jsonb
-      // content_pillars is a new legacy TEXT column; drop if migration not applied
-      delete (legacyOnly as any).content_pillars
-
-      const { error: retryError } = await supabase
-        .from('business_brand_profile')
-        .upsert(legacyOnly, { onConflict: 'business_id' })
-
-      if (retryError) {
-        throw new Error(`Failed to save brand profile (legacy retry): ${retryError.message}`)
-      }
-
-      console.log('✅ Brand profile saved to database (legacy retry; some newer columns missing)')
-      return
+    const baseOnly = {
+      business_id: profileData.business_id,
+      updated_at: new Date().toISOString(), // ✅ FIX: also required in fallback path
+      brand_essence: profileData.brand_essence,
+      tone_of_voice: profileData.tone_of_voice,
+      things_to_avoid: profileData.things_to_avoid,
+      target_audience: profileData.target_audience,
+      core_offerings: profileData.core_offerings,
+      content_focus: profileData.content_focus,
+      cta_style: profileData.cta_style,
+      communication_goal: profileData.communication_goal,
+      image_preferences: profileData.image_preferences,
     }
-
-    throw new Error(`Failed to save brand profile: ${msg}`)
+    const { error: retryError } = await supabase
+      .from('business_brand_profile')
+      .upsert(baseOnly, { onConflict: 'business_id' })
+    if (retryError) {
+      throw new Error(`Failed to save brand profile (legacy retry): ${retryError.message}`)
+    }
+    console.log('✅ Brand profile saved to database (base-only retry; newer columns not yet migrated)')
+    return
   }
 
   console.log('✅ Brand profile saved to database')

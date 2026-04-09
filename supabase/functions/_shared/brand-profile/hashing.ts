@@ -235,7 +235,7 @@ export async function saveSourceHashes(
     })
   
   if (error) {
-    console.error('Failed to save source hashes:', error)
-    throw new Error(`Failed to save source hashes: ${error.message}`)
+    // Table may not exist yet (migration pending) — non-fatal, skip silently
+    console.warn('⚠️ Could not save source hashes (table may not be migrated yet):', error.message)
   }
 }

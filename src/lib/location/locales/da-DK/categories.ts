@@ -116,9 +116,9 @@ export const CATEGORIES_DA: Record<LocationCategoryId, LocalizedCategoryContent>
   },
 
   waterfront: {
-    name: 'Vandfront / Fritidsområde',
+    name: 'Vandfront',
     icon: '🌊',
-    definition: 'Tæt på vand, parker eller promenader. Høj vejrfølsomhed, destinationsbaserede besøg.',
+    definition: 'Tæt på vand (havnefront, hav, sø eller å). Høj vejrfølsomhed, destinationsbaserede besøg.',
     whyItMatters: [
       'Weekend & eftermiddags-peaks',
       'Sommer-tung efterspørgsel',
@@ -127,11 +127,30 @@ export const CATEGORIES_DA: Record<LocationCategoryId, LocalizedCategoryContent>
     ],
     ctaShifts: [
       'Sid i solen',
-      'Perfekt efter gåturen',
+      'Ud til vandet',
       'Nyd udsigten',
       'Kig forbi'
     ],
     seasonalNotes: 'Ekstrem sommerfokus, vinterudfordringer'
+  },
+
+  nature_park: {
+    name: 'Park / Naturområde',
+    icon: '🌳',
+    definition: 'Nær parker, skove eller grønne områder. Tiltrækker gående, hundejere, cyklister og familier der laver udendørsaktiviteter.',
+    whyItMatters: [
+      'Opvarmning og læ-søgende',
+      'Familieudflugter og gåture med hund',
+      'Sæsonpeaks (forår/sommer)',
+      'Takeaway og udeservering er nøglefaktorer'
+    ],
+    ctaShifts: [
+      'Perfekt efter gåturen',
+      'Tag hunden med',
+      'Familievenlig',
+      'Kaffe og kage to-go'
+    ],
+    seasonalNotes: 'Sommerpeak, stille om vinteren'
   },
 
   shopping_district: {

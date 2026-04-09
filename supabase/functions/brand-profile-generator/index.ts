@@ -1,50 +1,12 @@
 /**
  * Brand Profile Generator - Edge Function
- * 
- * Generates AI-powered brand profiles for businesses.
- * 
- * v4.11.8 - CRITICAL: Fixed content_pillars validation by extracting array values correctly
- * v4.11.7 - DEBUG: Added detailed logging for remaining hard errors
- * v4.11.6 - CRITICAL: Fixed 8 hard errors by preserving proof arrays in parseBrandProfileResponse()
- * v4.11.5 - Fixed: primaryLanguage undefined error (use language.name)
- * v4.7.3 - CRITICAL: tone_model DB constraint violation fix
- * 
- * Changelog:
- * - v4.11.8: Added pickArrayValue() helper to handle content_pillars extraction (fixes last validation error)
- * - v4.11.8: content_pillars now correctly extracts from both direct arrays and {value: array} objects
- * - v4.11.7: Added detailed logging to identify remaining hard error after proof fix
- * - v4.11.5: Fixed ReferenceError: primaryLanguage undefined (use language.name instead)
- * - v4.11.4: Clarified proof rules to quote Danish evidence (not English labels from hooks)
- * - v4.11.3: Updated Prompt B proof rules to forbid content trigger references (prevents translation corruption)
- * - v4.11.3: Enforces verbatim quotes from source data only (no EN→DA re-translation)
- * - v4.11.2: Added content_triggers[].trigger names to proof allowlist (e.g., "Waterfront Dining Experience")
- * - v4.11.1: Expanded buildAllowedProofTokens() to include hook labels and usage occasion IDs (fixes proof grounding over-filtering)
- * - v4.11.1: Added debug logging to verify proof token expansion is active
- * - v4.7.3: Added sanitizeToneModelForDb() to ensure DB-safe tone_model (never 500 on constraint violation)
- * - v4.7.3: Improved error handling for tone_model DB constraints (return 422, not 500)
- * - v4.7.3: Added runtime tests for tone_model sanitizer
- * - v4.7.3: Retry save with tone_model=null if constraint violation occurs
- * - v4.7.2: Fixed tone_model.generated_at hallucination (always override with current timestamp)
- * - v4.7.2: Removed "indbydende" from tone_of_voice fallback (was causing validation errors)
- * - v4.7.2: Added deterministic patch for content_pillars missing notes
- * - v4.7.2: Hardcoded tone_model.version="2.0" and source="website" (never trust AI for metadata)
- * - v4.7.1: Menu data reduced to business type only, timeout 45s→60s (fix Prompt A timeouts)
- * - v4.7: Added source hashing, version_hash tracking, skip regeneration if unchanged
- * - v4.6: Added quality_status computation and storage (green/yellow/red)
- * - v4.5: Added tone_of_voice + content_focus fallbacks, complete field overwrites in repair
- * - v4.4: Increased max_tokens 2000→3500, added explicit size limits (prevent truncation)
- * - v4.3: Filter hooks by language (no English hooks in Danish content)
- * - v4.2: Added country name→ISO code mapping, Danish waterfront phrase to generic locale
- * - v4.1: Fixed locale resolution to use location.city, fixed fallback location phrases
- * - v4.0: Phase 2 - Error Tracking, Multi-Locale, Robust Fallbacks
- * - v2.2: Converted Prompt B to JSON output
- * - v2.3: Added controlled third-party context flag
- * - v2.4: Added must_use_phrases, concrete_anchors, disallowed_generic_words
- * - v2.5: Added hard evidence constraints
- * - v2.6: Reduced Prompt B information overload
- * - v2.11: Model optimization (gpt-4o + temp 0.5)
- * - v3.1: Production hardening (timeout, retry, request ID)
- * - v3.2: Modular refactoring for maintainability
+ *
+ * Generates AI-powered brand profiles for businesses using two AI prompts:
+ * - Prompt A (gpt-4o-mini, 45s budget): internal analysis + evidence extraction
+ * - Prompt B (gpt-4o, 50s budget): user-facing brand profile generation
+ *
+ * @version 4.13.0
+ * @see CHANGELOG.md for full version history
  */
 
 // @ts-ignore - Deno imports work at runtime
@@ -107,31 +69,23 @@ import {
   buildPromptA,
   buildPromptB,
   buildSystemPromptB,
-  BRAND_PROFILE_SCHEMA,
-  
-  // A1/A2 Split Architecture (v4.11.0)
-  buildPromptA1Evidence,
-  buildPromptA2Interpretation,
-  type PromptA1Evidence,
-  type PromptA2Interpretation,
-  
+
   // Validators
   validateBrandProfileOutput,
   validateFinalBrandProfile,
-  repairBrandProfile,
-  buildAllowedProofTokens,
-  buildNormalizedRefs,
-  
-  // Soft Repairs & Proof Grounding (v4.9.0)
   categorizeErrors,
-  applySoftRepairs,
-  logRepairResults,
-  applyProofGrounding,
-  logProofGroundingResults,
-  
+
   // Database
-  saveBrandProfile
+  saveBrandProfile,
+
+  // Location intelligence (deterministic)
+  buildLocationIntelligence,
+
+  // Voice Archetype Options Generator
+  generateVoiceOptions
 } from '../_shared/brand-profile/index.ts'
+import type { SecondarySignals } from '../_shared/brand-profile/index.ts'
+import { filterAudienceLabels } from '../_shared/utils/audience-filter.ts'
 
 // Tone Model Sanitizer (v4.7.3 - Critical fix for DB constraint violations)
 import {
@@ -175,7 +129,8 @@ import {
 } from '../_shared/brand-profile/repair/fallback-builders.ts'
 
 import {
-  applyDeterministicRepairs
+  applyDeterministicRepairs,
+  buildContentPillarsFallback
 } from '../_shared/brand-profile/repair/deterministic-repairs.ts'
 
 import {
@@ -192,12 +147,10 @@ const corsHeaders = {
 }
 
 const AI_MODELS = {
-  analysis: 'gpt-4o',
-  generation: 'gpt-4o'
+  analysis: 'gpt-4o-mini', // Prompt A internal analysis — mini is fast enough (25-40s); gpt-4o was timing out at 35s cut
+  generation: 'gpt-4o',   // User-facing brand content — keep full quality
+  fixer: 'gpt-4o-mini'    // JSON repair at temp 0.0 — trivially within mini capability
 }
-
-// Feature Flags (v4.11.0)
-const USE_SPLIT_PROMPT_A = Deno.env.get('USE_SPLIT_PROMPT_A') === 'true' // Default: false
 
 // Global error collector for request
 let requestErrors: ErrorCollector | null = null
@@ -243,116 +196,8 @@ function normalizeContentPillars(input: any): any[] {
 // ============================================================================
 
 /**
- * Merge A1 + A2 outputs into legacy Prompt A analysis format.
- * Maps new A2 structure back to existing fields expected by Prompt B.
- * 
- * v4.11.0 - A1/A2 Split Architecture
- */
-function mergeA1A2ToLegacyAnalysis(
-  a1: PromptA1Evidence,
-  a2: PromptA2Interpretation,
-  dataSources: DataSources
-): any {
-  // Build geo_context from A1 location facts
-  const geoContext = a1.facts.location.city ? {
-    city: a1.facts.location.city,
-    area_hint: a1.facts.location.area_type,
-    evidence: a1.facts.location.quotes.map(q => ({
-      quote: q.quote,
-      source: q.source
-    }))
-  } : undefined
-
-  // Map distinctive_hooks from A2 to legacy format
-  const distinctiveHooks = a2.distinctive_hooks.map(h => ({
-    hook: h.hook,
-    evidence: h.evidence_refs.join('; '),
-    source: 'A1_evidence',
-    confidence: h.confidence
-  }))
-
-  // Map rituals_and_moments from A2 to legacy format
-  const ritualsAndMoments = a2.rituals_and_moments.map(r => ({
-    moment: r.moment,
-    evidence: r.evidence_refs.join('; '),
-    confidence: r.confidence
-  }))
-
-  // Map usage_occasions from A2 (already in correct format)
-  const usageOccasions = a2.usage_occasions.map(occ => ({
-    id: occ.id,
-    name: occ.name,
-    when: occ.when,
-    situation: occ.situation,
-    behavior: occ.behavior,
-    job_to_be_done: occ.job_to_be_done,
-    evidence: occ.evidence_refs.map(ref => ({
-      quote: ref,
-      source: 'A1_evidence'
-    })),
-    confidence: occ.confidence
-  }))
-
-  // Map content_triggers from A2 (already in correct format)
-  const contentTriggers = a2.content_triggers.map(t => ({
-    trigger: t.trigger,
-    based_on_usage_occasion_ids: t.based_on_usage_occasion_ids,
-    what_to_show: t.what_to_show,
-    copy_angles: t.copy_angles,
-    evidence: t.evidence_refs.map(ref => ({
-      quote: ref,
-      source: 'A1_evidence'
-    })),
-    confidence: t.confidence
-  }))
-
-  // Build legacy signals object from A1 evidence
-  const signals = {
-    core_offerings: {
-      must_use_phrases: a1.facts.menu.meal_anchors || [],
-      items: a1.facts.menu.items || []
-    },
-    website_ctas: a1.facts.website.ctas || [],
-    hero_texts: a1.facts.website.hero_texts || []
-  }
-
-  // Return merged legacy analysis object
-  return {
-    business_id: a1.business_id,
-    generated_at: a1.generated_at,
-    analysis_version: a2.analysis_version,
-    
-    // Core analysis fields expected by Prompt B
-    distinctive_hooks: distinctiveHooks,
-    rituals_and_moments: ritualsAndMoments,
-    usage_occasions: usageOccasions,
-    content_triggers: contentTriggers,
-    geo_context: geoContext,
-    
-    // Voice context (map A2 to legacy format)
-    voice_context: {
-      location_profile: a2.voice_context.location_profile,
-      business_personality: a2.voice_context.business_personality,
-      language_mix: a2.voice_context.language_mix,
-      energy_level: a2.voice_context.energy_level,
-      reasoning: a2.voice_context.reasoning
-    },
-    
-    // Signals (for must_use_phrases extraction)
-    signals,
-    
-    // A1 evidence (store for debugging/traceability)
-    _a1_evidence: a1,
-    _a2_interpretation: a2
-  }
-}
-
-/**
  * Runs Prompt A - Internal Analysis.
  * Extracts signals and evidence from data sources.
- * 
- * v4.11.0: Supports both legacy (single Prompt A) and split (A1→A2) modes.
- * Mode controlled by USE_SPLIT_PROMPT_A feature flag.
  */
 async function runInternalAnalysis(
   dataSources: DataSources,
@@ -363,101 +208,7 @@ async function runInternalAnalysis(
 ): Promise<any> {
   const apiKey = Deno.env.get('OPENAI_API_KEY')!
 
-  // v4.11.0: Split Prompt A into A1 (evidence) → A2 (interpretation)
-  if (USE_SPLIT_PROMPT_A) {
-    console.log(`[${requestId}] 🔬 Running A1 (evidence extraction)...`)
-    
-    // Step 1: Run A1 - Evidence Extraction
-    const promptA1 = buildPromptA1Evidence(dataSources, language, allowThirdParty)
-    const a1Response = await fetchOpenAIWithRetry(
-      apiKey,
-      {
-        model: AI_MODELS.analysis,
-        messages: [
-          { role: 'system', content: language.systemPromptA },
-          { role: 'user', content: promptA1 }
-        ],
-        temperature: 0.2,  // Lower temp for fact extraction
-        max_tokens: 3000,
-        response_format: { type: 'json_object' }
-      },
-      requestId,
-      'Prompt A1 (Evidence Extraction)'
-    )
-
-    const a1Content = a1Response.choices[0]?.message?.content
-    if (!a1Content) {
-      throw new Error('No response from AI (Prompt A1)')
-    }
-
-    let a1Evidence: PromptA1Evidence
-    try {
-      a1Evidence = parseOpenAIJson<PromptA1Evidence>(a1Content)
-      console.log(`[${requestId}] ✅ A1 evidence extracted:`, {
-        location: a1Evidence.facts.location.city,
-        menu_items: a1Evidence.facts.menu.items.length,
-        ctas: a1Evidence.facts.website.ctas.length,
-        quotes_total: 
-          a1Evidence.facts.location.quotes.length +
-          a1Evidence.facts.menu.quotes.length +
-          a1Evidence.facts.website.quotes.length +
-          a1Evidence.facts.social.quotes.length +
-          a1Evidence.facts.images.quotes.length
-      })
-    } catch (e) {
-      const errMsg = (e as Error)?.message || String(e)
-      console.log(`[${requestId}] ⚠️ A1 returned invalid JSON: ${errMsg}`)
-      throw new Error(`Prompt A1 JSON parse failed: ${errMsg}`)
-    }
-
-    // Step 2: Run A2 - Interpretation
-    console.log(`[${requestId}] 🧠 Running A2 (interpretation)...`)
-    const promptA2 = buildPromptA2Interpretation(a1Evidence, dataSources, language, allowThirdParty)
-    const a2Response = await fetchOpenAIWithRetry(
-      apiKey,
-      {
-        model: AI_MODELS.analysis,
-        messages: [
-          { role: 'system', content: language.systemPromptA },
-          { role: 'user', content: promptA2 }
-        ],
-        temperature: 0.3,  // Higher temp for interpretation
-        max_tokens: 3500,
-        response_format: { type: 'json_object' }
-      },
-      requestId,
-      'Prompt A2 (Interpretation)'
-    )
-
-    const a2Content = a2Response.choices[0]?.message?.content
-    if (!a2Content) {
-      throw new Error('No response from AI (Prompt A2)')
-    }
-
-    let a2Interpretation: PromptA2Interpretation
-    try {
-      a2Interpretation = parseOpenAIJson<PromptA2Interpretation>(a2Content)
-      console.log(`[${requestId}] ✅ A2 interpretation complete:`, {
-        distinctive_hooks: a2Interpretation.distinctive_hooks.length,
-        rituals_and_moments: a2Interpretation.rituals_and_moments.length,
-        usage_occasions: a2Interpretation.usage_occasions.length,
-        content_triggers: a2Interpretation.content_triggers.length,
-        voice_profile: a2Interpretation.voice_context.location_profile
-      })
-    } catch (e) {
-      const errMsg = (e as Error)?.message || String(e)
-      console.log(`[${requestId}] ⚠️ A2 returned invalid JSON: ${errMsg}`)
-      throw new Error(`Prompt A2 JSON parse failed: ${errMsg}`)
-    }
-
-    // Step 3: Merge A1 + A2 into legacy analysis format
-    console.log(`[${requestId}] 🔀 Merging A1+A2 into legacy format...`)
-    const mergedAnalysis = mergeA1A2ToLegacyAnalysis(a1Evidence, a2Interpretation, dataSources)
-    return mergedAnalysis
-  }
-
-  // Legacy mode: Single Prompt A
-  console.log(`[${requestId}] 🔍 Running legacy Prompt A...`)
+  console.log(`[${requestId}] 🔍 Running Prompt A...`)
   const prompt =
     buildPromptA(dataSources, language, allowThirdParty) +
     (extraUserInstruction ? `\n\n---\nREPAIR / STRICTNESS OVERRIDE:\n${extraUserInstruction}\n` : '') +
@@ -485,7 +236,9 @@ async function runInternalAnalysis(
         response_format: { type: 'json_object' }
       },
       requestId,
-      'Prompt A (Internal Analysis) - JSON fixer'
+      'Prompt A (Internal Analysis) - JSON fixer',
+      // ✅ FIX: Cap to 1 retry × 25s — fixer must be fast or skipped
+      { timeout: 25000, maxRetries: 1, retryDelayMs: 500, retryStatusCodes: [429, 500, 502, 503, 504] }
     )
 
     const fixedContent = fixer.choices[0]?.message?.content
@@ -502,11 +255,12 @@ async function runInternalAnalysis(
         { role: 'user', content: prompt }
       ],
       temperature: 0.3,
-      max_tokens: 3500,  // Increased from 2000 to prevent truncation of large JSON
+      max_tokens: 1800,  // Capped at 1800: gpt-4o-mini @70tok/s = ~26s, safe for large-data businesses. 3000 was timing out (>55s) on businesses with large websites/menus.
       response_format: { type: 'json_object' },
     },
     requestId,
-    'Prompt A (Internal Analysis)'
+    'Prompt A (Internal Analysis)',
+    { timeout: 45000, maxRetries: 1, retryDelayMs: 1000, retryStatusCodes: [429, 500, 502, 503, 504] } // Budget: A(45)+B(50)=95s << 150s wall-clock; reduced from 55s to give more room for B
   )
 
   const content = data.choices[0]?.message?.content
@@ -541,14 +295,14 @@ async function generateBrandProfile(
   requestId: string,
   ignoreConfidenceCheck = false
 ): Promise<BrandProfile> {
-  const prompt = buildPromptB(dataSources, analysis, language, locale)
+  const { prompt, anchorCount: voiceAnchorCount, isPathB: voiceIsPathB } = buildPromptB(dataSources, analysis, language, locale)
   const apiKey = Deno.env.get('OPENAI_API_KEY')!
 
   const fixInvalidJsonToSections = async (raw: string, reason: string): Promise<any> => {
     const fixer = await fetchOpenAIWithRetry(
       apiKey,
       {
-        model: AI_MODELS.generation,
+        model: AI_MODELS.analysis, // gpt-4o-mini for JSON repair (fast, cheap)
         messages: [
           {
             role: 'system',
@@ -584,11 +338,12 @@ async function generateBrandProfile(
         }
       ],
       temperature: 0.25,
-      max_tokens: 3000,
+      max_tokens: 2500,  // Capped at 2500: gpt-4o @70tok/s = ~35s, well under 50s timeout. 3500 was hitting the timeout on full-text responses.
       response_format: { type: 'json_object' }
     },
     requestId,
-    'Prompt B (Brand Profile Generation)'
+    'Prompt B (Brand Profile Generation)',
+    { timeout: 50000, maxRetries: 1, retryDelayMs: 500, retryStatusCodes: [429, 500, 502, 503, 504] } // 50s×1=max; gpt-4o @2500tok typically 30-35s
   )
 
   const content = data.choices[0]?.message?.content
@@ -598,368 +353,199 @@ async function generateBrandProfile(
   }
 
   // Parse and validate
+  // v4.12.4: Removed JSON-fixer + JSON-retry chain (3 extra untimed AI calls = 30-130s extra → wall-clock kill).
+  // gpt-4o with response_format:json_object very rarely produces invalid JSON. If it does, use {} and let
+  // the deterministic fallbacks downstream populate all required fields.
   let sections: any
   try {
     sections = parseOpenAIJson<any>(content)
   } catch (e) {
     const errMsg = (e as Error)?.message || String(e)
-    console.log(`[${requestId}] ⚠️ Prompt B returned invalid JSON, attempting JSON fixer...`)
-    try {
-      sections = await fixInvalidJsonToSections(content, errMsg)
-    } catch (fixErr) {
-      console.log(`[${requestId}] ⚠️ JSON fixer failed, retrying Prompt B once with stricter JSON instruction...`)
-
-      const retry = await fetchOpenAIWithRetry(
-        apiKey,
-        {
-          model: AI_MODELS.generation,
-          messages: [
-            { role: 'system', content: buildSystemPromptB(language) },
-            {
-              role: 'user',
-              content: `${prompt}\n\n---\nIMPORTANT: Your previous response was invalid JSON and could not be parsed. Return ONLY valid JSON matching the required schema. Do not include markdown, comments, or trailing text. Ensure all strings are properly escaped. Avoid raw double quotes inside any string values.`
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 3000,
-          response_format: { type: 'json_object' }
-        },
-        requestId,
-        'Prompt B (Brand Profile Generation) - JSON retry'
-      )
-
-      const retryContent = retry.choices[0]?.message?.content
-      if (!retryContent) {
-        throw new Error(`No response from AI (Prompt B JSON retry): ${errMsg}`)
-      }
-
-      try {
-        sections = parseOpenAIJson<any>(retryContent)
-      } catch {
-        // Last resort: attempt fixer on retry output
-        try {
-          sections = await fixInvalidJsonToSections(retryContent, `Retry JSON still invalid: ${errMsg}`)
-        } catch (finalFixErr) {
-          const finalFixMsg = (finalFixErr as Error)?.message || String(finalFixErr)
-          throw new Error(`Prompt B JSON fix failed after retry: ${finalFixMsg}`)
-        }
-      }
+    console.warn(`[${requestId}] ⚠️ Prompt B returned invalid JSON (${errMsg}). Falling back to deterministic defaults.`)
+    sections = {}
+  }
+  
+  // Normalize: ensure all fields with a `.value` property have a string value.
+  // gpt-4o occasionally generates structured objects for fields that should be strings.
+  // This guard converts them to JSON strings so downstream repairs don't crash.
+  const STRING_VALUE_FIELDS = [
+    'brand_essence', 'tone_of_voice', 'target_audience', 'core_offerings',
+    'content_focus', 'cta_style', 'communication_goal', 'competitive_positioning'
+  ]
+  for (const field of STRING_VALUE_FIELDS) {
+    const f = (sections as any)?.[field]
+    if (f && typeof f === 'object' && 'value' in f && typeof f.value !== 'string') {
+      console.log(`[${requestId}] ⚠️ ${field}.value is non-string (${typeof f.value}), coercing to string`)
+      f.value = typeof f.value === 'object' ? JSON.stringify(f.value) : String(f.value ?? '')
     }
   }
   
-  // Apply deterministic post-processing repairs (Fix #3)
+  // v4.13.0: Single deterministic pass — collapsed from 7-layer repair stack.
+  // AI repair was removed in v4.12.4. Soft repairs + proof grounding added latency without
+  // measurable quality gain. All paths are now deterministic: no extra AI calls, no nested
+  // re-validations, single validate → fallbacks → sanitize → log.
+
+  // Step 1: deterministic structural repairs (normalizes field shapes, fills required keys)
   console.log(`[${requestId}] 🔧 Applying deterministic repairs...`)
   sections = applyDeterministicRepairs(sections, dataSources, analysis, language.code, locale)
-  
-  // v4.11.8: Ensure content_pillars has minimum 3 items BEFORE validation
-  if (Array.isArray((sections as any)?.content_pillars)) {
-    let pillars = normalizeContentPillars((sections as any).content_pillars)
-    if (pillars.length < 3) {
-      console.log(`[${requestId}] 🔧 Padding content_pillars from ${pillars.length} to 3 items`)
-      while (pillars.length < 3) {
-        const genericPillars = ['Atmosphere', 'Experience', 'Quality', 'Community', 'Innovation']
-        const nextPillar = genericPillars[pillars.length] || `Content Theme ${pillars.length + 1}`
-        pillars.push({
-          pillar: nextPillar,
-          allowed: true,
-          encouraged: false,
-          notes: `Inferred to meet minimum pillars requirement`
-        })
-      }
-    }
-    (sections as any).content_pillars = pillars
-  } else if ((sections as any)?.content_pillars) {
-    // Not an array but exists - normalize it
-    console.log(`[${requestId}] 🔧 Normalizing non-array content_pillars`)
-    let pillars = normalizeContentPillars((sections as any).content_pillars)
-    if (pillars.length < 3) {
-      while (pillars.length < 3) {
-        const genericPillars = ['Atmosphere', 'Experience', 'Quality', 'Community', 'Innovation']
-        const nextPillar = genericPillars[pillars.length] || `Content Theme ${pillars.length + 1}`
-        pillars.push({
-          pillar: nextPillar,
-          allowed: true,
-          encouraged: false,
-          notes: `Inferred to meet minimum pillars requirement`
-        })
-      }
+
+  // Step 2: ensure content_pillars has all 6 well-formed items (always applied)
+  {
+    const rawPillars = (sections as any)?.content_pillars
+    let pillars = normalizeContentPillars(rawPillars ?? [])
+    if (pillars.length < 6) {
+      console.log(`[${requestId}] 🔧 content_pillars has ${pillars.length} items — rebuilding deterministically from venue signals`)
+      const _loc = dataSources?.location || {}
+      const _areaType = _loc?.enrichment?.micro?.area_type
+      const _ph = _areaType === 'waterfront' ? (locale.preferredPhrasing?.['location_waterfront'] || 'ved vandet')
+        : _areaType === 'transit_hub' ? (locale.preferredPhrasing?.['location_transit'] || 'ved stationen')
+        : _areaType === 'shopping_street' ? (locale.preferredPhrasing?.['location_shopping'] || 'på gågaden')
+        : ''
+      const _city = _loc?.enrichment?.macro?.city || dataSources?.business?.city || 'byen'
+      const _locationHook = _ph ? `${_ph} i ${_city}` : _city
+      pillars = buildContentPillarsFallback(dataSources, analysis, _locationHook)
+      console.log(`[${requestId}] ✅ content_pillars rebuilt: ${pillars.filter((p: any) => p.encouraged).map((p: any) => p.pillar).join(', ')} encouraged`)
     }
     (sections as any).content_pillars = pillars
   }
-  
+
+  // Step 3: validate once, then apply all field-specific deterministic fallbacks in one pass
   const validationErrors = validateBrandProfileOutput(sections, analysis, dataSources)
   if (validationErrors.length > 0) {
-    console.log(`[${requestId}] ❌ Validation errors:`, validationErrors)
-    
-    // v4.9.0 Phase 1, Task B: Separate hard vs soft errors
-    const { hardErrors, softErrors } = categorizeErrors(validationErrors)
-    console.log(`[${requestId}] 📊 Error breakdown: ${hardErrors.length} hard, ${softErrors.length} soft`)
-    
-    // Apply soft repairs first (deterministic, fast)
-    if (softErrors.length > 0) {
-      const repairResult = applySoftRepairs(sections, softErrors)
-      logRepairResults(repairResult)
-      
-      if (repairResult.repaired) {
-        sections = sections // Profile mutated in place by applySoftRepairs
-        console.log(`[${requestId}] ✅ Soft repairs applied, re-validating...`)
-        
-        // v4.9.0 Phase 2 Task D: Apply proof grounding after soft repairs
-        const allowedTokens = buildAllowedProofTokens(analysis, dataSources)
-        const normalizedRefs = buildNormalizedRefs(analysis)
-        const proofGroundingResult = applyProofGrounding(sections, allowedTokens, normalizedRefs)
-        logProofGroundingResults(proofGroundingResult, requestId)
-        
-        // Re-validate after soft repairs + proof grounding
-        const afterSoftRepairErrors = validateBrandProfileOutput(sections, analysis, dataSources)
-        const { hardErrors: remainingHard, softErrors: remainingSoft } = categorizeErrors(afterSoftRepairErrors)
-        
-        console.log(`[${requestId}] 📊 After soft repairs: ${remainingHard.length} hard, ${remainingSoft.length} soft remaining`)
-        
-        // Only proceed to AI repair if hard errors remain
-        if (remainingHard.length === 0 && remainingSoft.length === 0) {
-          console.log(`[${requestId}] ✅ All errors resolved via soft repairs, skipping AI repair`)
-        } else if (remainingHard.length > 0) {
-          console.log(`[${requestId}] ⚠️  Hard errors remain, triggering AI repair...`)
-          console.log(`[${requestId}] 📄 AI output BEFORE AI repair:`, JSON.stringify(sections, null, 2))
-          const apiKey = Deno.env.get('OPENAI_API_KEY')
-          sections = await repairBrandProfile(sections, remainingHard, language, apiKey, fetch, true, analysis, dataSources)
-        }
-      }
+    console.log(`[${requestId}] 🔧 Validation issues (${validationErrors.length}) — applying deterministic fallbacks`)
+
+    if (validationErrors.some(e => String(e).includes('image_preferences.signature_shot'))) {
+      sections = { ...(sections || {}), image_preferences: { ...((sections as any)?.image_preferences || {}), signature_shot: buildFallbackSignatureShot(dataSources, analysis, language) } }
     }
-    
-    // If there were hard errors from the start, trigger AI repair
-    if (hardErrors.length > 0 && softErrors.length === 0) {
-      console.log(`[${requestId}] 🔴 Hard errors detected, triggering AI repair...`)
-      console.log(`[${requestId}] 📄 AI output BEFORE AI repair:`, JSON.stringify(sections, null, 2))
-      const apiKey = Deno.env.get('OPENAI_API_KEY')
-      sections = await repairBrandProfile(sections, hardErrors, language, apiKey, fetch, true, analysis, dataSources)
+    if (validationErrors.some(e => String(e).includes('brand_essence must include a location cue'))) {
+      sections = { ...(sections || {}), brand_essence: { ...(sections as any)?.brand_essence, value: buildFallbackBrandEssence(dataSources, analysis, language), proof: Array.isArray((sections as any)?.brand_essence?.proof) ? (sections as any).brand_essence.proof : ['#1'] } }
+    }
+    if (validationErrors.some(e => String(e).includes('content_pillars') && String(e).includes('notes must reference'))) {
+      sections = patchContentPillarsNotesToReferenceHooks(sections)
+    }
+    if ((sections as any)?.content_pillars) {
+      (sections as any).content_pillars = normalizeContentPillars((sections as any).content_pillars)
+    }
+    if (validationErrors.some(e => String(e).includes('target_audience'))) {
+      const fallback = buildFallbackTargetAudience(dataSources, analysis, language)
+      sections = { ...(sections || {}), __fallback_target_audience: true, target_audience: { ...((sections as any)?.target_audience || {}), value: fallback.value, proof: fallback.proof } }
+    }
+    if (validationErrors.some(e => String(e).includes('core_offerings'))) {
+      const fallback = buildFallbackCoreOfferings(dataSources, analysis, language)
+      sections = { ...(sections || {}), __fallback_core_offerings: true, core_offerings: { ...((sections as any)?.core_offerings || {}), value: fallback.value, proof: fallback.proof } }
+    }
+    if (validationErrors.some(e => String(e).includes('content_focus'))) {
+      const fallback = buildFallbackContentFocus(dataSources, analysis, language)
+      sections = { ...(sections || {}), __fallback_content_focus: true, content_focus: { ...((sections as any)?.content_focus || {}), value: fallback.value, proof: fallback.proof } }
+    }
+    if (validationErrors.some(e => String(e).includes('cta_style'))) {
+      const fallback = buildFallbackCtaStyle(dataSources, analysis, language)
+      sections = { ...(sections || {}), __fallback_cta_style: true, cta_style: { ...((sections as any)?.cta_style || {}), value: fallback.value, proof: fallback.proof } }
     }
 
-    const postRepairErrors = validateBrandProfileOutput(sections, analysis, dataSources)
-    if (postRepairErrors.length > 0) {
-      // Safety net: apply targeted deterministic fallbacks for the most common failure modes,
-      // then revalidate once. This prevents the whole run from 500ing on fixable formatting.
-      const needSig = postRepairErrors.some(e => String(e).includes('image_preferences.signature_shot'))
-      const needEssenceLocation = postRepairErrors.some(e => String(e).includes('brand_essence must include a location cue'))
-      const needPillarHookRef = postRepairErrors.some(e => String(e).includes('content_pillars') && String(e).includes('notes must reference'))
-      const needTargetAudience = postRepairErrors.some(e => String(e).includes('target_audience'))
-      const needCoreOfferings = postRepairErrors.some(e => String(e).includes('core_offerings'))
-      const needContentFocus = postRepairErrors.some(e => String(e).includes('content_focus'))
-      const needCtaStyle = postRepairErrors.some(e => String(e).includes('cta_style'))
+    // Step 4: sanitize banned words (fast, deterministic)
+    sections = sanitizeBannedWords(sections)
 
-      if (needSig) {
-        sections = {
-          ...(sections || {}),
-          image_preferences: {
-            ...((sections as any)?.image_preferences || {}),
-            signature_shot: buildFallbackSignatureShot(dataSources, analysis, language)
-          }
-        }
-      }
-      if (needEssenceLocation) {
-        sections = {
-          ...(sections || {}),
-          brand_essence: {
-            ...(sections as any)?.brand_essence,
-            value: buildFallbackBrandEssence(dataSources, analysis, language),
-            proof: Array.isArray((sections as any)?.brand_essence?.proof) ? (sections as any).brand_essence.proof : ['#1']
-          }
-        }
-      }
-      if (needPillarHookRef) {
-        sections = patchContentPillarsNotesToReferenceHooks(sections)
-      }
-      // v4.11.8: Normalize content_pillars safely (prevents .map() crash)
-      if ((sections as any)?.content_pillars) {
-        const normalized = normalizeContentPillars((sections as any).content_pillars)
-        (sections as any).content_pillars = normalized
-      }
-      if (needTargetAudience) {
-        const fallback = buildFallbackTargetAudience(dataSources, analysis, language)
-        sections = {
-          ...(sections || {}),
-          __fallback_target_audience: true,
-          target_audience: {
-            ...((sections as any)?.target_audience || {}),
-            value: fallback.value,
-            proof: fallback.proof
-          }
-        }
-      }
-      if (needCoreOfferings) {
-        const fallback = buildFallbackCoreOfferings(dataSources, analysis, language)
-        sections = {
-          ...(sections || {}),
-          __fallback_core_offerings: true,
-          core_offerings: {
-            ...((sections as any)?.core_offerings || {}),
-            value: fallback.value,
-            proof: fallback.proof
-          }
-        }
-      }
-      if (needContentFocus) {
-        const fallback = buildFallbackContentFocus(dataSources, analysis, language)
-        sections = {
-          ...(sections || {}),
-          __fallback_content_focus: true,
-          content_focus: {
-            ...((sections as any)?.content_focus || {}),
-            value: fallback.value,
-            proof: fallback.proof
-          }
-        }
-      }
-      if (needCtaStyle) {
-        const fallback = buildFallbackCtaStyle(dataSources, analysis, language)
-        sections = {
-          ...(sections || {}),
-          __fallback_cta_style: true,
-          cta_style: {
-            ...((sections as any)?.cta_style || {}),
-            value: fallback.value,
-            proof: fallback.proof
-          }
-        }
-      }
-
-      const afterFallbackErrors = validateBrandProfileOutput(sections, analysis, dataSources)
-      if (afterFallbackErrors.length === 0) {
-        console.log(`[${requestId}] ✅ Applied deterministic fallbacks and passed validation`)
-      } else {
-        // v4.8.8 Task 1: Last resort - sanitize banned words before checking errors
-        const hasBannedWordErrors = afterFallbackErrors.some(e => String(e).includes('🚫 BANNED WORD INCONSISTENCY'))
-        if (hasBannedWordErrors) {
-          console.log(`[${requestId}] 🧹 Banned word violations detected after repair. Applying sanitization...`)
-          sections = sanitizeBannedWords(sections)
-          
-          // Revalidate after sanitization
-          const afterSanitizationErrors = validateBrandProfileOutput(sections, analysis, dataSources)
-          
-          // If sanitization fixed all errors, we're done
-          if (afterSanitizationErrors.length === 0) {
-            console.log(`[${requestId}] ✅ Sanitization successful - all errors resolved`)
-          } else {
-            // Update error list to reflect post-sanitization state
-            afterFallbackErrors.length = 0
-            afterFallbackErrors.push(...afterSanitizationErrors)
-          }
-        }
-        
-        // Only proceed with error categorization if there are still errors
-        if (afterFallbackErrors.length > 0) {
-          // Separate differentiation warnings (can be ignored) from structural errors (cannot)
-        const differentiationWarnings = afterFallbackErrors.filter(err => {
-          const errStr = String(err)
-          return errStr.includes('distinctive hook') || 
-                 errStr.includes('proof does not reference')
-        })
-        
-        const structuralErrors = afterFallbackErrors.filter(err => {
-          const errStr = String(err)
-          return errStr.includes('must include location cue') ||
-                 errStr.includes('must include action cue') ||
-                 errStr.includes('must include CTA phrase') ||
-                 errStr.includes('contains disallowed generic word') ||
-                 (errStr.includes('missing') && !errStr.includes('distinctive hook'))
-        })
-        
-        // v4.9.0 Phase 1 Task F: Never throw - log warnings instead
-        if (structuralErrors.length > 0) {
-          console.warn(`[${requestId}] ⚠️ Structural validation warnings (non-fatal):`, structuralErrors.slice(0, 12))
-        }
-        
-        if (!ignoreConfidenceCheck && differentiationWarnings.length > 0) {
-          console.warn(`[${requestId}] ⚠️ Differentiation warnings:`, differentiationWarnings.slice(0, 12))
-        } else if (differentiationWarnings.length > 0) {
-          console.log(`[${requestId}] ⚠️ Differentiation warnings ignored (flag set):`, differentiationWarnings)
-        }
-        }  // End of if (afterFallbackErrors.length > 0) from v4.8.8
-      }
+    // Step 5: log residual issues — never throw
+    const residualErrors = validateBrandProfileOutput(sections, analysis, dataSources)
+    if (residualErrors.length === 0) {
+      console.log(`[${requestId}] ✅ All validation issues resolved`)
+    } else {
+      const structural = residualErrors.filter(e => { const s = String(e); return s.includes('must include location cue') || s.includes('must include action cue') || s.includes('must include CTA phrase') || s.includes('contains disallowed generic word') || (s.includes('missing') && !s.includes('distinctive hook')) })
+      const warnings = residualErrors.filter(e => { const s = String(e); return s.includes('distinctive hook') || s.includes('proof does not reference') })
+      if (structural.length > 0) console.warn(`[${requestId}] ⚠️ Residual structural issues (non-fatal):`, structural.slice(0, 12))
+      if (warnings.length > 0 && !ignoreConfidenceCheck) console.warn(`[${requestId}] ⚠️ Differentiation warnings:`, warnings.slice(0, 12))
     }
   }
 
-  // Absolute safety: never allow question/prompt or empty target audience to reach user.
+  // Absolute safety: content-based guards that validation may not catch
   try {
     const taRaw = (sections as any)?.target_audience
     const taValue = typeof taRaw === 'string' ? taRaw : (taRaw && typeof taRaw === 'object' ? String((taRaw as any).value || '') : '')
     if (isBadTargetAudienceValue(taValue)) {
       const fallback = buildFallbackTargetAudience(dataSources, analysis, language)
-      sections = {
-        ...(sections || {}),
-        __fallback_target_audience: true,
-        target_audience: {
-          ...((sections as any)?.target_audience || {}),
-          value: fallback.value,
-          proof: fallback.proof
-        }
-      }
+      sections = { ...(sections || {}), __fallback_target_audience: true, target_audience: { ...((sections as any)?.target_audience || {}), value: fallback.value, proof: fallback.proof } }
     }
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 
-  // Absolute safety: never allow instructional placeholders in core_offerings.
   try {
     const coRaw = (sections as any)?.core_offerings
     const coValue = typeof coRaw === 'string' ? coRaw : (coRaw && typeof coRaw === 'object' ? String((coRaw as any).value || '') : '')
     if (isBadCoreOfferingsValue(coValue)) {
       const fallback = buildFallbackCoreOfferings(dataSources, analysis, language)
-      sections = {
-        ...(sections || {}),
-        __fallback_core_offerings: true,
-        core_offerings: {
-          ...((sections as any)?.core_offerings || {}),
-          value: fallback.value,
-          proof: fallback.proof
-        }
-      }
+      sections = { ...(sections || {}), __fallback_core_offerings: true, core_offerings: { ...((sections as any)?.core_offerings || {}), value: fallback.value, proof: fallback.proof } }
     }
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 
-  // Absolute safety: ensure content_focus isn't menu-only / too narrow.
   try {
     const cfRaw = (sections as any)?.content_focus
     const cfValue = typeof cfRaw === 'string' ? cfRaw : (cfRaw && typeof cfRaw === 'object' ? String((cfRaw as any).value || '') : '')
     if (isBadContentFocusValue(cfValue)) {
       const fallback = buildFallbackContentFocus(dataSources, analysis, language)
-      sections = {
-        ...(sections || {}),
-        __fallback_content_focus: true,
-        content_focus: {
-          ...((sections as any)?.content_focus || {}),
-          value: fallback.value,
-          proof: fallback.proof
-        }
-      }
+      sections = { ...(sections || {}), __fallback_content_focus: true, content_focus: { ...((sections as any)?.content_focus || {}), value: fallback.value, proof: fallback.proof } }
     }
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 
-  // Absolute safety: ensure CTA Style is not booking-only.
   try {
     const ctaRaw = (sections as any)?.cta_style
     const ctaValue = typeof ctaRaw === 'string' ? ctaRaw : (ctaRaw && typeof ctaRaw === 'object' ? String((ctaRaw as any).value || '') : '')
     if (isBadCtaStyleValue(ctaValue)) {
       const fallback = buildFallbackCtaStyle(dataSources, analysis, language)
-      sections = {
-        ...(sections || {}),
-        __fallback_cta_style: true,
-        cta_style: {
-          ...((sections as any)?.cta_style || {}),
-          value: fallback.value,
-          proof: fallback.proof
+      sections = { ...(sections || {}), __fallback_cta_style: true, cta_style: { ...((sections as any)?.cta_style || {}), value: fallback.value, proof: fallback.proof } }
+    }
+  } catch { /* ignore */ }
+
+  // Path B post-processing: trim tone_of_voice bullet count to confirmed anchor count.
+  // Prevents AI padding past the signals that were actually injected.
+  // Section headers (STEMME-MEKANIK:, STEMME-IDENTITET:) and Eksempel: lines are always kept.
+  // Cap is 4–6 to accommodate the two-section format (2-3 mechanics + 2-3 posture rules).
+  if (voiceIsPathB) {
+    try {
+      const tovField = (sections as any)?.tone_of_voice
+      const rawTov = typeof tovField === 'string' ? tovField : (tovField?.value ?? '')
+      if (rawTov && typeof rawTov === 'string') {
+        const lines = rawTov.split('\n')
+        const bulletLines = lines.filter((l: string) => l.startsWith('- '))
+        const maxBullets = voiceAnchorCount >= 1
+          ? Math.min(Math.max(voiceAnchorCount, 4), 6) // floor 4 (2 mechanics + 2 posture), cap 6 (3+3)
+          : 4 // no anchors → enforce two-section minimum of 4 bullets
+        if (bulletLines.length > maxBullets) {
+          // Filter line-by-line: count bullets, but always keep section headers and Eksempel: lines.
+          let bulletCount = 0
+          const trimmedLines = lines.filter((l: string) => {
+            if (l.startsWith('- ')) { bulletCount++; return bulletCount <= maxBullets }
+            return true // keep section headers (STEMME-*:), Eksempel:, blank lines, everything else
+          })
+          const trimmedTov = trimmedLines.join('\n').trim()
+          console.log(`[${requestId}] ✂️ Path B tone_of_voice trimmed: ${bulletLines.length} bullets → ${maxBullets} (${voiceAnchorCount} anchors)`)
+          if (typeof tovField === 'string') {
+            ;(sections as any).tone_of_voice = trimmedTov
+          } else {
+            ;(sections as any).tone_of_voice = { ...(tovField || {}), value: trimmedTov }
+          }
         }
       }
-    }
-  } catch {
-    // ignore
+    } catch { /* trim is cosmetic — never block the profile */ }
   }
-  
+
+  // Specificity gate — soft-warn if brand_essence_elaboration is too abstract.
+  // This field is injected into the weekly plan AI on every Phase 1 run (PERSONALITY ANCHOR
+  // block). If it consists entirely of abstract warmth words, it pollutes every strategy prompt.
+  // This is a warn-only gate: it never blocks generation, but provides signal for future enforcement.
+  try {
+    const ABSTRACT_MARKERS = ['varme', 'fællesskab', 'samvær', 'hygge', 'trivsel', 'velvære', 'atmosfære', 'stemning', 'glæde', 'oplevelse']
+    const checkAbstractDrift = (rawField: any, fieldName: string) => {
+      const text = typeof rawField === 'string' ? rawField : (rawField?.value ?? '')
+      if (!text || typeof text !== 'string' || text.length < 10) return
+      const words = text.toLowerCase().split(/\s+/)
+      const abstractCount = ABSTRACT_MARKERS.filter(m => words.some(w => w.startsWith(m))).length
+      if (abstractCount >= 2 && words.length <= 15) {
+        console.warn(`[${requestId}] ⚠️ Abstract drift in ${fieldName} (${abstractCount} abstract markers / ${words.length} words): "${text.slice(0, 100)}"`)
+      }
+    }
+    checkAbstractDrift((sections as any)?.brand_essence_elaboration, 'brand_essence_elaboration')
+  } catch { /* cosmetic — never block profile */ }
+
   return parseBrandProfileResponse(sections, analysis, dataSources)
 }
 
@@ -971,9 +557,27 @@ function parseBrandProfileResponse(sections: any, analysis: any, dataSources: Da
 
   const pickValue = (field: string): string => {
     const v = sections?.[field]
-    if (typeof v === 'string') return v
-    if (v && typeof v === 'object' && typeof (v as any).value === 'string') return (v as any).value
-    return 'N/A'
+    let rawValue: string
+    if (typeof v === 'string') rawValue = v
+    else if (v && typeof v === 'object' && typeof (v as any).value === 'string') rawValue = (v as any).value
+    else return 'N/A'
+    // Normalize tone_of_voice inline bullets to newline-separated format.
+    // Safety net for any residual linearisation not caught upstream.
+    // (sanitizeBannedWords preserves \n since v4.13.x — this path rarely fires.)
+    if (field === 'tone_of_voice' && !rawValue.includes('\n') && rawValue.includes('- ')) {
+      let tov = rawValue
+      // Move keyword sections onto their own lines first
+      tov = tov.replace(/ (Eksempel: )/g, '\n$1')
+      tov = tov.replace(/ (Undgå: )/g, '\n$1')
+      // Split bullet items in the leading style-bullet segment
+      const firstNl = tov.indexOf('\n')
+      const bulletSeg = firstNl >= 0 ? tov.slice(0, firstNl) : tov
+      const rest = firstNl >= 0 ? tov.slice(firstNl) : ''
+      const parts = bulletSeg.split(' - ')
+      const normalised = parts.map((p, i) => (i === 0 ? p : '- ' + p)).join('\n')
+      return (normalised + rest).trim()
+    }
+    return rawValue
   }
   
   // v4.11.6: Extract proof arrays to preserve them in brandProfile (fixes 8 hard errors)
@@ -995,147 +599,33 @@ function parseBrandProfileResponse(sections: any, analysis: any, dataSources: Da
       isArray: Array.isArray(v),
       hasValueProp: v && typeof v === 'object' && 'value' in v,
       valueIsArray: v && typeof v === 'object' && Array.isArray((v as any).value),
-      raw: JSON.stringify(v).slice(0, 200)
+      raw: (JSON.stringify(v) ?? 'undefined').slice(0, 200)
     })
     if (Array.isArray(v)) return v
     if (v && typeof v === 'object' && Array.isArray((v as any).value)) return (v as any).value
     return []
   }
   
-  // Compute confidence scores from evidence flags
-  const computeConfidence = (varName: string, ev: any): { score: number; level: 'high' | 'inferred' | 'medium' | 'low' } => {
-    let score = 0.0
-    
-    switch (varName) {
-      case 'brand_essence':
-        if (ev.has_mission_statement) score += 0.4
-        if (ev.has_about_page) score += 0.2
-        if (ev.has_explicit_positioning) score += 0.3
-        if (ev.brand_keywords_found?.length >= 3) score += 0.1
-        break
-      case 'tone_of_voice':
-        if (ev.has_consistent_language) score += 0.4
-        if (ev.formality_level && ev.formality_level !== 'unknown') score += 0.2
-        if (ev.example_phrases?.length >= 5) score += 0.2
-        break
-      case 'target_audience':
-        if (ev.has_explicit_audience_statement) score += 0.4
-        if (ev.has_kids_menu) score += 0.2
-        if (ev.has_group_offerings) score += 0.2
-        if (ev.price_level_known) score += 0.1
-        break
-      case 'core_offerings':
-        if (ev.menu_items_count > 5) score += 0.3
-        if (ev.has_specialties_mentioned) score += 0.2
-        if (ev.website_additional_items_found?.length > 0) score += 0.2
-        if (ev.categories_identified?.length > 0) score += 0.1
-        break
-      case 'content_focus':
-        if (ev.has_website_themes) score += 0.5
-        if (ev.recurring_topics?.length >= 3) score += 0.3
-        break
-      case 'image_preferences':
-        if (ev.images_uploaded_count >= 3) score += 0.3
-        if (ev.hero_images_count >= 1) score += 0.2
-        if (ev.visual_patterns?.length >= 3) score += 0.2
-        break
-      case 'things_to_avoid':
-        if (ev.has_explicit_constraints) score += 0.5
-        if (ev.explicit_donts?.length >= 2) score += 0.3
-        break
-      case 'cta_style':
-        if (ev.has_cta_examples) score += 0.3
-        if (ev.action_verbs_found?.length >= 3) score += 0.2
-        if (ev.booking_prompts_found) score += 0.2
-        break
-      case 'communication_goal':
-        if (ev.has_explicit_goal) score += 0.5
-        if (ev.inferred_from_business_type) score += 0.3
-        break
-      case 'social_style':
-        // Usually inferred from tone/CTA patterns
-        if (evidence.tone_of_voice?.has_consistent_language) score += 0.3
-        if ((evidence.tone_of_voice?.example_phrases || []).length >= 3) score += 0.2
-        if (evidence.cta_style?.has_cta_examples) score += 0.2
-        break
-      case 'voice_examples':
-        // Derived from must-use phrases and tone signals
-        if ((evidence.tone_of_voice?.example_phrases || []).length >= 3) score += 0.3
-        if ((evidence.brand_essence?.brand_keywords_found || []).length >= 3) score += 0.2
-        if (evidence.tone_of_voice?.has_consistent_language) score += 0.2
-        break
-    }
-    
-    score = Math.min(score, 1.0)
-    const level = score >= 0.70 ? 'high' : score >= 0.50 ? 'inferred' : score >= 0.40 ? 'medium' : 'low'
-    return { score, level }
-  }
-
-  const conf = {
-    brand_essence: computeConfidence('brand_essence', evidence.brand_essence || {}),
-    tone_of_voice: computeConfidence('tone_of_voice', evidence.tone_of_voice || {}),
-    target_audience: computeConfidence('target_audience', evidence.target_audience || {}),
-    core_offerings: computeConfidence('core_offerings', evidence.core_offerings || {}),
-    content_focus: computeConfidence('content_focus', evidence.content_focus || {}),
-    image_preferences: computeConfidence('image_preferences', evidence.image_preferences || {}),
-    things_to_avoid: computeConfidence('things_to_avoid', evidence.things_to_avoid || {}),
-    cta_style: computeConfidence('cta_style', evidence.cta_style || {}),
-    communication_goal: computeConfidence('communication_goal', evidence.communication_goal || {}),
-    social_style: computeConfidence('social_style', evidence.social_style || {}),
-    voice_examples: computeConfidence('voice_examples', evidence.voice_examples || {}),
-    recognizable_interior_identity: computeConfidence('recognizable_interior_identity', evidence.recognizable_interior_identity || {})
-  }
-
   const targetAudienceIsFallback = Boolean((sections as any)?.__fallback_target_audience)
   const targetAudienceValue = pickValue('target_audience')
-  const targetAudienceConfidence = targetAudienceIsFallback
-    ? { score: 0.25, level: 'low' as const }
-    : conf.target_audience
-  const targetAudienceSignals = targetAudienceIsFallback
-    ? ['inferred_from_business_type', 'menu', 'location']
-    : (evidence.target_audience?.sources || [])
 
   const coreOfferingsIsFallback = Boolean((sections as any)?.__fallback_core_offerings)
   const coreOfferingsValue = pickValue('core_offerings')
-  const coreOfferingsConfidence = coreOfferingsIsFallback
-    ? { score: 0.30, level: 'low' as const }
-    : conf.core_offerings
-  const coreOfferingsSignals = coreOfferingsIsFallback
-    ? ['menu', 'website', 'inferred_from_business_type']
-    : (evidence.core_offerings?.sources || [])
 
   const contentFocusIsFallback = Boolean((sections as any)?.__fallback_content_focus)
   const contentFocusValue = pickValue('content_focus')
-  const contentFocusConfidence = contentFocusIsFallback
-    ? { score: 0.35, level: 'low' as const }
-    : conf.content_focus
-  const contentFocusSignals = contentFocusIsFallback
-    ? ['menu', 'images', 'physical_space', 'inferred_from_business_type']
-    : (evidence.content_focus?.sources || [])
 
   const ctaStyleIsFallback = Boolean((sections as any)?.__fallback_cta_style)
   const ctaStyleValue = pickValue('cta_style')
-  const ctaStyleConfidence = ctaStyleIsFallback
-    ? { score: 0.35, level: 'low' as const }
-    : conf.cta_style
-  const ctaStyleSignals = ctaStyleIsFallback
-    ? ['website_cta', 'inferred_from_business_type']
-    : (evidence.cta_style?.sources || [])
 
   return {
     brand_essence: {
       value: pickValue('brand_essence'),
-      proof: pickProof('brand_essence'),
-      confidence_score: conf.brand_essence.score,
-      confidence_level: conf.brand_essence.level,
-      signals_used: evidence.brand_essence?.sources || []
+      proof: pickProof('brand_essence')
     },
     tone_of_voice: {
       value: pickValue('tone_of_voice'),
-      proof: pickProof('tone_of_voice'),
-      confidence_score: conf.tone_of_voice.score,
-      confidence_level: conf.tone_of_voice.level,
-      signals_used: evidence.tone_of_voice?.sources || []
+      proof: pickProof('tone_of_voice')
     },
     // tone_model - raw from AI (sanitized before save)
     tone_model: sections.tone_model ?? null,
@@ -1155,61 +645,37 @@ function parseBrandProfileResponse(sections: any, analysis: any, dataSources: Da
             : []
         return { language_constraints, factual_constraints }
       })(),
-      proof: pickProof('things_to_avoid'),
-      confidence_score: conf.things_to_avoid.score,
-      confidence_level: conf.things_to_avoid.level,
-      signals_used: evidence.things_to_avoid?.sources || []
+      proof: pickProof('things_to_avoid')
     },
     target_audience: {
       value: targetAudienceValue,
-      proof: targetAudienceIsFallback ? ['Inferred from business type and menu'] : pickProof('target_audience'),
-      confidence_score: targetAudienceConfidence.score,
-      confidence_level: targetAudienceConfidence.level,
-      signals_used: targetAudienceSignals
+      proof: targetAudienceIsFallback ? ['Inferred from business type and menu'] : pickProof('target_audience')
     },
     core_offerings: {
       value: coreOfferingsValue,
-      proof: coreOfferingsIsFallback ? ['Menu items', 'Business type'] : pickProof('core_offerings'),
-      confidence_score: coreOfferingsConfidence.score,
-      confidence_level: coreOfferingsConfidence.level,
-      signals_used: coreOfferingsSignals
+      proof: coreOfferingsIsFallback ? ['Menu items', 'Business type'] : pickProof('core_offerings')
     },
     content_focus: {
       value: contentFocusValue,
-      proof: contentFocusIsFallback ? ['Menu', 'Physical space', 'Business type'] : pickProof('content_focus'),
-      confidence_score: contentFocusConfidence.score,
-      confidence_level: contentFocusConfidence.level,
-      signals_used: contentFocusSignals
+      proof: contentFocusIsFallback ? ['Menu', 'Physical space', 'Business type'] : pickProof('content_focus')
     },
     content_pillars: {
       value: pickArrayValue('content_pillars'),
-      proof: pickProof('content_pillars'),
-      confidence_score: conf.content_focus.score,
-      confidence_level: conf.content_focus.level,
-      signals_used: evidence.content_focus?.sources || []
+      proof: pickProof('content_pillars')
     },
     cta_style: {
       value: ctaStyleValue,
-      proof: ctaStyleIsFallback ? ['Website CTA', 'Business type'] : pickProof('cta_style'),
-      confidence_score: ctaStyleConfidence.score,
-      confidence_level: ctaStyleConfidence.level,
-      signals_used: ctaStyleSignals
+      proof: ctaStyleIsFallback ? ['Website CTA', 'Business type'] : pickProof('cta_style')
     },
     communication_goal: {
       value: pickValue('communication_goal'),
-      proof: pickProof('communication_goal'),
-      confidence_score: conf.communication_goal.score,
-      confidence_level: conf.communication_goal.level,
-      signals_used: evidence.communication_goal?.sources || []
+      proof: pickProof('communication_goal')
     },
     image_preferences: {
       value: sections.image_preferences?.dos && sections.image_preferences?.donts
         ? { dos: sections.image_preferences.dos, donts: sections.image_preferences.donts, signature_shot: sections.image_preferences.signature_shot || '' }
         : { dos: [], donts: [], signature_shot: '' },
-      proof: pickProof('image_preferences'),
-      confidence_score: conf.image_preferences.score,
-      confidence_level: conf.image_preferences.level,
-      signals_used: evidence.image_preferences?.sources || []
+      proof: pickProof('image_preferences')
     },
     social_style: {
       value: sections.social_style?.emoji_usage && sections.social_style?.emoji_examples && sections.social_style?.hashtag_strategy
@@ -1223,10 +689,7 @@ function parseBrandProfileResponse(sections: any, analysis: any, dataSources: Da
           }
         }
         : { emoji_usage: 'minimal', emoji_examples: [], hashtag_strategy: { branded: [], category: [], local: [] } },
-      proof: pickProof('social_style'),
-      confidence_score: conf.social_style.score,
-      confidence_level: conf.social_style.level,
-      signals_used: evidence.social_style?.sources || []
+      proof: pickProof('social_style')
     },
     voice_examples: {
       value: sections.voice_examples?.do_say && sections.voice_examples?.dont_say && sections.voice_examples?.vocabulary
@@ -1239,18 +702,97 @@ function parseBrandProfileResponse(sections: any, analysis: any, dataSources: Da
           }
         }
         : { do_say: [], dont_say: [], vocabulary: { prefer: [], avoid: [] } },
-      proof: pickProof('voice_examples'),
-      confidence_score: conf.voice_examples.score,
-      confidence_level: conf.voice_examples.level,
-      signals_used: evidence.voice_examples?.sources || []
+      proof: pickProof('voice_examples')
     },
     recognizable_interior_identity: {
       value: typeof sections.recognizable_interior_identity === 'string' ? sections.recognizable_interior_identity : '',
-      proof: pickProof('recognizable_interior_identity'),
-      confidence_score: conf.recognizable_interior_identity?.score || 0.5,
-      confidence_level: conf.recognizable_interior_identity?.level || 'medium' as const,
-      signals_used: evidence.recognizable_interior_identity?.sources || []
-    }
+      proof: pickProof('recognizable_interior_identity')
+    },
+
+    // Plain-text business descriptor — drives WeekContext.business_character for strategy prompts
+    // WP3: If Prompt B produced a valid new value, use it. Otherwise fall back to the previously
+    // confirmed existingBusinessCharacter to prevent regression (e.g. when data is sparse).
+    ...(() => {
+      const newValue = sections.business_character ? pickValue('business_character') : ''
+      const existingSeed = dataSources.existingBusinessCharacter || ''
+      // Quality gate: only re-inject existingSeed if it is substantive enough to be useful.
+      // Seeds shorter than 50 chars indicate a prior poor generation — let Prompt B derive fresh.
+      const seedPassesQualityGate = existingSeed.length >= 50
+      const bestValue = newValue.length >= 30 ? newValue : (seedPassesQualityGate ? existingSeed : newValue)
+      if (bestValue) {
+        if (newValue.length < 30 && existingSeed && seedPassesQualityGate) {
+          console.warn('⚠️ WP3: Prompt B business_character too short — preserving existing:', existingSeed.slice(0, 60))
+        } else if (newValue.length < 30 && existingSeed && !seedPassesQualityGate) {
+          console.warn('⚠️ WP3: Existing business_character too short to re-inject — generating fresh from source data')
+        }
+        return { business_character: bestValue }
+      }
+      return {}
+    })(),
+
+    // V2 Brand Profile fields (Marts 2026)
+    ...(sections.brand_essence_elaboration && {
+      brand_essence_elaboration: {
+        value: pickValue('brand_essence_elaboration'),
+        proof: pickProof('brand_essence_elaboration')
+      }
+    }),
+    ...(sections.identity_keywords && {
+      identity_keywords: {
+        value: pickArrayValue('identity_keywords') as string[],
+        proof: []
+      }
+    }),
+    ...(sections.voice_constraints && {
+      voice_constraints: {
+        value: pickValue('voice_constraints'),
+        proof: pickProof('voice_constraints')
+      }
+    }),
+
+    // Plain-text voice rationale — explains how Voice rules were derived (stored for transparency)
+    ...(sections.voice_rationale && {
+      voice_rationale: typeof sections.voice_rationale === 'string' ? sections.voice_rationale : ''
+    }),
+
+    // Content strategy — drives Phase 1 slot assignment (goal_mode + content_category per post)
+    ...((() => {
+      const cs = sections.content_strategy;
+      console.log('[bp] content_strategy parsed:', cs ? JSON.stringify(cs).slice(0, 120) : 'MISSING — Prompt B did not include it');
+      if (!cs) return {};
+      // Deterministic normalizer: GPT-4o occasionally returns a string instead of an array for
+      // footfall_signals, brand_anchors, loyalty_hooks. Split on comma/semicolon to recover array.
+      const toArray = (v: any): string[] => {
+        if (Array.isArray(v)) return v.filter((x: any) => typeof x === 'string');
+        if (typeof v === 'string' && v.trim()) return v.split(/[,;]\s*/).map((s: string) => s.trim()).filter(Boolean);
+        return [];
+      };
+      // content_category_weights: strip any extra keys not in schema (e.g. "community")
+      const VALID_CCW_KEYS = ['product_menu', 'craving_visual', 'behind_scenes', 'team_people'];
+      const rawCCW = cs.content_category_weights ?? {};
+      const filteredCCW: Record<string, number> = {};
+      let ccwSum = 0;
+      for (const k of VALID_CCW_KEYS) {
+        filteredCCW[k] = typeof rawCCW[k] === 'number' ? rawCCW[k] : 0;
+        ccwSum += filteredCCW[k];
+      }
+      // Re-normalise to 100 if sum is off (e.g. because community was stripped)
+      if (ccwSum > 0 && ccwSum !== 100) {
+        const factor = 100 / ccwSum;
+        for (const k of VALID_CCW_KEYS) filteredCCW[k] = Math.round(filteredCCW[k] * factor);
+        // Fix rounding error on first key
+        const diff = 100 - VALID_CCW_KEYS.reduce((s, k) => s + filteredCCW[k], 0);
+        filteredCCW[VALID_CCW_KEYS[0]] += diff;
+      }
+      const normalised = {
+        ...cs,
+        footfall_signals: toArray(cs.footfall_signals),
+        brand_anchors:    toArray(cs.brand_anchors),
+        loyalty_hooks:    toArray(cs.loyalty_hooks),
+        content_category_weights: filteredCCW,
+      };
+      return { content_strategy: normalised };
+    })())
   }
 }
 
@@ -1262,6 +804,19 @@ function parseBrandProfileResponse(sections: any, analysis: any, dataSources: Da
  * Acquire a generation lock for a business.
  * Returns success=false if lock already exists and is < 10 minutes old.
  */
+function isTableMissingError(error: any): boolean {
+  const msg: string = error?.message ?? ''
+  const details: string = error?.details ?? ''
+  return (
+    error?.code === '42P01' ||
+    msg.includes('does not exist') ||
+    msg.includes('relation') ||
+    msg.includes('schema cache') ||           // PostgREST: "Could not find the table ... in the schema cache"
+    msg.includes('Could not find the table') || // PostgREST alternative phrasing
+    details.includes('does not exist')
+  )
+}
+
 async function acquireGenerationLock(
   supabase: any,
   businessId: string,
@@ -1274,18 +829,25 @@ async function acquireGenerationLock(
 }> {
   try {
     // Check for existing lock
-    const { data: existingLock } = await supabase
+    const { data: existingLock, error: selectError } = await supabase
       .from('brand_profile_generation_locks')
       .select('request_id, started_at')
       .eq('business_id', businessId)
       .single()
+
+    // If lock table doesn't exist yet (migration not run), skip locking entirely
+    if (selectError && isTableMissingError(selectError)) {
+      console.warn(`[${requestId}] ⚠️ Lock table missing — skipping lock check, proceeding`)
+      return { success: true }
+    }
     
     if (existingLock) {
       const startedAt = new Date(existingLock.started_at)
       const ageMinutes = (Date.now() - startedAt.getTime()) / 1000 / 60
       
-      // If lock is older than 10 minutes, consider it stale and remove it
-      if (ageMinutes > 10) {
+      // If lock is older than 3 minutes, consider it stale and remove it
+      // (edge fn max runtime is ~130s, so anything >3 min is definitively stale)
+      if (ageMinutes > 3) {  // ✅ Was 10 — edge fn max is ~130s so 3min is safely stale
         console.log(`[${requestId}] ⚠️ Found stale lock (${ageMinutes.toFixed(1)} min old), removing...`)
         await supabase
           .from('brand_profile_generation_locks')
@@ -1304,7 +866,7 @@ async function acquireGenerationLock(
     }
     
     // Attempt to insert lock (will fail if race condition occurs)
-    const { error } = await supabase
+    const { error: insertError } = await supabase
       .from('brand_profile_generation_locks')
       .insert({
         business_id: businessId,
@@ -1312,9 +874,14 @@ async function acquireGenerationLock(
         started_at: new Date().toISOString()
       })
     
-    if (error) {
+    if (insertError) {
+      // If table doesn't exist, treat as no lock (migration not yet run) — proceed
+      if (isTableMissingError(insertError)) {
+        console.warn(`[${requestId}] ⚠️ Lock table missing on insert — skipping lock check, proceeding`)
+        return { success: true }
+      }
       // Likely a race condition - another request acquired the lock first
-      console.error(`[${requestId}] ❌ Failed to acquire lock:`, error.message)
+      console.error(`[${requestId}] ❌ Failed to acquire lock:`, insertError.message)
       return {
         success: false,
         reason: 'Lock acquired by concurrent request',
@@ -1323,12 +890,10 @@ async function acquireGenerationLock(
     }
     
     return { success: true }
-  } catch (error) {
-    console.error(`[${requestId}] ❌ Error acquiring lock:`, error)
-    return {
-      success: false,
-      reason: 'Failed to acquire lock due to database error'
-    }
+  } catch (err) {
+    // If any unexpected exception — fail open (allow generation) rather than blocking forever
+    console.error(`[${requestId}] ❌ Error acquiring lock (failing open):`, err)
+    return { success: true }
   }
 }
 
@@ -1383,15 +948,28 @@ serve(async (req: Request) => {
 
   const requestId = generateRequestId()
   const requestStartTime = Date.now()
-  
+
+  // Parse body ONCE outside try/catch so businessId is always accessible (e.g. in catch for lock release)
+  let businessId: string | null = null
+  let requestBody: any = {}
+  try {
+    requestBody = await req.json()
+    businessId = requestBody.businessId ?? null
+  } catch {
+    return new Response(
+      JSON.stringify({ error: 'Invalid JSON body', requestId }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
   try {
     const { 
-      businessId, 
-      forceRegenerate = false, 
-      allowThirdParty = false, 
+      forceRegenerate = false,
+      allowThirdParty = false,
       ignoreConfidenceCheck = false,  // DEPRECATED: use ignoreDifferentiationGate
-      ignoreDifferentiationGate = false  // NEW: only ignores "not enough hooks" warnings
-    } = await req.json()
+      ignoreDifferentiationGate = false,  // NEW: only ignores "not enough hooks" warnings
+      debug_mode = null  // 'prompt_a_only' | 'prompt_b_skip_save' | null
+    } = requestBody
 
     if (!businessId) {
       return new Response(
@@ -1407,7 +985,7 @@ serve(async (req: Request) => {
     )
 
     console.log(`[${requestId}] 🎯 Starting brand profile generation for business:`, businessId)
-    console.log(`[${requestId}] 🔧 v4.11.8: Added normalizeContentPillars() helper to prevent crashes`)
+    console.log(`[${requestId}] 🔧 v4.12.4: Removed JSON-fixer chain + AI repair + oversized menu. Budget: A(35)+B(50)=85s worst-case`)
     
     // Step 0: Acquire generation lock (single-flight guarantee)
     console.log(`[${requestId}] 🔒 Attempting to acquire generation lock...`)
@@ -1524,14 +1102,25 @@ serve(async (req: Request) => {
             brandProfile: {
               brand_essence: existingProfile.brand_essence,
               tone_of_voice: existingProfile.tone_of_voice,
+              tone_model: existingProfile.tone_model ?? null,
               content_focus: existingProfile.content_focus,
               target_audience: existingProfile.target_audience,
               content_pillars: existingProfile.content_pillars_jsonb || existingProfile.content_pillars,
-              social_style: existingProfile.social_style_jsonb || existingProfile.social_style,
+              content_pillars_jsonb: existingProfile.content_pillars_jsonb || existingProfile.content_pillars,
+              social_style: existingProfile.social_style,
               things_to_avoid: existingProfile.things_to_avoid_jsonb || existingProfile.things_to_avoid,
-              voice_examples: existingProfile.voice_examples_jsonb || existingProfile.voice_examples,
-              voice_context: existingProfile.voice_context_jsonb || existingProfile.voice_context,
-              image_preferences: existingProfile.image_preferences_jsonb || existingProfile.image_preferences
+              things_to_avoid_jsonb: existingProfile.things_to_avoid_jsonb,
+              core_offerings: existingProfile.core_offerings,
+              core_offerings_jsonb: existingProfile.core_offerings_jsonb,
+              cta_style: existingProfile.cta_style,
+              communication_goal: existingProfile.communication_goal,
+              voice_examples: existingProfile.voice_examples,
+              content_strategy: existingProfile.content_strategy ?? null,
+              image_preferences: existingProfile.image_preferences_jsonb || existingProfile.image_preferences,
+              image_preferences_jsonb: existingProfile.image_preferences_jsonb,
+              location_intelligence: existingProfile.location_intelligence ?? null,
+              quality_status: existingProfile.quality_status ?? null,
+              version_hash: versionHash ?? null,
             }
           }),
           { status: 200, headers: corsHeaders }
@@ -1599,6 +1188,17 @@ serve(async (req: Request) => {
     console.log(`[${requestId}] 🔍 Running internal analysis...`)
     let analysis = await runInternalAnalysis(dataSources, language, allowThirdParty, requestId)
 
+    // Step 2: Debug early-return — Prompt A only
+    if (debug_mode === 'prompt_a_only') {
+      const totalDuration = Date.now() - requestStartTime
+      console.log(`[${requestId}] 🧪 debug_mode=prompt_a_only — returning Prompt A result after ${totalDuration}ms`)
+      await releaseGenerationLock(supabaseClient, businessId, requestId).catch(() => {})
+      return new Response(
+        JSON.stringify({ debug_mode, durationMs: totalDuration, analysis }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Step 2.5: Ensure must_use_phrases
     analysis = ensureMustUsePhrasesFallback(analysis, dataSources)
 
@@ -1610,30 +1210,15 @@ serve(async (req: Request) => {
       console.log(`[${requestId}] ⚠️ generic_anchor_risk=true (must_use_phrases are generic)`)
     }
 
-    // Step 2.6: Enforce Distinctive Hooks contract (with one repair attempt)
-    // Skip validation if ignoreDifferentiationGate is set
+    // Step 2.6: Validate Distinctive Hooks contract (log-only, no repair retry)
+    // Repair retry removed v4.12.2: second runInternalAnalysis (55s) + Prompt B (50s) = 160s > 150s wall-clock limit.
+    // Worst-case with repair: 55s (A) + 55s (repair) + 50s (B) = 160s → Supabase kills at 150s.
+    // The contract is structurally enforced by ensureDistinctiveHooksMinimum() above.
     const shouldSkipContractValidation = ignoreDifferentiationGate || ignoreConfidenceCheck
     if (!shouldSkipContractValidation) {
-      let hookErrors = validateDistinctiveHooksContract(analysis, dataSources)
+      const hookErrors = validateDistinctiveHooksContract(analysis, dataSources)
       if (hookErrors.length > 0) {
-        console.log(`[${requestId}] ⚠️ Prompt A missing Distinctive Hooks contract; attempting repair`, hookErrors)
-
-        const extra = [
-          'Your previous JSON failed the Distinctive Hooks contract.',
-          'Fix ONLY by ensuring these top-level arrays exist: distinctive_hooks, physical_space_cues, rituals_and_moments, local_identity_cues, copy_patterns.',
-          'Each item MUST be an object with the required keys (hook/cue/moment/pattern + evidence + source + confidence).',
-          'Evidence MUST be an exact snippet from the provided input data (do not paraphrase; do not invent).',
-          'If you cannot find evidence for a category, return an empty array [].',
-          `Validation errors: ${hookErrors.slice(0, 12).join(' | ')}`
-        ].join('\n')
-
-        analysis = await runInternalAnalysis(dataSources, language, allowThirdParty, requestId, extra)
-        analysis = ensureMustUsePhrasesFallback(analysis, dataSources)
-        hookErrors = validateDistinctiveHooksContract(analysis, dataSources)
-
-        if (hookErrors.length > 0) {
-          throw new Error(`Prompt A Distinctive Hooks contract failed after repair: ${hookErrors.slice(0, 12).join(' | ')}`)
-        }
+        console.warn(`[${requestId}] ⚠️ Distinctive Hooks contract violations (continuing — no repair to stay inside 150s): ${hookErrors.slice(0, 6).join(' | ')}`)
       }
     } else {
       console.log(`[${requestId}] ⚠️ Skipping Distinctive Hooks contract validation (ignoreDifferentiationGate=true)`)
@@ -1645,7 +1230,7 @@ serve(async (req: Request) => {
     // UNLESS ignoreDifferentiationGate is explicitly set to true
     const differentiation = computeDifferentiationConfidence(analysis)
     const shouldSkipDifferentiationGate = ignoreDifferentiationGate || ignoreConfidenceCheck  // backwards compat
-    if (!shouldSkipDifferentiationGate && (Boolean(analysis?.evidence?.distinctive_hooks_missing) || differentiation.hooksCount < 2)) {
+    if (!shouldSkipDifferentiationGate && (Boolean(analysis?.evidence?.distinctive_hooks_missing) || differentiation.hooksCount < 1)) {
       const totalDuration = Date.now() - requestStartTime
       console.log(`[${requestId}] ⚠️ Skipping Prompt B (insufficient differentiators). Complete in ${totalDuration}ms`)
       
@@ -1665,6 +1250,7 @@ serve(async (req: Request) => {
             distinctive_hooks_missing: true,
             differentiation_confidence_score: differentiation.score,
             differentiation_confidence_level: differentiation.level,
+            menu_source: dataSources.menuSource || 'none',
             ui_prompt_da:
               'Tilføj 1–2 ting der gør jer unikke (fx kunst på væggen, ikon ved indgangen, udsigt, bar/cocktails, events). Så bliver jeres Brand Profil markant mere præcis.'
           }
@@ -1684,6 +1270,10 @@ serve(async (req: Request) => {
       brandProfile = finalValidation.cleaned
     }
 
+    // SANITY CHECK: verify the exact values being written to DB match what prompts produced
+    console.log('✅ SAVE_CHECK brand_essence.value =', (brandProfile as any)?.brand_essence?.value)
+    console.log('✅ SAVE_CHECK tone_of_voice.value =', (brandProfile as any)?.tone_of_voice?.value)
+
     // Step 4: Compute quality status and save to database
     const qualityStatus = requestErrors.getQualityStatus()
     const errorSummary = requestErrors.getSummary()
@@ -1692,14 +1282,264 @@ serve(async (req: Request) => {
     // Ensures tone_model is either null or fully normalized to pass DB constraint
     console.log(`[${requestId}] 🧹 Sanitizing tone_model for DB...`)
     const rawToneModel = brandProfile.tone_model
-    const sanitizedToneModel = sanitizeToneModelForDb(rawToneModel, language.code)
+    // Log raw AI output BEFORE sanitization so we can diagnose failures
+    console.log(`[${requestId}] 🔍 RAW_TONE_MODEL from AI:`, JSON.stringify(rawToneModel, null, 2))
+    let sanitizedToneModel = sanitizeToneModelForDb(rawToneModel, language.code)
+    if (!sanitizedToneModel) {
+      console.warn(`[${requestId}] ⚠️ tone_model sanitization failed — will save as null. Check RAW_TONE_MODEL log above.`)
+    }
+
     brandProfile.tone_model = sanitizedToneModel as any  // ToneModelV2 | null - type widening needed
     
     console.log(`[${requestId}] 💾 Saving brand profile...`)
     console.log(`[${requestId}] 📊 Quality Status: ${qualityStatus} (${errorSummary})`)
     console.log(`[${requestId}] 🔐 Version Hash: ${versionHash}`)
     console.log(`[${requestId}] 🔍 tone_model about to save:`, JSON.stringify(brandProfile.tone_model, null, 2))
-    
+
+    // Compute deterministic location intelligence (zero latency, zero tokens)
+    // Prefer business_location_intelligence row (has full category_scores) over
+    // business_locations row (which only has lightweight enrichment.micro.area_type)
+    const locationIntelligence = buildLocationIntelligence(dataSources.locationIntelligenceRow ?? dataSources.location)
+    if (locationIntelligence) {
+      console.log(`[${requestId}] 📍 location_intelligence: primary=${locationIntelligence.primary_type}, motivations=[${locationIntelligence.matched_motivations.join(', ')}], tourist=${locationIntelligence.tourist_context}`)
+    }
+
+    // Generate voice archetype options (non-blocking, non-fatal)
+    // Produces two bespoke voice options for the owner to choose from.
+    // Recommended archetype is applied as active; alternative stored in voice_options.
+    console.log(`[${requestId}] 🎙️ Generating voice archetype options...`)
+    const businessName = dataSources.business?.name ?? 'Forretning'
+    const businessTypeForVoice = brandProfile.business_character ?? (dataSources.business?.business_type_ai ?? '')
+    const locationForVoice = (
+      dataSources.location?.enrichment?.micro?.area_description ||
+      dataSources.location?.enrichment?.macro?.city ||
+      dataSources.business?.city ||
+      ''
+    )
+    const menuItemsForVoice: string[] = (
+      (dataSources.menuItems as any[])?.slice(0, 10).map((m: any) => m?.name ?? m?.item_name ?? '').filter(Boolean) ?? []
+    )
+    // Pull the actual homepage text for Pipeline A (website-faithful voice analysis)
+    const websiteAnalysis = dataSources.websiteAnalysis as any
+    const websiteTextForVoice: string = (
+      websiteAnalysis?.homepage_content ??
+      websiteAnalysis?.raw_result?.homepage_text ??
+      [
+        ...(websiteAnalysis?.hero_texts ?? []),
+        ...(websiteAnalysis?.headers ?? []),
+        ...(websiteAnalysis?.cta_texts ?? [])
+      ].filter(Boolean).join(' ') ??
+      ''
+    )
+
+    // Build secondary signals for Pipeline B calibration
+    const menuItemsRaw = (dataSources.menuItems as any[]) ?? []
+    const prices = menuItemsRaw
+      .map((m: any) => m?.price)
+      .filter((p: any) => p != null && !isNaN(Number(p)))
+      .map(Number)
+
+    // Section D fallback chain: about/tagline first, then CTA texts → business_character → empty
+    // Prefer first-person owner voice over navigation labels
+    const aboutFragments = [
+      websiteAnalysis?.about_us,
+      websiteAnalysis?.tagline,
+      websiteAnalysis?.description,
+      ...(Array.isArray(websiteAnalysis?.subpage_texts) ? websiteAnalysis.subpage_texts : [])
+    ].filter((t: any) => typeof t === 'string' && t.trim().length > 20)
+     .slice(0, 3) as string[]
+
+    const ctaAndHeaderFragments = [
+      ...(Array.isArray(websiteAnalysis?.cta_texts) ? websiteAnalysis.cta_texts : []),
+      ...(Array.isArray(websiteAnalysis?.headers) ? websiteAnalysis.headers : [])
+    ].filter((t: any) => typeof t === 'string' && t.trim().length > 8).slice(0, 3) as string[]
+
+    const secondaryTextFragments: string[] = aboutFragments.length > 0
+      ? aboutFragments
+      : ctaAndHeaderFragments.length > 0
+        ? ctaAndHeaderFragments
+        : dataSources.existingBusinessCharacter
+          ? [dataSources.existingBusinessCharacter.substring(0, 200)]
+          : []
+
+    // Detect reservations from booking CTAs or booking URLs in websiteAnalysis
+    const bookingPattern = /\b(book|reserv|bordreserv|bestil\s+bord|reserve(r)?\s+bord)\b/i
+    const ctaTexts: string[] = Array.isArray(websiteAnalysis?.cta_texts) ? websiteAnalysis.cta_texts : []
+    const hasBookingCta = ctaTexts.some((t: string) => bookingPattern.test(t))
+    const hasBookingUrl = typeof websiteAnalysis?.booking_url === 'string' && websiteAnalysis.booking_url.length > 0
+    const acceptsReservations: boolean | null = (hasBookingCta || hasBookingUrl) ? true : null
+
+    // Opening hours hint from structured opening_hours rows
+    const openingHoursRows = dataSources.openingHoursRows ?? []
+    const openingHoursHint: string = (() => {
+      if (openingHoursRows.length === 0) return ''
+      const dayMap: Record<string, string> = {
+        monday: 'Ma', tuesday: 'Ti', wednesday: 'On', thursday: 'To',
+        friday: 'Fr', saturday: 'Lø', sunday: 'Sø',
+        '0': 'Sø', '1': 'Ma', '2': 'Ti', '3': 'On', '4': 'To', '5': 'Fr', '6': 'Lø'
+      }
+      const rows = openingHoursRows.map((r: any) => {
+        const d = dayMap[String(r.weekday).toLowerCase()] ?? r.weekday
+        const o = String(r.open_time ?? '').substring(0, 5)
+        const c = String(r.close_time ?? '').substring(0, 5)
+        return `${d} ${o}-${c}`
+      })
+      // Compact: if all days same hours, show range
+      const unique = [...new Set(rows.map((r: string) => r.split(' ')[1]))]
+      if (unique.length === 1 && openingHoursRows.length >= 7) return `Alle dage ${unique[0]}`
+      return rows.slice(0, 5).join(', ') + (rows.length > 5 ? '...' : '')
+    })()
+
+    // Hybrid venue detection — done in TypeScript from concrete signals before AI Call 1
+    // Avoids asking the model to assess category when we already have the data
+    const hybridTypeHint: string = (() => {
+      const baseType = (businessTypeForVoice ?? '').toLowerCase()
+      const programmes = (dataSources.menuSignalProgrammes as any[] | null)
+        ?.map((p: any) => (p?.role ?? p?.name ?? '').toLowerCase()) ?? []
+      const catLabels = [...new Set(
+        ((dataSources.menuItems as any[]) ?? []).map((m: any) => (m?.category ?? '').toLowerCase()).filter(Boolean)
+      )] as string[]
+
+      // Detect day dimension: morning/brunch/lunch programmes or relevant menu categories
+      const hasDayDimension = programmes.some(p => /brunch|morgen|frokost|lunch|kaffe|dag/i.test(p))
+        || catLabels.some(c => /brunch|frokost|morgen|morgenmad|kaffe|smørrebrød|sandwich/i.test(c))
+
+      // Detect night/bar dimension: evening/cocktail/bar programmes, late hours, bar menu categories
+      const hasNightDimension = programmes.some(p => /aften|cocktail|bar|nat|sen/i.test(p))
+        || catLabels.some(c => /cocktail|bar|drinks|spiritus|vin|øl|natmad/i.test(c))
+        || (() => {
+          // Close time after 22:30 signals late-night component
+          const rows = dataSources.openingHoursRows ?? [] as any[]
+          return (rows as any[]).some((r: any) => {
+            const close = String(r?.close_time ?? '').substring(0, 5)
+            if (!close || !close.includes(':')) return false
+            const [h] = close.split(':').map(Number)
+            return h >= 23 || h <= 4 // midnight or later (incl. wrapping past midnight)
+          })
+        })()
+
+      // Only flag as hybrid if there are two genuinely distinct operational dimensions
+      if (!hasDayDimension || !hasNightDimension) return ''
+
+      // Build a human-readable compound label
+      const dayLabel = baseType.includes('café') || baseType.includes('cafe') ? 'café'
+        : baseType.includes('bakeri') || baseType.includes('bageri') ? 'bageri'
+        : baseType.includes('restaurant') ? 'restaurant'
+        : 'dagscafé'
+      const nightLabel = programmes.some(p => /cocktail/i.test(p)) || catLabels.some(c => /cocktail/i.test(c))
+        ? 'cocktailbar'
+        : programmes.some(p => /vinbar|vin/i.test(p)) || catLabels.some(c => /vinbar/i.test(c))
+          ? 'vinbar'
+          : 'bar/aftenssted'
+
+      return `${dayLabel} + ${nightLabel} (dag + sen aftendrift)`
+    })()
+    if (hybridTypeHint) {
+      console.log(`[${requestId}] 🔀 Hybrid venue detected: ${hybridTypeHint}`)
+    }
+
+    // Naming style classification — done in TypeScript to avoid asking AI to infer what we can compute
+    const namingStyleHint: string = (() => {
+      const names = menuItemsRaw.slice(0, 15).map((m: any) => m?.name ?? '').filter(Boolean) as string[]
+      if (names.length === 0) return 'ikke tilgængeligt'
+      const avgWords = names.reduce((s: number, n: string) => s + n.split(/\s+/).length, 0) / names.length
+      const englishCount = names.filter((n: string) => /\b(the|with|and|of|fresh|classic|house|special|style)\b/i.test(n)).length
+      const hasAdjectives = names.filter((n: string) => /\b(frisk|røget|grillet|sprød|hjemmelavet|classic|crispy|creamy)\b/i.test(n)).length > 1
+      const style = englishCount > names.length * 0.3 ? 'engelske termer' : 'rent dansk'
+      const length = avgWords < 2 ? 'kortfattet' : avgWords < 3.5 ? 'mellemlænge' : 'beskrivende'
+      const adjNote = hasAdjectives ? ' med adjektiver' : ' uden adjektiver'
+      return `${length} + ${style}${adjNote}`
+    })()
+
+    // Day-arc: programme names from menu_signal (e.g. ["Brunch", "Frokost", "Aften", "Cocktails"])
+    const dayArcProgrammes: string[] = (dataSources.menuSignalProgrammes as any[] | null)
+      ?.map((p: any) => p?.role ?? p?.name ?? '').filter(Boolean) ?? []
+
+    // Audience profile — score-gated + price-validated via shared audience-filter utility.
+    // Single source of truth: same logic as prompt-b.ts and the Location UI.
+    const categoryScoresRaw: Record<string, number> =
+      (dataSources.locationIntelligenceRow as any)?.category_scores ?? {}
+    const { audienceProfileString: audienceProfile } = filterAudienceLabels(
+      categoryScoresRaw,
+      prices.length ? Math.max(...prices) : null
+    )
+
+    const secondarySignals: SecondarySignals = {
+      priceRange: {
+        min: prices.length ? Math.min(...prices) : null,
+        max: prices.length ? Math.max(...prices) : null
+      },
+      hasKidsMenu: menuItemsRaw.some((m: any) =>
+        typeof (m?.category ?? '') === 'string' && (m.category ?? '').toLowerCase().includes('børn') ||
+        typeof (m?.name ?? '') === 'string' && (m.name ?? '').toLowerCase().includes('børn')
+      ),
+      categoryLabels: [...new Set(
+        menuItemsRaw.map((m: any) => m?.category).filter((c: any) => typeof c === 'string' && c.trim().length > 0)
+      )].slice(0, 8) as string[],
+      menuNamingSample: menuItemsRaw.slice(0, 12)
+        .map((m: any) => m?.name ?? m?.item_name ?? '')
+        .filter(Boolean) as string[],
+      namingStyleHint,
+      secondaryTextFragments,
+      websiteRegisterHint: (() => {
+        const wc = websiteTextForVoice.trim().split(/\s+/).filter(Boolean).length
+        if (wc < 30) return 'minimal — hjemsiden bruger primært billeder og korte labels'
+        if (wc < 200) return 'kortfattet og funktionel — få sætninger, faktabaseret'
+        return 'moderat detaljeret — har beskrivende tekst'
+      })(),
+      dayArcProgrammes,
+      audienceProfile,
+      openingHoursHint,
+      acceptsReservations,
+      hybridTypeHint,
+      locationIntelligence: locationIntelligence ?? null
+    }
+
+    // Inject content_anchors into tone_model — deterministic, not AI-generated.
+    // Derived from dayArcProgrammes (brunch/frokost/aften/cocktails etc.) +
+    // menu category labels, so the owner sees WHAT they actually sell, not just
+    // differentiator adjectives from primary_keywords.
+    if (brandProfile.tone_model) {
+      const contentAnchors: string[] = [
+        ...secondarySignals.dayArcProgrammes,
+        ...secondarySignals.categoryLabels.slice(0, 5)
+      ]
+        .filter(Boolean)
+        .reduce<string[]>((acc, s) => {
+          const norm = s.trim()
+          if (norm && !acc.some(x => x.toLowerCase() === norm.toLowerCase())) acc.push(norm)
+          return acc
+        }, [])
+        .slice(0, 10)
+      ;(brandProfile.tone_model as any).content_anchors = contentAnchors
+      console.log(`[${requestId}] 📌 content_anchors injected:`, contentAnchors.join(', '))
+    }
+
+    const targetAudienceForVoice: string = (
+      (brandProfile as any).target_audience?.description ??
+      (brandProfile as any).target_audience?.primary_segment ??
+      ''
+    )
+    const brandAnchorsForVoice: string[] = (
+      (brandProfile as any).content_strategy?.brand_anchors ?? []
+    )
+    const voiceOptions = await generateVoiceOptions(
+      Deno.env.get('OPENAI_API_KEY')!,
+      businessName,
+      businessTypeForVoice,
+      locationForVoice,
+      menuItemsForVoice,
+      websiteTextForVoice,
+      targetAudienceForVoice,
+      brandAnchorsForVoice,
+      secondarySignals,
+      requestId
+    )
+    // generateVoiceOptions always returns a valid object (never null/undefined)
+    const voiceArchetype = voiceOptions.recommended
+    console.log(`[${requestId}] ✅ Voice options ready: website="${voiceOptions.options.website?.label}", ai_enriched="${voiceOptions.options.ai_enriched?.label}"`)
+
+
     try {
       await saveBrandProfile(
         supabaseClient,
@@ -1707,7 +1547,10 @@ serve(async (req: Request) => {
         brandProfile,
         qualityStatus,
         requestErrors.toJSON().errors,  // Extract errors array from toJSON() result
-        versionHash  // Add version hash
+        versionHash,  // Add version hash
+        locationIntelligence,  // Deterministic location intelligence
+        voiceOptions,  // Both generated archetype options
+        voiceArchetype  // Active archetype (= recommended on first generation)
       )
     } catch (saveError: any) {
       // Detect DB constraint violations for tone_model
@@ -1728,7 +1571,10 @@ serve(async (req: Request) => {
           brandProfile,
           qualityStatus,
           requestErrors.toJSON().errors,
-          versionHash
+          versionHash,
+          locationIntelligence,
+          voiceOptions,
+          voiceArchetype
         )
         
         // Add error to collection
@@ -1768,9 +1614,16 @@ serve(async (req: Request) => {
       e.message.includes('repair') || e.message.includes('fallback')
     ).length
     
+    // Compute response qualityStatus from final validation results (not internal error tracking)
+    // green = no validation issues; yellow = soft issues only; red = hard errors
+    const responseQualityStatus: 'green' | 'yellow' | 'red' =
+      finalHardErrors.length > 0 ? 'red'
+      : finalSoftErrors.length === 0 ? 'green'
+      : 'yellow'
+    
     const responseEnvelope = {
       ok: finalHardErrors.length === 0,
-      qualityStatus: qualityStatus as 'perfect' | 'acceptable' | 'failed',
+      qualityStatus: responseQualityStatus,
       repairCount,
       hardErrors: finalHardErrors,
       softErrors: finalSoftErrors,
@@ -1815,6 +1668,7 @@ serve(async (req: Request) => {
           distinctive_hooks_missing: Boolean(analysis?.evidence?.distinctive_hooks_missing) || differentiation.hooksCount < 2,
           differentiation_confidence_score: differentiation.score,
           differentiation_confidence_level: differentiation.level,
+          menu_source: dataSources.menuSource || 'none',
           ui_prompt_da:
             (Boolean(analysis?.evidence?.distinctive_hooks_missing) || differentiation.hooksCount < 2)
               ? 'Tilføj 1–2 ting der gør jer unikke (fx kunst på væggen, ikon ved indgangen, udsigt, bar/cocktails, events). Så bliver jeres Brand Profil markant mere præcis.'
@@ -1823,16 +1677,32 @@ serve(async (req: Request) => {
         brandProfile: {
           brand_essence: brandProfile.brand_essence.value,
           tone_of_voice: brandProfile.tone_of_voice.value,
+          tone_model: brandProfile.tone_model ?? null,
           things_to_avoid: brandProfile.things_to_avoid.value,
+          things_to_avoid_jsonb: brandProfile.things_to_avoid.value,
           target_audience: brandProfile.target_audience.value,
           core_offerings: brandProfile.core_offerings.value,
+          core_offerings_jsonb: brandProfile.core_offerings.value,  // Full derivation happens in DB save layer
           content_focus: brandProfile.content_focus.value,
           content_pillars: brandProfile.content_pillars.value,
+          content_pillars_jsonb: brandProfile.content_pillars.value,
           cta_style: brandProfile.cta_style.value,
           communication_goal: brandProfile.communication_goal.value,
           image_preferences: brandProfile.image_preferences.value,
+          image_preferences_jsonb: brandProfile.image_preferences.value,
           social_style: brandProfile.social_style.value,
           voice_examples: brandProfile.voice_examples.value,
+          content_strategy: (brandProfile as any).content_strategy ?? null,
+          location_intelligence: locationIntelligence ?? null,  // Deterministic — not AI-generated
+          quality_status: qualityStatus ?? null,
+          version_hash: versionHash ?? null,
+          // V2 Brand Profile fields (Marts 2026)
+          brand_essence_elaboration: brandProfile.brand_essence_elaboration?.value ?? null,
+          identity_keywords: brandProfile.identity_keywords?.value ?? null,
+          voice_constraints: brandProfile.voice_constraints?.value ?? null,
+          voice_rationale: (brandProfile as any).voice_rationale ?? null,
+          voice_options: voiceOptions ?? null,
+          voice_archetype: voiceArchetype ?? null,
         },
         confidence: {
           brand_essence: brandProfile.brand_essence.confidence_level,
@@ -1858,8 +1728,7 @@ serve(async (req: Request) => {
     console.error(`[${requestId}] ❌ Error after ${totalDuration}ms:`, err.message)
     console.error(`[${requestId}] 📚 Error stack:`, err.stack)
     
-    // Release lock on error
-    const { businessId } = await req.json().catch(() => ({ businessId: null }))
+    // Release lock on error (businessId is in scope because body was parsed before the main try)
     if (businessId) {
       await releaseGenerationLock(
         createClient(

@@ -113,7 +113,7 @@ export function MenuSourceItem({
               value={menu.menuType}
               onChange={(e) => onMenuTypeChange(menu.url, e.target.value as MenuType)}
               disabled={menu.status === 'extracting'}
-              className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded bg-white hover:border-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500 font-medium text-gray-700"
+              className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded bg-white hover:border-gray-400 focus:ring-2 focus:ring-cta focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500 font-medium text-gray-700"
             >
               <option value="standard">Standardmenu</option>
               <option value="special">Midlertidig menu</option>
@@ -133,7 +133,7 @@ export function MenuSourceItem({
 
           {/* Extraction Method Badge */}
           {isGpt52Vision && (
-            <div className="px-2.5 py-1.5 text-xs font-medium border rounded-full whitespace-nowrap bg-indigo-50 text-indigo-700 border-indigo-200">
+            <div className="px-2.5 py-1.5 text-xs font-medium border rounded-full whitespace-nowrap bg-cta-surface text-cta-text border-cta-surface">
               AI-scannet
             </div>
           )}

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Analyze Photo – Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #222; padding: 32px 16px; }
+    h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 24px; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      max-width: 680px;
+    }
+
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #555; }
+
+    textarea, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-family: inherit;
+      resize: vertical;
+    }
+    textarea:focus, select:focus { outline: 2px solid #4f46e5; border-color: transparent; }
+
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .row > * { flex: 1; min-width: 140px; }
+
+    /* Drop zone */
+    .drop-zone {
+      border: 2px dashed #ccc;
+      border-radius: 10px;
+      padding: 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      background: #fafafa;
+    }
+    .drop-zone:hover, .drop-zone.over { border-color: #4f46e5; background: #f0f0ff; }
+    .drop-zone input { display: none; }
+    .drop-zone .hint { font-size: 0.85rem; color: #888; margin-top: 6px; }
+
+    #preview-wrap { margin-top: 14px; text-align: center; }
+    #preview-wrap img { max-height: 260px; max-width: 100%; border-radius: 8px; object-fit: contain; }
+
+    /* Button */
+    button {
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 28px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      max-width: 680px;
+      transition: background .15s;
+    }
+    button:hover:not(:disabled) { background: #4338ca; }
+    button:disabled { background: #a5a3e8; cursor: not-allowed; }
+
+    /* Status */
+    #status {
+      max-width: 680px;
+      margin-top: 14px;
+      font-size: 0.88rem;
+      color: #555;
+      min-height: 20px;
+    }
+    #status.error { color: #dc2626; }
+
+    /* Results */
+    #result-card { display: none; max-width: 680px; }
+
+    .chip {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+    .chip.post-it    { background: #dcfce7; color: #15803d; }
+    .chip.good-enough { background: #fef9c3; color: #92400e; }
+    .chip.quick-fix  { background: #fef3c7; color: #b45309; }
+    .chip.retake     { background: #fee2e2; color: #991b1b; }
+    .chip.excellent  { background: #dcfce7; color: #15803d; }
+    .chip.good       { background: #e0f2fe; color: #0369a1; }
+    .chip.fair       { background: #fef9c3; color: #92400e; }
+    .chip.poor       { background: #fee2e2; color: #991b1b; }
+
+    .result-section { margin-bottom: 18px; }
+    .result-section h3 { font-size: 0.8rem; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+    .result-section p { font-size: 0.95rem; line-height: 1.55; }
+    .result-section ul { padding-left: 18px; }
+    .result-section li { font-size: 0.93rem; margin-bottom: 4px; line-height: 1.45; }
+
+    .suggestion-item {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      background: #fafafa;
+    }
+    .suggestion-item strong { font-size: 0.93rem; }
+    .suggestion-item .meta { font-size: 0.8rem; color: #666; margin-top: 4px; }
+    .suggestion-item .action-badge {
+      font-size: 0.75rem;
+      background: #e0e7ff;
+      color: #4338ca;
+      padding: 1px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+
+    code { font-family: monospace; font-size: 0.82rem; background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+
+    details { max-width: 680px; margin-top: 12px; }
+    summary { cursor: pointer; font-size: 0.85rem; color: #888; }
+    pre { font-size: 0.78rem; background: #1e1e1e; color: #d4d4d4; padding: 16px; border-radius: 8px; overflow-x: auto; margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+
+<h1>📸 Analyze Photo – Test</h1>
+
+<!-- ── LOGIN ─────────────────────────────────────────────── -->
+<div class="card" id="login-card">
+  <div style="margin-bottom:16px;">
+    <label for="email">Email</label>
+    <input id="email" type="email" placeholder="din@email.dk" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:.95rem;" />
+  </div>
+  <div style="margin-bottom:16px;">
+    <label for="password">Adgangskode</label>
+    <input id="password" type="password" placeholder="••••••••" style="width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:.95rem;" />
+  </div>
+  <button id="login-btn" type="button" style="max-width:100%;">Log ind</button>
+  <div id="login-error" style="color:#dc2626;font-size:.85rem;margin-top:8px;"></div>
+</div>
+
+<!-- ── LOGGED-IN CONTENT ──────────────────────────────────── -->
+<div id="main-content" style="display:none;">
+<div style="max-width:680px;margin-bottom:14px;font-size:.85rem;color:#555;">
+  Logget ind som <strong id="user-email-label"></strong> &nbsp;
+  <a href="#" id="logout-link" style="color:#4f46e5;">Log ud</a>
+</div>
+
+<div class="card">
+  <label>Billede</label>
+  <div class="drop-zone" id="drop-zone">
+    <input type="file" id="file-input" accept="image/*" />
+    <div>Klik eller træk et billede hertil</div>
+    <div class="hint">JPEG / PNG / WEBP · maks 4 MB</div>
+  </div>
+  <div id="preview-wrap"></div>
+</div>
+
+<div class="card">
+  <div style="margin-bottom:16px;">
+    <label for="post-text">Tekst til opslaget (valgfri)</label>
+    <textarea id="post-text" rows="3" placeholder="F.eks. 'Frisk brød fra ovnen ☕ — kom forbi i dag!'"></textarea>
+  </div>
+  <div class="row">
+    <div>
+      <label for="language">Sprog</label>
+      <select id="language">
+        <option value="da" selected>Dansk</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <div>
+      <label for="business-type">Virksomhedstype (valgfri)</label>
+      <select id="business-type">
+        <option value="">– ikke angivet –</option>
+        <option value="cafe">Café</option>
+        <option value="restaurant">Restaurant</option>
+        <option value="bakery">Bageri</option>
+        <option value="bar">Bar</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<button id="analyze-btn" disabled>Analyser billede</button>
+<div id="status"></div>
+
+<div class="card" id="result-card">
+  <div class="result-section" id="res-recommendation"></div>
+  <div class="result-section" id="res-general"></div>
+  <div class="result-section" id="res-whatworks"></div>
+  <div class="result-section" id="res-content"></div>
+  <div class="result-section" id="res-emoji"></div>
+  <div class="result-section" id="res-suggestions"></div>
+</div>
+
+<details>
+  <summary>Rå JSON-svar</summary>
+  <pre id="raw-json">–</pre>
+</details>
+
+</div><!-- end #main-content -->
+
+<script>
+  const SUPABASE_URL  = 'https://kvqdkohdpvmdylqgujpn.supabase.co'
+  const ANON_KEY      = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2cWRrb2hkcHZtZHlscWd1anBuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA5ODg3NjAsImV4cCI6MjA3NjU2NDc2MH0.mB5s5sBCKIov-hIG5xJpo90SDLiQ2c8JAvvOkGCGyII'
+  const FUNCTION_URL  = `${SUPABASE_URL}/functions/v1/analyze-photo`
+  const BUCKET        = 'post-images'
+
+  let accessToken = null
+  let userId = null
+
+  function parseJwt(token) {
+    try { return JSON.parse(atob(token.split('.')[1])) } catch { return null }
+  }
+
+  // ── Login ────────────────────────────────────────────────────────────────
+  document.getElementById('login-btn').addEventListener('click', async () => {
+    const email    = document.getElementById('email').value.trim()
+    const password = document.getElementById('password').value
+    const errEl    = document.getElementById('login-error')
+    errEl.textContent = ''
+    if (!email || !password) { errEl.textContent = 'Udfyld email og adgangskode.'; return }
+
+    document.getElementById('login-btn').disabled = true
+    document.getElementById('login-btn').textContent = 'Logger ind...'
+
+    try {
+      const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { 'apikey': ANON_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error_description || data.msg || 'Login fejlede')
+      accessToken = data.access_token
+      userId = parseJwt(accessToken)?.sub || null
+      document.getElementById('user-email-label').textContent = email
+      document.getElementById('login-card').style.display = 'none'
+      document.getElementById('main-content').style.display = 'block'
+    } catch (err) {
+      errEl.textContent = '❌ ' + err.message
+    } finally {
+      document.getElementById('login-btn').disabled = false
+      document.getElementById('login-btn').textContent = 'Log ind'
+    }
+  })
+
+  document.getElementById('logout-link').addEventListener('click', e => {
+    e.preventDefault()
+    accessToken = null
+    document.getElementById('login-card').style.display = 'block'
+    document.getElementById('main-content').style.display = 'none'
+    document.getElementById('password').value = ''
+  })
+
+  let selectedFile = null
+
+  // ── Drop zone ────────────────────────────────────────────────────────────
+  const dropZone  = document.getElementById('drop-zone')
+  const fileInput = document.getElementById('file-input')
+  const previewWrap = document.getElementById('preview-wrap')
+
+  dropZone.addEventListener('click', () => fileInput.click())
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over') })
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'))
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('over')
+    const f = e.dataTransfer.files[0]
+    if (f && f.type.startsWith('image/')) setFile(f)
+  })
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) setFile(fileInput.files[0])
+  })
+
+  function setFile(f) {
+    selectedFile = f
+    document.getElementById('analyze-btn').disabled = false
+    setStatus('')
+    previewWrap.innerHTML = `<img src="${URL.createObjectURL(f)}" alt="preview" />`
+  }
+
+  // ── Analyze ──────────────────────────────────────────────────────────────
+  document.getElementById('analyze-btn').addEventListener('click', analyze)
+
+  async function analyze() {
+    if (!selectedFile) return
+
+    const btn = document.getElementById('analyze-btn')
+    btn.disabled = true
+    document.getElementById('result-card').style.display = 'none'
+    document.getElementById('raw-json').textContent = '–'
+
+    try {
+      // 1. Upload to Storage
+      setStatus('⬆️  Uploader billede...')
+      const ext = selectedFile.name.split('.').pop() || 'jpg'
+      const path = `${userId}/test-uploads/${Date.now()}.${ext}`
+      const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': ANON_KEY,
+          'Content-Type': selectedFile.type,
+          'x-upsert': 'true',
+        },
+        body: selectedFile,
+      })
+      if (!uploadRes.ok) {
+        const err = await uploadRes.text()
+        throw new Error(`Upload fejlede (${uploadRes.status}): ${err}`)
+      }
+      const imageUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${path}`
+
+      // 2. Get image dimensions from preview
+      const img = previewWrap.querySelector('img')
+      const imageWidth  = img ? img.naturalWidth  || img.width  || undefined : undefined
+      const imageHeight = img ? img.naturalHeight || img.height || undefined : undefined
+
+      // 3. Call edge function
+      setStatus('🤖  Analyserer med AI...')
+      const postText     = document.getElementById('post-text').value.trim() || undefined
+      const language     = document.getElementById('language').value
+      const businessType = document.getElementById('business-type').value || undefined
+
+      const fnRes = await fetch(FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ imageUrl, postText, language, businessType, imageWidth, imageHeight, tier: 'paid' }),
+      })
+
+      const data = await fnRes.json()
+
+      if (!fnRes.ok) {
+        throw new Error(data?.message || data?.error || `HTTP ${fnRes.status}`)
+      }
+
+      setStatus('')
+      renderResult(data)
+      document.getElementById('raw-json').textContent = JSON.stringify(data, null, 2)
+
+    } catch (err) {
+      setStatus('❌  ' + err.message, true)
+      console.error(err)
+    } finally {
+      btn.disabled = false
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  function renderResult(d) {
+    const card = document.getElementById('result-card')
+    card.style.display = 'block'
+
+    // Recommendation
+    const rec = d.recommendation || ''
+    const recLabels = { 'post-it': 'Post det nu', 'good-enough': 'God nok', 'quick-fix': 'Hurtig fix', 'retake': 'Tag om' }
+    document.getElementById('res-recommendation').innerHTML = `
+      <h3>Anbefaling</h3>
+      <p><span class="chip ${rec}">${recLabels[rec] || rec}</span> &nbsp;${esc(d.recommendationText || '')}</p>
+    `
+
+    // General feedback
+    document.getElementById('res-general').innerHTML = `
+      <h3>Generel feedback</h3>
+      <p>${esc(d.generalFeedback || '–')}</p>
+    `
+
+    // What works
+    const ww = Array.isArray(d.whatWorks) ? d.whatWorks : []
+    document.getElementById('res-whatworks').innerHTML = `
+      <h3>Hvad virker</h3>
+      <ul>${ww.map(w => `<li>${esc(w)}</li>`).join('')}</ul>
+    `
+
+    // Content match
+    const cm = d.contentMatch || {}
+    document.getElementById('res-content').innerHTML = `
+      <h3>Tekstmatch</h3>
+      <p><span class="chip ${cm.rating || ''}">${cm.rating || '–'}</span> &nbsp;${esc(cm.feedback || '–')}</p>
+    `
+
+    // Emoji match
+    document.getElementById('res-emoji').innerHTML = d.emojiMatch
+      ? `<h3>Emoji-match</h3><p>${esc(d.emojiMatch)}</p>`
+      : ''
+
+    // Suggestions
+    const sug = Array.isArray(d.suggestions) ? d.suggestions : []
+    const sugHtml = sug.length === 0
+      ? '<em style="color:#888;font-size:.9rem">Ingen forslag – billedet er klar!</em>'
+      : sug.map(s => `
+          <div class="suggestion-item">
+            <div><strong>${esc(s.title || '')}</strong> &nbsp;<span class="action-badge">${esc(s.action || '')}</span></div>
+            <div class="meta">${esc(s.reason || '')} &nbsp;·&nbsp; ${esc(s.location || '')}</div>
+          </div>
+        `).join('')
+    document.getElementById('res-suggestions').innerHTML = `<h3>Forslag (${sug.length})</h3>${sugHtml}`
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function setStatus(msg, isError = false) {
+    const el = document.getElementById('status')
+    el.textContent = msg
+    el.className = isError ? 'error' : ''
+  }
+
+  function esc(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+</script>
+</body>
+</html>

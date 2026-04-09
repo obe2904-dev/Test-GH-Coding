@@ -203,6 +203,39 @@ class MenuOCRWorker:
             is_pdf = looks_like_pdf(content_bytes) or content_type == 'application/pdf' or (pdf_url.lower().split('?')[0].endswith('.pdf'))
             source_sha = hashlib.sha256(content_bytes).hexdigest()
 
+            # SHA deduplication: if identical content was already successfully extracted,
+            # reuse the result instead of re-running expensive LLM calls.
+            try:
+                dedup_resp = (
+                    supabase
+                    .table('menu_results_v2')
+                    .select('id, structured_data, raw_text, extraction_method')
+                    .eq('sha256', source_sha)
+                    .eq('status', 'done')
+                    .neq('id', result_id)
+                    .limit(1)
+                    .execute()
+                )
+                dedup_rows = getattr(dedup_resp, 'data', None) or []
+                if dedup_rows:
+                    prior = dedup_rows[0]
+                    prior_method = prior.get('extraction_method') or 'unknown'
+                    logger.info(f"SHA dedup hit — reusing prior extraction (sha={source_sha[:12]}…, method={prior_method})")
+                    supabase.table('menu_results_v2').update({
+                        'status': 'done',
+                        'raw_text': prior.get('raw_text'),
+                        'structured_data': prior.get('structured_data'),
+                        'extraction_method': prior_method + '+dedup',
+                        'sha256': source_sha,
+                        'completed_at': utc_now_iso(),
+                        'source_url': pdf_url,
+                        'source_content_type': content_type,
+                        'language_code': language_code,
+                    }).eq('id', result_id).execute()
+                    return True
+            except Exception as _dedup_err:
+                logger.warning(f"SHA dedup check failed (will re-extract): {_dedup_err}")
+
             structured_data = None
             raw_text = None
             metrics = {}
@@ -296,9 +329,8 @@ class MenuOCRWorker:
 
             if structured_data is None:
                 structured_data = parse_menu_with_llm(llm_text, language_code, model="gpt-4o-mini")
-                if not validate_structured_menu(structured_data):
-                    logger.info("Low/empty parse result, retrying with gpt-4o")
-                    structured_data = parse_menu_with_llm(llm_text, language_code, model="gpt-4o")
+                # NOTE: gpt-4o text retry removed — if mini can't parse clean text, gpt-4o won't either;
+                # the bottleneck is input quality, not model capability. Vision fallback below handles hard cases.
 
                 # Fallback to vision for failed PDF parsing
                 if is_pdf and GPT52_VISION_ENABLED and not validate_structured_menu(structured_data):

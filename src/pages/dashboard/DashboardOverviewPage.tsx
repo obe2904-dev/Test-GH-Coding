@@ -13,17 +13,17 @@ export function DashboardOverviewPage() {
         
         {/* Placeholder for 3-Metric Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="bg-primary-50 rounded-lg p-6">
+          <div className="bg-cta-surface rounded-lg p-6">
             <p className="text-sm text-gray-600 mb-2">{t('dashboard.metrics.reach')}</p>
             <p className="text-3xl font-bold text-gray-900">—</p>
             <p className="text-sm text-gray-500 mt-2">{t('dashboard.metrics.comingSoon')}</p>
           </div>
-          <div className="bg-primary-50 rounded-lg p-6">
+          <div className="bg-cta-surface rounded-lg p-6">
             <p className="text-sm text-gray-600 mb-2">{t('dashboard.metrics.engagementRate')}</p>
             <p className="text-3xl font-bold text-gray-900">—</p>
             <p className="text-sm text-gray-500 mt-2">{t('dashboard.metrics.comingSoon')}</p>
           </div>
-          <div className="bg-primary-50 rounded-lg p-6">
+          <div className="bg-cta-surface rounded-lg p-6">
             <p className="text-sm text-gray-600 mb-2">{t('dashboard.metrics.linkClicks')}</p>
             <p className="text-3xl font-bold text-gray-900">—</p>
             <p className="text-sm text-gray-500 mt-2">{t('dashboard.metrics.comingSoon')}</p>

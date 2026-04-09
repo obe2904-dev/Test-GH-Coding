@@ -12,6 +12,8 @@ export function isBadTargetAudienceValue(value: string): boolean {
   if (v.includes('?') || /\?$/.test(v)) return true
   if (n === 'hvem taler i til' || n.includes('hvem taler i til')) return true
   if (n.includes('who are you speaking to') || n.includes('who do you speak to')) return true
+  // Reject old demographic persona formats: "Lokale gæster/besøgende der søger", "Folk der...", "Dem der..."
+  if (/^(lokale\s+gæster|folk\s+der|dem\s+der|de\s+der|visitors?\s+looking|locals?\s+and|gæster\s+der|kunder\s+der)/i.test(n)) return true
   return false
 }
 
@@ -24,6 +26,19 @@ export function isBadCoreOfferingsValue(value: string): boolean {
   if (/\bhvem\b/i.test(v)) return true
   if (/\bperfekt\s+til\b/i.test(v)) return true
   if (n.includes('jeres primære produkter') || n.includes('produkter eller services')) return true
+
+  // Detect raw menu item names: if ≥2 bullets are ALL-CAPS text without any meal-category keyword,
+  // the AI listed specific item names (e.g. "FAVORITTEN", "DEN NYE") instead of meal categories.
+  const MEAL_CAT_RE = /\b(brunch|frokost|middag|morgenmad|aftensmad|lunch|kaffe|kage|drinks|cocktails?|terrasse|take.?away|private|bar)\b/i
+  const bullets = v.split('\n').map((b: string) => b.replace(/^[-•*]\s*/, '').trim()).filter(Boolean)
+  // ALL-CAPS with no meal category keyword
+  const rawItemBullets = bullets.filter((b: string) => /^[^a-z]+$/.test(b) && b.length >= 3 && /[A-Z]/.test(b) && !MEAL_CAT_RE.test(b))
+  if (rawItemBullets.length >= 2) return true
+  // Danish article-starting items: "DEN LUKSURIØSE BRUNCH", "DEN LILLE BRUNCH", "DET STORE BORD"
+  // Categories never start with an article — specific item names almost always do
+  const articleItemBullets = bullets.filter((b: string) => /^(DEN|DET|DE|EN|ET)\s+/i.test(b))
+  if (articleItemBullets.length >= 2) return true
+
   return false
 }
 

@@ -2,6 +2,7 @@
 
 import { CategoryMatch } from '@/types/location';
 import { LOCATION_CATEGORIES } from '@/lib/location/categories';
+import { LocationCategoryIcon } from './LocationCategoryIcon';
 
 interface Props {
   match: CategoryMatch;
@@ -22,7 +23,7 @@ export default function LocationCategoryCard({ match, isSecondary }: Props) {
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
-          <span className="text-3xl">{category.icon}</span>
+          <LocationCategoryIcon categoryId={match.categoryId} className="w-8 h-8 text-text" />
           <div>
             <h4 className="font-semibold text-lg">{category.name}</h4>
             <p className={`text-sm ${confidenceBadge.color}`}>

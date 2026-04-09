@@ -1,15 +1,31 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { LocationAnalysis } from '../../lib/location/core/types';
+import type { SupportedLocale } from '../../lib/location/core/types';
 import LocationAnalysisDisplay from '../../components/setup/LocationAnalysis';
+import { LocationCategoryIcon } from '../../components/setup/LocationCategoryIcon';
 import { supabase } from '../../lib/supabase';
 import { analyzeLocation } from '../../lib/location/core/analyzer';
 import { analyzeConceptFit, ConceptFitInput, ConceptFitOutput } from '../../lib/location/conceptFitAnalyzer';
 import { getLocaleConfig } from '../../lib/location/locales';
 
+// Seasonal relevance mapping for each location type
+const SEASONAL_PATTERN_MAP: Record<string, 'year_round' | 'summer_peak' | 'semester_only' | 'weekday_only'> = {
+  waterfront: 'summer_peak',
+  tourist: 'summer_peak',
+  nature_park: 'summer_peak',
+  student: 'semester_only',
+  office: 'weekday_only',
+};
+
 
 function LocationIntelligencePage() {
+  const { t, i18n } = useTranslation();
+  // Map i18n language to locale config key for location category names
+  const uiLocale: SupportedLocale = i18n.language === 'en' ? 'en-US' : 'da-DK';
+
   const [address, setAddress] = useState('');
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -29,8 +45,11 @@ function LocationIntelligencePage() {
     return null;
   });
   const [conceptFit, setConceptFit] = useState<Record<string, ConceptFitOutput> | null>(null);
+  const [locationTypeScores, setLocationTypeScores] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  // ISO string of the last time AI analysis completed — used to gate re-analysis
+  const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
 
   // Save analysis to sessionStorage whenever it changes
   useEffect(() => {
@@ -173,6 +192,11 @@ function LocationIntelligencePage() {
 
           setAnalysis(reconstructedAnalysis);
           console.log('✅ Restored location analysis from database');
+
+          // Track when the analysis was last run
+          if ((savedData as any).last_updated_by_ai) {
+            setLastAnalyzedAt((savedData as any).last_updated_by_ai);
+          }
           
           // Also restore concept fit data if available
           const savedDataAny = savedData as any;
@@ -309,7 +333,7 @@ function LocationIntelligencePage() {
 
   const handleAnalyze = async () => {
     if (!address.trim()) {
-      setError('Indtast venligst en adresse');
+      setError(t('location.errorNoAddress'));
       return;
     }
 
@@ -362,12 +386,25 @@ function LocationIntelligencePage() {
         // Get locale config to get actual category display names
         const localeConfig = getLocaleConfig(analysis.locale);
         
+        // Persist fresh scores into state for rendering
+        const freshScores: Record<string, number> = {};
+        analysis.matches.forEach(m => { freshScores[m.categoryId] = m.score; });
+        setLocationTypeScores(freshScores);
+
+        // Categories where client-side detection is reliable (keyword + transit POI based).
+        // If the lightweight matcher confidently gives these 0, they're infrastructure mismatches
+        // that only survive from stale DB scores — suppress them.
+        const RELIABLE_CLIENT_VETO = new Set(['transport_hub', 'office', 'shopping_district']);
+
+        // Use DB/analysis.matches scores (Google Maps-based, authoritative) for gating.
         const categories = analysis.matches.map(m => ({
           categoryId: m.categoryId,
-          score: m.score,
+          score: (RELIABLE_CLIENT_VETO.has(m.categoryId) && locationTypeMatches[m.categoryId]?.match_score === 0)
+            ? 0
+            : m.score,
           displayName: localeConfig.categories[m.categoryId]?.name || m.categoryId
         }));
-        
+
         // Filter categories >= 60% to call Edge Function
         const eligibleCategories = categories.filter(cat => cat.score >= 60);
         console.log(`🚀 Calling Edge Function for ${eligibleCategories.length} categories (≥60%):`, eligibleCategories.map(c => c.categoryId).join(', '));
@@ -386,7 +423,8 @@ function LocationIntelligencePage() {
             const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('analyze-concept-fit', {
               body: {
                 businessId: businessId,
-                locationType: category.categoryId
+                locationType: category.categoryId,
+                language: i18n.language === 'en' ? 'en' : 'da',
               }
             });
             
@@ -406,7 +444,7 @@ function LocationIntelligencePage() {
                 category_score: category.score,
                 strategy_score: category.score,
                 seasonal_weight: 1.0,
-                seasonal_relevance: 'year_round',
+                seasonal_relevance: SEASONAL_PATTERN_MAP[category.categoryId] || 'year_round',
                 is_strategy_driver: isStrategyDriver,
                 fit_level: edgeConceptFit.overall_fit_level === 'strong' ? 'strong' : 
                           edgeConceptFit.overall_fit_level === 'challenging' ? 'challenging' : 'moderate',
@@ -463,7 +501,7 @@ function LocationIntelligencePage() {
       
     } catch (error) {
       console.error('Location analysis error:', error);
-      setError(error instanceof Error ? error.message : 'Fejl ved analyse af lokation');
+      setError(error instanceof Error ? error.message : t('location.errorAnalyzeFailed'));
     } finally {
       setIsAnalyzing(false);
     }
@@ -528,7 +566,7 @@ function LocationIntelligencePage() {
 
       if (saveError) {
         console.error('❌ Auto-save error:', saveError);
-        setError('Kunne ikke gemme automatisk. Data er stadig tilgængelig.');
+        setError(t('location.errorSaveFailed'));
       } else {
         console.log('✅ Location profile auto-saved');
       }
@@ -554,48 +592,38 @@ function LocationIntelligencePage() {
     saveLocationProfile(updatedAnalysis);
   };
 
-  const handleContinue = () => {
-    // Auto-save is already enabled, so just navigate to next step
-    window.location.href = '/dashboard/menu';
-  };
-
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
+    <div className="bg-surface-page min-h-full py-6 px-6">
+      <div className="max-w-4xl mx-auto">
       {/* Progress indicator */}
       <div className="mb-6">
         <div className="flex items-center justify-center gap-2 text-sm">
-          <a href="/dashboard/profile" className="text-gray-400 hover:text-gray-600">Profil</a>
-          <span className="text-gray-300">→</span>
-          <span className="text-indigo-600 font-semibold">Lokation</span>
-          <span className="text-gray-300">→</span>
-          <a href="/dashboard/menu" className="text-gray-400 hover:text-gray-600">Menu</a>
-          <span className="text-gray-300">→</span>
-          <a href="/dashboard/operations" className="text-gray-400 hover:text-gray-600">Drift</a>
-          <span className="text-gray-300">→</span>
-          <a href="/dashboard/brand" className="text-gray-400 hover:text-gray-600">Brand</a>
-          <span className="text-gray-300">→</span>
-          <a href="/dashboard/goals" className="text-gray-400 hover:text-gray-600">Mål</a>
+          <a href="/dashboard/profile" className="text-text-muted hover:text-text-secondary">{t('location.breadcrumb.profile')}</a>
+          <span className="text-text-muted">→</span>
+          <a href="/dashboard/menu" className="text-text-muted hover:text-text-secondary">{t('location.breadcrumb.menu')}</a>
+          <span className="text-text-muted">→</span>
+          <span className="text-brand font-semibold">{t('location.breadcrumb.location')}</span>
+          <span className="text-text-muted">→</span>
+          <a href="/dashboard/brand-v5" className="text-text-muted hover:text-text-secondary">{t('location.breadcrumb.brand')}</a>
         </div>
       </div>
 
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Din lokation</h1>
-        <p className="text-gray-600">
-          Vi analyserer din lokation og tilpasser indholdsstrategien.
-        </p>
+      <div className="text-center mb-4">
+        <h1 className="text-xl font-bold text-brand mb-1">{t('location.title')}</h1>
+        <p className="text-sm text-text-secondary">{t('location.subtitle')}</p>
       </div>
 
       {/* Loading state */}
       {isLoadingAddress && (
-        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+        <div className="bg-surface rounded-lg border border-border p-6 mb-6">
           <div className="flex items-center justify-center py-8">
-            <div className="flex items-center gap-3 text-gray-500">
+            <div className="flex items-center gap-3 text-text-muted">
               <svg className="animate-spin h-6 w-6" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              <span>Henter adresse...</span>
+              <span>{t('location.loadingAddress')}</span>
             </div>
           </div>
         </div>
@@ -603,115 +631,217 @@ function LocationIntelligencePage() {
 
       {/* Address Display Card */}
       {!isLoadingAddress && (
-        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+        <div className="bg-surface rounded-lg border border-border p-6 mb-6">
           {address ? (
             <div className="space-y-4">
               {/* Read-only address display */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Forretningsadresse
+                <label className="block text-sm font-medium text-text-secondary mb-2">
+                  {t('location.addressLabel')}
                 </label>
-                <div className="bg-gray-50 border border-gray-300 rounded-lg p-4">
-                  <p className="text-gray-900 font-medium">{address}</p>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Adresse hentes fra din virksomhedsprofil. Vil du ændre den? 
-                    <a href="/dashboard/profile" className="text-blue-600 hover:underline ml-1">
-                      Gå til Virksomhedsprofil
+                <div className="bg-surface-alt border border-border rounded-lg p-4">
+                  <p className="text-text font-medium">{address}</p>
+                  <p className="text-xs text-text-muted mt-2">
+                    {t('location.addressNote')}
+                    <a href="/dashboard/profile" className="text-cta hover:text-cta-text hover:underline ml-1">
+                      {t('location.addressNoteLink')}
                     </a>
                   </p>
                 </div>
               </div>
 
               {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-600">{error}</p>
+                <div className="p-3 bg-error-surface border border-error rounded-lg">
+                  <p className="text-sm text-error">{error}</p>
                 </div>
               )}
 
-              <button
-                onClick={handleAnalyze}
-                disabled={isAnalyzing}
-                className="w-full px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-              >
-                {isAnalyzing ? 'Analyserer...' : 'Analyser Lokation'}
-              </button>
+              {/* Cache gate: hide the blue button when analysis is < 7 days old */}
+              {(() => {
+                const GATE_DAYS = 7;
+                const cacheAgeDays = lastAnalyzedAt
+                  ? (Date.now() - new Date(lastAnalyzedAt).getTime()) / (1000 * 60 * 60 * 24)
+                  : null;
+                const isCacheRecent = cacheAgeDays !== null && cacheAgeDays < GATE_DAYS;
+
+                if (isCacheRecent) {
+                  return (
+                    <div className="flex items-center justify-between p-3 bg-success-surface border border-success rounded-lg">
+                      <p className="text-sm text-success-text">
+                        {t('location.cacheValid', { count: Math.round(cacheAgeDays!) })}
+                      </p>
+                      <button
+                        onClick={handleAnalyze}
+                        disabled={isAnalyzing}
+                        className="text-sm text-success-text hover:opacity-90 underline disabled:no-underline disabled:cursor-not-allowed ml-4 whitespace-nowrap"
+                      >
+                        {isAnalyzing ? t('location.analyzing') : t('location.forceReanalyze')}
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <button
+                    onClick={handleAnalyze}
+                    disabled={isAnalyzing}
+                    className="w-full px-6 py-3 bg-cta text-text-inverse font-medium rounded-lg hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isAnalyzing ? t('location.analyzing') : t('location.analyzeButton')}
+                  </button>
+                );
+              })()}
             </div>
           ) : (
             <div className="text-center py-8">
-              <div className="text-gray-400 mb-4">
+              <div className="text-text-muted mb-4">
                 <svg className="w-16 h-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Ingen adresse fundet</h3>
-              <p className="text-gray-600 mb-4">
-                Tilføj din forretningsadresse i virksomhedsprofilen først
+              <h3 className="text-lg font-medium text-brand mb-2">{t('location.noAddress')}</h3>
+              <p className="text-text-secondary mb-4">
+                {t('location.noAddressHint')}
               </p>
               <a
                 href="/dashboard/profile"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-cta text-text-inverse font-medium rounded-lg hover:bg-cta-hover transition-colors"
               >
-                Tilføj adresse i Virksomhedsprofil
+                {t('location.addAddressLink')}
               </a>
             </div>
           )}
         </div>
       )}
 
-      {/* Analysis Results */}
-      {analysis && (
+      {/* Concept Fit Results - Din Lokation hidden, only show final fit analysis */}
+      {analysis && conceptFit && Object.keys(conceptFit).length > 0 && (
         <>
-          {console.log('🎨 Rendering analysis display:', analysis)}
-          {console.log('🎨 ConceptFit state:', conceptFit)}
+          {console.log('🎨 Rendering Concept Fit:', conceptFit)}
+          
+          {/* Optional: Uncomment to restore location type detection display
           <LocationAnalysisDisplay 
             analysis={analysis}
             conceptFits={conceptFit}
             onDeleteCategory={handleDeleteCategory}
           />
+          */}
+          
+          {/* Show Concept Fit cards directly */}
+          <div className="space-y-4">
+            {(() => {
+              const localeConfig = getLocaleConfig(uiLocale);
+              const eligibleCategories = Object.entries(conceptFit)
+                .filter(([categoryId]) => {
+                  // Use fresh scores (locationTypeScores) if available, else fall back to stored analysis
+                  const score = locationTypeScores[categoryId] 
+                    ?? (analysis.matches.find(m => m.categoryId === categoryId)?.score || 0);
+                  return score >= 60;
+                })
+                .sort(([, a], [, b]) => {
+                  if (a.is_strategy_driver) return -1;
+                  if (b.is_strategy_driver) return 1;
+                  const scoreA = locationTypeScores[a.area_type] 
+                    ?? (analysis.matches.find(m => m.categoryId === a.area_type)?.score || 0);
+                  const scoreB = locationTypeScores[b.area_type] 
+                    ?? (analysis.matches.find(m => m.categoryId === b.area_type)?.score || 0);
+                  return scoreB - scoreA;
+                });
+
+              return eligibleCategories
+                .filter(([, fit]) => fit.fit_level !== 'challenging')
+                .map(([categoryId, fit]) => {
+                const categoryConfig = localeConfig.categories[categoryId];
+                const locationScore = locationTypeScores[categoryId] 
+                  ?? (analysis.matches.find(m => m.categoryId === categoryId)?.score || 0);
+                
+                const getFitBadge = (fitLevel: string) => {
+                  switch (fitLevel) {
+                    case 'strong': return { emoji: '✅', label: t('location.fitStrong'), color: 'bg-success-surface text-success-text border-success' };
+                    case 'moderate': return { emoji: '🟡', label: t('location.fitModerate'), color: 'bg-info-surface text-info-text border-info' };
+                    case 'challenging': return { emoji: '⚠️', label: t('location.fitChallenging'), color: 'bg-warning-surface text-warning-text border-warning' };
+                    default: return { emoji: '❓', label: t('location.fitUnknown'), color: 'bg-surface-alt text-text border-border' };
+                  }
+                };
+                
+                const fitBadge = getFitBadge(fit.fit_level);
+                
+                return (
+                  <div key={categoryId} className="bg-surface rounded-lg border border-border p-6">
+                    <div className="flex items-start gap-4 mb-4">
+                      <LocationCategoryIcon categoryId={categoryId} className="w-10 h-10 text-text" />
+                      <div className="flex-1">
+                        <div className="flex items-start justify-between mb-2">
+                          <h3 className="text-xl font-bold text-brand">{categoryConfig.name}</h3>
+                          {fit.is_strategy_driver && (
+                            <span className="px-3 py-1 rounded-full text-xs font-medium bg-info-surface text-info-text">
+                              📍 {t('location.strategyFocus')}
+                            </span>
+                          )}
+                        </div>
+
+                        {fit.ui_summary && (
+                          <p className="text-text-secondary mb-3">
+                            <strong>{fit.ui_summary.one_liner}</strong>
+                          </p>
+                        )}
+                        {fit.fit_reasons && fit.fit_reasons.length > 0 && (
+                          <div className="mb-3">
+                            <p className="text-sm font-semibold text-text-secondary mb-1">{t('location.strengths')}</p>
+                            <ul className="text-sm text-text-secondary space-y-1">
+                              {fit.fit_reasons.map((reason: string, i: number) => (
+                                <li key={i}>✓ {reason}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {fit.marketing_implications && (
+                          <div className="mt-3 p-3 bg-info-surface rounded border border-info">
+                            <p className="text-sm font-semibold text-info-text mb-1">{t('location.marketingStrategy')}</p>
+                            {fit.marketing_implications.content_emphasis && fit.marketing_implications.content_emphasis.length > 0 ? (
+                              <ul className="text-sm text-info-text space-y-1">
+                                {fit.marketing_implications.content_emphasis.map((item: string, i: number) => (
+                                  <li key={i}>&rarr; {item}</li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-sm text-info-text">{fit.ui_summary?.best_marketing_angle}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
 
           {isSaving && (
-            <div className="text-center text-sm text-gray-600 mt-4">
-              💾 Gemmer automatisk...
+            <div className="text-center text-sm text-text-secondary mt-4">
+              {t('location.autoSaving')}
             </div>
           )}
-
-          <div className="flex gap-4 mt-6">
-            <button
-              onClick={() => {
-                setAnalysis(null);
-                sessionStorage.removeItem('location_analysis');
-              }}
-              className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Analyser igen
-            </button>
-            <button
-              onClick={handleContinue}
-              disabled={isSaving}
-              className="flex-1 px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              Fortsæt
-            </button>
-          </div>
         </>
       )}
 
       {/* Navigation buttons */}
       <div className="flex justify-between mt-6">
         <a
-          href="/dashboard/profile"
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          href="/dashboard/menu"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm text-text-secondary border border-border rounded-lg hover:bg-surface-alt transition-colors"
         >
-          ← Tilbage til Profil
+          {t('location.backToProfile')}
         </a>
         <a
-          href="/dashboard/menu"
-          className="inline-flex items-center gap-2 px-6 py-2 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+          href="/dashboard/brand-v5"
+          className="inline-flex items-center gap-2 px-6 py-2 text-sm bg-cta text-text-inverse font-medium rounded-lg hover:bg-cta-hover transition-colors"
         >
-          Næste: Menu →
+          {t('location.nextMenu')}
         </a>
       </div>
+    </div>
     </div>
   )
 }

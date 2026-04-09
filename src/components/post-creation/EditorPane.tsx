@@ -17,7 +17,9 @@ export function EditorPane({ writeContentProps, validationBanner, footerProps }:
 
       {validationBanner}
 
-      <PostCreationFooter {...footerProps} />
+      <div className="flex justify-end">
+        <PostCreationFooter {...footerProps} />
+      </div>
     </>
   )
 }

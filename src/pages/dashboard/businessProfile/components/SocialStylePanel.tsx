@@ -127,7 +127,7 @@ export function SocialStylePanel({ socialStyle, isLoading, onEdit }: SocialStyle
                 <div className="text-[11px] text-gray-500 mb-1">Brand hashtags:</div>
                 <div className="flex flex-wrap gap-1">
                   {socialStyle.hashtag_strategy.branded.map((tag, i) => (
-                    <span key={i} className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
+                    <span key={i} className="text-xs bg-cta-surface text-cta-text px-2 py-0.5 rounded">
                       {tag.startsWith('#') ? tag : `#${tag}`}
                     </span>
                   ))}

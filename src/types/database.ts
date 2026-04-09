@@ -216,6 +216,24 @@ export interface Database {
           image_preferences: string | null
           social_style: Json | null
           voice_examples: Json | null
+          // JSONB-parsed arrays (richer structured versions)
+          content_pillars_jsonb: Json | null
+          things_to_avoid_jsonb: Json | null
+          // V2 Brand Profile fields (Marts 2026)
+          brand_essence_elaboration: string | null
+          identity_keywords: string[] | null
+          emotional_core: string | null
+          voice_constraints: string | null
+          // Location intelligence (from populate-location-intelligence)
+          location_intelligence: Json | null
+          // Strategy & audience deep-dive fields
+          brand_strategy: Json | null
+          who_when_why: Json | null
+          who_when_why_internal: Json | null
+          // Generation lifecycle metadata
+          quality_status: string | null
+          version_hash: string | null
+          generation_errors: Json | null
           booking_link: string | null
           created_at: string
           updated_at: string
@@ -240,9 +258,23 @@ export interface Database {
           image_preferences?: string | null
           social_style?: Json | null
           voice_examples?: Json | null
+          content_pillars_jsonb?: Json | null
+          things_to_avoid_jsonb?: Json | null
+          location_intelligence?: Json | null
+          brand_strategy?: Json | null
+          who_when_why?: Json | null
+          who_when_why_internal?: Json | null
+          quality_status?: string | null
+          version_hash?: string | null
+          generation_errors?: Json | null
           booking_link?: string | null
           created_at?: string
           updated_at?: string
+          // V2 Brand Profile fields (Marts 2026)
+          brand_essence_elaboration?: string | null
+          identity_keywords?: string[] | null
+          emotional_core?: string | null
+          voice_constraints?: string | null
         }
         Update: {
           business_id?: string
@@ -264,9 +296,23 @@ export interface Database {
           image_preferences?: string | null
           social_style?: Json | null
           voice_examples?: Json | null
+          content_pillars_jsonb?: Json | null
+          things_to_avoid_jsonb?: Json | null
+          location_intelligence?: Json | null
+          brand_strategy?: Json | null
+          who_when_why?: Json | null
+          who_when_why_internal?: Json | null
+          quality_status?: string | null
+          version_hash?: string | null
+          generation_errors?: Json | null
           booking_link?: string | null
           created_at?: string
           updated_at?: string
+          // V2 Brand Profile fields (Marts 2026)
+          brand_essence_elaboration?: string | null
+          identity_keywords?: string[] | null
+          emotional_core?: string | null
+          voice_constraints?: string | null
         }
       }
       business_locations: {
@@ -544,6 +590,14 @@ export interface Database {
           photo_idea: string | null
           created_at: string
           updated_at: string
+          // Extended columns (migration 20260302000000)
+          idea_source: string | null
+          idea_data: Json | null
+          media_analysis: Json | null
+          caption_data: Json | null
+          phase: string | null
+          strategy_id: string | null
+          idea_index: number | null
         }
         Insert: {
           id?: string
@@ -554,6 +608,13 @@ export interface Database {
           photo_idea?: string | null
           created_at?: string
           updated_at?: string
+          idea_source?: string | null
+          idea_data?: Json | null
+          media_analysis?: Json | null
+          caption_data?: Json | null
+          phase?: string | null
+          strategy_id?: string | null
+          idea_index?: number | null
         }
         Update: {
           id?: string
@@ -564,6 +625,13 @@ export interface Database {
           photo_idea?: string | null
           created_at?: string
           updated_at?: string
+          idea_source?: string | null
+          idea_data?: Json | null
+          media_analysis?: Json | null
+          caption_data?: Json | null
+          phase?: string | null
+          strategy_id?: string | null
+          idea_index?: number | null
         }
       }
 
@@ -1065,6 +1133,127 @@ export interface Database {
           file_size?: number | null
           created_at?: string
           updated_at?: string
+        }
+      }
+      weekly_content_plans: {
+        Row: {
+          id: string
+          user_id: string
+          business_id: string
+          week_number: number
+          week_start: string
+          week_end: string
+          generated_at: string | null
+          posts: Json
+          summary: Json | null
+          learning_data: Json | null
+          created_at: string | null
+          updated_at: string | null
+          strategy_id: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          business_id: string
+          week_number: number
+          week_start: string
+          week_end: string
+          generated_at?: string | null
+          posts?: Json
+          summary?: Json | null
+          learning_data?: Json | null
+          created_at?: string | null
+          updated_at?: string | null
+          strategy_id?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          business_id?: string
+          week_number?: number
+          week_start?: string
+          week_end?: string
+          generated_at?: string | null
+          posts?: Json
+          summary?: Json | null
+          learning_data?: Json | null
+          created_at?: string | null
+          updated_at?: string | null
+          strategy_id?: string | null
+        }
+      }
+      weekly_strategies: {
+        Row: {
+          id: string
+          business_id: string
+          week_number: number
+          week_start: string
+          week_end: string
+          is_current_week: boolean | null
+          narrative: Json
+          strategic_priorities: Json
+          post_ideas: Json
+          selected_idea_ids: number[] | null
+          week_context_snapshot: Json | null
+          business_type: string
+          country: string | null
+          generated_at: string | null
+          status: string | null
+          platforms: string[] | null
+          subscription_tier: string | null
+          target_post_count: number | null
+          strategic_brief: Json | null
+          strategic_brief_raw: string | null
+          strategy_version: string | null
+          strategy_rationale: string | null
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          week_number: number
+          week_start: string
+          week_end: string
+          is_current_week?: boolean | null
+          narrative: Json
+          strategic_priorities: Json
+          post_ideas: Json
+          selected_idea_ids?: number[] | null
+          week_context_snapshot?: Json | null
+          business_type: string
+          country?: string | null
+          generated_at?: string | null
+          status?: string | null
+          platforms?: string[] | null
+          subscription_tier?: string | null
+          target_post_count?: number | null
+          strategic_brief?: Json | null
+          strategic_brief_raw?: string | null
+          strategy_version?: string | null
+          strategy_rationale?: string | null
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          week_number?: number
+          week_start?: string
+          week_end?: string
+          is_current_week?: boolean | null
+          narrative?: Json
+          strategic_priorities?: Json
+          post_ideas?: Json
+          selected_idea_ids?: number[] | null
+          week_context_snapshot?: Json | null
+          business_type?: string
+          country?: string | null
+          generated_at?: string | null
+          status?: string | null
+          platforms?: string[] | null
+          subscription_tier?: string | null
+          target_post_count?: number | null
+          strategic_brief?: Json | null
+          strategic_brief_raw?: string | null
+          strategy_version?: string | null
+          strategy_rationale?: string | null
         }
       }
     }

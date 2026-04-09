@@ -48,7 +48,7 @@ export function BrandPanel({
               onChange={(event) => onAboutTextChange(event.target.value)}
               placeholder="Fortæl kort om din virksomhed..."
               rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#88F2D7] resize-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mint resize-none"
             />
           </div>
 
@@ -62,7 +62,7 @@ export function BrandPanel({
                 value={brandVoice}
                 onChange={(event) => onBrandVoiceChange(event.target.value)}
                 placeholder="fx venlig, professionel, casual..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#88F2D7]"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mint"
               />
             </div>
 
@@ -75,7 +75,7 @@ export function BrandPanel({
                 value={targetAudience}
                 onChange={(event) => onTargetAudienceChange(event.target.value)}
                 placeholder="fx familier, unge, lokale..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#88F2D7]"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mint"
               />
             </div>
           </div>
@@ -90,7 +90,7 @@ export function BrandPanel({
                 value={ctaPreference}
                 onChange={(event) => onCtaPreferenceChange(event.target.value)}
                 placeholder="fx Book bord nu, Se menuen..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#88F2D7]"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mint"
               />
             </div>
 
@@ -103,7 +103,7 @@ export function BrandPanel({
                 value={bookingLink}
                 onChange={(event) => onBookingLinkChange(event.target.value)}
                 placeholder="fx https://dinvirksomhed.dk/book"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#88F2D7]"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mint"
               />
             </div>
           </div>

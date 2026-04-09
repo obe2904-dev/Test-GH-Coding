@@ -13,7 +13,12 @@ interface SaveDraftOptions {
   photoIdea: string
 }
 
-export function useDraftSave() {
+interface UseDraftSaveOptions {
+  disableWarning?: boolean // Disable beforeunload warning (e.g., for AI suggestions with auto-save)
+}
+
+export function useDraftSave(options?: UseDraftSaveOptions) {
+  const { disableWarning = false } = options || {}
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
@@ -124,8 +129,12 @@ export function useDraftSave() {
     setHasUnsavedChanges(false)
   }
 
-  // Warn on page exit if unsaved changes
+  // Warn on page exit if unsaved changes (unless disabled for auto-save scenarios)
   useEffect(() => {
+    if (disableWarning) {
+      return // Skip warning for AI suggestions with auto-save
+    }
+
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasUnsavedChanges) {
         e.preventDefault()
@@ -136,7 +145,7 @@ export function useDraftSave() {
 
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [hasUnsavedChanges])
+  }, [hasUnsavedChanges, disableWarning])
 
   return {
     isSaving,

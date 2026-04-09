@@ -421,7 +421,7 @@ export default function TestLocationIntelligenceFullPage() {
 
                 <button
                   onClick={handleExportTestCase}
-                  className="w-full px-4 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700"
+                  className="w-full px-4 py-2 bg-cta text-white font-medium rounded-lg hover:bg-cta-hover"
                 >
                   📦 Export Test Case (Copy to Clipboard)
                 </button>

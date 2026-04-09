@@ -1,5 +1,7 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useBrandProfileGeneration } from '@/hooks/useBrandProfileGeneration';
+import { BrandSectionIcon } from './BrandSectionIcon';
 import { GenerationProgress } from './GenerationProgress';
 
 interface BrandProfileGeneratorProps {
@@ -8,6 +10,7 @@ interface BrandProfileGeneratorProps {
 }
 
 export function BrandProfileGenerator({ businessId, onSuccess }: BrandProfileGeneratorProps) {
+  const { t } = useTranslation();
   const { generating, error, generate } = useBrandProfileGeneration();
 
   const handleGenerate = async () => {
@@ -24,57 +27,56 @@ export function BrandProfileGenerator({ businessId, onSuccess }: BrandProfileGen
   return (
     <div className="max-w-2xl mx-auto text-center py-12 px-4">
       {/* Icon */}
-      <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
-        <span className="text-4xl">✨</span>
+      <div className="w-20 h-20 bg-info-surface rounded-full flex items-center justify-center mx-auto mb-6">
+        <BrandSectionIcon id="sparkles" className="w-10 h-10 text-text" />
       </div>
 
       {/* Heading */}
-      <h2 className="text-3xl font-bold text-gray-900 mb-4">
-        Generer din Brandprofil
+      <h2 className="text-3xl font-bold text-brand mb-4">
+        {t('brand.generator.title')}
       </h2>
 
       {/* Description */}
-      <p className="text-lg text-gray-600 mb-8">
-        Vores AI analyserer din forretning, menu og lokation for at skabe en 
-        autentisk brandprofil der matcher din identitet.
+      <p className="text-lg text-text-secondary mb-8">
+        {t('brand.generator.description')}
       </p>
 
       {/* What's included */}
-      <div className="bg-gray-50 rounded-lg p-6 mb-8 text-left">
-        <h3 className="font-semibold text-gray-900 mb-3">Din profil inkluderer:</h3>
-        <ul className="space-y-2 text-gray-700">
+      <div className="bg-surface-alt rounded-lg p-6 mb-8 text-left">
+        <h3 className="font-semibold text-brand mb-3">{t('brand.generator.includes')}</h3>
+        <ul className="space-y-2 text-text-secondary">
           <li className="flex items-start">
-            <span className="text-green-500 mr-2 mt-1">✓</span>
-            <span><strong>Brand Essence:</strong> Din unikke identitet på ét sætning</span>
+            <span className="text-success mr-2 mt-1">✓</span>
+            <span><strong>Brand Essence:</strong> {t('brand.generator.item.essence')}</span>
           </li>
           <li className="flex items-start">
-            <span className="text-green-500 mr-2 mt-1">✓</span>
-            <span><strong>Tone of Voice:</strong> Hvordan du kommunikerer</span>
+            <span className="text-success mr-2 mt-1">✓</span>
+            <span><strong>Tone of Voice:</strong> {t('brand.generator.item.tone')}</span>
           </li>
           <li className="flex items-start">
-            <span className="text-green-500 mr-2 mt-1">✓</span>
-            <span><strong>Content Hooks:</strong> Specifikke vinkler til dine opslag</span>
+            <span className="text-success mr-2 mt-1">✓</span>
+            <span><strong>Content Hooks:</strong> {t('brand.generator.item.hooks')}</span>
           </li>
           <li className="flex items-start">
-            <span className="text-green-500 mr-2 mt-1">✓</span>
-            <span><strong>Forbudte Ord:</strong> Ord der lyder generiske eller uægte</span>
+            <span className="text-success mr-2 mt-1">✓</span>
+            <span><strong>Forbudte Ord:</strong> {t('brand.generator.item.banned')}</span>
           </li>
           <li className="flex items-start">
-            <span className="text-green-500 mr-2 mt-1">✓</span>
-            <span><strong>Målgruppe:</strong> Hvem du taler til</span>
+            <span className="text-success mr-2 mt-1">✓</span>
+            <span><strong>Målgruppe:</strong> {t('brand.generator.item.audience')}</span>
           </li>
           <li className="flex items-start">
-            <span className="text-green-500 mr-2 mt-1">✓</span>
-            <span><strong>Konkurrence-positionering:</strong> Hvad gør dig unik</span>
+            <span className="text-success mr-2 mt-1">✓</span>
+            <span><strong>Konkurrence-positionering:</strong> {t('brand.generator.item.positioning')}</span>
           </li>
         </ul>
       </div>
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-          <p className="text-red-800 text-sm">
-            <strong>Fejl:</strong> {error}
+        <div className="bg-error-surface border border-error rounded-lg p-4 mb-6">
+          <p className="text-error-text text-sm">
+            <strong>{t('brand.generator.error')}</strong> {error}
           </p>
         </div>
       )}
@@ -83,14 +85,14 @@ export function BrandProfileGenerator({ businessId, onSuccess }: BrandProfileGen
       <button
         onClick={handleGenerate}
         disabled={generating}
-        className="px-8 py-4 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-lg shadow-lg hover:shadow-xl"
+        className="px-8 py-4 bg-cta text-text-inverse font-semibold rounded-lg hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed transition-colors text-lg shadow-lg hover:shadow-xl"
       >
-        {generating ? 'Genererer...' : '✨ Generer Brandprofil'}
+        {generating ? t('brand.generator.generating') : t('brand.generator.button')}
       </button>
 
       {/* Time estimate */}
-      <p className="text-sm text-gray-500 mt-4">
-        Tager ca. 15-25 sekunder
+      <p className="text-sm text-text-muted mt-4">
+        {t('brand.generator.timeEstimate')}
       </p>
     </div>
   );

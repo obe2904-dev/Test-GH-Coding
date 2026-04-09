@@ -139,6 +139,145 @@ export type Database = {
           },
         ]
       }
+      weekly_content_plans: {
+        Row: {
+          id: string
+          user_id: string
+          business_id: string
+          week_number: number
+          week_start: string
+          week_end: string
+          generated_at: string | null
+          posts: Json
+          summary: Json | null
+          learning_data: Json | null
+          created_at: string | null
+          updated_at: string | null
+          strategy_id: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          business_id: string
+          week_number: number
+          week_start: string
+          week_end: string
+          generated_at?: string | null
+          posts?: Json
+          summary?: Json | null
+          learning_data?: Json | null
+          created_at?: string | null
+          updated_at?: string | null
+          strategy_id?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          business_id?: string
+          week_number?: number
+          week_start?: string
+          week_end?: string
+          generated_at?: string | null
+          posts?: Json
+          summary?: Json | null
+          learning_data?: Json | null
+          created_at?: string | null
+          updated_at?: string | null
+          strategy_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weekly_content_plans_strategy_id_fkey"
+            columns: ["strategy_id"]
+            isOneToOne: false
+            referencedRelation: "weekly_strategies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      weekly_strategies: {
+        Row: {
+          id: string
+          business_id: string
+          week_number: number
+          week_start: string
+          week_end: string
+          is_current_week: boolean | null
+          narrative: Json
+          strategic_priorities: Json
+          post_ideas: Json
+          selected_idea_ids: number[] | null
+          week_context_snapshot: Json | null
+          business_type: string
+          country: string | null
+          generated_at: string | null
+          status: string | null
+          platforms: string[] | null
+          subscription_tier: string | null
+          target_post_count: number | null
+          strategic_brief: Json | null
+          strategic_brief_raw: string | null
+          strategy_version: string | null
+          strategy_rationale: string | null
+        }
+        Insert: {
+          id?: string
+          business_id: string
+          week_number: number
+          week_start: string
+          week_end: string
+          is_current_week?: boolean | null
+          narrative: Json
+          strategic_priorities: Json
+          post_ideas: Json
+          selected_idea_ids?: number[] | null
+          week_context_snapshot?: Json | null
+          business_type: string
+          country?: string | null
+          generated_at?: string | null
+          status?: string | null
+          platforms?: string[] | null
+          subscription_tier?: string | null
+          target_post_count?: number | null
+          strategic_brief?: Json | null
+          strategic_brief_raw?: string | null
+          strategy_version?: string | null
+          strategy_rationale?: string | null
+        }
+        Update: {
+          id?: string
+          business_id?: string
+          week_number?: number
+          week_start?: string
+          week_end?: string
+          is_current_week?: boolean | null
+          narrative?: Json
+          strategic_priorities?: Json
+          post_ideas?: Json
+          selected_idea_ids?: number[] | null
+          week_context_snapshot?: Json | null
+          business_type?: string
+          country?: string | null
+          generated_at?: string | null
+          status?: string | null
+          platforms?: string[] | null
+          subscription_tier?: string | null
+          target_post_count?: number | null
+          strategic_brief?: Json | null
+          strategic_brief_raw?: string | null
+          strategy_version?: string | null
+          strategy_rationale?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "weekly_strategies_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       business_location_intelligence: {
         Row: {
           area_type: string | null
@@ -945,6 +1084,14 @@ export type Database = {
           selected_platforms: string[] | null
           updated_at: string | null
           user_id: string
+          // Extended columns (migration 20260302000000)
+          idea_source: string | null
+          idea_data: Json | null
+          media_analysis: Json | null
+          caption_data: Json | null
+          phase: string | null
+          strategy_id: string | null
+          idea_index: number | null
         }
         Insert: {
           created_at?: string | null
@@ -955,6 +1102,13 @@ export type Database = {
           selected_platforms?: string[] | null
           updated_at?: string | null
           user_id: string
+          idea_source?: string | null
+          idea_data?: Json | null
+          media_analysis?: Json | null
+          caption_data?: Json | null
+          phase?: string | null
+          strategy_id?: string | null
+          idea_index?: number | null
         }
         Update: {
           created_at?: string | null
@@ -965,6 +1119,13 @@ export type Database = {
           selected_platforms?: string[] | null
           updated_at?: string | null
           user_id?: string
+          idea_source?: string | null
+          idea_data?: Json | null
+          media_analysis?: Json | null
+          caption_data?: Json | null
+          phase?: string | null
+          strategy_id?: string | null
+          idea_index?: number | null
         }
         Relationships: []
       }

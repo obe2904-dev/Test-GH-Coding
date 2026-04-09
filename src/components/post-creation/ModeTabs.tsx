@@ -25,7 +25,7 @@ export function ModeTabs({
         onClick={onManualSelect}
         className={`flex-1 px-3 py-2 transition-all text-sm font-medium flex items-center justify-center gap-1.5 border-b-[3px]
           ${activeTab === 'manual'
-            ? 'text-[#0F2E32] border-[#88F2D7]'
+            ? 'text-brand border-mint'
             : 'text-[#6B7280] border-transparent hover:text-[#1F2937]'
           }`}
       >
@@ -37,7 +37,7 @@ export function ModeTabs({
         onClick={onAISelect}
         className={`flex-1 px-3 py-2 transition-all text-sm font-medium flex items-center justify-center gap-1.5 border-b-[3px] cursor-pointer
           ${activeTab === 'ai'
-            ? 'text-[#0F2E32] border-[#88F2D7]'
+            ? 'text-brand border-mint'
             : 'text-[#6B7280] border-transparent hover:text-[#1F2937]'
           }`}
       >

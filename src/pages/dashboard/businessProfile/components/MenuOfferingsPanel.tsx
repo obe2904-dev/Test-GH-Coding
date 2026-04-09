@@ -4,6 +4,7 @@ import { TFunction } from 'i18next'
 import type { BusinessOfferingsProfile } from '../../../../types/businessOfferings'
 import { MenuSourceItem } from './MenuSourceItem'
 import { MenuExtractionCard } from './MenuExtractionCard'
+import { supabase } from '../../../../lib/supabase'
 import { 
   useMenuSources, 
   useMenuExtractions, 
@@ -15,6 +16,15 @@ import {
 
 // Re-export types for other components
 export type { MenuType, MenuExtraction, MenuUrlState }
+
+// Menu Signal interface (matches backend MenuSignalResult)
+interface MenuSignalResult {
+  hasMenu: boolean
+  menuDescription: string | null
+  menuCategories: string[] | null
+  signatureItems: string[] | null
+  rawExtract: string | null
+}
 
 /**
  * Detect menu type from URL path and common patterns
@@ -126,6 +136,32 @@ export function MenuOfferingsPanel({
   websiteUrl
 }: MenuOfferingsPanelProps) {
   const [isDetectingMenus, setIsDetectingMenus] = React.useState(false)
+  const [menuSignal, setMenuSignal] = React.useState<MenuSignalResult | null>(null)
+  
+  // Load menu_signal from business_profile
+  React.useEffect(() => {
+    if (!businessId) return
+    
+    const loadMenuSignal = async () => {
+      const { data, error } = await supabase
+        .from('business_profile')
+        .select('menu_signal')
+        .eq('business_id', businessId)
+        .single()
+      
+      if (error) {
+        console.error('Error loading menu_signal:', error)
+        return
+      }
+      
+      if (data?.menu_signal) {
+        setMenuSignal(data.menu_signal as MenuSignalResult)
+        console.log('📋 Loaded menu_signal:', data.menu_signal)
+      }
+    }
+    
+    loadMenuSignal()
+  }, [businessId])
   
   // Initialize all hooks
   const menuSources = useMenuSources(businessId, userId)
@@ -281,6 +317,57 @@ export function MenuOfferingsPanel({
 
   return (
     <div className="space-y-8">
+      {/* AI MENU PREVIEW - Shows what website analysis found (Free tier) */}
+      {menuSignal?.hasMenu && (
+        <div className="bg-gradient-to-r from-blue-50 to-cta-surface border border-blue-200 rounded-lg p-5 shadow-sm">
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0 w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+              <span className="text-2xl">🍽️</span>
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="text-base font-semibold text-blue-900">AI Menu Oversigt</h3>
+                <span className="px-2 py-0.5 text-xs font-medium bg-blue-200 text-blue-800 rounded-full">Fra website analyse</span>
+              </div>
+              {menuSignal.menuDescription && (
+                <p className="text-sm text-blue-800 mb-3 leading-relaxed">
+                  {menuSignal.menuDescription}
+                </p>
+              )}
+              {menuSignal.signatureItems && menuSignal.signatureItems.length > 0 && (
+                <div className="bg-white/60 rounded-lg p-3 border border-blue-100">
+                  <p className="text-xs font-semibold text-blue-900 mb-2">🌟 Signaturetter fundet:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {menuSignal.signatureItems.map((item, idx) => (
+                      <span 
+                        key={idx}
+                        className="px-2.5 py-1 bg-white text-blue-800 text-xs font-medium rounded-full border border-blue-200"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {menuSignal.menuCategories && menuSignal.menuCategories.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {menuSignal.menuCategories.map((cat: string, idx: number) => (
+                    <span key={idx} className="px-2 py-0.5 text-xs bg-surface-alt border border-border text-text-secondary rounded">
+                      {cat}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3 pt-3 border-t border-blue-200">
+                <p className="text-xs text-blue-600">
+                  💡 <span className="font-medium">Tips:</span> Dette er en hurtig oversigt. For at få fuld menu-udtrækning med priser og beskrivelser, tilføj menulinks eller upload PDF nedenfor.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MENU SOURCES SECTION - Always visible for user input */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
           {/* Header */}
@@ -297,7 +384,7 @@ export function MenuOfferingsPanel({
                 <button
                   onClick={handleDetectNewMenus}
                   disabled={isDetectingMenus}
-                  className="px-4 py-2 text-sm font-medium text-indigo-600 bg-white border border-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 text-sm font-medium text-cta bg-white border border-cta rounded-lg hover:bg-cta-surface transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isDetectingMenus ? 'Søger...' : 'Find nye menu-links'}
                 </button>
@@ -355,7 +442,7 @@ export function MenuOfferingsPanel({
               {!menuSources.showAddMenu && (
                 <button
                   onClick={() => menuSources.setShowAddMenu(true)}
-                  className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
+                  className="flex items-center gap-2 text-sm font-medium text-cta hover:text-cta-text transition-colors"
                 >
                   <span>+</span>
                   <span>Tilføj menu</span>
@@ -366,14 +453,14 @@ export function MenuOfferingsPanel({
                 <div className="space-y-2">
                   <button
                     onClick={() => menuSources.setAddMenuMode('link')}
-                    className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
+                    className="flex items-center gap-2 text-sm font-medium text-cta hover:text-cta-text transition-colors"
                   >
                     <span>🔗</span>
                     <span>Indsæt link</span>
                   </button>
                   <button
                     onClick={() => menuSources.setAddMenuMode('text')}
-                    className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
+                    className="flex items-center gap-2 text-sm font-medium text-cta hover:text-cta-text transition-colors"
                   >
                     <span>✍️</span>
                     <span>Indtast menu selv</span>
@@ -412,7 +499,7 @@ export function MenuOfferingsPanel({
                       }
                     }}
                     placeholder="https://eksempel.dk/menu"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-cta focus:border-transparent"
                     autoFocus
                   />
                   <div className="flex items-center gap-2">
@@ -426,7 +513,7 @@ export function MenuOfferingsPanel({
                         }
                       }}
                       disabled={!menuSources.newMenuInput.trim()}
-                      className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                      className="px-3 py-2 text-sm font-medium text-white bg-cta rounded hover:bg-cta-hover transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
                     >
                       Tilføj
                     </button>
@@ -456,7 +543,7 @@ export function MenuOfferingsPanel({
                         menuSources.setNewMenuInput('')
                       }
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-vertical min-h-[120px]"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-cta focus:border-transparent resize-vertical min-h-[120px]"
                     autoFocus
                   />
                   <div className="flex items-center gap-2">
@@ -469,7 +556,7 @@ export function MenuOfferingsPanel({
                         }
                       }}
                       disabled={!menuSources.newMenuInput.trim()}
-                      className="px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                      className="px-3 py-2 text-sm font-medium text-white bg-cta rounded hover:bg-cta-hover transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
                     >
                       Analysér menu
                     </button>
@@ -514,7 +601,7 @@ export function MenuOfferingsPanel({
               </button>
               <button
                 onClick={menuSources.confirmReplaceStandardMenu}
-                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
+                className="px-4 py-2 text-sm font-medium text-white bg-cta rounded-lg hover:bg-cta-hover transition-colors"
               >
                 Erstat
               </button>
@@ -577,7 +664,7 @@ export function MenuOfferingsPanel({
                 <button
                   onClick={menuHandlers.handleFetchMenuUrl}
                   disabled={menuHandlers.isProcessing || !menuHandlers.menuUrl.trim()}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-cta text-white rounded-lg text-sm font-medium hover:bg-cta-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {menuHandlers.isProcessing ? 'Henter...' : 'Hent'}
                 </button>
@@ -607,7 +694,7 @@ export function MenuOfferingsPanel({
                   <button
                     onClick={menuHandlers.handleManualMenuEntry}
                     disabled={menuHandlers.isProcessing || !menuHandlers.manualMenuText.trim()}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                    className="px-4 py-2 bg-cta text-white rounded-lg text-sm font-medium hover:bg-cta-hover disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
                   >
                     <AnalyzeIcon className={menuHandlers.isProcessing ? 'w-4 h-4 animate-spin motion-reduce:animate-none' : 'w-4 h-4'} />
                     <span>{menuHandlers.isProcessing ? 'Analyserer...' : 'Analysér menu'}</span>

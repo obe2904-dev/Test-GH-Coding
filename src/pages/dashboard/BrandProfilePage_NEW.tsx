@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useTierStore } from '../../stores/tierStore'
 import { useBrandProfile } from '../../hooks/useBrandProfile'
+import { useVisualIdentityAnalyzer } from '../../hooks/useVisualIdentityAnalyzer'
+import { PhotoUploader } from '../../components/visualIdentity/PhotoUploader'
 
 export default function BrandProfilePage() {
   const { t } = useTranslation()
@@ -12,6 +14,7 @@ export default function BrandProfilePage() {
   // Use the consolidated brand profile hook
   const {
     form,
+    businessId,
     isLoading,
     isGenerating,
     isSaving,
@@ -29,6 +32,25 @@ export default function BrandProfilePage() {
     canSave,
     canGenerate
   } = useBrandProfile()
+
+  const { analyzing: analyzingPhotos, checkingStorage, error: photoAnalysisError, recognizableInteriorIdentity, analyze: analyzePhotos, checkAndAutoAnalyze } = useVisualIdentityAnalyzer()
+  const [interiorPhotoPaths, setInteriorPhotoPaths] = useState<string[]>([])
+  const [autoAnalysisAttempted, setAutoAnalysisAttempted] = useState(false)
+
+  // Auto-populate the field when analysis succeeds
+  useEffect(() => {
+    if (recognizableInteriorIdentity) {
+      updateField('recognizable_interior_identity', recognizableInteriorIdentity)
+    }
+  }, [recognizableInteriorIdentity])
+
+  // Auto-trigger: when businessId is available and the field is empty,
+  // check storage once for existing photos and analyze them automatically.
+  useEffect(() => {
+    if (!businessId || autoAnalysisAttempted || form.recognizable_interior_identity || analyzingPhotos || checkingStorage) return
+    setAutoAnalysisAttempted(true)
+    checkAndAutoAnalyze(businessId)
+  }, [businessId, form.recognizable_interior_identity, autoAnalysisAttempted])
   
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   
@@ -75,7 +97,7 @@ export default function BrandProfilePage() {
               </p>
             </div>
             
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg p-6 mb-6">
+            <div className="bg-gradient-to-br from-cta-surface to-purple-50 rounded-lg p-6 mb-6">
               <h3 className="font-semibold text-gray-900 mb-3">Med Brand Profil får du:</h3>
               <ul className="text-left space-y-2 text-sm text-gray-700">
                 <li className="flex items-start gap-2">
@@ -104,7 +126,7 @@ export default function BrandProfilePage() {
             <div className="flex gap-3 justify-center">
               <button
                 onClick={() => navigate('/dashboard/plans')}
-                className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-semibold shadow-md"
+                className="px-6 py-3 bg-gradient-to-r from-cta to-purple-600 text-white rounded-lg hover:from-cta-hover hover:to-purple-700 transition-all font-semibold shadow-md"
               >
                 Se priser og opgrader
               </button>
@@ -130,7 +152,7 @@ export default function BrandProfilePage() {
         </div>
 
         {/* AI Generate Section */}
-        <div className="mb-6 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-200 p-4">
+        <div className="mb-6 bg-gradient-to-r from-purple-50 to-cta-surface rounded-lg border border-purple-200 p-4">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1">
               <h3 className="text-sm font-semibold text-gray-900 mb-1">🤖 AI-Genereret Brand Profil</h3>
@@ -141,7 +163,7 @@ export default function BrandProfilePage() {
             <button
               onClick={() => setShowConfirmModal(true)}
               disabled={!canGenerate}
-              className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+              className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-cta rounded-lg hover:from-purple-700 hover:to-cta-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
             >
               {isGenerating ? 'Genererer...' : isSaving ? 'Gemmer...' : 'Generer Brand Profil'}
             </button>
@@ -178,7 +200,7 @@ export default function BrandProfilePage() {
                 </button>
                 <button
                   onClick={handleGenerateClick}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all"
+                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-cta rounded-lg hover:from-purple-700 hover:to-cta-hover transition-all"
                 >
                   Generer nu
                 </button>
@@ -186,6 +208,89 @@ export default function BrandProfilePage() {
             </div>
           </div>
         )}
+
+        {/* ── Visual Identity Frame ─────────────────────────────────────── */}
+        <div className="mb-6 bg-white rounded-lg border-2 border-teal-200 p-5">
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">📸</span>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Fotos & atmosfære</h3>
+                <p className="text-xs text-gray-500 mt-0.5">AI analyserer dine fotos og bruger atmosfærebeskrivelsen i tekster om stemning, behind-the-scenes og brand</p>
+              </div>
+            </div>
+            <button
+              onClick={() => (isEditing('recognizable_interior_identity') ? stopEditing() : startEditing('recognizable_interior_identity'))}
+              className="px-3 py-1.5 text-xs font-medium text-teal-700 hover:text-white hover:bg-teal-600 border border-teal-300 rounded-md transition-colors shrink-0"
+            >
+              {isEditing('recognizable_interior_identity') ? 'Luk' : 'Rediger'}
+            </button>
+          </div>
+
+          {/* Status / content display */}
+          {(checkingStorage || analyzingPhotos) ? (
+            <div className="flex items-center gap-2 text-xs text-teal-700 bg-teal-50 rounded-lg px-3 py-2">
+              <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>
+              {checkingStorage ? 'Tjekker for fotos…' : 'Analyserer fotos med AI…'}
+            </div>
+          ) : form.recognizable_interior_identity ? (
+            <p className="text-xs text-gray-700 bg-teal-50 rounded-lg px-3 py-2 leading-relaxed">
+              {form.recognizable_interior_identity}
+            </p>
+          ) : (
+            <p className="text-xs text-gray-400 italic">
+              Ikke udfyldt — upload 2–3 fotos nedenfor. AI genererer en atmosfærebeskrivelse der bruges til at skrive mere præcise og levende tekster om dit sted.
+            </p>
+          )}
+
+          {/* Photo uploader — always visible */}
+          <div className="mt-4 bg-teal-50 border border-teal-200 rounded-lg p-4">
+            <p className="text-xs text-teal-700 mb-3">
+              Upload 2–3 fotos af dit indre og ydre. AI analyserer dem og genererer en atmosfærebeskrivelse der bruges i dine tekster.
+            </p>
+            <PhotoUploader
+              businessId={businessId ?? ''}
+              onUploadComplete={setInteriorPhotoPaths}
+            />
+            {interiorPhotoPaths.length > 0 && (
+              <button
+                onClick={async () => { if (businessId) await analyzePhotos(businessId, interiorPhotoPaths) }}
+                disabled={analyzingPhotos || !businessId}
+                className="mt-3 w-full px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                {analyzingPhotos ? '⏳ Analyserer fotos…' : `✨ Analyser ${interiorPhotoPaths.length} foto${interiorPhotoPaths.length !== 1 ? 's' : ''}`}
+              </button>
+            )}
+            {photoAnalysisError && <p className="mt-2 text-xs text-red-600">{photoAnalysisError}</p>}
+            {recognizableInteriorIdentity && <p className="mt-2 text-xs text-teal-700">✓ Atmosfærebeskrivelse udfyldt fra fotos</p>}
+          </div>
+
+          {/* Inline editor — manual text only, behind Rediger */}
+          {isEditing('recognizable_interior_identity') && (
+            <div className="mt-3 space-y-3">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Eller skriv en atmosfærebeskrivelse manuelt:</p>
+                <textarea
+                  value={form.recognizable_interior_identity}
+                  onChange={(e) => updateField('recognizable_interior_identity', e.target.value)}
+                  placeholder="Fx: 'Udendørs terrasse direkte ved åen', 'Åbent køkken', 'Ingen hvid-dug service — åben og uformel borddækning'…"
+                  className="w-full h-32 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-400 focus:border-transparent resize-none"
+                />
+              </div>
+              <button
+                onClick={() => { save(); stopEditing() }}
+                disabled={isSaving}
+                className="w-full px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              >
+                {isSaving ? 'Gemmer…' : 'Gem beskrivelse'}
+              </button>
+            </div>
+          )}
+        </div>
+        {/* ─────────────────────────────────────────────────────────────── */}
 
         <div className="space-y-3">
           {/* 1. Brand Essence ⭐⭐⭐⭐⭐ */}
@@ -201,7 +306,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('brand_essence') ? stopEditing() : startEditing('brand_essence'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('brand_essence') ? 'Luk' : 'Rediger'}
               </button>
@@ -212,7 +317,7 @@ export default function BrandProfilePage() {
                   value={form.brand_essence}
                   onChange={(e) => updateField('brand_essence', e.target.value)}
                   placeholder="Beskriv kernen i dit brand - hvad gør jer unikke, jeres mission, og jeres kernepersonlighed..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{brand_essence}}'}</code></p>
               </div>
@@ -232,7 +337,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('tone_of_voice') ? stopEditing() : startEditing('tone_of_voice'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('tone_of_voice') ? 'Luk' : 'Rediger'}
               </button>
@@ -243,7 +348,7 @@ export default function BrandProfilePage() {
                   value={form.tone_of_voice}
                   onChange={(e) => updateField('tone_of_voice', e.target.value)}
                   placeholder="Beskriv jeres tone - f.eks. 'venlig og professionel', 'afslappet og humoristisk', 'autoritativ og troværdig'..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{tone_of_voice}}'}</code></p>
               </div>
@@ -263,7 +368,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('things_to_avoid') ? stopEditing() : startEditing('things_to_avoid'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('things_to_avoid') ? 'Luk' : 'Rediger'}
               </button>
@@ -274,7 +379,7 @@ export default function BrandProfilePage() {
                   value={form.things_to_avoid}
                   onChange={(e) => updateField('things_to_avoid', e.target.value)}
                   placeholder="Liste af ord, vendinger, emner eller tone som AI skal undgå - f.eks. 'ingen slang', 'undgå overdrivelser', 'aldrig nævn konkurrenter'..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{things_to_avoid}}'}</code></p>
               </div>
@@ -294,7 +399,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('target_audience') ? stopEditing() : startEditing('target_audience'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('target_audience') ? 'Luk' : 'Rediger'}
               </button>
@@ -305,7 +410,7 @@ export default function BrandProfilePage() {
                   value={form.target_audience}
                   onChange={(e) => updateField('target_audience', e.target.value)}
                   placeholder="Beskriv jeres primære målgruppe - demografi, interesser, behov, adfærd..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{target_audience}}'}</code></p>
               </div>
@@ -325,7 +430,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('core_offerings') ? stopEditing() : startEditing('core_offerings'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('core_offerings') ? 'Luk' : 'Rediger'}
               </button>
@@ -336,7 +441,7 @@ export default function BrandProfilePage() {
                   value={form.core_offerings}
                   onChange={(e) => updateField('core_offerings', e.target.value)}
                   placeholder="Liste de vigtigste produkter, services eller tilbud som AI kan henvise til..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{core_offerings}}'}</code></p>
               </div>
@@ -356,7 +461,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('content_focus') ? stopEditing() : startEditing('content_focus'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('content_focus') ? 'Luk' : 'Rediger'}
               </button>
@@ -367,7 +472,7 @@ export default function BrandProfilePage() {
                   value={form.content_focus}
                   onChange={(e) => updateField('content_focus', e.target.value)}
                   placeholder="Beskriv indholdsemnerne I vil fokusere på - f.eks. 'produktnyhederog tips', 'kundehistorier', 'brancheindsigter'..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{content_focus}}'}</code></p>
               </div>
@@ -387,7 +492,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('cta_style') ? stopEditing() : startEditing('cta_style'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('cta_style') ? 'Luk' : 'Rediger'}
               </button>
@@ -398,7 +503,7 @@ export default function BrandProfilePage() {
                   value={form.cta_style}
                   onChange={(e) => updateField('cta_style', e.target.value)}
                   placeholder="Beskriv jeres foretrukne CTA-stil - f.eks. 'direkte og handlingsorienteret', 'blød og inviterende', 'urgency-baseret'..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{cta_style}}'}</code></p>
               </div>
@@ -418,7 +523,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('communication_goal') ? stopEditing() : startEditing('communication_goal'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('communication_goal') ? 'Luk' : 'Rediger'}
               </button>
@@ -429,7 +534,7 @@ export default function BrandProfilePage() {
                   value={form.communication_goal}
                   onChange={(e) => updateField('communication_goal', e.target.value)}
                   placeholder="Beskriv jeres overordnede kommunikationsmål - f.eks. 'bygge tillid og troværdighed', 'drive salg', 'uddanne målgruppen'..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{communication_goal}}'}</code></p>
               </div>
@@ -449,7 +554,7 @@ export default function BrandProfilePage() {
               </div>
               <button
                 onClick={() => (isEditing('image_preferences') ? stopEditing() : startEditing('image_preferences'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
               >
                 {isEditing('image_preferences') ? 'Luk' : 'Rediger'}
               </button>
@@ -460,49 +565,9 @@ export default function BrandProfilePage() {
                   value={form.image_preferences}
                   onChange={(e) => updateField('image_preferences', e.target.value)}
                   placeholder="Beskriv jeres foretrukne billedstil - f.eks. 'autentiske fotos', 'lyse og venlige farver', 'minimalistisk design'..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
                 />
                 <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{image_preferences}}'}</code></p>
-              </div>
-            )}
-          </div>
-
-          {/* 10. Recognizable Interior / Visual Identity (CONDITIONAL) */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-start justify-between gap-4 mb-2">
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                  Recognizable Interior / Visual Identity 🎨
-                </h3>
-                <p className="text-xs text-gray-600">
-                  {form.recognizable_interior_identity || 'Kun hvis der er dokumenterede visuelle kendetegn (murals, kunst, ikoniske interiør-elementer)'}
-                </p>
-                <p className="text-xs text-amber-600 mt-1 italic">
-                  ⚠️ Conditional field: Only populate with verified visual evidence
-                </p>
-              </div>
-              <button
-                onClick={() => (isEditing('recognizable_interior_identity') ? stopEditing() : startEditing('recognizable_interior_identity'))}
-                className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-md transition-colors"
-              >
-                {isEditing('recognizable_interior_identity') ? 'Luk' : 'Rediger'}
-              </button>
-            </div>
-            {isEditing('recognizable_interior_identity') && (
-              <div className="mt-3 space-y-2">
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
-                  <p className="text-xs text-amber-800 font-medium mb-1">⚠️ Important:</p>
-                  <p className="text-xs text-amber-700">
-                    Only fill this if you have <strong>explicit visual evidence</strong> (uploaded interior photos, labeled images, or clear descriptions). Examples: murals, wall art, iconic figures/themes, distinctive decor guests notice. Leave empty if uncertain.
-                  </p>
-                </div>
-                <textarea
-                  value={form.recognizable_interior_identity}
-                  onChange={(e) => updateField('recognizable_interior_identity', e.target.value)}
-                  placeholder="Fx: 'Stor mural af en lokal kunstner på bagvæggen', 'Ikonisk vintage radio fra 1950'erne ved baren', 'Hængende planter og træmøbler i skandinavisk stil'... KUN hvis dokumenteret med fotos!"
-                  className="w-full h-32 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                />
-                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{recognizable_interior_identity}}'}</code></p>
               </div>
             )}
           </div>
@@ -536,7 +601,7 @@ export default function BrandProfilePage() {
               <button
                 onClick={save}
                 disabled={!canSave}
-                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="px-4 py-2 text-sm font-medium text-white bg-cta rounded-lg hover:bg-cta-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isSaving ? 'Gemmer...' : 'Gem ændringer'}
               </button>

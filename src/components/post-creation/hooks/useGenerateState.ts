@@ -59,8 +59,10 @@ export function useGenerateState({
   }, [activePlatform, customizePerPlatform, headline, platformTexts, text])
 
   const updateCurrentText = useCallback((field: 'headline' | 'text', value: string) => {
+    console.log('[useGenerateState] updateCurrentText called:', { field, valueLength: value.length })
     markAsChanged?.()
     setIsEdited(true)
+    console.log('[useGenerateState] setIsEdited(true) called')
     const newHeadline = field === 'headline' ? value : headline
     const newText = field === 'text' ? value : text
 
@@ -68,16 +70,10 @@ export function useGenerateState({
     setText(newText)
 
     setPlatformTexts((prev) => {
-      if (customizePerPlatform) {
-        return {
-          ...prev,
-          [activePlatform]: {
-            headline: newHeadline,
-            text: newText
-          }
-        }
-      }
-
+      // When the user manually edits, cascade to ALL platforms regardless of
+      // customizePerPlatform — AI-generated per-platform variation (e.g. a booking link
+      // appended only on Facebook) was structural, but a deliberate user edit should
+      // always win everywhere.
       const next: PlatformTextMap = {}
       Object.keys(prev).forEach((platform) => {
         next[platform] = {
@@ -87,7 +83,7 @@ export function useGenerateState({
       })
       return next
     })
-  }, [activePlatform, customizePerPlatform, headline, markAsChanged, setPlatformTexts, text])
+  }, [headline, markAsChanged, setPlatformTexts, text])
 
   const handleClearContent = useCallback(() => {
     setHeadline('')

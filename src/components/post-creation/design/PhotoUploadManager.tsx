@@ -34,6 +34,12 @@ const Sparkles = ({ className }: { className?: string }) => (
   </svg>
 )
 
+const Play = ({ className }: { className?: string }) => (
+  <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <path d="M8 5v14l11-7z"/>
+  </svg>
+)
+
 interface PhotoUploadManagerProps {
   uploadedMedia: MediaItem[]
   selectedMediaIndex: number
@@ -70,10 +76,10 @@ export function PhotoUploadManager({
     <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
       <div className="mb-2">
         <h3 className="text-sm font-bold text-slate-800 mb-1">
-          Vælg dit billede
+          {t('create.chooseYourPhoto')}
         </h3>
         <p className="text-xs text-slate-600">
-          Upload dit foto — jeg viser dig et realistisk preview.
+          {t('create.uploadPreviewDesc')}
         </p>
       </div>
 
@@ -87,7 +93,7 @@ export function PhotoUploadManager({
             {canAddMore && (
               <button 
                 onClick={() => fileInputRef.current?.click()}
-                className="text-xs text-indigo-600 font-medium hover:underline flex items-center gap-1"
+                className="text-xs text-cta font-medium hover:underline flex items-center gap-1"
               >
                 <Upload className="w-3 h-3" />
                 {t('create.addMore', 'Add')}
@@ -102,15 +108,27 @@ export function PhotoUploadManager({
                 onClick={() => onSelectMedia(index)}
                 className={`relative cursor-pointer flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden border-2 transition-all ${
                   index === selectedMediaIndex 
-                    ? 'border-indigo-500 ring-2 ring-indigo-200' 
-                    : 'border-slate-200 hover:border-indigo-300'
+                    ? 'border-cta ring-2 ring-cta' 
+                    : 'border-slate-200 hover:border-cta'
                 }`}
               >
-                <img
-                  src={media.url}
-                  alt={`Photo ${index + 1}`}
-                  className="w-full h-full object-cover"
-                />
+                {media.type === 'video' ? (
+                  <>
+                    <video
+                      src={media.url}
+                      className="w-full h-full object-cover pointer-events-none"
+                    />
+                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                      <Play className="w-4 h-4 text-white drop-shadow" />
+                    </div>
+                  </>
+                ) : (
+                  <img
+                    src={media.url}
+                    alt={`Photo ${index + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                )}
                 {media.adjustedUrl && (
                   <div className="absolute top-0.5 right-0.5">
                     <Sparkles className="w-3 h-3 text-yellow-400 drop-shadow" />
@@ -132,32 +150,32 @@ export function PhotoUploadManager({
       )}
 
       {processingImage ? (
-        <div className="border-2 border-dashed border-indigo-300 rounded-lg p-8 text-center bg-indigo-50">
-          <div className="animate-spin w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full mx-auto mb-2" />
-          <p className="text-xs font-medium text-indigo-700 mb-1">
-            Uploader og behandler billede...
+        <div className="border-2 border-dashed border-cta rounded-lg p-8 text-center bg-cta-surface">
+          <div className="animate-spin w-8 h-8 border-4 border-cta-surface border-t-cta rounded-full mx-auto mb-2" />
+          <p className="text-xs font-medium text-cta-text mb-1">
+            {t('create.uploadingProcessing')}
           </p>
-          <p className="text-xs text-indigo-600">
-            Vent venligst
+          <p className="text-xs text-cta">
+            {t('create.pleaseWait')}
           </p>
         </div>
       ) : !hasPhoto ? (
         <div
           onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-slate-300 rounded-lg py-6 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 transition-all h-[140px] flex flex-col items-center justify-center"
+          className="border-2 border-dashed border-slate-300 rounded-lg py-6 text-center cursor-pointer hover:border-cta hover:bg-cta-surface transition-all h-[140px] flex flex-col items-center justify-center"
         >
           <Camera className="w-8 h-8 text-slate-400 mx-auto mb-2" />
           <p className="text-xs font-medium text-slate-700 mb-1">
-            Klik for at uploade foto
+            {t('create.clickToUploadMedia')}
           </p>
           <p className="text-xs text-slate-500">
-            JPG, PNG eller GIF
+            {t('create.fileFormats')}
           </p>
           
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/*,video/mp4,video/quicktime,video/x-m4v"
             multiple={currentTier !== 'free'}
             onChange={onPhotoUpload}
             className="hidden"
@@ -170,7 +188,7 @@ export function PhotoUploadManager({
             <div className="flex gap-2">
               <button
                 onClick={() => replaceFileInputRef.current?.click()}
-                className="w-full px-3 py-1.5 border border-dashed border-slate-300 rounded-lg text-xs text-slate-600 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                className="w-full px-3 py-1.5 border border-dashed border-slate-300 rounded-lg text-xs text-slate-600 hover:border-cta hover:text-cta hover:bg-cta-surface transition-all"
               >
                 {t('create.changePhoto', 'Change Photo')}
               </button>
@@ -178,7 +196,7 @@ export function PhotoUploadManager({
               <input
                 ref={replaceFileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/mp4,video/quicktime,video/x-m4v"
                 multiple={false}
                 onChange={onReplacePhoto}
                 className="hidden"
@@ -191,7 +209,7 @@ export function PhotoUploadManager({
             <div className="flex gap-2">
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full px-3 py-1.5 border border-dashed border-slate-300 rounded-lg text-xs text-slate-600 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all flex items-center justify-center gap-1"
+                className="w-full px-3 py-1.5 border border-dashed border-slate-300 rounded-lg text-xs text-slate-600 hover:border-cta hover:text-cta hover:bg-cta-surface transition-all flex items-center justify-center gap-1"
               >
                 <Upload className="w-3 h-3" />
                 {t('create.addMorePhotos', 'Add More Photos')} ({uploadedMedia.length}/{maxPhotos})
@@ -200,7 +218,7 @@ export function PhotoUploadManager({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,video/mp4,video/quicktime,video/x-m4v"
                 multiple={currentTier !== 'free'}
                 onChange={onPhotoUpload}
                 className="hidden"

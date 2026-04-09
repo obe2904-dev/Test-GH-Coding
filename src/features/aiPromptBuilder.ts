@@ -251,6 +251,21 @@ const extractMenuItemsList = (offerings: any): string => {
   return allItems.join('\n')
 }
 
+/**
+ * Extract a flat list of menu items from menu_results_v2 rows (one per line).
+ * Returns empty string if no items found.
+ * This is the authoritative source — prefer over extractMenuItemsList when available.
+ */
+const extractMenuItemsFromV2 = (menuItems: MenuItemV2[]): string => {
+  if (!menuItems || menuItems.length === 0) return ''
+  return menuItems
+    .map(item => {
+      const suffix = item.category_name ? ` (${item.category_name})` : ''
+      return `${item.item_name.trim()}${suffix}`
+    })
+    .join('\n')
+}
+
 // ============================================================================
 // BEHAVIORAL DRIVERS DERIVATION (Evidence-Anchored)
 // ============================================================================
@@ -475,7 +490,11 @@ type WebsiteAnalysis = Database['public']['Tables']['website_analyses']['Row']
  */
 export interface BrandProfileForAI {
   brandEssence?: string
+  // V2 identity fields
+  identityKeywords?: string[] | null
+  voiceConstraints?: string | null
   toneOfVoice?: string
+  /** @deprecated Use voiceConstraints instead (v2). Kept for legacy profiles. */
   thingsToAvoid?: string
   targetAudience?: string
   coreOfferings?: string[] | string
@@ -483,6 +502,42 @@ export interface BrandProfileForAI {
   ctaStyle?: string
   communicationGoal?: string
   imagePreferences?: string
+  // Richer structured fields (populated when brand profile has been fully generated)
+  toneModel?: {
+    emoji_level?: string
+    formality?: string
+    writing_rules?: string[]
+    good_examples?: string[]
+    avoid_examples?: string[]
+    primary_keywords?: string[]
+  } | null
+  contentPillars?: string[] | null
+  socialStyle?: {
+    emojiUsage?: string
+    hashtagStrategy?: string
+    captionLength?: string
+    postingVoice?: string
+  } | null
+  voiceExamples?: {
+    headlines?: string[]
+    phrases?: string[]
+    captions?: string[]
+  } | null
+  locationIntelligence?: {
+    primary_type?: string
+    matched_motivations?: string[]
+    marketing_focus?: string | null
+    secondary_types?: string[]
+    tourist_context?: boolean
+  } | null
+  // Brand-specific phrases to weave into post text naturally
+  signaturePhrases?: string[] | null
+}
+
+export interface MenuItemV2 {
+  item_name: string
+  category_name?: string | null
+  is_signature?: boolean | null
 }
 
 export interface BusinessContext {
@@ -496,6 +551,9 @@ export interface BusinessContext {
     opening_hours?: any
     business_offerings?: any
     booking_url?: string | null
+    /** Authoritative menu rows from menu_results_v2. When present and non-empty, used
+     *  instead of business_offerings for MENUPUNKTER — always more current. */
+    menu_items_v2?: MenuItemV2[]
   }
 }
 
@@ -579,12 +637,14 @@ export function buildPostIdeaPrompt(context: BusinessContext, options: AIPromptO
         ? `
 Brandessens:
 ${brandProfile.brandEssence || ''}
+${brandProfile.identityKeywords?.length ? `🔑 Identitet: ${brandProfile.identityKeywords.join(' · ')}` : ''}
 
 Tone:
 ${brandProfile.toneOfVoice || ''}
 
-Ting at undgå:
-${brandProfile.thingsToAvoid || ''}
+${brandProfile.voiceConstraints ? `⚠️ Skriveprincip:
+${brandProfile.voiceConstraints}` : `Ting at undgå:
+${brandProfile.thingsToAvoid || ''}`}
 
 Målgruppe:
 ${brandProfile.targetAudience || ''}
@@ -603,16 +663,23 @@ ${brandProfile.communicationGoal || ''}
 
 Billedpræferencer:
 ${brandProfile.imagePreferences || ''}
+${brandProfile.contentPillars?.length ? `\nIndholdsøjler:\n${brandProfile.contentPillars.map((p) => `- ${p}`).join('\n')}` : ''}
+${brandProfile.toneModel?.emoji_level ? `Emoji-niveau: ${brandProfile.toneModel.emoji_level}` : ''}
+${brandProfile.toneModel?.writing_rules?.length ? `Skriveregler: ${brandProfile.toneModel.writing_rules.join(' | ')}` : ''}
+${brandProfile.toneModel?.avoid_examples?.length ? `Undgå disse formuleringer: ${brandProfile.toneModel.avoid_examples.slice(0, 4).join(', ')}` : ''}
+${brandProfile.locationIntelligence?.primary_type ? `\nLokalitetstype: ${brandProfile.locationIntelligence.primary_type}${brandProfile.locationIntelligence.tourist_context ? ' (turistzone)' : ''}\nMarkedsføringsfokus: ${brandProfile.locationIntelligence.marketing_focus || brandProfile.locationIntelligence.matched_motivations?.join(', ') || ''}` : ''}
+${brandProfile.locationIntelligence?.secondary_types?.length ? `Sekundære lokationstyper: ${brandProfile.locationIntelligence.secondary_types.join(', ')} — tilpas tone og indhold til dette brede publikum` : ''}
+${brandProfile.signaturePhrases?.length ? `\nBrandets egne fraser (vævs ind hvis passende): ${brandProfile.signaturePhrases.join(' · ')}` : ''}
 `.trim()
         : `
 Brand Essence:
 ${brandProfile.brandEssence || ''}
+${brandProfile.identityKeywords?.length ? `🔑 Identity: ${brandProfile.identityKeywords.join(' · ')}` : ''}
 
 Tone of Voice:
 ${brandProfile.toneOfVoice || ''}
 
-Things to Avoid:
-${brandProfile.thingsToAvoid || ''}
+${brandProfile.voiceConstraints ? `⚠️ Writing Principle:\n${brandProfile.voiceConstraints}` : `Things to Avoid:\n${brandProfile.thingsToAvoid || ''}`}
 
 Target Audience:
 ${brandProfile.targetAudience || ''}
@@ -631,6 +698,13 @@ ${brandProfile.communicationGoal || ''}
 
 Image Preferences:
 ${brandProfile.imagePreferences || ''}
+${brandProfile.contentPillars?.length ? `\nContent Pillars:\n${brandProfile.contentPillars.map((p) => `- ${p}`).join('\n')}` : ''}
+${brandProfile.toneModel?.emoji_level ? `Emoji Level: ${brandProfile.toneModel.emoji_level}` : ''}
+${brandProfile.toneModel?.writing_rules?.length ? `Writing Rules: ${brandProfile.toneModel.writing_rules.join(' | ')}` : ''}
+${brandProfile.toneModel?.avoid_examples?.length ? `Avoid These Formulations: ${brandProfile.toneModel.avoid_examples.slice(0, 4).join(', ')}` : ''}
+${brandProfile.locationIntelligence?.primary_type ? `\nLocation Type: ${brandProfile.locationIntelligence.primary_type}${brandProfile.locationIntelligence.tourist_context ? ' (tourist zone)' : ''}\nMarketing Focus: ${brandProfile.locationIntelligence.marketing_focus || brandProfile.locationIntelligence.matched_motivations?.join(', ') || ''}` : ''}
+${brandProfile.locationIntelligence?.secondary_types?.length ? `Secondary Location Types: ${brandProfile.locationIntelligence.secondary_types.join(', ')} — adapt ideas and tone for this broad multi-audience location` : ''}
+${brandProfile.signaturePhrases?.length ? `\nBrand Phrases (weave in naturally where fitting): ${brandProfile.signaturePhrases.join(' · ')}` : ''}
 `.trim()
 
     const toneText = String(brandProfile.toneOfVoice || '')
@@ -789,7 +863,11 @@ ${!hasBrandProfile && profile?.target_audience ? `${i18n.businessContext.targetA
   }
 
   // Add menu context as soft context (not for enforcement)
-  const menuContextText = profileData?.business_offerings ? formatOfferingsForPrompt(profileData.business_offerings) || '' : ''
+  // Prefer menu_items_v2 (authoritative) — skip verbose formatOfferingsForPrompt when v2 rows are present
+  const hasMenuV2 = !!(profileData?.menu_items_v2 && profileData.menu_items_v2.length > 0)
+  const menuContextText = hasMenuV2
+    ? '' // strict MENUPUNKTER section below handles menu_items_v2 — skip duplicate soft block
+    : (profileData?.business_offerings ? formatOfferingsForPrompt(profileData.business_offerings) || '' : '')
   if (menuContextText) {
     optionalContextBody += `\n${i18n.optionalContext.menuContextTitle} ${i18n.optionalContext.menuContextHint}:\n` + menuContextText.trim() + '\n'
   }
@@ -803,7 +881,11 @@ ${!hasBrandProfile && profile?.target_audience ? `${i18n.businessContext.targetA
   const hasBookingUrl = !!profileData?.booking_url
 
   let menuItemsList = ''
-  if (profileData?.business_offerings) {
+  if (profileData?.menu_items_v2 && profileData.menu_items_v2.length > 0) {
+    // Authoritative source: fresh rows from menu_results_v2
+    menuItemsList = extractMenuItemsFromV2(profileData.menu_items_v2).trim()
+  } else if (profileData?.business_offerings) {
+    // Fallback: website-scraped snapshot from business_profile
     menuItemsList = extractMenuItemsList(profileData.business_offerings).trim()
   }
   const hasMenuItems = !!menuItemsList

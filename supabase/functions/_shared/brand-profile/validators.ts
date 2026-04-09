@@ -16,210 +16,9 @@ declare const Deno: {
   }
 } | undefined
 
-// Meta-text patterns that should NEVER appear in user-facing fields
-// These are allowed ONLY in clarifications_needed or internal_notes
-export const META_TEXT_PATTERNS = [
-  '(mangler tydelig evidens',
-  'mangler tydelig evidens',
-  'foreslået retning',
-  'uklart om',
-  'Uklart om',
-  'insufficient evidence',
-  'suggested direction',
-  'unclear about',
-  'needs verification',
-  'verificer',
-  'afklar',
-  'TODO',
-  '[TBD]',
-  '[?]',
-]
+import { META_TEXT_PATTERNS, checkBannedWordsConsistency, INTERNAL_TOKENS } from './meta-text-validator.ts'
+import { buildAllowedProofTokens, buildNormalizedRefs } from './proof-tokens.ts'
 
-// Internal tokens that should never appear in user-facing content
-const INTERNAL_TOKENS = [
-  'MANDATORY',
-  'HARD CONSTRAINTS',
-  'SOM TOMMELFINGERREGEL',
-  '[INTERNT',
-  'MÅLTIDSANKRE',
-  'OPLEVELSES-/SERVICEANKER',
-  'CRITICAL',
-  '(3 required)',
-  '(2 required)',
-  'required)'
-]
-
-/**
- * Check if generated sections contain words that are listed in things_to_avoid.language_constraints
- * 
- * v4.8.8 Task 1: Ensure banned word consistency
- * v4.8.9 Task 2: Smart Banned Words - respect business's authentic vocabulary
- * If a word is in language_constraints, it should NOT appear anywhere else in the output
- * UNLESS the word appears 3+ times on the business's website (then it's allowed)
- * 
- * @param sections - Brand profile sections to validate
- * @param dataSources - Optional data sources for smart banned word filtering
- * @returns Array of validation errors (field + word pairs)
- */
-export function checkBannedWordsConsistency(sections: any, dataSources?: DataSources): string[] {
-  const errors: string[] = []
-  
-  // Extract banned words from things_to_avoid.language_constraints
-  const thingsToAvoid = sections?.things_to_avoid
-  let languageConstraints = thingsToAvoid?.value?.language_constraints || thingsToAvoid?.language_constraints || []
-  
-  if (!Array.isArray(languageConstraints) || languageConstraints.length === 0) {
-    return errors
-  }
-  
-  let bannedWords = languageConstraints
-    .filter(Boolean)
-    .map((w: any) => String(w).trim())
-    .filter((w: string) => w.length > 0)
-  
-  if (bannedWords.length === 0) {
-    return errors
-  }
-  
-  // v4.8.9 Task 2: If dataSources provided, filter out words used 3+ times on website
-  // This handles edge case where AI might have included an allowed word in things_to_avoid
-  if (dataSources) {
-    // Import functions from prompt-b (they're exported)
-    // We need to dynamically import since TypeScript modules are static
-    // For now, we'll replicate the logic here (simpler for Deno edge function)
-    const websiteText = aggregateWebsiteTextForValidator(dataSources)
-    const allowedWordsSet = new Set<string>()
-    
-    // Check each banned word for 3+ occurrences
-    bannedWords.forEach(word => {
-      const regex = new RegExp(`\\b${word.toLowerCase()}\\b`, 'gi')
-      const matches = websiteText.toLowerCase().match(regex)
-      const count = matches ? matches.length : 0
-      
-      if (count >= 3) {
-        allowedWordsSet.add(word.toLowerCase())
-        console.log(`🔓 Validator: Allowing "${word}" (${count} occurrences on website)`)
-      }
-    })
-    
-    // Filter out allowed words
-    if (allowedWordsSet.size > 0) {
-      bannedWords = bannedWords.filter(w => !allowedWordsSet.has(w.toLowerCase()))
-      console.log(`🔧 Validator: Checking ${bannedWords.length} banned words (${allowedWordsSet.size} allowed)`)
-    }
-  }
-  
-  // Fields to check (extract value from object or use string directly)
-  const fieldsToCheck = [
-    { name: 'brand_essence', value: sections?.brand_essence?.value || sections?.brand_essence },
-    { name: 'core_offerings', value: sections?.core_offerings?.value || sections?.core_offerings },
-    { name: 'target_audience', value: sections?.target_audience?.value || sections?.target_audience },
-    { name: 'tone_of_voice', value: sections?.tone_of_voice?.value || sections?.tone_of_voice },
-    { name: 'content_focus', value: sections?.content_focus?.value || sections?.content_focus },
-    { name: 'communication_goal', value: sections?.communication_goal?.value || sections?.communication_goal },
-    { name: 'cta_style', value: sections?.cta_style?.value || sections?.cta_style },
-    { name: 'signature_shot', value: sections?.image_preferences?.signature_shot }
-  ]
-  
-  // Check each field for banned words
-  for (const field of fieldsToCheck) {
-    if (!field.value || typeof field.value !== 'string') continue
-    
-    for (const bannedWord of bannedWords) {
-      // Escape special regex characters in the banned word
-      const escapedWord = bannedWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const regex = new RegExp(`\\b${escapedWord}\\b`, 'gi')
-      
-      if (regex.test(field.value)) {
-        errors.push(
-          `🚫 BANNED WORD INCONSISTENCY: Field "${field.name}" contains banned word "${bannedWord}" which is listed in things_to_avoid.language_constraints`
-        )
-      }
-    }
-  }
-  
-  return errors
-}
-
-/**
- * Helper function to aggregate website text for validator
- * (duplicates logic from prompt-b.ts to avoid circular dependencies)
- * 
- * v4.9.0: Now uses detectWebsitePresence for comprehensive detection
- */
-function aggregateWebsiteTextForValidator(dataSources: DataSources): string {
-  const textParts: string[] = []
-  
-  // v4.9.0: Use comprehensive website presence detection
-  const presence = detectWebsitePresence(dataSources)
-  logWebsitePresence(presence, 'Validator')
-  
-  if (!presence.hasWebsite) {
-    console.log('⚠️ Validator: No website data found for banned word analysis')
-    return ''
-  }
-  
-  // v4.8.9 FIX: Use websiteAnalysis (actual key) with fallback to website
-  const website = (dataSources as any).websiteAnalysis || (dataSources as any).website
-  
-  if (website) {
-    // v4.8.9 FIX: Use ACTUAL field names from website_analyses table
-    if (website.homepage_content) textParts.push(website.homepage_content)
-    if (website.about_content) textParts.push(website.about_content)
-    if (website.about_block) textParts.push(website.about_block)
-    
-    // Array fields - handle both array and string formats
-    if (website.hero_texts) {
-      if (Array.isArray(website.hero_texts)) textParts.push(...website.hero_texts)
-      else textParts.push(website.hero_texts)
-    }
-    if (website.headers) {
-      if (Array.isArray(website.headers)) textParts.push(...website.headers)
-      else textParts.push(website.headers)
-    }
-    if (website.cta_texts) {
-      if (Array.isArray(website.cta_texts)) textParts.push(...website.cta_texts)
-      else textParts.push(website.cta_texts)
-    }
-    if (website.nav_items) {
-      if (Array.isArray(website.nav_items)) textParts.push(...website.nav_items)
-      else textParts.push(website.nav_items)
-    }
-    if (website.keywords) {
-      if (Array.isArray(website.keywords)) textParts.push(...website.keywords)
-      else textParts.push(website.keywords)
-    }
-    if (website.pages && Array.isArray(website.pages)) {
-      website.pages.forEach((page: any) => {
-        if (page.content) textParts.push(page.content)
-        if (page.text) textParts.push(page.text)
-      })
-    }
-  }
-  
-  const profile = dataSources.profile as any
-  if (profile) {
-    if (profile.short_description) textParts.push(profile.short_description)
-    if (profile.long_description) textParts.push(profile.long_description)
-  }
-  
-  const social = dataSources.social as any
-  if (social) {
-    if (social.bio) textParts.push(social.bio)
-    if (social.description) textParts.push(social.description)
-  }
-  
-  return textParts.filter(Boolean).join(' ')
-}
-
-/**
- * Validates Prompt B output for issues.
- * Checks for disallowed generic words, internal tokens, and meta-text.
- * 
- * @param sections - Parsed JSON sections from Prompt B
- * @param analysis - Prompt A analysis (for disallowed words)
- * @returns Array of error messages (empty if valid)
- */
 export function validateBrandProfileOutput(sections: any, analysis: any, dataSources?: DataSources): string[] {
   const errors: string[] = []
 
@@ -589,11 +388,15 @@ export function validateBrandProfileOutput(sections: any, analysis: any, dataSou
     if (normalizedRefs.length === 0 && ALLOWED_PROOF_TOKENS.length === 0) return true
     const joined = normalize(proof.join(' '))
     
+    // Accept explicit hook number references (#1, #2, ...) as valid citations
+    const hasHookNumber = /\#\d+/.test(proof.join(' '))
+    // Accept short proof items (≤4 words) as specific domain citations (e.g. "Website CTA", "Book dit bord")
+    const hasShortSpecificCitation = proof.some(p => p.trim().split(/\s+/).length <= 4 && p.trim().length >= 3)
     // Check if proof contains at least one allowed token OR one reference from analysis
     const hasAllowedToken = ALLOWED_PROOF_TOKENS.some(token => joined.includes(token))
     const hasAnalysisRef = normalizedRefs.some(r => joined.includes(r))
     
-    return hasAllowedToken || hasAnalysisRef
+    return hasHookNumber || hasShortSpecificCitation || hasAllowedToken || hasAnalysisRef
   }
   
   // Extract disallowed generic words from analysis
@@ -1017,10 +820,18 @@ export function validateBrandProfileOutput(sections: any, analysis: any, dataSou
     'Offers'
   ])
 
-  if (!Array.isArray(sections.content_pillars)) {
+  // Unwrap {value: array} shape (brandProfile wraps all fields)
+  const rawContentPillarsField = (sections as any).content_pillars
+  const contentPillarsArr: any[] | null = Array.isArray(rawContentPillarsField)
+    ? rawContentPillarsField
+    : (rawContentPillarsField && typeof rawContentPillarsField === 'object' && Array.isArray((rawContentPillarsField as any).value))
+      ? (rawContentPillarsField as any).value
+      : null
+
+  if (!contentPillarsArr) {
     errors.push('Field "content_pillars" must be an array (3-6 items)')
   } else {
-    const pills = sections.content_pillars as any[]
+    const pills = contentPillarsArr
     if (pills.length < 3 || pills.length > 6) {
       errors.push('Field "content_pillars" must have 3-6 items')
     }
@@ -1660,146 +1471,51 @@ Return the corrected JSON now:`
   }
 }
 
-/**
- * Build ALLOWED_PROOF_TOKENS for proof grounding validation (v4.9.0 Phase 2)
- * Extracted from validateBrandProfileOutput for reuse in proof-grounding.ts
- * 
- * MUST match the token extraction logic in Prompt B to ensure consistency
- * 
- * v4.10.0 Phase 1: Expanded to include ALL CTA tokens (not just primary)
- */
-export function buildAllowedProofTokens(analysis: any, dataSources?: DataSources): string[] {
-  const normalize = (s: string): string => s.toLowerCase().trim().replace(/\s+/g, ' ')
-  
-  // Get location-based proof tokens
-  const locationData = (dataSources as any)?.location
-  const locationPhraseProof = locationData?.enrichment?.micro?.area_type === 'waterfront' ? 'ved åen'
-    : locationData?.enrichment?.micro?.area_type === 'transit_hub' ? 'ved stationen'
-    : locationData?.enrichment?.micro?.area_type === 'shopping_street' ? 'på gågaden'
-    : ''
-  const cityProof = locationData?.enrichment?.macro?.city || ''
-  const canonicalLocationHook = locationPhraseProof && cityProof ? `${locationPhraseProof} i ${cityProof}` : ''
-  
-  // Get menu/CTA anchors from analysis (must match Prompt B extraction logic)
-  const menuAnchors = analysis?.signals?.core_offerings?.must_use_phrases || []
-  const topMenuItems = ((dataSources as any)?.menu || [])
-    .filter((item: any) => item.name && item.name.length > 3)
-    .slice(0, 6)
-    .map((item: any) => item.name)
-  
-  const ctaAnchors = analysis?.signals?.cta_anchors?.must_use_phrases || []
-  
-  // Get ALL CTA texts from website analysis (v4.10.0: expanded from just primary)
-  const websiteAnalysis = (dataSources as any)?.websiteAnalysis
-  const allCtaTexts = websiteAnalysis?.cta_texts || []
-  
-  // Also include headers as they often contain key phrases
-  const headers = websiteAnalysis?.headers || []
-  
-  // v4.11.1: Add hook LABELS from Prompt A (not just evidence quotes)
-  // AI often references hooks by label (e.g., "Distinctive hook #1: Dining by the river")
-  // instead of quoting the exact Danish evidence ("ved åen i Aarhus")
-  const hookLabels: string[] = []
-  const addHookLabels = (items: any[], labelKey: string) => {
-    if (!Array.isArray(items)) return
-    items.slice(0, 8).forEach((item: any) => {
-      const label = String(item?.[labelKey] || '').trim()
-      if (label && label.length > 3) hookLabels.push(label)
-      // Also add the evidence quote if different from label
-      const evidence = String(item?.evidence || '').trim()
-      if (evidence && evidence !== label && evidence.length > 3) hookLabels.push(evidence)
-    })
-  }
-  
-  addHookLabels(analysis?.distinctive_hooks || [], 'hook')
-  addHookLabels(analysis?.physical_space_cues || [], 'cue')
-  addHookLabels(analysis?.rituals_and_moments || [], 'moment')
-  addHookLabels(analysis?.local_identity_cues || [], 'cue')
-  addHookLabels(analysis?.copy_patterns || [], 'pattern')
-  
-  // v4.11.1: Also add usage occasion IDs (e.g., "brunch-to-work", "dinner-to-drinks")
-  const usageOccasionIds = (analysis?.usage_occasions || [])
-    .map((uo: any) => String(uo?.id || '').trim())
-    .filter(Boolean)
-  
-  // v4.11.2: Add content trigger NAMES (e.g., "Waterfront Dining Experience")
-  // AI references these by name in proof like "Based on content trigger 'X'"
-  const contentTriggerNames = (analysis?.content_triggers || [])
-    .map((ct: any) => String(ct?.trigger || '').trim())
-    .filter((name: string) => name.length > 3)
-  
-  const finalTokens = [
-    canonicalLocationHook,
-    ...allCtaTexts, // All CTAs (including "BOOK DIT BORD", "BOOK BORD", etc.)
-    ...ctaAnchors,
-    ...menuAnchors,
-    ...topMenuItems,
-    ...headers.slice(0, 3), // Top 3 headers
-    locationPhraseProof, // Also include just the phrase without city
-    cityProof,
-    ...hookLabels, // v4.11.1: Hook labels and evidence from Prompt A
-    ...usageOccasionIds, // v4.11.1: Usage occasion IDs
-    ...contentTriggerNames // v4.11.2: Content trigger names
-  ].filter(Boolean).map(t => normalize(t))
-  
-  // v4.11.2: Debug logging to verify all expansions are included
-  console.log(`🔧 v4.11.2 Proof tokens: ${finalTokens.length} total (${hookLabels.length} hooks, ${usageOccasionIds.length} occasions, ${contentTriggerNames.length} triggers)`)
-  
-  // Ensure we return at least one token for downstream validators/tests
-  if (finalTokens.length === 0) {
-    finalTokens.push('generic')
-  }
+// ---------------------------------------------------------------------------
+// Error categorization (moved from soft-repairs.ts in v4.14.0)
+// ---------------------------------------------------------------------------
 
-  return finalTokens
+function isHardError(error: string): boolean {
+  const hardPatterns = [
+    /must be (an? )?(string|number|boolean|array|object)/i,
+    /expected.*but got/i,
+    /wrong type/i,
+    /invalid type/i,
+    /missing required/i,
+    /field.*required/i,
+    /(^|")(\w+)" is required/i,
+    /invalid enum/i,
+    /not in allowed set/i,
+    /must be one of:/i,
+    /violates.*constraint/i,
+    /db.*error/i,
+    /unique constraint/i,
+    /invalid json/i,
+    /parse error/i,
+    /malformed/i,
+    /missing "value"/i,
+    /missing "proof"/i,
+    /must be an object.*value.*proof/i
+  ]
+  return hardPatterns.some(pattern => pattern.test(error))
 }
 
 /**
- * Build normalized reference pool from Prompt A analysis
+ * Separates validation errors into hard (must block) and soft (advisory) categories.
  */
-export function buildNormalizedRefs(analysis: any): string[] {
-  const normalize = (s: string): string => s.toLowerCase().trim().replace(/\s+/g, ' ')
-  
-  const referencePool: string[] = []
-  
-  // Add hook tokens (support both structured and legacy top-level shapes)
-  const hookTokens: Array<{ original: string; normalized: string }> = []
-  const structuredHooks = analysis?.structured?.distinctive_hooks || analysis?.distinctive_hooks || []
-  for (const hook of structuredHooks) {
-    if (hook?.hook_text) hookTokens.push({ original: hook.hook_text, normalized: normalize(hook.hook_text) })
-    if (hook?.hook) hookTokens.push({ original: hook.hook, normalized: normalize(hook.hook) })
-    if (hook?.location) hookTokens.push({ original: hook.location, normalized: normalize(hook.location) })
-    if (hook?.offering) hookTokens.push({ original: hook.offering, normalized: normalize(hook.offering) })
-    if (hook?.reference) hookTokens.push({ original: hook.reference, normalized: normalize(hook.reference) })
-  }
-
-  // Add menu/CTA anchors (support structured or top-level)
-  if (analysis?.structured?.menu_anchors) {
-    referencePool.push(...analysis.structured.menu_anchors)
-  } else if (analysis?.menu_anchors) {
-    referencePool.push(...analysis.menu_anchors)
-  }
-  if (analysis?.structured?.cta_anchors) {
-    referencePool.push(...analysis.structured.cta_anchors)
-  } else if (analysis?.cta_anchors) {
-    referencePool.push(...analysis.cta_anchors)
-  }
-
-  // Add content_triggers references and names (legacy and structured)
-  if (Array.isArray(analysis?.content_triggers)) {
-    for (const ct of analysis.content_triggers) {
-      if (ct?.reference) referencePool.push(ct.reference)
-      if (ct?.trigger) referencePool.push(ct.trigger)
+export function categorizeErrors(errors: string[]): {
+  hardErrors: string[]
+  softErrors: string[]
+} {
+  const hardErrors: string[] = []
+  const softErrors: string[] = []
+  for (const error of errors) {
+    if (isHardError(error)) {
+      hardErrors.push(error)
+    } else {
+      softErrors.push(error)
     }
   }
-  
-  // Add hook tokens
-  referencePool.push(...hookTokens.map(t => t.original))
-  
-  // Keep short numeric references like #1, #2 even if shorter than 4 chars
-  return Array.from(new Set(referencePool.map(normalize))).filter(r => {
-    if (!r) return false
-    if (/^#\d+$/.test(r)) return true
-    return r.length >= 4
-  })
+  return { hardErrors, softErrors }
 }
 

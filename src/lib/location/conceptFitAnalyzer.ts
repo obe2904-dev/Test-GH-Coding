@@ -137,7 +137,7 @@ export class ConceptFitAnalyzer {
     expectations: LocationExpectations
   ): { score: 'good' | 'moderate' | 'poor'; details: string } {
     if (!hours) {
-      return { score: 'moderate', details: 'Åbningstider ikke angivet' };
+      return { score: 'moderate', details: t('conceptFit.hours.not_provided') };
     }
     
     const categoryId = expectations.categoryId;
@@ -155,15 +155,15 @@ export class ConceptFitAnalyzer {
       );
       
       if (!hasWeekdayMorning && !hasWeekdayLunch) {
-        return { score: 'poor', details: 'Savner morgenmad og frokosttider på hverdage' };
+        return { score: 'poor', details: t('conceptFit.hours.missing_office_hours') };
       }
       if (!hasWeekdayLunch) {
-        return { score: 'moderate', details: 'Åbner for sent til frokost-rush' };
+        return { score: 'moderate', details: t('conceptFit.hours.too_late_for_lunch') };
       }
       if (hasLunchMenu) {
-        return { score: 'good', details: 'Perfekt match: Frokostmenu i kontorets rytme' };
+        return { score: 'good', details: t('conceptFit.hours.perfect_office_lunch') };
       }
-      return { score: 'good', details: 'Godt match for kontorets rytme' };
+      return { score: 'good', details: t('conceptFit.hours.good_office_match') };
     }
     
     // Transport Hub: needs early/late + continuous + grab-and-go options
@@ -174,12 +174,12 @@ export class ConceptFitAnalyzer {
       );
       
       if (!hasEarlyHours) {
-        return { score: 'moderate', details: 'Pendlere kræver tidlig åbning' };
+        return { score: 'moderate', details: t('conceptFit.hours.commuters_need_early') };
       }
       if (hasBreakfastMenu) {
-        return { score: 'good', details: 'Perfekt: Morgenmenu til pendlere' };
+        return { score: 'good', details: t('conceptFit.hours.perfect_commuter_morning') };
       }
-      return { score: 'good', details: 'Dækker pendler-tider' };
+      return { score: 'good', details: t('conceptFit.hours.covers_commuter_times') };
     }
     
     // Student: needs weekday evenings + late dinner
@@ -190,12 +190,12 @@ export class ConceptFitAnalyzer {
       );
       
       if (!hasEvenings) {
-        return { score: 'moderate', details: 'Studerende efterspørger aftentimer' };
+        return { score: 'moderate', details: t('conceptFit.hours.students_need_evenings') };
       }
       if (hasDinnerMenu) {
-        return { score: 'good', details: 'Perfekt: Aftensmenu til studerende' };
+        return { score: 'good', details: t('conceptFit.hours.perfect_student_evening') };
       }
-      return { score: 'good', details: 'Aftentimer passer til studerende' };
+      return { score: 'good', details: t('conceptFit.hours.evening_suits_students') };
     }
     
     // Waterfront/Tourist: needs weekends + brunch/afternoon options
@@ -206,24 +206,24 @@ export class ConceptFitAnalyzer {
       );
       
       if (!hasWeekendAfternoons) {
-        return { score: 'moderate', details: 'Savner weekend-eftermiddagstrafik' };
+        return { score: 'moderate', details: t('conceptFit.hours.missing_weekend_afternoons') };
       }
       if (hasBrunchMenu) {
-        return { score: 'good', details: 'Perfekt: Brunchmenu til weekend-besøgende' };
+        return { score: 'good', details: t('conceptFit.hours.perfect_weekend_brunch') };
       }
-      return { score: 'good', details: 'Fanger weekend-besøgende' };
+      return { score: 'good', details: t('conceptFit.hours.catches_weekend_visitors') };
     }
     
     // Destination: flexible timing (planned visits) + check for special menus
     if (categoryId === 'destination') {
       const hasSpecialMenus = menuPeriods && menuPeriods.length > 1;
       if (hasSpecialMenus) {
-        return { score: 'good', details: 'Flere menuperioder passer til planlagte besøg' };
+        return { score: 'good', details: t('conceptFit.hours.multiple_periods_destination') };
       }
-      return { score: 'good', details: 'Fleksibelt - folk planlægger besøg' };
+      return { score: 'good', details: t('conceptFit.hours.flexible_destination') };
     }
     
-    return { score: 'moderate', details: 'Acceptabel timing' };
+    return { score: 'moderate', details: t('conceptFit.hours.acceptable') };
   }
   
   /**
@@ -235,7 +235,7 @@ export class ConceptFitAnalyzer {
     expectations: LocationExpectations
   ): { score: 'good' | 'moderate' | 'poor'; details: string } {
     if (!priceLevel) {
-      return { score: 'moderate', details: 'Prisniveau uklart' };
+      return { score: 'moderate', details: t('conceptFit.price.unclear') };
     }
     
     const categoryId = expectations.categoryId;
@@ -243,30 +243,30 @@ export class ConceptFitAnalyzer {
     
     // Student area + premium = challenging but not impossible
     if (categoryId === 'student' && priceLevel === 'premium') {
-      return { score: 'moderate', details: 'Premium i studentområde kræver kvalitetshistorie' };
+      return { score: 'moderate', details: t('conceptFit.price.premium_student_area') };
     }
     
     // Office/City + budget = works for volume
     if ((categoryId === 'office' || categoryId === 'city_centre') && priceLevel === 'budget') {
-      return { score: 'good', details: 'Budget-venligt tiltrækker højt volumen' };
+      return { score: 'good', details: t('conceptFit.price.budget_high_volume') };
     }
     
     // Destination + premium = good match
     if (categoryId === 'destination' && priceLevel === 'premium') {
-      return { score: 'good', details: 'Premium passer til planlagte besøg' };
+      return { score: 'good', details: t('conceptFit.price.premium_destination') };
     }
     
     // High price sensitivity area + premium
     if (priceSensitivity === 'high' && priceLevel === 'premium') {
-      return { score: 'moderate', details: 'Højt prisniveau - fokuser på værdi' };
+      return { score: 'moderate', details: t('conceptFit.price.high_focus_value') };
     }
     
     // Medium price sensitivity + mid pricing
     if (priceSensitivity === 'medium' && priceLevel === 'mid') {
-      return { score: 'good', details: 'Priserne passer godt til området' };
+      return { score: 'good', details: t('conceptFit.price.good_match') };
     }
     
-    return { score: 'moderate', details: 'Prisniveau acceptabelt' };
+    return { score: 'moderate', details: t('conceptFit.price.acceptable') };
   }
   
   /**
@@ -280,7 +280,7 @@ export class ConceptFitAnalyzer {
     expectations: LocationExpectations
   ): { score: 'good' | 'moderate' | 'poor'; details: string } {
     if (!serviceModel) {
-      return { score: 'moderate', details: 'Servicemodel uklar' };
+      return { score: 'moderate', details: t('conceptFit.service.unclear') };
     }
     
     const categoryId = expectations.categoryId;
@@ -289,9 +289,9 @@ export class ConceptFitAnalyzer {
     // Transport hub needs grab-and-go
     if (categoryId === 'transport_hub') {
       if (serviceModel === 'takeaway' || serviceModel === 'both') {
-        return { score: 'good', details: 'Takeaway passer pendlere' };
+        return { score: 'good', details: t('conceptFit.service.takeaway_commuters') };
       }
-      return { score: 'poor', details: 'Pendlingzone kræver hurtig service' };
+      return { score: 'poor', details: t('conceptFit.service.hub_needs_quick') };
     }
     
     // Office benefits from takeaway + fast lunch options
@@ -300,14 +300,14 @@ export class ConceptFitAnalyzer {
       
       if (serviceModel === 'both') {
         if (hasLunchMenu) {
-          return { score: 'good', details: 'Perfekt: Både spisning og takeaway med frokostmenu' };
+          return { score: 'good', details: t('conceptFit.service.perfect_office_both') };
         }
-        return { score: 'good', details: 'Både spisning og takeaway fanger travle' };
+        return { score: 'good', details: t('conceptFit.service.office_both_good') };
       }
       if (serviceModel === 'dine-in' && speedExpectation === 'fast') {
-        return { score: 'moderate', details: 'Frokost-gæster vil have fart på' };
+        return { score: 'moderate', details: t('conceptFit.service.lunch_needs_speed') };
       }
-      return { score: 'moderate', details: 'Servicemodel acceptabel' };
+      return { score: 'moderate', details: t('conceptFit.service.acceptable') };
     }
     
     // Destination: dine-in is expected + multiple menu periods adds value
@@ -316,13 +316,13 @@ export class ConceptFitAnalyzer {
       
       if (serviceModel === 'dine-in') {
         if (hasMultipleMenus) {
-          return { score: 'good', details: 'Perfekt: Folk kommer for oplevelsen og valgmuligheder' };
+          return { score: 'good', details: t('conceptFit.service.perfect_destination_multi') };
         }
-        return { score: 'good', details: 'Folk kommer for oplevelsen' };
+        return { score: 'good', details: t('conceptFit.service.destination_experience') };
       }
     }
     
-    return { score: 'moderate', details: 'Servicestil fungerer' };
+    return { score: 'moderate', details: t('conceptFit.service.works') };
   }
   
   /**
@@ -363,8 +363,8 @@ export class ConceptFitAnalyzer {
     fitLevel: 'strong' | 'moderate' | 'challenging',
     categoryDisplayName: string,
     hoursFit: { score: string; details: string },
-    priceFit: { details: string },
-    serviceFit: { details: string },
+    priceFit: { score: string; details: string },
+    serviceFit: { score: string; details: string },
     expectations: LocationExpectations
   ): { one_liner: string; best_marketing_angle: string } {
     const categoryName = categoryDisplayName; // Use actual category name from UI
@@ -377,10 +377,9 @@ export class ConceptFitAnalyzer {
     }
     
     if (fitLevel === 'challenging') {
-      // Map internal detail checks to i18n keys (UI only)
-      const mainIssueKey = hoursFit.details.includes('Savner')
+      const mainIssueKey = hoursFit.score === 'poor'
         ? 'conceptFit.ui.issue.adjust_hours'
-        : priceFit.details.includes('kræver')
+        : priceFit.score === 'moderate'
         ? 'conceptFit.ui.issue.strengthen_value'
         : 'conceptFit.ui.issue.adjust_service';
 
@@ -401,10 +400,10 @@ export class ConceptFitAnalyzer {
     const angles = expectations.winningAngles;
     
     if (fitLevel === 'strong') {
-      return `${angles[0]} + ${angles[1] || 'kvalitet'}`;
+      return `${angles[0]} + ${angles[1] || t('conceptFit.fallback.quality')}`;
     }
     
-    return `${angles[1] || 'kvalitet'} + ${angles[2] || 'værdi'}`;
+    return `${angles[1] || t('conceptFit.fallback.quality')} + ${angles[2] || t('conceptFit.fallback.value')}`;
   }
   
   /**
@@ -437,17 +436,17 @@ export class ConceptFitAnalyzer {
     
     // Content emphasis based on fit
     if (fitLevel === 'strong') {
-      contentEmphasis.push('Fremhæv placering og bekvemmelighed');
-      contentEmphasis.push('Brug områdets momentum i content');
-      contentEmphasis.push('Fokuser på consistency og tilgængelighed');
+      contentEmphasis.push(t('conceptFit.marketing.strong_1'));
+      contentEmphasis.push(t('conceptFit.marketing.strong_2'));
+      contentEmphasis.push(t('conceptFit.marketing.strong_3'));
     } else if (fitLevel === 'moderate') {
-      contentEmphasis.push('Byg kvalitets- og værdikommunikation');
-      contentEmphasis.push('Adresser potentielle forbehold proaktivt');
-      contentEmphasis.push('Fremhæv unikke styrker');
+      contentEmphasis.push(t('conceptFit.marketing.moderate_1'));
+      contentEmphasis.push(t('conceptFit.marketing.moderate_2'));
+      contentEmphasis.push(t('conceptFit.marketing.moderate_3'));
     } else {
-      contentEmphasis.push('Styrk værdikommunikation kraftigt');
-      contentEmphasis.push('Brug testimonials og beviser');
-      contentEmphasis.push('Skab klare reasons-to-visit');
+      contentEmphasis.push(t('conceptFit.marketing.challenging_1'));
+      contentEmphasis.push(t('conceptFit.marketing.challenging_2'));
+      contentEmphasis.push(t('conceptFit.marketing.challenging_3'));
     }
     
     // Add area-specific emphasis
@@ -455,13 +454,13 @@ export class ConceptFitAnalyzer {
     
     // Timing tweaks
     if (hoursFit.score === 'moderate' || hoursFit.score === 'poor') {
-      timingTweaks.push('Overvej justeringer i åbningstider');
+      timingTweaks.push(t('conceptFit.timing.adjust'));
     }
     if (expectations.categoryId === 'waterfront' || expectations.categoryId === 'tourist') {
-      timingTweaks.push('Fokuser ekstra på weekends og sæson');
+      timingTweaks.push(t('conceptFit.timing.seasonal_focus'));
     }
     if (expectations.categoryId === 'destination') {
-      timingTweaks.push('Fokuser på reservationer og parkeringsinformation');
+      timingTweaks.push(t('conceptFit.timing.reservation_info'));
     }
     
     // CTA style
@@ -495,39 +494,39 @@ export class ConceptFitAnalyzer {
       if (hoursFit.score === 'poor' || hoursFit.score === 'moderate') {
         adjustments.push({
           type: 'timing',
-          suggestion: 'Juster åbningstider til områdets peak-tider'
+          suggestion: t('conceptFit.adjust.timing')
         });
       }
       
-      if (priceFit.score === 'moderate' && priceFit.details.includes('kræver')) {
+      if (priceFit.score === 'moderate') {
         adjustments.push({
           type: 'positioning',
-          suggestion: 'Styrk kvalitets- og værdikommunikation i content'
+          suggestion: t('conceptFit.adjust.positioning')
         });
       }
       
       if (serviceFit.score === 'poor') {
         adjustments.push({
           type: 'offer',
-          suggestion: 'Tilføj hurtig-service eller takeaway option'
+          suggestion: t('conceptFit.adjust.service')
         });
       }
       
       if (expectations.categoryId === 'student' && priceFit.score !== 'good') {
         adjustments.push({
           type: 'offer',
-          suggestion: 'Overvej student-rabatter eller værdi-bundles'
+          suggestion: t('conceptFit.adjust.student')
         });
       }
       
       if (expectations.categoryId === 'destination') {
         adjustments.push({
           type: 'positioning',
-          suggestion: 'Fremhæv destinationens oplevelse og praktisk info (parkering, adgang)'
+          suggestion: t('conceptFit.adjust.destination_positioning')
         });
         adjustments.push({
           type: 'offer',
-          suggestion: 'Promover reservationer, pakkeløsninger eller køre-til-tilbud'
+          suggestion: t('conceptFit.adjust.destination_offer')
         });
       }
     }
@@ -548,19 +547,19 @@ export class ConceptFitAnalyzer {
     const watchouts: string[] = [];
     
     if (fitLevel === 'challenging') {
-      watchouts.push('Konceptet kræver stærk markedsføring for at lykkes her');
+      watchouts.push(t('conceptFit.watchout.challenging'));
     }
     
     if (expectations.categoryId === 'tourist' || expectations.categoryId === 'waterfront') {
-      watchouts.push('Området er sæsonpåvirket - planlæg indhold derefter');
+      watchouts.push(t('conceptFit.watchout.seasonal'));
     }
     
     if (priceFit.score === 'poor') {
-      watchouts.push('Prisniveau kan afskrække - fokuser på unique value proposition');
+      watchouts.push(t('conceptFit.watchout.price'));
     }
     
     if (hoursFit.score === 'poor') {
-      watchouts.push('Åbningstider matcher ikke områdets rush - risk for missed opportunities');
+      watchouts.push(t('conceptFit.watchout.hours'));
     }
     
     return watchouts.slice(0, 3);
@@ -670,7 +669,7 @@ export class ConceptFitAnalyzer {
         one_liner: t('conceptFit.ui.default_one_liner'),
         best_marketing_angle: t('conceptFit.ui.default_best_angle')
       },
-      fit_reasons: ['Lokationstype kræver yderligere analyse'],
+      fit_reasons: [t('conceptFit.default_reason')],
       marketing_implications: {
         content_emphasis: ['Kvalitet', 'Service', 'Værdi'],
         cta_style: 'Friendly invite',

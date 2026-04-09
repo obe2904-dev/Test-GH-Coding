@@ -80,6 +80,40 @@
       "connect": "Forbind dine sociale medier konti",
       "firstPost": "Opret dit første opslag",
       "schedule": "Planlæg indhold for ugen"
+    },
+    "suggestionsReady": "Dine AI-ideer til i dag",
+    "suggestionsSubtext": "Tryk på en idé for at skrive opslaget.",
+    "headlinePromptFallback": "Få AI-ideer til dit næste opslag",
+    "aiIdeasDescription": "Lad AI foreslå 3 ideer til dagens opslag baseret på dit menukort og vejret 🌤️",
+    "generateIdeas": "Generér ideer",
+    "upgradeNudge": "Vil du have flere AI-ideer per dag?",
+    "upgradeNudgeSubtext": "Opgrader til Smart eller Pro for ubegrænsede daglige ideer.",
+    "writeOwnIdea": "Skriv din egen idé i stedet",
+    "regenerateIdeas": "🔄 Generér nye ideer",
+    "generatePostWithAI": "Generér opslag med AI",
+    "whyThisPost": "💡 Hvorfor dette opslag?",
+    "cameraOrPhone": "Kamera eller telefon",
+    "weatherIn": "Vejret i",
+    "weatherValidUntil": "Gælder",
+    "suggestedTimeToday": "i dag",
+    "suggestedTimeTomorrow": "i morgen",
+    "contentType": {
+      "menu_item": "Produkt",
+      "atmosphere": "Stemning",
+      "behind_scenes": "Bag kulisserne"
+    },
+    "timeReason": {
+      "08:00": "Morgenkunder på vej",
+      "09:00": "Før brunchen starter",
+      "10:00": "Formiddagspause",
+      "11:00": "Beslutning om frokost",
+      "12:00": "Frokostpause",
+      "13:00": "Middagspause",
+      "14:00": "Eftermiddagspause",
+      "16:00": "Fyraften",
+      "17:00": "Aftensmål begynder",
+      "18:00": "Afteninspiration",
+      "20:00": "Aftenstemning"
     }
   },
   "common": {
@@ -94,7 +128,6 @@
     "edit": "Rediger",
     "unsavedChanges": "Du har ændringer, der ikke er gemt. Er du sikker på, du vil forlade siden?"
   },
-
   "operations": {
     "title": "Drift & Åbningstider",
     "subtitle": "Operationel information om din virksomhed",
@@ -138,8 +171,12 @@
         "luxury": "Luksus"
       }
     },
-    "busy": { "title": "Travle Perioder" },
-    "slow": { "title": "Stille Perioder" },
+    "busy": {
+      "title": "Travle Perioder"
+    },
+    "slow": {
+      "title": "Stille Perioder"
+    },
     "periods": {
       "morning": "Morgen",
       "lunch": "Frokost",
@@ -188,7 +225,28 @@
     "privacy": "Privatliv",
     "terms": "Vilkår",
     "profile": "Min Profil",
-    "upgrade": "Opgrader"
+    "upgrade": "Opgrader",
+    "yourBusiness": "Din Forretning",
+    "whatWeOffer": "Det vi tilbyder",
+    "setup": {
+      "profile": "1. Virksomhedsprofil",
+      "menu": "2. Det vi tilbyder",
+      "location": "3. Lokation",
+      "brand": "4. Brand Profil (AI)"
+    },
+    "badgeNew": "NY",
+    "sectionContent": "Indhold",
+    "writeSelf": "Skriv Selv",
+    "dailySuggestion": "Dagens forslag",
+    "weeklyPlan": "Ugentlig plan",
+    "sectionPublishing": "Publicering",
+    "tier": {
+      "free": "Gratis Plan",
+      "standard": "Smart Plan",
+      "premium": "Pro Plan",
+      "upgrade": "Opgrader →",
+      "unlocked": "Alt låst op"
+    }
   },
   "myProfile": {
     "title": "Min Profil",
@@ -301,7 +359,6 @@
       "yesterday": "I går"
     }
   },
-  
   "business": {
     "homepageUrl": "Virksomhedens Hjemmeside",
     "homepageDescription": "Indtast din virksomheds hjemmeside URL, så vores AI kan analysere dine åbningstider, tjenester og andre vigtige informationer.",
@@ -318,12 +375,9 @@
     "reviewAndEdit": "Gennemse og rediger informationen nedenfor",
     "autoDetected": "Auto-opdaget",
     "basicInfo": {
-      "title": "Grundlæggende Information",
-      "businessName": "Virksomhedsnavn",
-      "businessType": "Virksomhedstype",
-      "description": "Virksomhedsbeskrivelse",
-      "logo": "Virksomhedslogo",
-      "selectType": "Vælg virksomhedstype"
+      "businessNamePlaceholder": "Din virksomheds navn",
+      "categoryPlaceholder": "fx café, restaurant, bar, frisør, tøjbutik",
+      "categoryHint": "Skriv det, du selv kalder din forretning i hverdagen (fx \"café\", \"herrefrisør\", \"tøjbutik\")."
     },
     "businessTypes": {
       "restaurant": "Restaurant/Café",
@@ -344,11 +398,6 @@
       "locationLabel": "By/Lokation *",
       "locationPlaceholder": "f.eks. København",
       "saveButton": "Gem & Begynd at Skabe Bedre Indhold"
-    },
-    "basicInfo": {
-      "businessNamePlaceholder": "Din virksomheds navn",
-      "categoryPlaceholder": "fx café, restaurant, bar, frisør, tøjbutik",
-      "categoryHint": "Skriv det, du selv kalder din forretning i hverdagen (fx \"café\", \"herrefrisør\", \"tøjbutik\")."
     },
     "websiteAnalysis": {
       "badge": "AVANCERET (Valgfri)",
@@ -393,42 +442,104 @@
     }
   },
   "menu": {
+    "addManual": "Tilføj menu manuelt",
+    "add": {
+      "link": "Indsæt link",
+      "text": "Indtast menu selv",
+      "linkPlaceholder": "https://eksempel.dk/menu",
+      "add": "Tilføj",
+      "analyze": "Analysér"
+    },
+    "item": {
+      "name": "Navn",
+      "description": "Beskrivelse",
+      "price": "Pris"
+    },
+    "addManualText": "Tilføj menu som tekst",
+    "findOn": "Find menu på",
+    "noLinksFound": "Ingen menusider fundet på hjemmesiden",
+    "extractFailed": "Menuudtræk mislykkedes. Prøv igen.",
+    "savePricingFailed": "Kunne ikke gemme priser. Prøv igen.",
     "header": {
-      "title": "Menukort",
-      "subtitle": "AI-drevet menu-udtrækning",
-      "subtitle2": "AI-drevet menu-udtrækning og redigering"
+      "title": "Det vi tilbyder",
+      "subtitle": "Tilføj din menu, så vi kan lave relevant indhold",
+      "subtitle2": "Din menu og dine tilbud"
     },
     "free": {
-      "upgradeTitle": "Opgrader for menu-udtrækning",
-      "description": "Med Smart eller Pro kan du automatisk udtrække menuer fra din hjemmeside, redigere menuret, og få AI til at skabe kontekst-bevidste opslag baseret på dit menukort.",
-      "cta": "Se priser og opgrader"
-    },
-    "error": {
-      "noWebsite": "Ingen hjemmeside angivet",
-      "analyzeFailed": "Kunne ikke analysere hjemmeside",
-      "noMenusFound": "Ingen menukort fundet på hjemmesiden",
-      "linkAlreadyAdded": "Dette link er allerede tilføjet",
-      "addFailed": "Kunne ikke tilføje menu",
-      "analyzeMenuFailed": "Kunne ikke analysere menu",
-      "saveEdit": "Kunne ikke gemme ændringer"
-    },
-    "info": {
-      "noNewMenus": "Ingen nye menuer fundet - alle menuer eksisterer allerede"
-    },
-    "delete": {
-      "inProgress": "Kan ikke slette menuer mens en udtrækning er i gang. Vent venligst.",
-      "confirm": "Slet denne menu?"
+      "upgradeTitle": "Lås op for menufunktioner",
+      "cta": "Opgrader for at tilføje menu"
     },
     "batch": {
-      "extracting": "Udtrækker menu...",
+      "extracting": "Udtrækker...",
       "inQueue": "i kø",
-      "helper": "Menuer behandles én ad gangen for at sikre kvalitet. Lad siden være åben."
+      "helper": "Vi udtrækker automatisk menupunkter fra hver kilde"
     },
-    "findOn": "Find menuer på",
     "detect": {
-      "searching": "Søger...",
-      "find": "Find menuer"
-    }
+      "find": "Find menusider",
+      "searching": "Søger..."
+    },
+    "error": {
+      "noWebsite": "Tilføj venligst en hjemmeside-URL til din virksomhedsprofil først",
+      "analyzeFailed": "Kunne ikke analysere hjemmesiden. Prøv igen.",
+      "noMenusFound": "Ingen menusider fundet på hjemmesiden",
+      "addFailed": "Kunne ikke tilføje menukilde. Prøv igen.",
+      "linkAlreadyAdded": "Dette link er allerede tilføjet",
+      "saveEdit": "Kunne ikke gemme redigering. Prøv igen.",
+      "analyzeMenuFailed": "Kunne ikke analysere menutekst. Prøv igen."
+    },
+    "delete": {
+      "confirm": "Er du sikker på, at du vil slette denne menu?",
+      "inProgress": "Sletter menu..."
+    },
+    "sources": {
+      "heading": "{{count}} menusider fundet",
+      "subheading": "Vælg de sider du vil importere",
+      "selectAll": "Vælg alle",
+      "deselectAll": "Fravælg alle",
+      "howItWorks": "Sådan fungerer det",
+      "fetchSelected": "Importer {{count}} valgte",
+      "processing": "Behandler {{count}}...",
+      "processingHint": "Dette kan tage et øjeblik",
+      "fromLabel": "Fra: {{label}}",
+      "itemCount": "{{count}} menupunkter",
+      "avgPrice": "gns. {{price}} kr.",
+      "statusPending": "Afventer",
+      "statusExtracting": "Udtrækker...",
+      "statusError": "Fejl",
+      "defaultTitle": "Menusiden",
+      "pendingHint": "Venter på at blive behandlet",
+      "collapse": "Skjul",
+      "expand": "Vis menupunkter",
+      "tooltipCannotDelete": "Kan ikke slette — udtrækker i øjeblikket",
+      "tooltipDeleteSource": "Slet kilde",
+      "tooltipRemoveFromList": "Fjern fra liste",
+      "emptyCategory": "Ingen menupunkter i denne kategori",
+      "emptyTitle": "Ingen menupunkter fundet",
+      "emptySubtitle": "Prøv at tilføje menupunkter manuelt",
+      "emptyState": "Ingen menulinks tilføjet endnu",
+      "emptyStateHint": "Find menusider fra din hjemmeside eller tilføj et link manuelt",
+      "emptyState2": "Ingen menutekst tilføjet endnu",
+      "emptyState2Hint": "Indæt din menu som tekst for at udtrække menupunkter automatisk"
+    },
+    "pricing": {
+      "heading": "Priser",
+      "edit": "Rediger priser",
+      "save": "Gem",
+      "saving": "Gemmer...",
+      "cancel": "Annuller",
+      "levelFieldLabel": "Prisniveau",
+      "levelPlaceholder": "Vælg prisniveau...",
+      "levelLabel": "Prisniveau: {{level}}",
+      "budget": "Budgetvenlig",
+      "moderate": "Moderat",
+      "upscale": "Højt niveau",
+      "fineDining": "Finere restauration",
+      "avgCheckLabel": "Gennemsnitlig pris per kuvert",
+      "avgLabel": "gns. {{avg}} kr.",
+      "notSet": "Priser ikke angivet"
+    },
+    "backToProfile": "<-Tilbage: Virksomhedsprofil",
+    "nextLocation": "Næste: Lokation →"
   },
   "createPost": {
     "title": "Lav Opslag",
@@ -452,7 +563,17 @@
       "create": "Vis",
       "createSubtitle": "Vælg dit billede",
       "publish": "Udgiv",
-      "publishSubtitle": "Planlæg & Post"
+      "publishSubtitle": "Planlæg & Post",
+      "writeSelf": "Skriv Selv",
+      "aiIdeas": "AI Forslag",
+      "weeklyPlan": "Ugeplan",
+      "writeText": "Skriv tekst",
+      "editText": "Tilret tekst",
+      "textReady": "Tekst klar",
+      "choosePhoto": "Vælg billede",
+      "photoReady": "Billede klar",
+      "pending": "Afventer",
+      "schedule": "Planlæg"
     },
     "generate": {
       "title": "Lav Dit Opslag",
@@ -491,7 +612,7 @@
       "generate": "Generér",
       "timeEstimate": "Estimeret resterende tid",
       "minutes": "minutter",
-      "continue": "Fortsæt til Vis",
+      "continue": "Fortsæt til Design",
       "aiIdea1Title": "Weekend Special Tilbud",
       "aiIdea1Headline": "🔥 Weekend Special: 20% Rabat På Alt!",
       "aiIdea1Text": "Kun denne weekend! Få 20% rabat på alle vores produkter. Perfekt tid til at forkæle dig selv eller finde den særlige gave. Besøg os i butikken eller shop online. Tidsbegrænset tilbud!",
@@ -597,7 +718,9 @@
         "enterTextFirst": "Indtast hvad du gerne vil skrive, før AI kan hjælpe dig",
         "tellMoreAbout": "Fortæl lidt mere - hvad skal opslaget handle om?",
         "meaningfulText": "Teksten skal have en klar betydning. Skriv hvad du gerne vil fortælle dine kunder."
-      }
+      },
+      "hashtagInsightSharedExtras": "Hashtags er fordelt i {{sharedCount}} delte tags og {{instagramExtras}} ekstra til Instagram, så du når begge platforme.",
+      "hashtagInsightSharedOnly": "Hashtags fungerer på både Facebook og Instagram uden ekstra platform-specifikke tags."
     },
     "photoAnalysis": {
       "title": "AI Analyse & Forslag",
@@ -636,7 +759,8 @@
         "low": "LAV"
       },
       "hideAnalysis": "Skjul Analyse",
-      "analysisError": "Billedanalyse fejlede. Prøv venligst igen."
+      "analysisError": "Billedanalyse fejlede. Prøv venligst igen.",
+      "reanalyzeButton": "Analyser igen"
     },
     "create": {
       "title": "Tilføj Foto & Forhåndsvisning",
@@ -692,7 +816,7 @@
       "yourBusiness": "Din Virksomhed",
       "justNow": "Lige nu",
       "back": "Tilbage",
-      "continue": "Fortsæt til Planlægning",
+      "continue": "Fortsæt til Publish",
       "aiPickBestPhoto": "Lad AI vælge dit bedste foto",
       "aiAnalyzes": "AI analyserer komposition, belysning og motivfokus for at vælge fotoet med højeste engagement-potentiale",
       "howItWorks": "Sådan fungerer AI Fotoanalyse:",
@@ -703,7 +827,26 @@
       "aiAddition": "Vil du vide mere? Kontakt os i dag!",
       "characters": "tegn",
       "includeEmojis": "Inkluder emojis",
-      "includeHashtags": "Inkluder hashtags"
+      "includeHashtags": "Inkluder hashtags",
+      "applyGrading": "Anvend farvegradering",
+      "crop": "Beskær",
+      "errorPrefix": "Fejl: {{error}}",
+      "ideasInPlan": "Ideer i plan",
+      "mediaAngle": "Vinkel",
+      "mediaIdea": "📷 Medieidé",
+      "mediaIdeaFromPlan": "📷 Medie fra plan",
+      "mediaMotif": "Motiv",
+      "mediaSetting": "Omgivelser",
+      "photoEditFailed": "Fotoredigering fejlede. Prøv igen.",
+      "uploadFailed": "Upload fejlede. Prøv igen.",
+      "videoQuotaExceeded": "Du har brugt alle {{current}} af dine {{limit}} ugentlige videoanalyser. Opgrader for mere.",
+      "videoTooLong": "Denne video er {{duration}} sekunder – kun videoer op til 30 sekunder kan analyseres.",
+      "chooseYourPhoto": "Vælg dit billede",
+      "uploadPreviewDesc": "Upload dit foto — jeg viser dig et realistisk preview.",
+      "uploadingProcessing": "Uploader og behandler billede...",
+      "pleaseWait": "Vent venligst",
+      "clickToUploadMedia": "Klik for at uploade foto eller video",
+      "fileFormats": "JPG, PNG, GIF eller MP4/MOV (maks 30 sek)"
     },
     "publish": {
       "title": "Planlæg & Udgiv",
@@ -746,8 +889,29 @@
       "timeInPast": "Tidspunktet er i fortiden",
       "postsTimeline": "Opslags Tidslinje",
       "chronological": "Kronologisk",
-      "dayNames": ["Søn", "Man", "Tir", "Ons", "Tor", "Fre", "Lør"],
-      "monthNames": ["Januar", "Februar", "Marts", "April", "Maj", "Juni", "Juli", "August", "September", "Oktober", "November", "December"],
+      "dayNames": [
+        "Søn",
+        "Man",
+        "Tir",
+        "Ons",
+        "Tor",
+        "Fre",
+        "Lør"
+      ],
+      "monthNames": [
+        "Januar",
+        "Februar",
+        "Marts",
+        "April",
+        "Maj",
+        "Juni",
+        "Juli",
+        "August",
+        "September",
+        "Oktober",
+        "November",
+        "December"
+      ],
       "locale": "da-DK",
       "postingTo": "Poster til",
       "back": "Tilbage",
@@ -756,7 +920,10 @@
       "publishing": "Udgiver...",
       "scheduling": "Planlægger...",
       "scheduleQuotaExceeded": "Du har nået din månedlige planlægningsgrænse. Opgrader til Smart for ubegrænset planlægning!",
-      "usedThisMonth": "brugt denne måned"
+      "usedThisMonth": "brugt denne måned",
+      "manualPostingRequired": "Manuel opslag påkrævet",
+      "prepareManualPost": "Forbered manuel opslag",
+      "publishNowCta": "Udgiv opslag"
     },
     "progress": {
       "step": "Trin",
@@ -906,21 +1073,19 @@
       "sampleText": "Dit fantastiske opslagsindhold vil vises her!",
       "recentPost1": "Seneste succeshistorie fra vores klienter!",
       "upcomingPost1": "Weekend specielt tilbud til følgere! 🎉"
-    }
-  },
-  "menu": {
-    "addManual": "Tilføj menu manuelt",
-    "add": {
-      "link": "Indsæt link",
-      "text": "Indtast menu selv",
-      "linkPlaceholder": "https://eksempel.dk/menu",
-      "add": "Tilføj",
-      "analyze": "Analysér"
     },
-    "item": {
-      "name": "Navn",
-      "description": "Beskrivelse",
-      "price": "Pris"
+    "editCaption": "Rediger tekst",
+    "hashtagGroupFacebook": "Til Facebook",
+    "hashtagGroupInstagram": "Til Instagram",
+    "hashtagGroupInstagramExtra": "Ekstra til Instagram",
+    "hashtagGroupShared": "Delt på tværs af platforme",
+    "preview": {
+      "heading": "Sådan ser dit opslag ud",
+      "noPlatformsTitle": "Vælg dine sociale medier for at se den rigtige forhåndsvisning",
+      "noPlatformsDesc": "Når jeg ved, hvor du poster, kan jeg vise dig en forhåndsvisning, der passer til hver platform — og automatisk tilpasse størrelsen.",
+      "selectSocialMedia": "Vælg sociale medier",
+      "uploadTitle": "Klik for at uploade",
+      "uploadSubtitle": "Foto eller video"
     }
   },
   "dateFormat": {
@@ -1122,7 +1287,7 @@
     "email": "E-mail",
     "saveSuccess": "Ændringer gemt",
     "saveError": "Kunne ikke gemme ændringer",
-    "upgradeTitle": "Lås op for mere med Smart eller Premium",
+    "upgradeTitle": "Lås op for mere med Smart eller Pro",
     "upgradeDescription": "Få adgang til website analyse, brand voice, nøgleord, og meget mere.",
     "viewPlans": "Se priser",
     "unlockMore": "Lås op for flere funktioner",
@@ -1140,7 +1305,96 @@
       "analysisFailedDesc": "Vi fandt begrænset information.",
       "fillManually": "Udfyld Manuelt",
       "tryAgain": "Prøv Igen"
-    }
+    },
+    "title": "Virksomhedsprofil",
+    "fullSubtitle": "Udfyld din virksomhedsprofil for at komme i gang",
+    "freeSubtitleBasic": "Udfyld det vigtigste for at komme i gang",
+    "loading": "Henter...",
+    "websiteUrlLabel": "Hjemmeside URL",
+    "websiteUrlPlaceholder": "https://www.dinforretning.dk",
+    "analyzeWebsiteButton": "Analysér hjemmeside",
+    "analyzeWebsiteHint": "Vi udtrækker automatisk forretningsoplysninger fra din hjemmeside",
+    "analyzingWebsiteButton": "Analyserer...",
+    "analyzeWebsiteAriaLive": "Analyserer hjemmeside, vent venligst...",
+    "analyzeButton": "Analysér",
+    "analyzeHint": "Opdatér detaljer fra hjemmeside",
+    "analyzingButton": "Analyserer...",
+    "aboutLabel": "Om os",
+    "aboutPlaceholder": "Skriv en kort beskrivelse af din forretning...",
+    "aboutBusinessLabel": "Om forretningen",
+    "aboutBusinessSuffix": "",
+    "aboutCharacterHint": "Beskriv din forretnings karakter og personlighed",
+    "aboutCharacterPlaceholder": "f.eks. Hyggelig, lokal, familievenlig, afslappet",
+    "aboutRunAnalysis": "Generer fra indhold",
+    "aboutUsUrl": "URL til om os-side",
+    "addressLabel": "Adresse",
+    "aiSuggestButton": "AI Forslag",
+    "alertAnalysisError": "Analyse mislykkedes. Prøv igen.",
+    "alertEnterWebsite": "Indtast venligst en hjemmeside-URL først",
+    "alertFetchFailed": "Kunne ikke hente hjemmesidedata. Prøv igen.",
+    "alertFieldsFetched": "Felter opdateret fra hjemmeside",
+    "alertNameRequired": "Forretningsnavn er påkrævet",
+    "alertNotLoggedIn": "Du skal være logget ind",
+    "alertSaveFailed": "Kunne ikke gemme ændringer. Prøv igen.",
+    "basicInfoSection": "Basisoplysninger",
+    "bookingLinkLabel": "Booking link",
+    "cityLabel": "By",
+    "closeButton": "Luk",
+    "countryLabel": "Land",
+    "days": {
+      "man": "Man",
+      "tir": "Tir",
+      "ons": "Ons",
+      "tor": "Tor",
+      "fre": "Fre",
+      "lør": "Lør",
+      "søn": "Søn"
+    },
+    "delivery": "Levering",
+    "editButton": "Rediger",
+    "emailLabel": "E-mail",
+    "generatingCharacter": "Genererer forretningskarakter...",
+    "hoursEmpty": "Ingen åbningstider tilføjet endnu",
+    "hoursHasData": "Åbningstider gemt",
+    "kidsMenu": "Børnemenu",
+    "logoHint": "Upload dit virksomhedslogo",
+    "logoLabel": "Logo",
+    "noChangesStatus": "Ingen ændringer",
+    "notFilled": "Ikke udfyldt",
+    "outdoorSeating": "Udeservering",
+    "outdoorSeatingBadge": "Ude",
+    "parking": "Parkering",
+    "phoneLabel": "Telefon",
+    "postalCodeLabel": "Postnummer",
+    "powerOutlets": "Stikkontakter",
+    "reservationRequired": "Reservation påkrævet",
+    "revertButton": "Fortryd",
+    "saveButton": "Gem",
+    "savedStatus": "Gemt",
+    "sectionAbout": "Om os",
+    "sectionBusiness": "Forretning",
+    "sectionContact": "Kontakt",
+    "sectionHours": "Åbningstider",
+    "sectionLocation": "Placering",
+    "sectionService": "Services",
+    "sectorPlaceholder": "Vælg sektor...",
+    "serviceNotSet": "Ikke angivet",
+    "tableService": "Bordservice",
+    "taglineAiBadge": "AI",
+    "taglineHint": "En kort, mindeværdig tagline for din forretning",
+    "taglineLabel": "Tagline",
+    "taglinePlaceholder": "f.eks. Hvor hvert måltid er en fest",
+    "takeaway": "Takeaway",
+    "typeLabel": "Forretningstype",
+    "typePlaceholder": "f.eks. Restaurant, Café, Bar",
+    "unsavedStatus": "Ugemte ændringer",
+    "upgradeBannerCta": "Opgrader",
+    "upgradeBannerDesc": "Lås op for alle funktioner med en Pro-plan",
+    "upgradeBannerTitle": "Lås op for mere",
+    "websiteLabel": "Hjemmeside",
+    "websitePlaceholder": "https://www.dinforretning.dk",
+    "wifi": "Wi-Fi",
+    "nextMenu": "Næste: Det vi tilbyder →"
   },
   "onboarding": {
     "welcome": "Velkommen! 👋",
@@ -1210,5 +1464,441 @@
       "haze": "Dis",
       "drizzle": "Støvregn"
     }
+  },
+  "brand": {
+    "backToMenu": "<- Tilbage: Lokation",
+    "page": {
+      "generating": "Genererer brandprofil...",
+      "loading": "Henter brandprofil...",
+      "errorTitle": "Fejl",
+      "title": "Brand Profil",
+      "subtitle": "Din AI-genererede brandidentitet og kommunikationsguide",
+      "noBusiness": "Ingen forretning fundet. Kontakt support hvis problemet fortsætter."
+    },
+    "generator": {
+      "title": "Generer din Brandprofil",
+      "description": "Vores AI analyserer din forretning, menu og lokation for at skabe en autentisk brandprofil der matcher din identitet.",
+      "includes": "Din profil inkluderer:",
+      "item": {
+        "essence": "Din unikke identitet på ét sætning",
+        "tone": "Hvordan du kommunikerer",
+        "hooks": "Specifikke vinkler til dine opslag",
+        "banned": "Ord der lyder generiske eller uægte",
+        "audience": "Hvem du taler til",
+        "positioning": "Hvad gør dig unik"
+      },
+      "error": "Fejl:",
+      "generating": "Genererer...",
+      "button": "✨ Generer Brandprofil",
+      "timeEstimate": "Tager ca. 15-25 sekunder"
+    },
+    "progress": {
+      "defaultMessage": "Genererer brandprofil...",
+      "subtitle": "Dette tager typisk 15-25 sekunder",
+      "step1": "Indsamler forretningsdata...",
+      "step2": "Analyserer menu og lokation...",
+      "step3": "Genererer brandidentitet med AI..."
+    },
+    "display": {
+      "regenerate": "🔄 Generer igen",
+      "group1Badge": "Gruppe 1 · Identitet · Læses ved hver generering",
+      "businessType": "Forretningstype",
+      "hideDetails": "Skjul detaljer",
+      "showPositioning": "Vis positionering",
+      "humor": {
+        "low": "Seriøs",
+        "moderate": "Let humoristisk",
+        "high": "Humoristisk"
+      },
+      "voice": {
+        "title": "Stemme",
+        "badge": "Læses ved hver generering",
+        "legacyWarning": "⚠️ Gammel format — generer profilen igen for at få regelbaseret tone-guide",
+        "rationale": "Sådan er stemmeprincipperne udledt",
+        "typicalOpening": "✅ Typisk åbning",
+        "humorLabel": "😄 Humor"
+      },
+      "pillars": {
+        "title": "Content Pillars",
+        "badge": "Læses ved hver generering",
+        "empty": "Ingen content pillars fundet — generer profilen igen."
+      },
+      "limits": {
+        "title": "Grænser",
+        "badge": "Læses ved hver generering",
+        "principle": "⚠️ Skriveprincip",
+        "avoid": "❌ Undgå fx",
+        "signature": "✨ Signatur-fraser",
+        "copy": "Klik for at kopiere",
+        "empty": "Ingen grænser defineret — generer profilen igen."
+      },
+      "strategy": {
+        "title": "Post Strategi",
+        "badge": "Styrer ugentlig post-mix",
+        "goals": {
+          "drive_footfall": "Tiltrækningsstrategi",
+          "build_brand": "Brandopbygning",
+          "retain_loyalty": "Loyalitetstrategi"
+        },
+        "primaryGoal": "Primært mål",
+        "goalBlend": "Mål-fordeling",
+        "rationaleTitle": "💡 Hvorfor denne strategi?",
+        "signalsTitle": "Signaler bag strategien",
+        "tips": {
+          "footfall": "Besøgssignal",
+          "brand": "Brand-anker",
+          "loyalty": "Loyalitetshook"
+        },
+        "rationale": {
+          "footfall_with_signals": "**{{label}} ({{pct}}%)** er valgt som primært mål fordi forretningen har klare besøgssignaler: {{signals}}.",
+          "footfall_no_signals": "**{{label}} ({{pct}}%)** er primært mål — forretningstypen trækker gæster via konkrete besøgsanledninger.",
+          "brand_with_anchors": "**{{label}} ({{pct}}%)** prioriteres fordi forretningens signatur-elementer — {{anchors}} — kræver tydelig online identitet.",
+          "brand_no_anchors": "**{{label}} ({{pct}}%)** er inkluderet for at styrke den visuelle og redaktionelle identitet over tid.",
+          "loyalty_with_hooks": "**{{label}} ({{pct}}%)** understøttes af tilbagevendende gæster og vaner: {{hooks}}.",
+          "loyalty_no_hooks": "**{{label}} ({{pct}}%)** holder stamgæsterne engagerede mellem besøg."
+        }
+      },
+      "background": {
+        "title": "Baggrundskontekst",
+        "audience": "Målgruppe",
+        "unverified": "ikke verificeret",
+        "samplePosts": "Eksempel-opslag",
+        "generatorInput": "bruges som generator-input",
+        "story": "Brand-historie",
+        "ourStory": "Vores historie",
+        "differentiator": "Hvad skiller os ud"
+      }
+    },
+    "archetype": {
+      "voiceOptions": "Stemmemuligheder",
+      "recommended": "anbefalet",
+      "activeVoice": "Aktiv stemme",
+      "inactiveVoice": "Ikke aktiv",
+      "writingRules": "Skriveregler",
+      "examplePosts": "Eksempel-opslag",
+      "currentVoice": "Nuværende stemme",
+      "useThisVoice": "Brug denne stemme",
+      "switching": "Skifter…",
+      "fallbackTitle": "STEMME",
+      "error": "Noget gik galt — prøv igen.",
+      "sources": {
+        "website": {
+          "title": "DIN HJEMMESIDE",
+          "subtitle": "Hvad hjemmesiden faktisk kommunikerer i dag"
+        },
+        "ai_enriched": {
+          "title": "AI ANBEFALING",
+          "subtitle": "Hvad der virker bedre på sociale medier"
+        }
+      }
+    }
+  },
+  "location": {
+    "title": "Lokation",
+    "subtitle": "Forstå din lokations styrker og muligheder",
+    "addressLabel": "Din adresse",
+    "addressNote": "Hentet fra din virksomhedsprofil.",
+    "addressNoteLink": "Opdatér adresse",
+    "analyzeButton": "Analysér lokation",
+    "analyzing": "Analyserer...",
+    "autoSaving": "Gemmer automatisk...",
+    "backToProfile": "<-Tilbage: Det vi tilbyder",
+    "continue": "Fortsæt",
+    "errorAnalyzeFailed": "Analyse mislykkedes. Prøv igen.",
+    "errorNoAddress": "Tilføj venligst en adresse i din virksomhedsprofil først",
+    "errorSaveFailed": "Kunne ikke gemme. Prøv igen.",
+    "fitChallenging": "Udfordrende",
+    "fitModerate": "Moderat match",
+    "fitStrong": "Godt match",
+    "fitUnknown": "Ukendt",
+    "forceReanalyze": "Re-analysér",
+    "loadingAddress": "Henter adresse...",
+    "locationScore": "Lokationsscore: {{score}}",
+    "marketingStrategy": "Marketingstrategi",
+    "nextMenu": "Næste: Brand Profile →",
+    "noAddress": "Ingen adresse tilføjet",
+    "noAddressHint": "Tilføj din adresse i virksomhedsprofilen for at analysere din placering",
+    "reanalyze": "Re-analysér",
+    "reanalyzeWithAge": "Re-analysér ({{count}} dage gammel)",
+    "cacheValid": "Analyse fra {{count}} dage siden",
+    "strategyFocus": "Strategifokus",
+    "strengths": "Styrker",
+    "addAddressLink": "Tilføj adresse →",
+    "breadcrumb": {
+      "profile": "Virksomhedsprofil",
+      "menu": "Det vi tilbyder",
+      "location": "Lokation",
+      "brand": "Brand Profil"
+    }
+  },
+  "weeklyPlan": {
+    "loading": "Indlæser ugentlig plan...",
+    "progress": {
+      "stage1Title": "Ugentlig plan",
+      "stage1Sub": "Vælg opslag",
+      "stage2Title": "Design",
+      "imageReady": "Billede klar",
+      "pending": "Afventer",
+      "stage3Title": "Publish"
+    },
+    "weekToggle": {
+      "current": "Denne uge",
+      "next": "Næste uge"
+    },
+    "empty": {
+      "welcomeBack": "Velkommen tilbage!",
+      "noPlanCurrent": "Ingen plan for denne uge",
+      "noPlanYet": "Ingen ugentlig plan endnu",
+      "descExisting": "Du har en gemt plan for denne uge. Vælg om du vil indlæse den eller generere en ny.",
+      "descCurrentWeek": "Ingen plan genereret for indeværende uge — du kan stadig generere en plan og komme i gang med opslag.",
+      "descNextWeek": "Lad AI'en generere en skræddersyet indholdsplan til næste uge — bygget på din virksomhedsprofil, din type af sted, lokation og ugens aktuelle forhold.",
+      "loadExisting": "Indlæs Eksisterende Plan",
+      "generateNew": "Generer Ny Plan",
+      "generateWeekly": "Generer Ugentlig Plan"
+    },
+    "generating": {
+      "title": "🎨 AI'en arbejder på din ugentlige plan...",
+      "subtitle": "Dette tager typisk 2–3 minutter. AI'en laver naturlige, autentiske danske captions til hvert opslag.",
+      "step1Title": "Analyserer dit brand og menukort",
+      "step1Desc": "Brand voice, værdier, sæson og menu items",
+      "step2Title": "Finder de bedste content opportunities",
+      "step2Desc": "Baseret på sæson, vejr og performance",
+      "step3Title": "Genererer AI captions med Gemini 2.5 Flash",
+      "step3Desc": "Autentisk dansk, brand-konsistent, naturlig tone",
+      "step4Title": "Samler alt til færdig ugentlig plan",
+      "step4Desc": "Visuel direction, timing, platform optimization",
+      "footer": "AI'en kører et fuldt strategisk pipeline. Siden opdaterer automatisk når din plan er klar."
+    },
+    "context": {
+      "label": "Ugens kontekst",
+      "outdoorOpportunity": "☀️ Udendørs mulighed",
+      "indoorFocus": "🌧 Indendørs fokus",
+      "payPeriod": "💰 Lønningsperiode"
+    },
+    "regenModal": {
+      "title": "Erstat eksisterende plan?",
+      "desc": "Dette vil erstatte din nuværende ugentlige plan. Alle ændringer vil gå tabt. Er du sikker på, at du vil fortsætte?",
+      "cancel": "Annuller",
+      "confirm": "Generer Ny Plan"
+    },
+    "ownerNote": {
+      "label": "Noget særligt denne uge? (valgfrit)",
+      "placeholder": "Fx: Vi lancerer ny brunchret lørdag, eller vi fejrer 5-års jubilæum..."
+    },
+    "errors": {
+      "noExistingPlan": "Kunne ikke finde eksisterende plan",
+      "loadFailed": "Kunne ikke indlæse plan",
+      "saveFailed": "Kunne ikke gemme ændringer",
+      "strategyFailed": "Strategigenereringen tog for lang tid. Klik på 'Generer ugeplanen' for at prøve igen."
+    },
+    "archetype": {
+      "morning_cafe": "Morgen-café",
+      "brunch_cafe": "Brunch-café",
+      "all_day_cafe": "All-day café",
+      "lunch_restaurant": "Frokostrestaurant",
+      "dinner_restaurant": "Aftenrestaurant",
+      "full_service_restaurant": "Full-service",
+      "evening_bar": "Aftenbar",
+      "late_night_bar": "Nattelivsbar",
+      "wine_bar": "Vinbar",
+      "fast_casual": "Fast casual"
+    },
+    "weather": {
+      "staleAlert": "Vejrudsigten er nu mere præcis end da planen blev genereret — opdater vejret for de nyeste estimater til weekenden.",
+      "headerCurrent": "Vejrudsigt denne uge",
+      "headerNext": "Vejrudsigt næste uge",
+      "headerWeek": "Vejrudsigt uge {{n}}",
+      "updating": "Opdaterer...",
+      "updateBtn": "↻ Opdater vejr",
+      "noChange": "Vejret er ikke ændret væsentligt — ingen grund til at generere en ny plan.",
+      "changedNoImpact": "Vejret har ændret sig, men ingen opslag i planen ser ud til at blive påvirket.",
+      "changedImpact_one": "Vejret har ændret sig markant — ét opslag kan være påvirket: {{posts}}",
+      "changedImpact_other": "Vejret har ændret sig markant — {{count}} opslag kan være påvirket: {{posts}}",
+      "considerNew": "Overvej at generere en ny plan, så forslagene tager højde for det opdaterede vejr.",
+      "generateNewBtn": "↺ Generer ny plan",
+      "condSunny": "solrig",
+      "condPartlyCloudy": "delvist skyet",
+      "condCloudy": "overskyet",
+      "condRain": "regnfuld",
+      "condSnow": "snefuld",
+      "condFog": "tåget",
+      "dayMonday": "mandag",
+      "dayTuesday": "tirsdag",
+      "dayWednesday": "onsdag",
+      "dayThursday": "torsdag",
+      "dayFriday": "fredag",
+      "daySaturday": "lørdag",
+      "daySunday": "søndag",
+      "heavyRainWeek": "Udpræget regnvejrsuge — {{rainDays}} ud af {{totalDays}} dage med regn",
+      "winterWeek": "Vinterpræget uge med sne på {{snowDays}} dage",
+      "mixedWeek": "Blandet uge — {{sunnyDays}} ⛅ dage og {{rainDays}} regndage",
+      "overallWeek": "Overvejende {{emoji}} {{condition}} uge",
+      "tempRange": ". Temperaturer fra {{min}}° til {{max}}° (snit maks {{avg}}°C).",
+      "warmest": "Varmest {{day}} ({{temp}}°)",
+      "coldest": "køligst {{day}} ({{temp}}°)",
+      "mostRain": "mest regn {{day}} ({{pct}}% chance)",
+      "weekendSummary": "Weekend: {{conditions}} — ca. {{avg}}°C.",
+      "weekendGood": " Godt for udetrafik.",
+      "weekendRain": " Regnvejr i weekenden øger spontane indendørs-besøg — brug det til atmosfære- eller oplevelses-posts.",
+      "weekendAllRain": "🌧️ regnfuldt"
+    },
+    "overview": {
+      "weekPrefix": "Uge",
+      "generateNew": "Generer ny plan",
+      "noPostsPlanned": "Ingen opslag planlagt",
+      "doneBadge": "✓ Lavet",
+      "pastBadge": "⏰ Fortid",
+      "createPost": "Lav opslag →",
+      "tip": "💡 Tip: Klik på et opslag for at se fuld specifikation, redigere caption, uploade foto/video og godkende til publicering.",
+      "focusLabel": "Fokus:",
+      "months": {
+        "january": "januar",
+        "february": "februar",
+        "march": "marts",
+        "april": "april",
+        "may": "maj",
+        "june": "juni",
+        "july": "juli",
+        "august": "august",
+        "september": "september",
+        "october": "oktober",
+        "november": "november",
+        "december": "december"
+      },
+      "days": {
+        "short": {
+          "Mon": "Man",
+          "Tue": "Tir",
+          "Wed": "Ons",
+          "Thu": "Tor",
+          "Fri": "Fre",
+          "Sat": "Lør",
+          "Sun": "Søn"
+        },
+        "shortFromIndex": [
+          "Søn",
+          "Man",
+          "Tir",
+          "Ons",
+          "Tor",
+          "Fre",
+          "Lør"
+        ],
+        "longFromIndex": [
+          "søndag",
+          "mandag",
+          "tirsdag",
+          "onsdag",
+          "torsdag",
+          "fredag",
+          "lørdag"
+        ]
+      },
+      "dayLabels": [
+        "Man",
+        "Tir",
+        "Ons",
+        "Tor",
+        "Fre",
+        "Lør",
+        "Søn"
+      ],
+      "timing": {
+        "morning": "Morgen-vindue",
+        "lunch": "Frokost-beslutning",
+        "dinner": "Aftenmad-planlægning",
+        "eveningFomo": "Aften-FOMO",
+        "eveningEngagement": "Aften-engagement",
+        "peak": "Peak engagement",
+        "weekend": "Weekend-engagement",
+        "optimal": "Optimalt tidspunkt"
+      },
+      "cta": {
+        "booking": "🔔 Book bord",
+        "event": "🎉 Event",
+        "engagement": "💬 Interaktion",
+        "awareness": "👁️ Del",
+        "traffic": "⚡ Kør trafik",
+        "default": "✨ Kom forbi"
+      },
+      "status": {
+        "draft": "Kladde",
+        "approved": "Godkendt",
+        "scheduled": "Planlagt",
+        "posted": "Postet"
+      }
+    },
+    "detail": {
+      "title": "Post Specifikation",
+      "timeAt": "kl.",
+      "pastTitle": "Post planlagt i fortiden",
+      "pastDesc": "Dette post er planlagt til {{date}} kl. {{time}}, som er passeret. Du kan omplanlægge posten til en ny dato nedenfor.",
+      "reschedule": "📅 Flyt til næste uge (+7 dage)",
+      "whyPost": "💡 Hvorfor dette post?",
+      "timingSection": "📅 Timing",
+      "day": "Dag",
+      "date": "Dato",
+      "time": "Tid",
+      "rationale": "Begrundelse",
+      "platform": "📱 Platform & Format",
+      "platformLabel": "Platform",
+      "format": "Format",
+      "platformRationale": "Platform Rationale",
+      "formatRationale": "Format Rationale",
+      "postType": "📝 Post Type",
+      "type": "Type",
+      "category": "Kategori",
+      "priority": "Prioritet",
+      "reasons": "Grunde",
+      "content": "🎯 Indhold",
+      "whyThisDish": "Hvorfor denne ret:",
+      "caption": "💬 Caption",
+      "aiGenerated": "AI Genereret",
+      "generatingCaption": "Genererer...",
+      "regenerate": "Regenerer",
+      "regenerateTitle": "Generer ny caption med AI",
+      "editCaption": "Rediger",
+      "characters": "{{count}} tegn",
+      "cancelEdit": "Annuller",
+      "save": "Gem",
+      "hashtags": "Hashtags:",
+      "quality": "Kvalitet:",
+      "visualDirection": "📸 Visuel Retning",
+      "subject": "Motiv",
+      "angle": "Vinkel",
+      "setting": "Omgivelser",
+      "lighting": "Lys",
+      "styling": "Styling",
+      "context": "Kontekst",
+      "technicalSpecs": "Tekniske specs",
+      "fileFormat": "Format:",
+      "dimensions": "Størrelse:",
+      "aspectRatio": "Ratio:",
+      "media": "📦 Medie",
+      "uploading": "Uploader...",
+      "uploadMedia": "Upload foto/video",
+      "dragDrop": "eller træk og slip her",
+      "replaceImage": "Erstat billede",
+      "exportBrief": "Eksporter Fotograf Brief (PDF)",
+      "productionNotes": "⏱️ Produktionsnoter",
+      "estimatedTime": "Estimeret tid",
+      "logistics": "Logistik",
+      "alternatives": "🔄 Alternativer",
+      "altPrefix": "Alt {{n}}:",
+      "statusLabel": "Status:",
+      "statusDraft": "Kladde",
+      "statusApproved": "Godkendt",
+      "statusScheduled": "Planlagt",
+      "statusPosted": "Postet",
+      "close": "Luk",
+      "approve": "Godkend Opslag",
+      "uploadError": "Kunne ikke uploade fil. Prøv igen.",
+      "regenerateError": "Kunne ikke regenerere caption. Prøv igen."
+    }
+  },
+  "identity": {
+    "uploadPhotos": "Upload fotos",
+    "uploadHint": "Upload 2–3 fotos af din virksomheds indre og ydre",
+    "photosUploaded": "{{count}} fotos uploadet"
   }
 }

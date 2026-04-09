@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePostCreationStore, type PlatformContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
@@ -46,7 +46,7 @@ interface PublishStepProps {
 
 export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsavedChanges }: PublishStepProps) {
   const { t: tPublish, i18n } = useTranslation(undefined, { keyPrefix: 'createPost.publish' })
-  const { postContent, selectedPlatforms, photoContent, photoIdea, selectedIdea, aiIdeas } = usePostCreationStore()
+  const { postContent, selectedPlatforms, photoContent, photoIdea, selectedIdea, aiIdeas, weeklyPlanPost, postCta } = usePostCreationStore()
   const { isConnected } = useConnectionsStore()
   const { 
     canSchedulePost, 
@@ -61,6 +61,40 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [selectedHour, setSelectedHour] = useState<string>('14')
   const [selectedMinute, setSelectedMinute] = useState<string>('00')
+  const [scheduleFromPlan, setScheduleFromPlan] = useState(false)
+
+  // Pre-populate schedule from Weekly Plan timing (runs once on mount)
+  useEffect(() => {
+    if (!weeklyPlanPost?.timing?.date) return
+    try {
+      const [y, m, d] = weeklyPlanPost.timing.date.split('-').map(Number)
+      // Parse time: handle "18:00", "18:00-21:00", "6 PM" formats
+      let hour = 12
+      let minute = 0
+      const rawTime = weeklyPlanPost.timing.time || ''
+      const timeMatch = rawTime.match(/(\d{1,2}):(\d{2})/)
+      if (timeMatch) {
+        hour = parseInt(timeMatch[1], 10)
+        minute = parseInt(timeMatch[2], 10)
+      } else {
+        const hourOnlyMatch = rawTime.match(/(\d{1,2})\s*(am|pm)?/i)
+        if (hourOnlyMatch) {
+          hour = parseInt(hourOnlyMatch[1], 10)
+          if (hourOnlyMatch[2]?.toLowerCase() === 'pm' && hour < 12) hour += 12
+        }
+      }
+      const date = new Date(y, m - 1, d, hour, minute)
+      if (!isNaN(date.getTime()) && date > new Date()) {
+        setSelectedDate(date)
+        setSelectedHour(String(hour).padStart(2, '0'))
+        setSelectedMinute(String(minute).padStart(2, '0'))
+        setPublishMode('schedule')
+        setScheduleFromPlan(true)
+      }
+    } catch {
+      // Silently ignore parse errors — user can pick manually
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [isPublishing, setIsPublishing] = useState(false)
   // const [schedulingConflicts, setSchedulingConflicts] = useState<string[]>([])
   const [showManualPostModal, setShowManualPostModal] = useState(false)
@@ -316,11 +350,15 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
         if (cta.url) {
           content += `\n${cta.url}`
         }
+      } else if (platform.toLowerCase() === 'facebook' && postCta?.url) {
+        // Weekly-plan / generate-text-from-idea path: CTA text is already baked into the GPT
+        // output, so only append the booking URL on a new line.
+        content += `\n${postCta.url}`
       }
 
       return content
     },
-    [postContent, selectedPlatforms, selectedAiIdea]
+    [postContent, selectedPlatforms, selectedAiIdea, postCta]
   )
 
   // Copy to clipboard
@@ -487,9 +525,6 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
 
   return (
     <div className="space-y-4">
-      {/* Progress Stepper */}
-      <ProgressStepper currentStep={3} totalSteps={3} onStepClick={onStepClick} />
-
       {/* No Platforms Selected - Show gentle prompt */}
       {selectedPlatforms.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 px-6">
@@ -506,7 +541,7 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
                 // Navigate to business profile social media section
                 window.location.href = '/dashboard/profile#social-media'
               }}
-              className="px-6 py-3 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors flex items-center gap-2 mx-auto"
+              className="px-6 py-3 bg-cta text-white rounded-lg text-sm font-semibold hover:bg-cta-hover transition-colors flex items-center gap-2 mx-auto"
             >
               <span>Vælg sociale medier</span>
               <ChevronRight className="w-4 h-4" />
@@ -567,10 +602,15 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
             {/* Calendar with Timeline */}
             <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
               <div className="flex items-center gap-1.5 mb-3">
-                <Calendar className="w-4 h-4 text-indigo-600" />
+                <Calendar className="w-4 h-4 text-cta" />
                 <h3 className="text-sm font-bold text-slate-800">
                   {tPublish('calendar', 'Calendar & Timeline')}
                 </h3>
+                {scheduleFromPlan && (
+                  <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold bg-cta-surface text-cta-text px-2 py-0.5 rounded-full">
+                    📅 Fra ugeplanen
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -629,7 +669,7 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
       <div className="border-t border-[#D1D5DB] mt-4"></div>
 
       {/* Navigation */}
-      <div className="flex items-start justify-between pt-2 pb-2 gap-3">
+      <div className="flex items-center justify-between pt-2 pb-4 gap-3">
         <button
           onClick={onBack}
           className="px-4 py-2 text-xs font-medium text-[#374151] bg-white border border-[#D1D5DB] rounded-lg hover:bg-[#F9FAFB] transition-colors flex items-center gap-1.5"
@@ -647,7 +687,7 @@ export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsav
             <button
               onClick={onNext}
               disabled={!canPublish || isPublishing}
-              className="px-6 py-2 bg-[#0F2E32] text-[#88F2D7] rounded-lg hover:bg-[#12393D] transition-all font-bold text-xs shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-6 py-2 bg-brand text-mint rounded-lg hover:bg-[#12393D] transition-all font-bold text-xs shadow-md flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isPublishing ? (
                 <>

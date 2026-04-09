@@ -59,6 +59,10 @@ export interface CountryPatterns {
   destination: {
     lowTrafficReason: string;
   };
+  nature_park: {
+    parkKeywords: string[];
+    nearParkReason: string;
+  };
   language: string; // ISO 639-1 code
 }
 
@@ -122,6 +126,10 @@ export const COUNTRY_PATTERNS: Record<string, CountryPatterns> = {
     destination: {
       lowTrafficReason: 'Begrænset gennemgangstrafik',
     },
+    nature_park: {
+      parkKeywords: ['park', 'skov', 'have', 'skovbakke', 'promenade', 'stien', 'naturpark'],
+      nearParkReason: 'Nær park eller naturområde',
+    },
     language: 'da',
   },
 
@@ -183,6 +191,10 @@ export const COUNTRY_PATTERNS: Record<string, CountryPatterns> = {
     },
     destination: {
       lowTrafficReason: 'Begränsad genomfartstrafik',
+    },
+    nature_park: {
+      parkKeywords: ['park', 'skog', 'trädgård', 'promenad', 'naturreservat', 'löpspår'],
+      nearParkReason: 'Nära park eller naturområde',
     },
     language: 'sv',
   },
@@ -246,6 +258,10 @@ export const COUNTRY_PATTERNS: Record<string, CountryPatterns> = {
     destination: {
       lowTrafficReason: 'Begrenzter Durchgangsverkehr',
     },
+    nature_park: {
+      parkKeywords: ['park', 'wald', 'garten', 'promenade', 'naturpark', 'grünanlage', 'forstweg'],
+      nearParkReason: 'Nahe Park oder Naturgebiet',
+    },
     language: 'de',
   },
 
@@ -307,6 +323,10 @@ export const COUNTRY_PATTERNS: Record<string, CountryPatterns> = {
     },
     destination: {
       lowTrafficReason: 'Limited through-traffic',
+    },
+    nature_park: {
+      parkKeywords: ['park', 'common', 'heath', 'gardens', 'promenade', 'forest', 'trail'],
+      nearParkReason: 'Near park or nature area',
     },
     language: 'en',
   },

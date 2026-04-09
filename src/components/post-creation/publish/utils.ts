@@ -55,7 +55,9 @@ export const buildPlatformPreviewContent = (
       : postContent.hashtags ?? []
 
   const hashtagsForPlatform = sourceHashtags.filter((tag) => {
-    const platforms = (tag.platforms ?? fallbackPlatforms).map((value) => normalizePlatformKey(value))
+    // treat empty platforms array the same as null (e.g. when platforms load after transfer)
+    const effectivePlatforms = (tag.platforms && tag.platforms.length > 0) ? tag.platforms : fallbackPlatforms
+    const platforms = effectivePlatforms.map((value) => normalizePlatformKey(value))
     return platforms.includes(targetPlatform)
   })
 

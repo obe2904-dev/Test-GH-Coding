@@ -12,6 +12,8 @@ import { supabase } from '../../lib/supabase';
 import { BrandStrategy } from '../../lib/brandStrategy/types';
 import { generateBrandStrategy, saveBrandStrategy } from '../../lib/brandStrategy/generator';
 import { BrandStrategyDisplay } from '../../components/brandStrategy/BrandStrategyDisplay';
+import { PhotoUploader } from '../../components/visualIdentity/PhotoUploader';
+import { useVisualIdentityAnalyzer } from '../../hooks/useVisualIdentityAnalyzer';
 
 export default function BrandProfilePageNew() {
   const navigate = useNavigate();
@@ -20,6 +22,11 @@ export default function BrandProfilePageNew() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [strategy, setStrategy] = useState<BrandStrategy | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [interiorPhotoPaths, setInteriorPhotoPaths] = useState<string[]>([]);
+  const [atmosphereText, setAtmosphereText] = useState('');
+  const [isSavingAtmosphere, setIsSavingAtmosphere] = useState(false);
+  const [editingAtmosphere, setEditingAtmosphere] = useState(false);
+  const { analyzing: analyzingPhotos, checkingStorage, error: photoError, recognizableInteriorIdentity, analyze: analyzePhotos, checkAndAutoAnalyze } = useVisualIdentityAnalyzer();
 
   // Load business and existing strategy
   useEffect(() => {
@@ -42,12 +49,19 @@ export default function BrandProfilePageNew() {
         const bizId = (business as any).id;
         setBusinessId(bizId);
 
-        // Check for existing strategy
+        // Auto-analyze if photos exist
+        await checkAndAutoAnalyze(bizId);
+
+        // Check for existing strategy (also loads atmosphere)
         const { data: existingStrategy } = await supabase
           .from('business_brand_profile')
           .select('*')
           .eq('business_id', bizId)
           .maybeSingle();
+
+        if (existingStrategy?.recognizable_interior_identity) {
+          setAtmosphereText(existingStrategy.recognizable_interior_identity);
+        }
 
         console.log('Existing strategy from DB:', existingStrategy);
 
@@ -246,6 +260,94 @@ export default function BrandProfilePageNew() {
           <p className="text-sm text-red-800">{error}</p>
         </div>
       )}
+
+      {/* ── Fotos & atmosfære ─────────────────────────────────────────── */}
+      <div className="mb-6 bg-white rounded-lg border-2 border-teal-200 p-5">
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">📸</span>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Fotos & atmosfære</h3>
+              <p className="text-xs text-gray-500 mt-0.5">AI analyserer dine fotos og bruger atmosfærebeskrivelsen i tekster om stemning, behind-the-scenes og brand</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setEditingAtmosphere(v => !v)}
+            className="px-3 py-1.5 text-xs font-medium text-teal-700 hover:text-white hover:bg-teal-600 border border-teal-300 rounded-md transition-colors shrink-0"
+          >
+            {editingAtmosphere ? 'Luk' : 'Rediger'}
+          </button>
+        </div>
+
+        {/* Atmosphere status */}
+        {(checkingStorage || analyzingPhotos) ? (
+          <div className="flex items-center gap-2 text-xs text-teal-700 bg-teal-50 rounded-lg px-3 py-2 mb-4">
+            <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+            </svg>
+            {checkingStorage ? 'Tjekker for fotos…' : 'Analyserer fotos med AI…'}
+          </div>
+        ) : (atmosphereText || recognizableInteriorIdentity) ? (
+          <p className="text-xs text-gray-700 bg-teal-50 rounded-lg px-3 py-2 leading-relaxed mb-4">
+            {atmosphereText || recognizableInteriorIdentity}
+          </p>
+        ) : (
+          <p className="text-xs text-gray-400 italic mb-4">
+            Ikke udfyldt — upload 2–3 fotos nedenfor. AI genererer en atmosfærebeskrivelse der bruges til at skrive mere præcise og levende tekster om dit sted.
+          </p>
+        )}
+
+        {/* Photo uploader — always visible */}
+        <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
+          <p className="text-xs text-teal-700 mb-3">
+            Upload 2–3 fotos af dit indre og ydre. AI analyserer dem og genererer en atmosfærebeskrivelse der bruges i dine tekster.
+          </p>
+          <PhotoUploader
+            businessId={businessId ?? ''}
+            onUploadComplete={setInteriorPhotoPaths}
+          />
+          {interiorPhotoPaths.length > 0 && (
+            <button
+              onClick={async () => { if (businessId) await analyzePhotos(businessId, interiorPhotoPaths) }}
+              disabled={analyzingPhotos || !businessId}
+              className="mt-3 w-full px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            >
+              {analyzingPhotos ? '⏳ Analyserer fotos…' : `✨ Analyser ${interiorPhotoPaths.length} foto${interiorPhotoPaths.length !== 1 ? 's' : ''}`}
+            </button>
+          )}
+          {photoError && <p className="mt-2 text-xs text-red-600">{photoError}</p>}
+          {recognizableInteriorIdentity && <p className="mt-2 text-xs text-teal-700">✓ Atmosfærebeskrivelse udfyldt fra fotos</p>}
+        </div>
+
+        {/* Manual editor */}
+        {editingAtmosphere && (
+          <div className="mt-3 space-y-3">
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Eller skriv en atmosfærebeskrivelse manuelt:</p>
+              <textarea
+                value={atmosphereText}
+                onChange={(e) => setAtmosphereText(e.target.value)}
+                placeholder="Fx: 'Udendørs terrasse direkte ved åen', 'Åbent køkken', 'Ingen hvid-dug service — åben og uformel borddækning'…"
+                className="w-full h-32 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-400 focus:border-transparent resize-none"
+              />
+            </div>
+            <button
+              onClick={async () => {
+                if (!businessId) return;
+                setIsSavingAtmosphere(true);
+                await supabase.from('business_brand_profile').upsert({ business_id: businessId, recognizable_interior_identity: atmosphereText }, { onConflict: 'business_id' });
+                setIsSavingAtmosphere(false);
+                setEditingAtmosphere(false);
+              }}
+              disabled={isSavingAtmosphere}
+              className="w-full px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors"
+            >
+              {isSavingAtmosphere ? 'Gemmer…' : 'Gem beskrivelse'}
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* No strategy yet - show generate button */}
       {!strategy && !isGenerating && (

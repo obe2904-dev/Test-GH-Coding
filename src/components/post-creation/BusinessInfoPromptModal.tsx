@@ -24,8 +24,8 @@ export function BusinessInfoPromptModal({
         <div className="p-6">
           {/* Header with icon */}
           <div className="flex items-center justify-center mb-4">
-            <div className="w-16 h-16 bg-gradient-to-r from-indigo-100 to-purple-100 rounded-full flex items-center justify-center">
-              <Sparkles className="w-8 h-8 text-indigo-600" />
+            <div className="w-16 h-16 bg-gradient-to-r from-cta-surface to-purple-100 rounded-full flex items-center justify-center">
+              <Sparkles className="w-8 h-8 text-cta" />
             </div>
           </div>
 
@@ -47,7 +47,7 @@ export function BusinessInfoPromptModal({
             {/* Primary option - Website link (more prominent) */}
             <button
               onClick={onWebsiteLink}
-              className="w-full px-5 py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all font-bold text-base shadow-lg flex items-center justify-center gap-2 transform hover:scale-[1.02]"
+              className="w-full px-5 py-4 bg-gradient-to-r from-cta to-purple-600 text-white rounded-xl hover:from-cta-hover hover:to-purple-700 transition-all font-bold text-base shadow-lg flex items-center justify-center gap-2 transform hover:scale-[1.02]"
             >
               <span className="text-xl">🔗</span>
               <span>{t('websiteLink', 'Link til hjemmeside')}</span>

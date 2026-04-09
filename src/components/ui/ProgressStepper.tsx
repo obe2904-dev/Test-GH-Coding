@@ -78,7 +78,7 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
 
         {/* Progress line */}
         <div
-          className="absolute top-1/2 left-6 h-0.5 -translate-y-1/2 bg-[#0F2E32] transition-all duration-500"
+          className="absolute top-1/2 left-6 h-0.5 -translate-y-1/2 bg-brand transition-all duration-500"
           style={{ width: progressWidth, zIndex: 1 }}
         />
 
@@ -116,9 +116,9 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
                 <div
                   className={`
                     w-10 h-10 rounded-full flex items-center justify-center border-2 font-bold text-lg transition-all
-                    ${isActive ? 'bg-[#F4F1FE] text-[#C7BAF7] border-[#C7BAF7] shadow-lg ring-4 ring-purple-50' : ''}
-                    ${isCompleted ? 'bg-[#FAFAFA] text-[#C7BAF7] border-[#C7BAF7] shadow-md' : ''}
-                    ${isFuture ? 'bg-white text-[#C7BAF7] border-[#D1D5DB] hover:border-[#C7BAF7]' : ''}
+                    ${isActive ? 'bg-[#F4F1FE] text-accent border-accent shadow-lg ring-4 ring-purple-50' : ''}
+                    ${isCompleted ? 'bg-[#FAFAFA] text-accent border-accent shadow-md' : ''}
+                    ${isFuture ? 'bg-white text-accent border-[#D1D5DB] hover:border-accent' : ''}
                   `}
                 >
                   {isCompleted ? <Check className="w-5 h-5" /> : stepNumber}

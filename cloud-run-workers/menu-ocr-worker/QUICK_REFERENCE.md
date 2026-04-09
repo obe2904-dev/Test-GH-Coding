@@ -102,7 +102,7 @@ OPENAI_API_KEY=                    # Required
 
 ### Worker Behavior
 ```bash
-WORKER_BACKGROUND_POLL_ENABLED=true    # Auto-poll queue
+WORKER_BACKGROUND_POLL_ENABLED=false   # Disabled — use Cloud Scheduler + /run-once
 WORKER_TRIGGER_TOKEN=                  # Protect /run-once endpoint
 STALE_JOB_MINUTES=12                   # Requeue threshold
 ```
@@ -118,7 +118,7 @@ MAX_LLM_CHARS=18000                    # Max text to LLM
 ### Vision
 ```bash
 GPT52_VISION_ENABLED=true              # Enable vision extraction
-GPT52_MODEL=gpt-5.2                    # Vision model
+GPT52_MODEL=gpt-4o                     # Vision model (changed from gpt-5.2)
 GPT52_MAX_PAGES=4                      # Max pages to render
 GPT52_MAX_IMAGE_WIDTH=1400             # Image size limit
 HARD_PDF_SKIP_OCR=true                 # Skip OCR for hard PDFs
@@ -192,12 +192,20 @@ gcloud run deploy menu-ocr-worker-v2 \
   --source . \
   --region europe-west1 \
   --project aigetmenu \
-  --memory 2Gi \
-  --cpu 2 \
-  --timeout 300 \
-  --max-instances 10 \
-  --set-env-vars="SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,OPENAI_API_KEY=..."
+  --memory 1Gi \
+  --cpu 1 \
+  --timeout 180 \
+  --concurrency 1 \
+  --min-instances 0 \
+  --max-instances 3 \
+  --set-env-vars="SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,OPENAI_API_KEY=...,WORKER_BACKGROUND_POLL_ENABLED=false,GPT52_MODEL=gpt-4o-mini"
 ```
+# Cost notes:
+# --memory 1Gi / --cpu 1  : sufficient for PDF rendering + gpt-4o-mini vision (was 2Gi/2CPU)
+# --concurrency 1         : one job at a time per instance (queue worker design)
+# --max-instances 3       : prevents runaway cost if queue spikes; 3 parallel jobs is plenty
+# --timeout 180           : 3 minutes is ample; was 300s (5 min = 5 min billing if job hangs)
+# WORKER_BACKGROUND_POLL_ENABLED=false : scale-to-zero; Cloud Scheduler calls /run-once instead
 
 ### Update Just Code
 ```bash

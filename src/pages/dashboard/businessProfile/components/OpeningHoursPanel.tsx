@@ -40,13 +40,13 @@ export function OpeningHoursPanel({
               type="time"
               value={openingHours[key]?.open || ''}
               onChange={(e) => onOpeningHoursChange(key, 'open', e.target.value)}
-              className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-[#88F2D7]"
+              className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-mint"
             />
             <input
               type="time"
               value={openingHours[key]?.close || ''}
               onChange={(e) => onOpeningHoursChange(key, 'close', e.target.value)}
-              className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-[#88F2D7]"
+              className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-mint"
             />
           </div>
         ))}

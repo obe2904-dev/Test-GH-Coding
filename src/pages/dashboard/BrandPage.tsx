@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useTierStore } from '../../stores/tierStore'
+import { BrandSectionIcon } from '../../components/brandProfile/BrandSectionIcon'
 
 type VoiceStyle = 'casual' | 'professional' | 'friendly' | 'energetic'
 type EmojiUsage = 'none' | 'minimal' | 'moderate' | 'frequent'
@@ -243,9 +244,9 @@ function BrandPage() {
             <p className="text-sm text-gray-600">Din brands personlighed og tone</p>
           </div>
 
-          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border border-indigo-200 p-6">
+          <div className="bg-gradient-to-br from-cta-surface to-purple-50 rounded-lg border border-cta-surface p-6">
             <div className="flex items-start gap-3">
-              <div className="text-3xl">🎨</div>
+              <BrandSectionIcon id="palette" className="w-8 h-8 text-text" />
               <div className="flex-1">
                 <h3 className="font-semibold text-gray-900 mb-2 text-lg">Opgrader for brand profil</h3>
                 <p className="text-sm text-gray-600 mb-4">
@@ -254,7 +255,7 @@ function BrandPage() {
                 </p>
                 <button
                   onClick={() => (window.location.href = '/dashboard/plans')}
-                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded font-medium text-sm"
+                  className="px-4 py-2 bg-gradient-to-r from-cta to-purple-600 text-white rounded font-medium text-sm"
                 >
                   Se priser og opgrader
                 </button>
@@ -351,11 +352,11 @@ function BrandPage() {
                       onChange={(e) => setToneInput(e.target.value)}
                       onKeyPress={(e) => e.key === 'Enter' && handleAddToneKeyword()}
                       placeholder="fx. autentisk, imødekommende..."
-                      className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-cta"
                     />
                     <button
                       onClick={handleAddToneKeyword}
-                      className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700"
+                      className="px-4 py-2 text-sm font-medium text-white bg-cta rounded hover:bg-cta-hover"
                     >
                       Tilføj
                     </button>
@@ -364,12 +365,12 @@ function BrandPage() {
                     {toneKeywords.map((keyword) => (
                       <span
                         key={keyword}
-                        className="inline-flex items-center gap-1 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
+                        className="inline-flex items-center gap-1 px-3 py-1 bg-cta-surface text-cta-text rounded-full text-sm"
                       >
                         {keyword}
                         <button
                           onClick={() => handleRemoveToneKeyword(keyword)}
-                          className="hover:text-indigo-900"
+                          className="hover:text-cta-text"
                         >
                           ✕
                         </button>
@@ -410,11 +411,11 @@ function BrandPage() {
                     onChange={(e) => setValueInput(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleAddValue()}
                     placeholder="fx. bæredygtighed, lokale råvarer..."
-                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-cta"
                   />
                   <button
                     onClick={handleAddValue}
-                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700"
+                    className="px-4 py-2 text-sm font-medium text-white bg-cta rounded hover:bg-cta-hover"
                   >
                     Tilføj
                   </button>
@@ -466,7 +467,7 @@ function BrandPage() {
                   <select
                     value={emojiUsage || 'moderate'}
                     onChange={(e) => handleEmojiUsageChange(e.target.value as EmojiUsage)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-cta"
                   >
                     <option value="none">Ingen emojis</option>
                     <option value="minimal">Minimal (1-2 per opslag)</option>

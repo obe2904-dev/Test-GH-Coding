@@ -50,7 +50,7 @@ export function UpgradePrompt({ feature, currentUsage, targetTier = 'standardplu
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full overflow-hidden">
         
         {/* Header */}
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 p-6 text-white relative">
+        <div className="bg-gradient-to-r from-purple-600 to-cta p-6 text-white relative">
           {onClose && (
             <button
               onClick={onClose}
@@ -102,7 +102,7 @@ export function UpgradePrompt({ feature, currentUsage, targetTier = 'standardplu
                 // TODO: Navigate to upgrade page
                 console.log('Upgrade to', targetTier)
               }}
-              className="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 px-4 rounded-lg font-semibold text-sm hover:from-purple-700 hover:to-indigo-700 transition-all"
+              className="flex-1 bg-gradient-to-r from-purple-600 to-cta text-white py-3 px-4 rounded-lg font-semibold text-sm hover:from-purple-700 hover:to-cta-hover transition-all"
             >
               {t('upgrade.upgradeNow', 'Upgrade Now')}
             </button>

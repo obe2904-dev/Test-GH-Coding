@@ -56,7 +56,7 @@ export function EnhancementControls({
         <>
           <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
             <div className="flex items-center gap-1 mb-1.5">
-              <Hash className="w-3 h-3 text-indigo-600" />
+              <Hash className="w-3 h-3 text-cta" />
               <span className="text-xs font-semibold text-slate-700">{t('hashtags', 'Hashtags')}</span>
               <span className="text-xs text-slate-500">
                 ({hashtags.length})
@@ -113,7 +113,7 @@ export function EnhancementControls({
           <div className="mt-1">
             <button
               onClick={() => onToggleHashtags(!includeHashtags)}
-              className="flex items-center gap-1 text-xs text-slate-700 transition-colors hover:text-indigo-600 cursor-pointer"
+              className="flex items-center gap-1 text-xs text-slate-700 transition-colors hover:text-cta cursor-pointer"
             >
               {includeHashtags ? '✅' : '⬜'} {t('hashtagsIncluded', 'Hashtags included')}
             </button>
@@ -126,19 +126,19 @@ export function EnhancementControls({
             <div className="flex flex-col gap-2 text-xs text-slate-700">
               <button
                 onClick={() => onToggleEmojis(!includeEmojis)}
-                className="flex items-center gap-1 transition-colors hover:text-indigo-600 cursor-pointer"
+                className="flex items-center gap-1 transition-colors hover:text-cta cursor-pointer"
               >
                 {includeEmojis ? '✅' : '⬜'} {t('emojisIncluded', 'Emojis included')}
               </button>
               <button
                 onClick={() => onToggleHashtags(!includeHashtags)}
-                className="flex items-center gap-1 transition-colors hover:text-indigo-600 cursor-pointer"
+                className="flex items-center gap-1 transition-colors hover:text-cta cursor-pointer"
               >
                 {includeHashtags ? '✅' : '⬜'} {t('hashtagsIncluded', 'Hashtags included')}
               </button>
               <button
                 onClick={() => onToggleCTA(!includeCTA)}
-                className="flex items-center gap-1 transition-colors hover:text-indigo-600 cursor-pointer"
+                className="flex items-center gap-1 transition-colors hover:text-cta cursor-pointer"
               >
                 {includeCTA ? '✅' : '⬜'} {t('ctaIncluded', 'CTA: Call to action')}
               </button>

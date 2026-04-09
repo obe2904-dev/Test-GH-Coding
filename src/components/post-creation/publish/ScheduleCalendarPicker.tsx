@@ -287,7 +287,7 @@ export function ScheduleCalendarPicker({
                       ? 'bg-amber-500 text-white shadow-md'
                       : 'bg-purple-600 text-white shadow-md'
                     : todayDate
-                    ? 'bg-indigo-100 text-indigo-700 font-bold'
+                    ? 'bg-cta-surface text-cta-text font-bold'
                     : dayObj.isCurrentMonth
                     ? 'bg-slate-50 text-slate-700 hover:bg-slate-100'
                     : 'bg-transparent text-slate-400 hover:bg-slate-50 hover:text-slate-500'
@@ -302,7 +302,7 @@ export function ScheduleCalendarPicker({
 
       <div className="col-span-1 space-y-2">
         <div className="flex items-center gap-1">
-          <Clock className="w-3 h-3 text-indigo-600" />
+          <Clock className="w-3 h-3 text-cta" />
           <p className="text-xs font-semibold text-slate-700">
             {selectTimeLabel}
           </p>

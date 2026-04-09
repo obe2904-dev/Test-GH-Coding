@@ -27,6 +27,9 @@ interface CompetitiveVenue {
   place_id: string;
   name: string;
   distance_meters: number;
+  rating?: number;
+  user_ratings_total?: number;
+  price_level?: number;
 }
 
 export interface CompDetails {
@@ -338,6 +341,9 @@ export class GoogleMapsService {
                 place_id: place.place_id,
                 name: place.name,
                 distance_meters: Math.round(distance),
+                rating: place.rating,
+                user_ratings_total: place.user_ratings_total,
+                price_level: place.price_level,
               });
               console.log(`    ✓ Added: ${place.name} (${Math.round(distance)}m, ${place.rating}★, ${place.user_ratings_total} reviews)`);
             } else {
@@ -352,30 +358,28 @@ export class GoogleMapsService {
       }
     }
 
-    // Return top 10 closest venues
+    // Return top 6 closest venues (will be trimmed further in caller)
     const sortedVenues = Array.from(venues.values())
       .sort((a, b) => a.distance_meters - b.distance_meters)
-      .slice(0, 10);
+      .slice(0, 6);
     
     console.log(`✅ Found ${sortedVenues.length} comparable venues after filtering`);
     return sortedVenues;
   }
 
   /**
-   * Get detailed information for a place
+   * Get detailed information for a place.
+   * Only requests Basic + Contact tier fields (name, types, opening_hours).
+   * Rating, price_level, and user_ratings_total are carried in from the
+   * Text Search result to avoid triggering the Atmosphere Data billing SKU.
    */
-  async getPlaceDetails(placeId: string, distanceMeters: number = 0): Promise<CompDetails | null> {
-    // Request comprehensive fields for competitive analysis
-    const fields = [
-      'place_id',
-      'name',
-      'types',
-      'rating',
-      'user_ratings_total',
-      'price_level',
-      'opening_hours',
-      'reviews'
-    ].join(',');
+  async getPlaceDetails(
+    placeId: string,
+    distanceMeters: number = 0,
+    preloaded?: { rating?: number; user_ratings_total?: number; price_level?: number }
+  ): Promise<CompDetails | null> {
+    // Basic + Contact fields only — avoids Atmosphere Data SKU (reviews, price_level, rating)
+    const fields = ['place_id', 'name', 'types', 'opening_hours'].join(',');
 
     const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=${fields}&key=${this.apiKey}`;
 
@@ -390,25 +394,19 @@ export class GoogleMapsService {
 
       const place = data.result;
 
-      // Extract sample reviews (3-5 for pattern detection)
-      const reviews = place.reviews?.slice(0, 5).map((r: any) => ({
-        text: r.text,
-        rating: r.rating,
-        author_name: r.author_name
-      })) || [];
-
       return {
         place_id: place.place_id,
         name: place.name,
         types: place.types || [],
-        rating: place.rating,
-        user_ratings_total: place.user_ratings_total,
-        price_level: place.price_level,
+        // Use pre-loaded values from Text Search (no extra Atmosphere charge)
+        rating: preloaded?.rating,
+        user_ratings_total: preloaded?.user_ratings_total,
+        price_level: preloaded?.price_level,
         opening_hours: place.opening_hours ? {
           weekday_text: place.opening_hours.weekday_text,
           periods: place.opening_hours.periods
         } : undefined,
-        reviews,
+        reviews: [], // Reviews removed — were sole driver of Atmosphere Data cost
         distance_meters: distanceMeters
       };
     } catch (error) {

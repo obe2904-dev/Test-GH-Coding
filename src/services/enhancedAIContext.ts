@@ -22,6 +22,8 @@ export interface EnhancedAIContext {
     voiceExamples: any
     ctaStyle: string | null
     thingsToAvoid: string | null
+    toneModel: any
+    contentPillars: any
   }
   
   // Business Data
@@ -92,12 +94,25 @@ export function mapToBrandProfileForAI(dbProfile: BusinessBrandProfile | null): 
                   dbProfile.content_focus ||
                   dbProfile.cta_style ||
                   dbProfile.communication_goal ||
-                  dbProfile.image_preferences
+                  dbProfile.image_preferences ||
+                  dbProfile.tone_model ||
+                  dbProfile.content_pillars_jsonb
   
   if (!hasData) return null
-  
+
+  // Parse content_pillars_jsonb into a flat string array
+  const contentPillars: string[] | null = (() => {
+    const raw = dbProfile.content_pillars_jsonb
+    if (!raw) return null
+    const arr = Array.isArray(raw) ? raw : (typeof raw === 'object' && (raw as any).pillars ? (raw as any).pillars : null)
+    if (!arr) return null
+    return (arr as any[]).map((p: any) => (typeof p === 'string' ? p : p?.name || p?.title || String(p))).filter(Boolean)
+  })()
+
   return {
     brandEssence: dbProfile.brand_essence || undefined,
+    identityKeywords: dbProfile.identity_keywords ?? null,
+    voiceConstraints: dbProfile.voice_constraints ?? null,
     toneOfVoice: dbProfile.tone_of_voice || undefined,
     thingsToAvoid: dbProfile.things_to_avoid || undefined,
     targetAudience: dbProfile.target_audience || undefined,
@@ -106,6 +121,12 @@ export function mapToBrandProfileForAI(dbProfile: BusinessBrandProfile | null): 
     ctaStyle: dbProfile.cta_style || undefined,
     communicationGoal: dbProfile.communication_goal || undefined,
     imagePreferences: dbProfile.image_preferences || undefined,
+    toneModel: (dbProfile.tone_model as BrandProfileForAI['toneModel']) ?? null,
+    contentPillars: contentPillars,
+    socialStyle: (dbProfile.social_style as BrandProfileForAI['socialStyle']) ?? null,
+    voiceExamples: (dbProfile.voice_examples as BrandProfileForAI['voiceExamples']) ?? null,
+    locationIntelligence: (dbProfile.location_intelligence as BrandProfileForAI['locationIntelligence']) ?? null,
+    signaturePhrases: ((dbProfile as any).signature_phrases as string[] | null) ?? null,
   }
 }
 
@@ -190,7 +211,9 @@ export async function gatherEnhancedAIContext(
       socialStyle: brandProfile.social_style,
       voiceExamples: brandProfile.voice_examples,
       ctaStyle: brandProfile.cta_style,
-      thingsToAvoid: brandProfile.things_to_avoid
+      thingsToAvoid: brandProfile.things_to_avoid,
+      toneModel: brandProfile.tone_model ?? null,
+      contentPillars: brandProfile.content_pillars_jsonb ?? null,
     }
   }
   
@@ -258,6 +281,24 @@ function buildFormattedContext(context: EnhancedAIContext): string {
       const style = bv.socialStyle as any
       if (style.emojiUsage) brandLines.push(`- Emoji Usage: ${style.emojiUsage}`)
       if (style.hashtagStrategy) brandLines.push(`- Hashtag Strategy: ${style.hashtagStrategy}`)
+    }
+
+    // Tone model details
+    if (bv.toneModel) {
+      const tm = bv.toneModel as any
+      if (tm.emoji_level) brandLines.push(`- Emoji Level: ${tm.emoji_level}`)
+      if (tm.formality) brandLines.push(`- Formality: ${tm.formality}`)
+      if (tm.writing_rules?.length > 0) brandLines.push(`- Writing Rules: ${tm.writing_rules.join(' | ')}`)
+      if (tm.good_examples?.length > 0) brandLines.push(`- Good Examples: "${tm.good_examples.slice(0, 2).join('", "')}"`)
+      if (tm.avoid_examples?.length > 0) brandLines.push(`- Avoid: "${tm.avoid_examples.slice(0, 3).join('", "')}"`)
+    }
+
+    // Content pillars
+    if (bv.contentPillars) {
+      const pillars = Array.isArray(bv.contentPillars) ? bv.contentPillars : (bv.contentPillars as any)?.pillars
+      if (pillars?.length > 0) {
+        brandLines.push(`- Content Pillars: ${(pillars as string[]).slice(0, 5).join(', ')}`)
+      }
     }
     
     if (brandLines.length > 1) {

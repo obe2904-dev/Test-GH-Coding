@@ -4,7 +4,7 @@
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { GoogleMapsService } from './services/google-maps.ts';
 import { LocationAnalyzer } from './services/location-analyzer.ts';
@@ -90,6 +90,44 @@ serve(async (req) => {
       console.log(`[1/6] Fetched address from businesses table: ${address}, ${city || 'Denmark'}`);
     }
 
+    // ─────────────────────────────────────────────────────────
+    // CACHE CHECK: skip all Google API calls if data is fresh
+    // (same address, updated within last 30 days)
+    // ─────────────────────────────────────────────────────────
+    const CACHE_TTL_DAYS = 30;
+    const { data: cachedIntel } = await supabase
+      .from('business_location_intelligence')
+      .select('last_updated_by_ai, neighborhood')
+      .eq('business_id', business_id)
+      .maybeSingle();
+
+    if (cachedIntel?.last_updated_by_ai) {
+      const cacheAgeDays =
+        (Date.now() - new Date(cachedIntel.last_updated_by_ai).getTime()) /
+        (1000 * 60 * 60 * 24);
+
+      if (cacheAgeDays < CACHE_TTL_DAYS) {
+        console.log(
+          `✅ Cache hit: location data is ${Math.round(cacheAgeDays)} days old (< ${CACHE_TTL_DAYS} days). ` +
+          `Returning cached result without calling Google Maps APIs.`
+        );
+
+        // Fetch and return the full cached row
+        const { data: fullCached } = await supabase
+          .from('business_location_intelligence')
+          .select('*')
+          .eq('business_id', business_id)
+          .single();
+
+        return new Response(
+          JSON.stringify({ success: true, location_intelligence: fullCached, cached: true }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } else {
+        console.log(`⏰ Cache expired: ${Math.round(cacheAgeDays)} days old. Re-running full analysis.`);
+      }
+    }
+
     // Get business category and website URL if not already fetched
     let websiteUrl: string | null = null;
     if (!businessCategory || businessCategory === 'restaurant') {
@@ -154,15 +192,19 @@ serve(async (req) => {
 
       console.log(`🏪 Found ${comparableVenues.length} comparable venues`);
 
-      // Fetch details for top 5-7 comps (balance signal vs cost)
-      const detailsPromises = comparableVenues.slice(0, 7).map(venue =>
-        googleMaps.getPlaceDetails(venue.place_id, venue.distance_meters)
+      // Fetch details for top 4 comps only (Basic + Contact tier — no Atmosphere fields)
+      const detailsPromises = comparableVenues.slice(0, 4).map(venue =>
+        googleMaps.getPlaceDetails(venue.place_id, venue.distance_meters, {
+          rating: venue.rating,
+          user_ratings_total: venue.user_ratings_total,
+          price_level: venue.price_level,
+        })
       );
 
       const detailsResults = await Promise.all(detailsPromises);
       competitiveContext = detailsResults.filter(d => d !== null);
 
-      console.log(`✅ Fetched details for ${competitiveContext.length} competitive venues`);
+      console.log(`✅ Fetched details for ${competitiveContext.length} competitive venues (Basic+Contact tier only)`);
     } catch (compError) {
       console.warn('⚠️ Could not fetch competitive venues:', compError);
       // Continue without competitive data - not critical

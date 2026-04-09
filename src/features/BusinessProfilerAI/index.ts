@@ -1,6 +1,8 @@
 // src/features/BusinessProfilerAI/index.ts
 // Business Profile AI for web scraping and analysis
 
+import { getPrimaryType, type BusinessType } from '../../lib/businessTypeHelpers'
+
 //
 // Nye typer til sektor og offerings – local to this file (du kan
 // altid flytte dem til en fælles types-fil senere)
@@ -32,7 +34,7 @@ export type BusinessOfferingsProfile = {
 export interface BusinessProfileAnalysis {
   url: string
   businessName?: string
-  businessType?: string
+  businessType?: BusinessType  // Support both string and hybrid businessType
   description?: string
   shortDescription?: string  // NEW: Homepage "about" text for Om forretningen tab
   logoUrl?: string
@@ -336,7 +338,9 @@ class SupabaseBusinessProfilerAI {
    * Guess sector from businessType, keywords, url, etc.
    */
   private guessSector(analysis: BusinessProfileAnalysis): BusinessSector | undefined {
-    const type = (analysis.businessType || '').toLowerCase()
+    // Handle both string and hybrid businessType
+    const businessTypeStr = analysis.businessType ? getPrimaryType(analysis.businessType) : ''
+    const type = businessTypeStr.toLowerCase()
     const keywordsJoined = (analysis.keywords || []).join(' ').toLowerCase()
     const url = (analysis.url || '').toLowerCase()
     const text = `${type} ${keywordsJoined} ${url}`

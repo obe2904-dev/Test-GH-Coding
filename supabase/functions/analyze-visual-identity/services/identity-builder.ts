@@ -49,7 +49,7 @@ export class IdentityBuilder {
           content_style: 'Wider shots showing context and ambiance',
         },
       },
-      recognizable_interior_identity: this.buildInteriorIdentity(analysis.recognizable_elements),
+      recognizable_interior_identity: this.buildInteriorIdentity(analysis.venue_description, analysis.recognizable_elements),
       signature_visual_elements: analysis.recognizable_elements || [],
       primary_colors: colors,
     };
@@ -72,7 +72,10 @@ export class IdentityBuilder {
   /**
    * Build interior identity description
    */
-  private buildInteriorIdentity(elements: string[]): string {
+  private buildInteriorIdentity(venueDescription: string, elements: string[]): string {
+    if (venueDescription && venueDescription.trim().length > 20) {
+      return venueDescription.trim();
+    }
     if (!elements || elements.length === 0) {
       return 'Not yet analyzed';
     }

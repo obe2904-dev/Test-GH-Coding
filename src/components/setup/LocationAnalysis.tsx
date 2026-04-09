@@ -4,6 +4,7 @@ import { LocationAnalysis } from '@/lib/location/core/types';
 import { ConceptFitOutput } from '@/lib/location/conceptFitAnalyzer';
 import { getSeasonalRelevanceLabel } from '@/lib/location/seasonality';
 import { getLocaleConfig } from '@/lib/location/locales';
+import { LocationCategoryIcon } from './LocationCategoryIcon';
 
 interface Props {
   analysis: LocationAnalysis;
@@ -43,9 +44,9 @@ export default function LocationAnalysisDisplay({ analysis, conceptFits, onDelet
   return (
     <div className="space-y-6">
       {/* Primary Category Display */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 border border-blue-200">
+      <div className="bg-gradient-to-r from-blue-50 to-cta-surface rounded-lg p-6 border border-blue-200">
         <div className="flex items-start gap-4">
-          <div className="text-4xl">{categoryContent.icon}</div>
+          <LocationCategoryIcon categoryId={primaryMatch.categoryId} className="w-10 h-10 text-text" />
           <div className="flex-1">
             <div className="flex items-start justify-between mb-2">
               <h2 className="text-2xl font-bold">
@@ -70,17 +71,7 @@ export default function LocationAnalysisDisplay({ analysis, conceptFits, onDelet
               {categoryContent.definition}
             </p>
             
-            {/* Confidence indicator */}
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm text-gray-600">Tillid:</span>
-              <div className="flex-1 max-w-xs bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full"
-                  style={{ width: `${primaryMatch.score}%` }}
-                />
-              </div>
-              <span className="text-sm font-medium">{primaryMatch.score}%</span>
-            </div>
+
             
             {/* Seasonal Relevance Badge */}
             {primaryFit && (
@@ -102,18 +93,10 @@ export default function LocationAnalysisDisplay({ analysis, conceptFits, onDelet
             
             {/* Concept Fit for Primary Category */}
             {primaryFit && (
-              <div className={`mt-4 p-4 rounded-lg border-2 ${getFitBadge(primaryFit.fit_level).color}`}>
-                <div className="flex items-start gap-3">
-                  <span className="text-2xl">{getFitBadge(primaryFit.fit_level).emoji}</span>
-                  <div className="flex-1">
-                    <h4 className="font-semibold mb-1">
-                      {getFitBadge(primaryFit.fit_level).label}
-                    </h4>
-                    <p className="text-sm mb-2">{primaryFit.ui_summary.one_liner}</p>
-                    <div className="text-sm font-medium">
-                      💡 <span className="text-gray-600">Marketing vinkel:</span> {primaryFit.ui_summary.best_marketing_angle}
-                    </div>
-                  </div>
+              <div className="mt-4 p-4 rounded-lg border border-gray-200">
+                <p className="text-sm mb-2">{primaryFit.ui_summary.one_liner}</p>
+                <div className="text-sm font-medium">
+                  💡 <span className="text-gray-600">Marketing vinkel:</span> {primaryFit.ui_summary.best_marketing_angle}
                 </div>
               </div>
             )}
@@ -236,13 +219,10 @@ export default function LocationAnalysisDisplay({ analysis, conceptFits, onDelet
                       </button>
                     )}
                     <div className="flex items-start gap-3 mb-3">
-                      <span className="text-3xl">{content.icon}</span>
+                      <LocationCategoryIcon categoryId={match.categoryId} className="w-8 h-8 text-text" />
                       <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="mb-1">
                           <h4 className="font-semibold text-lg">{content.name}</h4>
-                          <span className="text-sm font-medium text-blue-600">
-                            {match.score}% match
-                          </span>
                         </div>
                         <p className="text-sm text-gray-600">{content.definition}</p>
                       </div>
@@ -268,18 +248,10 @@ export default function LocationAnalysisDisplay({ analysis, conceptFits, onDelet
                     
                     {/* Concept Fit for Secondary Category */}
                     {fit && (
-                      <div className={`mb-3 p-3 rounded-lg border ${getFitBadge(fit.fit_level).color}`}>
-                        <div className="flex items-start gap-2">
-                          <span className="text-lg">{getFitBadge(fit.fit_level).emoji}</span>
-                          <div className="flex-1">
-                            <h5 className="text-xs font-semibold mb-1">
-                              {getFitBadge(fit.fit_level).label}
-                            </h5>
-                            <p className="text-xs mb-1">{fit.ui_summary.one_liner}</p>
-                            <div className="text-xs">
-                              💡 {fit.ui_summary.best_marketing_angle}
-                            </div>
-                          </div>
+                      <div className="mb-3 p-3 rounded-lg border border-gray-200">
+                        <p className="text-xs mb-1">{fit.ui_summary.one_liner}</p>
+                        <div className="text-xs">
+                          💡 {fit.ui_summary.best_marketing_angle}
                         </div>
                       </div>
                     )}

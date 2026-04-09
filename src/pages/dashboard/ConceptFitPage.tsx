@@ -14,7 +14,11 @@ export default function ConceptFitPage() {
   const [loading, setLoading] = useState(true);
   const [conceptFits, setConceptFits] = useState<Record<string, ConceptFitOutput> | null>(null);
   const [categoryScores, setCategoryScores] = useState<Record<string, number>>({});
+  const [businessType, setBusinessType] = useState<string | null>(null);
+  
   const [error, setError] = useState<string | null>(null);
+  const [selectedAbbr, setSelectedAbbr] = useState<string | null>(null);
+  const [businessId, setBusinessId] = useState<string | null>(null);
 
   useEffect(() => {
     loadConceptFitData();
@@ -32,10 +36,10 @@ export default function ConceptFitPage() {
         return;
       }
 
-      // Get business ID
-      const { data: business } = await supabase
+      // Get business and type (minimal safe columns)
+      const { data: business } = await (supabase as any)
         .from('businesses')
-        .select('id')
+        .select('id, category, vertical, name, logo_url')
         .eq('owner_id', user.id)
         .single();
 
@@ -44,11 +48,77 @@ export default function ConceptFitPage() {
         return;
       }
 
+      // Set business type for display (prefer explicit category, fallback to vertical/name)
+      const bizType = (business as any).category || (business as any).vertical || (business as any).name || null;
+      setBusinessType(bizType);
+      setBusinessId((business as any).id || null);
+
+      // Try to fetch capability columns if the DB has them (safe: ignore failures)
+      let hasTableFlag = false
+      let menusList: string[] = []
+      try {
+        const { data: caps } = await (supabase as any)
+          .from('businesses')
+          .select('has_table_seating, menus')
+          .eq('id', (business as any).id)
+          .maybeSingle()
+        if (caps) {
+          hasTableFlag = Boolean((caps as any).has_table_seating)
+          menusList = Array.isArray((caps as any).menus) ? (caps as any).menus : []
+        }
+      } catch (err) {
+        // ignore - column may not exist yet
+      }
+
+      // Auto-select common abbreviation based on category/vertical/name heuristics and DB signals
+      const pickAbbr = (cat?: string, vert?: string, name?: string, hasTable?: boolean, menus?: string[]) => {
+        const text = `${cat || ''} ${vert || ''} ${name || ''}`.toLowerCase();
+        // If DB signals table seating and menus, prefer FSE
+        if (hasTable || (menus && menus.length > 0)) return 'FSE'
+        if (/restaurant|menu|full[ -]?service|dining|table|sit[- ]down|bistro|brasserie/.test(text)) return 'FSE'
+        if (/coffee|cafe|espresso|latte|barista|brew/.test(text)) return 'SBO'
+        if (/food truck|mobile food|street food|truck/.test(text)) return 'MFV'
+        if (/pre-?pack|prepack|dispenser|vending/.test(text)) return 'MFD'
+        if (/fast food|burger|qsr|takeaway|kebab|pizza|fries/.test(text)) return 'QSR'
+        return 'FSE'
+      }
+
+      // If user previously saved a preferred abbreviation, prefer that and do not overwrite it.
+      let persistedAbbr: string | null = null
+      try {
+        const { data: profile } = await (supabase as any)
+          .from('business_profile')
+          .select('target_audience')
+          .eq('business_id', (business as any).id)
+          .maybeSingle()
+        if (profile && profile.target_audience) {
+          persistedAbbr = profile.target_audience as string
+        }
+      } catch (e) {
+        // ignore - table/column may not exist yet
+      }
+
+      if (persistedAbbr) {
+        setSelectedAbbr(persistedAbbr)
+      } else {
+        const abbr = pickAbbr((business as any).category, (business as any).vertical, (business as any).name, hasTableFlag, menusList)
+        setSelectedAbbr(abbr)
+
+        // Persist automatic selection only when there is no user-saved value
+        try {
+          await (supabase as any)
+            .from('business_profile')
+            .upsert({ business_id: (business as any).id, target_audience: abbr }, { onConflict: 'business_id' })
+        } catch (e) {
+          console.warn('Failed to persist abbreviation', e)
+        }
+      }
+
       // Load location intelligence data (includes concept fit)
-      const { data: locationData, error: loadError } = await supabase
+      const { data: locationData, error: loadError } = await (supabase as any)
         .from('business_location_intelligence')
         .select('concept_fit_by_category, category_scores')
-        .eq('business_id', business.id)
+        .eq('business_id', (business as any).id)
         .maybeSingle();
 
       if (loadError) {
@@ -156,14 +226,30 @@ export default function ConceptFitPage() {
 
   const localeConfig = getLocaleConfig('da-DK');
 
+  const commonAbbreviations = [
+    { abbr: 'FSE', text: 'Food Service Establishment (broad, full-service operators)' },
+    { abbr: 'SBO', text: 'Specialty Beverage Operator / Limited Service Restaurant' },
+    { abbr: 'MFV', text: 'Mobile Food Vehicle / Mobile Food Preparer' },
+    { abbr: 'MFD', text: 'Mobile Food Dispenser (pre-packaged)' },
+    { abbr: 'QSR', text: 'Quick Service Restaurant / Fast Food' }
+  ];
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">🎯 Koncept Fit Analyse</h1>
+              <div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-bold text-gray-900">🎯 Koncept Fit Analyse</h1>
+                {businessType && (
+                  <span className="inline-block px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-sm font-medium border border-gray-200">
+                    {businessType}
+                  </span>
+                )}
+                {/* Small business type badge only (capabilities removed) */}
+              </div>
               <p className="text-gray-600 mt-2">
                 Detaljeret analyse af hvordan dit koncept passer til hver lokationstype
               </p>
@@ -180,13 +266,46 @@ export default function ConceptFitPage() {
               <strong>💡 Tip:</strong> Denne analyse viser hvorfor dit koncept passer (eller ikke passer) til hver lokationstype baseret på åbningstider, priser, service og menu.
             </p>
           </div>
+          {/* Common abbreviations small frame */}
+          <div className="mt-4">
+            <div className="bg-white border border-gray-200 rounded-md p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-gray-900">Forkortelser</h4>
+                <span className="text-xs text-gray-500">Almindelige branchestandarder</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {commonAbbreviations.map((it) => (
+                    <button
+                      key={it.abbr}
+                      type="button"
+                      onClick={async () => {
+                        setSelectedAbbr(it.abbr)
+                        try {
+                          if (businessId) {
+                            await (supabase as any)
+                              .from('business_profile')
+                              .upsert({ business_id: businessId, target_audience: it.abbr }, { onConflict: 'business_id' })
+                          }
+                        } catch (e) {
+                          console.warn('Failed to persist abbreviation', e)
+                        }
+                      }}
+                      className={`text-left w-full flex items-start gap-3 p-2 border rounded text-sm ${selectedAbbr === it.abbr ? 'border-blue-600 bg-blue-50' : ''}`}
+                    >
+                      <div className="w-12 h-8 flex items-center justify-center bg-gray-50 border border-gray-100 rounded font-semibold text-gray-800">{it.abbr}</div>
+                      <div className="text-xs text-gray-700">{it.text}</div>
+                    </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Concept Fit Cards */}
         <div className="space-y-6">
           {eligibleCategories.map(([categoryId, fit]) => {
             const score = categoryScores[categoryId] || 0;
-            const categoryContent = localeConfig.categories[categoryId];
+            const categoryContent = (localeConfig.categories as any)[categoryId];
             const badge = getFitBadge(fit.fit_level);
 
             return (
@@ -195,7 +314,7 @@ export default function ConceptFitPage() {
                 className="bg-white rounded-lg shadow-md border-2 border-gray-200 overflow-hidden"
               >
                 {/* Header */}
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 border-b border-gray-200">
+                <div className="bg-gradient-to-r from-blue-50 to-cta-surface p-6 border-b border-gray-200">
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-4">
                       <span className="text-5xl">{categoryContent.icon}</span>
@@ -203,9 +322,6 @@ export default function ConceptFitPage() {
                         <h2 className="text-2xl font-bold text-gray-900 mb-1">{categoryContent.name}</h2>
                         <p className="text-gray-600 text-sm mb-3">{categoryContent.definition}</p>
                         <div className="flex items-center gap-3">
-                          <span className="inline-block px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
-                            {score}% match
-                          </span>
                           {fit.is_strategy_driver && (
                             <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
                               📍 Strategisk Fokus

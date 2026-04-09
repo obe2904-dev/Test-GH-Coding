@@ -2,7 +2,6 @@ import { useState, type FormEvent, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PlatformHashtag } from '../../../stores/postCreationStore'
 import type { Tier } from '../../../stores/tierStore'
-import { PlatformSelector } from './PlatformSelector'
 import { HashtagDisplay } from './HashtagDisplay'
 import { ClarificationPrompt } from './ClarificationPrompt'
 import { AIFeaturePanel } from './AIFeaturePanel'
@@ -54,6 +53,7 @@ interface WriteContentCardProps {
   insight?: string | null
   hasAISuggestion: boolean
   platformHashtagViews?: Record<string, PlatformHashtag[]>
+  showClearAll?: boolean
 }
 
 export function WriteContentCard({
@@ -99,7 +99,8 @@ export function WriteContentCard({
   hasHashtags,
   insight,
   hasAISuggestion,
-  platformHashtagViews
+  platformHashtagViews,
+  showClearAll = false
 }: WriteContentCardProps) {
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const [customHashtag, setCustomHashtag] = useState('')
@@ -137,15 +138,17 @@ export function WriteContentCard({
               ? t('generate.aISuggestionHeadline', 'Sådan! Jeg har lavet et forslag til dig 🙌')
               : t('generate.headlinePrompt', 'What would you like to post today? 😊')}
           </p>
-
-          <PlatformSelector
-            currentTier={currentTier}
-            selectedPlatforms={selectedPlatforms}
-            onSelectPlatforms={onSelectPlatforms}
-            activePlatform={activePlatform}
-            onActivePlatformChange={onActivePlatformChange}
-            availablePlatforms={availablePlatforms}
-          />
+          {showClearAll && (
+            <button
+              onClick={onClear}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-red-500 bg-red-50 border border-red-200 hover:bg-red-100 hover:text-red-700 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+              Slet alt
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -153,15 +156,17 @@ export function WriteContentCard({
             {textSubtitle}
           </p>
 
-          {showHeadlinePrompt && canEditHeadline && !isHeadlineEditorVisible && (
-            <button
-              type="button"
-              onClick={onToggleHeadlineEditor}
-              className="text-[11px] font-semibold text-[#4338CA] hover:text-[#312E81] underline transition-colors"
-            >
-              {t('generate.viewHeadline', 'View headline')}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {showHeadlinePrompt && canEditHeadline && !isHeadlineEditorVisible && (
+              <button
+                type="button"
+                onClick={onToggleHeadlineEditor}
+                className="text-[11px] font-semibold text-[#4338CA] hover:text-[#312E81] underline transition-colors"
+              >
+                {t('generate.viewHeadline', 'View headline')}
+              </button>
+            )}
+          </div>
         </div>
 
         {showHeadlinePrompt && canEditHeadline && isHeadlineEditorVisible && (
@@ -274,14 +279,7 @@ export function WriteContentCard({
           </div>
         )}
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-          <button
-            onClick={onClear}
-            className="text-xs font-medium text-[#9CA3AF] hover:text-[#6B7280] underline transition-colors"
-          >
-            Slet Alt
-          </button>
-
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
           <ActionButtons
             onEnhance={onEnhance}
             onSpellingCheck={onSpellingCheck}
@@ -290,6 +288,8 @@ export function WriteContentCard({
             isSpellingChecked={isSpellingChecked}
             isEdited={isEdited}
             hasAISuggestion={hasAISuggestion}
+            showEnhance={true}
+            showSpellingCheck={true}
           />
         </div>
 
@@ -300,14 +300,6 @@ export function WriteContentCard({
             onInputChange={onClarificationChange}
             onSubmit={onClarificationSubmit}
             onDismiss={onClarificationDismiss}
-          />
-        )}
-
-        {hasBusinessProfile && currentTier !== 'free' && (
-          <AIFeaturePanel
-            includeHashtags={includeHashtags}
-            onToggleHashtags={onToggleHashtags}
-            onUpgrade={onUpgrade}
           />
         )}
       </div>

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { PlatformBadge } from './PlatformBadge';
 import { VisualSuggestionBadge } from './VisualSuggestionBadge';
 
 interface PostIdeaCardProps {
@@ -47,12 +46,11 @@ export function PostIdeaCard({ post, onApprove, onReject, onDelete }: PostIdeaCa
   };
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden hover:border-indigo-200 transition-colors">
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden hover:border-cta-surface transition-colors">
       <div className="p-4">
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-2 flex-wrap">
-            <PlatformBadge platform={post.platform as any} />
             <span 
               className={`px-2 py-1 rounded border text-xs font-medium ${
                 statusColors[post.status as keyof typeof statusColors]
@@ -60,6 +58,17 @@ export function PostIdeaCard({ post, onApprove, onReject, onDelete }: PostIdeaCa
             >
               {t(`posts.status.${post.status}`)}
             </span>
+            {post.suggested_post_time && (() => {
+              const d = new Date(post.suggested_post_time);
+              const label = (d.getHours() === 0 && d.getMinutes() === 0)
+                ? 'Snarest muligt'
+                : d.toLocaleString('da-DK', { hour: '2-digit', minute: '2-digit' });
+              return (
+                <span className="px-2 py-1 rounded border text-xs font-medium bg-amber-50 text-amber-700 border-amber-200">
+                  🕐 {label}
+                </span>
+              );
+            })()}
           </div>
           <button
             onClick={handleDelete}
@@ -103,25 +112,6 @@ export function PostIdeaCard({ post, onApprove, onReject, onDelete }: PostIdeaCa
                   {tag}
                 </span>
               ))}
-            </div>
-          </div>
-        )}
-
-        {/* Suggested post time */}
-        {post.suggested_post_time && (
-          <div className="mb-4">
-            <div className="text-xs font-medium text-gray-700 mb-1">
-              {t('posts.postTime')}
-            </div>
-            <div className="text-sm text-gray-600">
-              {new Date(post.suggested_post_time).toLocaleString('da-DK', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
             </div>
           </div>
         )}

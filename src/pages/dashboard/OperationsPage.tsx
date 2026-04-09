@@ -368,7 +368,7 @@ function OperationsPage() {
             <p className="text-sm text-gray-600">{t('operations.subtitle')}</p>
           </div>
 
-          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border border-indigo-200 p-6">
+          <div className="bg-gradient-to-br from-cta-surface to-purple-50 rounded-lg border border-cta-surface p-6">
             <div className="flex items-start gap-3">
               <div className="text-3xl">⏰</div>
               <div className="flex-1">
@@ -376,7 +376,7 @@ function OperationsPage() {
                 <p className="text-sm text-gray-600 mb-4">{t('operations.upgrade.description')}</p>
                 <button
                   onClick={() => (window.location.href = '/dashboard/plans')}
-                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded font-medium text-sm"
+                  className="px-4 py-2 bg-gradient-to-r from-cta to-purple-600 text-white rounded font-medium text-sm"
                 >
                   {t('operations.upgrade.cta')}
                 </button>
@@ -403,7 +403,7 @@ function OperationsPage() {
             disabled={!hasUnsavedChanges || isSaving}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
               hasUnsavedChanges && !isSaving
-                ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                ? 'bg-cta text-white hover:bg-cta-hover'
                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
             }`}
           >
@@ -574,7 +574,7 @@ function OperationsPage() {
                       setHasTableService(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.tableService')}</span>
                 </label>
@@ -586,7 +586,7 @@ function OperationsPage() {
                       setHasTakeaway(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.takeaway')}</span>
                 </label>
@@ -598,7 +598,7 @@ function OperationsPage() {
                       setHasDelivery(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.delivery')}</span>
                 </label>
@@ -610,7 +610,7 @@ function OperationsPage() {
                       setHasOutdoorSeating(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.outdoorSeating')}</span>
                 </label>
@@ -622,7 +622,7 @@ function OperationsPage() {
                       setHasWifi(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.wifi')}</span>
                 </label>
@@ -634,7 +634,7 @@ function OperationsPage() {
                       setHasPowerOutlets(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.powerOutlets')}</span>
                 </label>
@@ -646,7 +646,7 @@ function OperationsPage() {
                       setHasParking(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.parking')}</span>
                 </label>
@@ -658,7 +658,7 @@ function OperationsPage() {
                       setReservationRequired(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.reservationRequired')}</span>
                 </label>
@@ -670,7 +670,7 @@ function OperationsPage() {
                       setHasKidsMenu(e.target.checked)
                       setHasUnsavedChanges(true)
                     }}
-                    className="rounded border-gray-300 text-indigo-600"
+                    className="rounded border-gray-300 text-cta"
                   />
                   <span className="text-sm text-gray-700">{t('operations.service.kidsMenu')}</span>
                 </label>

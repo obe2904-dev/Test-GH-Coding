@@ -115,7 +115,7 @@ export function TopBar({ className = '' }: TopBarProps) {
     <header className={`bg-white border-b border-slate-200 px-4 flex items-center justify-between ${className}`} style={{ height: '64px' }}>
       {/* Left Side - Tier Switcher for Testing */}
       <div className="flex items-center">
-        <PlanSwitcher source="dev" className="text-sm" />
+        <PlanSwitcher source="supabase" writeBack={true} className="text-sm" />
       </div>
 
       {/* Right Side - Language, Notifications, User Menu */}
@@ -175,7 +175,7 @@ export function TopBar({ className = '' }: TopBarProps) {
             onClick={toggleUserMenu}
             className="flex items-center gap-2.5 px-3 py-2 hover:bg-slate-100 rounded-lg transition-all"
           >
-            <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center">
+            <div className="w-9 h-9 bg-gradient-to-br from-cta to-purple-600 rounded-full flex items-center justify-center">
               <span className="text-white font-bold text-sm">
                 {userData.initials}
               </span>

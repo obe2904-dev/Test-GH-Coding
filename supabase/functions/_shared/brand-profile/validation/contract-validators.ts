@@ -5,6 +5,8 @@
  * Ensures AI follows instructions and provides traceable evidence for all claims.
  */
 
+import { extractStructuredWebsiteData } from '../signal-extractor.ts'
+
 export const DISTINCTIVE_HOOK_SOURCES = new Set([
   'website_analysis',
   'business_profile',
@@ -30,25 +32,7 @@ export function normalizeForContainmentCheck(input: string): string {
 export function buildEvidenceCorpus(dataSources: any): string {
   const { business, profile, menu, images, websiteAnalysis, socialAccounts } = dataSources
 
-  // Import needed helpers
-  const extractStructuredWebsiteData = (ws: any, b: any) => {
-    // Simplified extraction - in real code this would import from data-gatherer
-    return {
-      metaTitles: [],
-      metaDescriptions: [],
-      headers: [],
-      heroTexts: [],
-      aboutSnippets: [],
-      imageAltSignals: [],
-      imageCaptions: [],
-      uniqueNounCues: [],
-      ctaTexts: [],
-      valuePhrases: [],
-      menuCategoriesMentioned: [],
-      aboutTone: '',
-      rawExcerpt: ''
-    }
-  }
+  // Use the real extractStructuredWebsiteData (imported at top of file)
 
   const buildMenuSummary = (items: any[], limit: number) => {
     return items.slice(0, limit).map((item: any) => {
@@ -88,6 +72,15 @@ export function buildEvidenceCorpus(dataSources: any): string {
     business?.country
   ].filter(Boolean).join('\n')
 
+  // Also include raw top-level website fields (homepage_content, key_themes) used by Prompt A
+  const rawWebsiteExtra = [
+    websiteAnalysis?.homepage_content,
+    ...(Array.isArray(websiteAnalysis?.key_themes) ? websiteAnalysis.key_themes : []),
+    ...(Array.isArray(websiteAnalysis?.headers) ? websiteAnalysis.headers : []),
+    ...(Array.isArray(websiteAnalysis?.hero_texts) ? websiteAnalysis.hero_texts : []),
+    ...(Array.isArray(websiteAnalysis?.cta_texts) ? websiteAnalysis.cta_texts : []),
+  ].filter(Boolean).join('\n')
+
   const websiteText = [
     ...(structuredWebsite.metaTitles || []),
     ...(structuredWebsite.metaDescriptions || []),
@@ -101,7 +94,8 @@ export function buildEvidenceCorpus(dataSources: any): string {
     ...(structuredWebsite.valuePhrases || []),
     ...(structuredWebsite.menuCategoriesMentioned || []),
     structuredWebsite.aboutTone,
-    structuredWebsite.rawExcerpt
+    structuredWebsite.rawExcerpt,
+    rawWebsiteExtra
   ].filter(Boolean).join('\n')
 
   return [
@@ -184,16 +178,29 @@ export function validateDistinctiveHooksContract(analysis: any, dataSources: any
   }
 
   validateItems('distinctive_hooks', 'hook', 'evidence', 'source', 'confidence')
-  validateItems('physical_space_cues', 'cue', 'evidence', 'source', 'confidence')
-  validateItems('rituals_and_moments', 'moment', 'evidence', 'source', 'confidence')
-  validateItems('local_identity_cues', 'cue', 'evidence', 'source', 'confidence')
-  validateItems('copy_patterns', 'pattern', 'evidence', 'source', 'confidence')
+
+  // Legacy schema fields — only validate when not compact-1.0
+  if (analysis?.analysis_version !== 'compact-1.0') {
+    validateItems('physical_space_cues', 'cue', 'evidence', 'source', 'confidence')
+    validateItems('rituals_and_moments', 'moment', 'evidence', 'source', 'confidence')
+    validateItems('local_identity_cues', 'cue', 'evidence', 'source', 'confidence')
+    validateItems('copy_patterns', 'pattern', 'evidence', 'source', 'confidence')
+  }
 
   return errors
 }
 
 export function ensureDistinctiveHooksMinimum(analysis: any): any {
   const hooks = Array.isArray(analysis?.distinctive_hooks) ? analysis.distinctive_hooks : []
+
+  // compact-1.0: trust the schema, threshold is 1
+  if (analysis?.analysis_version === 'compact-1.0') {
+    if (hooks.length >= 1) return analysis
+    return {
+      ...analysis,
+      evidence: { ...(analysis?.evidence || {}), generic_anchor_risk: true, distinctive_hooks_missing: true }
+    }
+  }
 
   // Step 5 hard truth: treat generic/low-information hooks as "missing" so we nudge the user
   // instead of forcing the system into generic/hallucination-prone outputs.

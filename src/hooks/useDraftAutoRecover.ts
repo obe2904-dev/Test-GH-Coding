@@ -11,6 +11,11 @@ interface DraftRecovery {
   postContent: any
   photoContent: any
   photoIdea: string
+  // Extended fields (added for idea context + wizard step recovery)
+  strategicIdea?: any   // matches postCreationStore.strategicIdea shape
+  weeklyPlanPost?: any  // full PostSpecification (for direct transfer button)
+  ideaSource?: string   // 'user' | 'quick_suggestions' | 'weekly_plan'
+  currentStep?: string  // 'generate' | 'create' | 'publish'
 }
 
 export function useDraftAutoRecover() {
@@ -77,7 +82,10 @@ export function useDraftAutoRecover() {
           selectedPlatforms,
           postContent,
           photoContent: serializablePhotoContent || photoContent,
-          photoIdea
+          photoIdea,
+          strategicIdea: store.strategicIdea ?? undefined,
+          weeklyPlanPost: store.weeklyPlanPost ?? undefined,
+          ideaSource: store.strategicIdea ? 'weekly_plan' : 'user',
         }
         localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
       }
@@ -116,6 +124,14 @@ export function useDraftAutoRecover() {
         }
         if (draft.photoIdea) {
           store.setPhotoIdea(draft.photoIdea)
+        }
+        // Restore strategic idea context from Weekly Plan
+        if (draft.strategicIdea) {
+          store.setStrategicIdea(draft.strategicIdea)
+        }
+        // Restore full Weekly Plan post spec (for direct transfer button)
+        if (draft.weeklyPlanPost) {
+          store.setWeeklyPlanPost(draft.weeklyPlanPost)
         }
         
         setShowRecoveryPrompt(false)

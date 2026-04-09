@@ -325,7 +325,7 @@ export function buildContentFocusFallback(ctx: FallbackContext): FallbackResult<
     const foodArea = hasFood 
       ? '- MAD & SERVICE: Klassiske retter serveret i roligt tempo, hvor man kan nyde måltidet uden stress'
       : '- MAD & SERVICE: Kvalitetsmad serveret i afslappede omgivelser'
-    value = `${foodArea}\n- STEMNING & INTERIØR: Afslappet atmosfære ${locationName}, perfekt når man har god tid\n- FOLK & ØJEBLIKKE: Lange måltider hvor man bliver siddende, overgange fra brunch til frokost til aften`
+      value = `${foodArea}\n- STEMNING & INTERIØR: Afslappet atmosfære i ${locationName}, perfekt når man har god tid\n- FOLK & ØJEBLIKKE: Lange måltider hvor man bliver siddende, overgange fra brunch til frokost til aften`
   } else if (locale.language === 'de') {
     const foodArea = hasFood
       ? '- ESSEN & SERVICE: Klassische Gerichte in entspanntem Tempo serviert, wo man die Mahlzeit ohne Stress genießen kann'
@@ -359,6 +359,7 @@ export function buildContentFocusFallback(ctx: FallbackContext): FallbackResult<
  * Remove banned words from text (locale-aware)
  */
 export function removeBannedWords(text: string, locale: LocaleConfig): string {
+  if (typeof text !== 'string') return text  // Guard: non-string values pass through unchanged
   let cleaned = text
   
   locale.bannedWords.forEach(word => {
@@ -366,8 +367,20 @@ export function removeBannedWords(text: string, locale: LocaleConfig): string {
     cleaned = cleaned.replace(re, '')
   })
   
-  // Clean up extra spaces
-  return cleaned.replace(/\s+/g, ' ').trim()
+  // Collapse horizontal whitespace only — preserve newlines so structured fields
+  // (e.g. tone_of_voice bullet lists) are not linearized into one line
+  cleaned = cleaned.replace(/[^\S\n]+/g, ' ')
+  
+  // Strip orphaned conjunctions left when a word was the only item after/before one
+  // e.g. "uformel og venlig" where "venlig" is banned → "uformel og" → "uformel"
+  cleaned = cleaned.split('\n').map(line =>
+    line
+      .replace(/\s+(og|men|eller)\s*$/i, '')  // dangling conjunction at end of line
+      .replace(/^\s*(og|men|eller)\s+/i, '')  // dangling conjunction at start of line
+      .trim()
+  ).join('\n').trim()
+  
+  return cleaned
 }
 /**
  * Sanitize sections by removing words listed in things_to_avoid.language_constraints
@@ -379,19 +392,23 @@ export function removeBannedWords(text: string, locale: LocaleConfig): string {
  * @returns Sanitized sections
  */
 export function sanitizeBannedWords(sections: any): any {
-  // Extract banned words from things_to_avoid.language_constraints
+  // Always-banned words (hard-coded — these must never appear regardless of AI output)
+  const DEFAULT_ALWAYS_BANNED = [
+    'hyggelig', 'hyggeligt', 'lækker', 'lækkert', 'lækre',
+    'indbydende', 'afslappet', 'afslappede', 'afslappende',
+    'autentisk', 'autentiske', 'unik', 'unikke',
+    'fantastisk', 'fantastiske', 'vidunderlig', 'vidunderlige', 'charmerende'
+  ]
+
+  // Also use AI-generated language_constraints if available
   const thingsToAvoid = sections?.things_to_avoid
   const languageConstraints = thingsToAvoid?.value?.language_constraints || thingsToAvoid?.language_constraints || []
-  
-  if (!Array.isArray(languageConstraints) || languageConstraints.length === 0) {
-    return sections
-  }
-  
-  const bannedWords = languageConstraints
-    .filter(Boolean)
-    .map((w: any) => String(w).trim())
-    .filter((w: string) => w.length > 0)
-  
+  const aiBannedWords = Array.isArray(languageConstraints)
+    ? languageConstraints.filter(Boolean).map((w: any) => String(w).trim()).filter((w: string) => w.length > 0)
+    : []
+
+  const bannedWords = [...new Set([...DEFAULT_ALWAYS_BANNED, ...aiBannedWords])]
+
   if (bannedWords.length === 0) {
     return sections
   }
@@ -407,8 +424,19 @@ export function sanitizeBannedWords(sections: any): any {
       cleaned = cleaned.replace(regex, '')
     })
     
-    // Clean up extra spaces
-    return cleaned.replace(/\s+/g, ' ').trim()
+    // Collapse horizontal whitespace only — preserve newlines so structured fields retain their format
+    cleaned = cleaned.replace(/[^\S\n]+/g, ' ')
+    
+    // Strip orphaned conjunctions left by word removal
+    // e.g. "uformel og venlig" where "venlig" is stripped → "uformel og" → "uformel"
+    cleaned = cleaned.split('\n').map(line =>
+      line
+        .replace(/\s+(og|men|eller)\s*$/i, '')  // dangling at end
+        .replace(/^\s*(og|men|eller)\s+/i, '')  // dangling at start
+        .trim()
+    ).join('\n').trim()
+    
+    return cleaned
   }
   
   // Create a deep copy and sanitize all text fields
@@ -417,6 +445,7 @@ export function sanitizeBannedWords(sections: any): any {
   // Handle fields that can be either strings or objects with value property
   const fieldNames = [
     'brand_essence',
+    'brand_essence_elaboration',
     'core_offerings',
     'target_audience',
     'tone_of_voice',
@@ -446,7 +475,23 @@ export function sanitizeBannedWords(sections: any): any {
       signature_shot: sanitizeText(sanitized.image_preferences.signature_shot)
     }
   }
-  
+
+  // Handle voice_examples.do_say — display-only phrases shown to the business owner.
+  // Banned words must not appear as "suggested phrases". dont_say is intentionally wrong-register
+  // so we do NOT sanitize it: stripping banned words from "phrases to avoid" would be misleading.
+  if (sanitized.voice_examples?.do_say && Array.isArray(sanitized.voice_examples.do_say)) {
+    const cleanedDoSay = sanitized.voice_examples.do_say
+      .map((phrase: any) => (typeof phrase === 'string' ? sanitizeText(phrase) : phrase))
+      .filter((phrase: any) => typeof phrase === 'string' && phrase.trim().length > 5)
+    if (cleanedDoSay.length !== sanitized.voice_examples.do_say.length) {
+      console.log(`🧹 voice_examples.do_say: removed ${sanitized.voice_examples.do_say.length - cleanedDoSay.length} phrase(s) containing banned words`)
+    }
+    sanitized.voice_examples = {
+      ...sanitized.voice_examples,
+      do_say: cleanedDoSay
+    }
+  }
+
   console.log(`🧹 Sanitized ${bannedWords.length} banned words from output as last resort`)
   
   return sanitized

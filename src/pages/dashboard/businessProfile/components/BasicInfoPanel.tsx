@@ -43,7 +43,7 @@ export function BasicInfoPanel({
           value={businessName}
           onChange={(e) => onBusinessNameChange(e.target.value)}
           placeholder="fx Min Restaurant"
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         />
       </div>
 
@@ -55,7 +55,7 @@ export function BasicInfoPanel({
         <select
           value={businessSector || ''}
           onChange={(e) => onBusinessSectorChange(e.target.value as BusinessSector || null)}
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         >
           <option value="">Vælg branche...</option>
           {BUSINESS_SECTORS.map((sector) => (
@@ -76,7 +76,7 @@ export function BasicInfoPanel({
           value={businessCategory}
           onChange={(e) => onBusinessCategoryChange(e.target.value)}
           placeholder="fx Italiensk restaurant, Frisør, Yoga studio"
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm"
         />
         <p className="text-xs text-gray-500 mt-1">
           Præciser din virksomhedstype for mere målrettede opslag
@@ -93,7 +93,7 @@ export function BasicInfoPanel({
           onChange={(e) => onAboutTextChange(e.target.value)}
           placeholder="En kort beskrivelse af din virksomhed..."
           rows={4}
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm resize-none"
+          className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-transparent text-sm resize-none"
         />
         <p className="text-xs text-gray-500 mt-1">
           Dette bruges til at skrive bedre og mere relevante opslag

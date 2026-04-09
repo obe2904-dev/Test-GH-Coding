@@ -10,6 +10,7 @@ interface PhotoAnalysisResult {
   color_grading: string;
   dominant_colors: string[]; // e.g., ["warm brown (#8B7355)", "cream (#F5F5DC)"]
   recognizable_elements: string[];
+  venue_description: string;
   photography_tips: string[];
   mood: string;
 }
@@ -24,11 +25,11 @@ export class PhotoAnalyzer {
   /**
    * Analyze multiple photos with GPT-4 Vision
    */
-  async analyzePhotos(photoUrls: string[]): Promise<PhotoAnalysisResult> {
+  async analyzePhotos(photoUrls: string[], locale: string = 'da'): Promise<PhotoAnalysisResult> {
     // Limit to first 5 photos to control costs
     const urlsToAnalyze = photoUrls.slice(0, 5);
 
-    const prompt = this.buildAnalysisPrompt(urlsToAnalyze.length);
+    const prompt = this.buildAnalysisPrompt(urlsToAnalyze.length, locale);
 
     // Build messages with images
     const imageMessages = urlsToAnalyze.map(url => ({
@@ -47,7 +48,7 @@ export class PhotoAnalyzer {
         messages: [
           {
             role: 'system',
-            content: 'You are a professional photography and brand identity consultant specializing in hospitality businesses. You analyze photos to extract visual style guidelines. Always return valid JSON.',
+            content: `You are a professional photography and brand identity consultant specializing in hospitality businesses. You analyze photos to extract visual style guidelines. Always return valid JSON. Write all descriptive text fields (venue_description, overall_aesthetic, lighting_preference, composition_style, color_grading, mood, photography_tips, recognizable_elements) in ${locale === 'da' ? 'Danish' : locale === 'nb' ? 'Norwegian' : locale === 'sv' ? 'Swedish' : 'English'}.`,
           },
           {
             role: 'user',
@@ -81,7 +82,8 @@ export class PhotoAnalyzer {
   /**
    * Build analysis prompt
    */
-  private buildAnalysisPrompt(photoCount: number): string {
+  private buildAnalysisPrompt(photoCount: number, locale: string = 'da'): string {
+    const lang = locale === 'da' ? 'Danish' : locale === 'nb' ? 'Norwegian' : locale === 'sv' ? 'Swedish' : 'English';
     return `Analyze these ${photoCount} photos from a hospitality business (restaurant/café/bar) and extract their visual identity.
 
 TASK:
@@ -92,8 +94,9 @@ Identify the consistent visual style across all photos. Look for patterns in:
 4. **Color Grading**: What's the color treatment? (e.g., "Warm tones, earthy", "Cool blue-gray", "High contrast, vibrant")
 5. **Dominant Colors**: Extract 3-5 dominant colors WITH hex codes. Format: "warm brown (#8B7355)", "cream (#F5F5DC)"
 6. **Recognizable Elements**: What interior/exterior elements are distinctive? (e.g., "Vintage furniture, exposed brick", "Light wood tables, plants", "Industrial metal fixtures")
-7. **Photography Tips**: What photography guidelines would maintain this style? (3-4 specific tips)
-8. **Mood**: Overall emotional feeling (e.g., "Cozy and inviting", "Elegant and refined", "Casual and fun")
+7. **Venue Description**: Write 2-3 factual sentences describing what this space physically looks and feels like — materials, layout character, indoor/outdoor setup, level of formality. Focus on verifiable facts visible in the photos, not impressions. Example: "Open dining room with light wood tables and black metal chairs. Large windows along one wall with direct sightlines to the street. No tablecloths — casual, unfussy table setting."
+8. **Photography Tips**: What photography guidelines would maintain this style? (3-4 specific tips)
+9. **Mood**: Overall emotional feeling (e.g., "Cozy and inviting", "Elegant and refined", "Casual and fun")
 
 CRITICAL REQUIREMENTS:
 - Extract ACTUAL colors from photos (not generic)
@@ -117,6 +120,7 @@ OUTPUT FORMAT (JSON):
     "Element 2",
     "Element 3"
   ],
+  "venue_description": "2-3 factual sentences about the physical space (write in ${lang})",
   "photography_tips": [
     "Tip 1",
     "Tip 2",

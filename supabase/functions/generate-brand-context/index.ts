@@ -198,8 +198,9 @@ Start with:
 Be specific and actionable. Avoid generic advice. The tone should match the business type:
 - Casual cafés: Warm, conversational, local
 - Fine dining: Sophisticated, descriptive, elevated
-- Beauty salons: Personal, caring, transformative
-- Wellness: Calm, supportive, mindful
+- Bars: Energetic, social, inviting
+- Bakeries: Comforting, artisanal, homemade feel
+- Food trucks: Fun, casual, on-the-go
 
 Remember: Write everything in Danish. Make it feel authentic to THIS specific business, not a template.`
 

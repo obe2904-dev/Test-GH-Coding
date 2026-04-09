@@ -37,11 +37,11 @@ export function IdeaCard({ idea, isSelected, onSelect, type }: IdeaCardProps) {
   
   const borderColor = type === 'ai' 
     ? (isSelected ? 'border-purple-500' : 'border-slate-200')
-    : (isSelected ? 'border-indigo-500' : 'border-slate-200')
+    : (isSelected ? 'border-cta' : 'border-slate-200')
   
   const bgColor = type === 'ai'
     ? (isSelected ? 'bg-purple-50' : 'bg-white')
-    : (isSelected ? 'bg-indigo-50' : 'bg-white')
+    : (isSelected ? 'bg-cta-surface' : 'bg-white')
 
   return (
     <div
@@ -68,7 +68,7 @@ export function IdeaCard({ idea, isSelected, onSelect, type }: IdeaCardProps) {
         <div className="mb-2">
           <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${
             idea._cta.type === 'booking' 
-              ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+              ? 'bg-cta-surface text-cta-text border border-cta-surface'
               : 'bg-slate-100 text-slate-700 border border-slate-200'
           }`}>
             <span>{idea._cta.text}</span>
@@ -98,7 +98,7 @@ export function IdeaCard({ idea, isSelected, onSelect, type }: IdeaCardProps) {
 
       {idea.description && (
         <div className="flex items-start gap-1.5 p-2 bg-white rounded-lg border border-slate-200">
-          <Camera className="w-3 h-3 text-indigo-600 flex-shrink-0 mt-0.5" />
+          <Camera className="w-3 h-3 text-cta flex-shrink-0 mt-0.5" />
           <div>
             <p className="text-xs font-semibold text-slate-700 mb-0.5">
               {t('generate.photoSuggestion', 'Foto ide')}:

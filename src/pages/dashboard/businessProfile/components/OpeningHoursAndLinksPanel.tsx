@@ -59,13 +59,13 @@ export function OpeningHoursAndLinksPanel({
                   type="time"
                   value={openingHours[key]?.open || ''}
                   onChange={(e) => onOpeningHoursChange(key, 'open', e.target.value)}
-                  className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-[#88F2D7]"
+                  className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-mint"
                 />
                 <input
                   type="time"
                   value={openingHours[key]?.close || ''}
                   onChange={(e) => onOpeningHoursChange(key, 'close', e.target.value)}
-                  className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-[#88F2D7]"
+                  className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-mint"
                 />
               </div>
             ))}
@@ -86,7 +86,7 @@ export function OpeningHoursAndLinksPanel({
               value={openingHoursUrl}
               onChange={(e) => onOpeningHoursUrlChange(e.target.value)}
               placeholder="fx https://dinvirksomhed.dk/aabningstider"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#88F2D7]"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mint"
             />
             <p className="text-[11px] text-gray-500 mt-1">
               Link til din åbningstider-side
@@ -125,7 +125,7 @@ export function OpeningHoursAndLinksPanel({
                 value={aboutUsUrl}
                 onChange={(e) => onAboutUsUrlChange(e.target.value)}
                 placeholder="fx https://dinvirksomhed.dk/om-os"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#88F2D7]"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mint"
               />
               <p className="text-[11px] text-gray-500 mt-1">
                 Link til din "Om os" eller "About" side
@@ -144,7 +144,7 @@ export function OpeningHoursAndLinksPanel({
                   value={bookingLink}
                   onChange={(e) => onBookingLinkChange(e.target.value)}
                   placeholder="fx https://book.dinvirksomhed.dk"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#88F2D7]"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mint"
                 />
                 <p className="text-[11px] text-gray-500 mt-1">
                   Link til dit online booking system

@@ -1,7 +1,5 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MediaItem } from '../../../stores/postCreationStore'
-import { useTierStore } from '../../../stores/tierStore'
 
 // Icon Components  
 const Loader = ({ className }: { className?: string }) => (
@@ -58,21 +56,16 @@ export function MediaDisplay({
   onSelectVersionForPost
 }: MediaDisplayProps) {
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
-  const { currentTier } = useTierStore()
-  // Free users: slightly reduced, responsive max-height and rounded corners
-  // Paid users: keep a taller fixed height for the richer editor experience
-  const baseImgClass = currentTier === 'free'
-    ? 'max-h-[420px] w-full rounded-xl'
-    : 'w-full h-96 rounded-xl'
 
-  const [imgFit, setImgFit] = useState<'cover' | 'contain'>('cover')
-  
   const displayUrl = getDisplayUrl(currentPhoto, viewMode)
 
   return (
     <div className="space-y-2">
       {/* Main Photo Display with View Toggle */}
-      <div className="relative rounded-xl overflow-hidden border border-slate-200">
+      {/* Outer div is full-width for layout; inner div tightly wraps the image so no
+          white/gray bars appear on sides when showing a square or portrait crop result. */}
+      <div className="w-full flex justify-center">
+      <div className="relative rounded-xl overflow-hidden border border-slate-200 inline-block">
         {currentPhoto?.isProcessing && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10">
             <div className="text-center">
@@ -83,27 +76,22 @@ export function MediaDisplay({
             </div>
           </div>
         )}
-        <img
-          src={displayUrl}
-          alt="Upload"
-          className={`${baseImgClass} ${imgFit === 'contain' ? 'object-contain bg-gray-100' : 'object-cover'}`}
-          onLoad={(e) => {
-            try {
-              const img = e.currentTarget as HTMLImageElement
-              const w = img.naturalWidth || img.width
-              const h = img.naturalHeight || img.height
-              const aspect = w / h
-              // If image is portrait or relatively tall, use contain to avoid top/bottom crop
-              if (aspect < 1.2) {
-                setImgFit('contain')
-              } else {
-                setImgFit('cover')
-              }
-            } catch (err) {
-              setImgFit('cover')
-            }
-          }}
-        />
+
+        {/* Display video or image based on type */}
+        {currentPhoto.type === 'video' ? (
+          <video
+            src={displayUrl}
+            controls
+            className="max-h-[520px] max-w-full w-auto rounded-xl bg-black"
+            style={{ objectFit: 'contain' }}
+          />
+        ) : (
+          <img
+            src={displayUrl}
+            alt="Upload"
+            className="max-h-[520px] max-w-full w-auto h-auto block rounded-xl"
+          />
+        )}
         
         {/* View Mode Toggle - Overlaid on image */}
         {hasAdjustedVersion && (
@@ -122,7 +110,7 @@ export function MediaDisplay({
               onClick={() => onViewModeChange('adjusted')}
               className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${
                 viewMode === 'adjusted'
-                  ? 'bg-indigo-600 text-white shadow-md'
+                  ? 'bg-cta text-white shadow-md'
                   : 'text-white hover:bg-white/20'
               }`}
             >
@@ -140,7 +128,8 @@ export function MediaDisplay({
         >
           {t('create.remove', 'Fjern')}
         </button>
-      </div>
+      </div>{/* inner tight-wrap */}
+      </div>{/* outer full-width centering wrapper */}
       
       {/* Select Version for Post */}
       {hasAdjustedVersion && (
@@ -172,7 +161,7 @@ export function MediaDisplay({
               }}
               className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
                 currentPhoto.selectedVersionForPost === 'adjusted'
-                  ? 'bg-indigo-600 text-white border-2 border-indigo-700'
+                  ? 'bg-cta text-white border-2 border-cta'
                   : 'bg-white text-slate-700 border border-slate-300 hover:border-slate-400'
               }`}
             >

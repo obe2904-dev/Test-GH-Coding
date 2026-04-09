@@ -103,9 +103,17 @@ export function usePlatformManager({
   useEffect(() => {
     const timer = setTimeout(() => {
       const available = INITIAL_PLATFORMS.filter((platform) => isEnabled(platform))
+      // console.log('[usePlatformManager] 🔄 Platform initialization check:', {
+      //   available,
+      //   selectedPlatforms,
+      //   currentTier,
+      //   needsInit: available.length > 0 && selectedPlatforms.length === 0
+      // });
 
       if (available.length > 0 && selectedPlatforms.length === 0) {
         const onboarding = getOnboardingPlatforms()
+        // console.log('[usePlatformManager] Onboarding platforms from storage:', onboarding);
+
         if (onboarding.length > 0) {
           if (currentTier === 'free') {
             const storedActiveRaw = localStorage.getItem('onboarding:activePlatform') || onboarding[0]
@@ -116,17 +124,23 @@ export function usePlatformManager({
             const preferredPlatform = available.includes('facebook')
               ? 'facebook'
               : fallbackPlatform
+            console.log('[usePlatformManager] Free tier init:', preferredPlatform);
             setSelectedPlatforms([preferredPlatform])
             setActivePlatform(preferredPlatform)
           } else {
             const filtered = onboarding.filter((platform) => available.includes(platform))
-            setSelectedPlatforms(filtered.length > 0 ? filtered : available)
+            const finalPlatforms = filtered.length > 0 ? filtered : available
+            console.log('[usePlatformManager] Paid tier init from onboarding:', finalPlatforms);
+            setSelectedPlatforms(finalPlatforms)
           }
         } else {
+          console.log('[usePlatformManager] No onboarding data, using defaults');
           if (currentTier === 'free') {
+            console.log('[usePlatformManager] Free tier default: facebook');
             setSelectedPlatforms(['facebook'])
             setActivePlatform('facebook')
           } else {
+            console.log('[usePlatformManager] Paid tier default: all available', available);
             setSelectedPlatforms(available)
           }
         }
@@ -137,8 +151,23 @@ export function usePlatformManager({
   }, [currentTier, getOnboardingPlatforms, isEnabled, selectedPlatforms.length, setSelectedPlatforms])
 
   useEffect(() => {
+    // console.log('[usePlatformManager] 🔍 Active platform check:', {
+    //   selectedPlatforms,
+    //   activePlatform,
+    //   isActiveInSelected: selectedPlatforms.includes(activePlatform)
+    // });
+
     if (selectedPlatforms.length > 0 && !selectedPlatforms.includes(activePlatform)) {
-      setActivePlatform(selectedPlatforms[0])
+      // Prefer Instagram when available (primary platform for visual content)
+      const newActivePlatform = selectedPlatforms.includes('instagram') 
+        ? 'instagram' 
+        : selectedPlatforms[0]
+      // console.log('[usePlatformManager] ✅ Switching active platform:', {
+      //   from: activePlatform,
+      //   to: newActivePlatform,
+      //   reason: selectedPlatforms.includes('instagram') ? 'Instagram preference' : 'First available'
+      // });
+      setActivePlatform(newActivePlatform)
     }
   }, [selectedPlatforms, activePlatform])
 
@@ -147,14 +176,6 @@ export function usePlatformManager({
       setCustomizePerPlatform(false)
     }
   }, [selectedPlatforms, customizePerPlatform])
-
-  useEffect(() => {
-    if (currentTier === 'free' && selectedPlatforms.length > 1) {
-      const preferred = selectedPlatforms.includes('facebook') ? 'facebook' : selectedPlatforms[0]
-      setSelectedPlatforms([preferred])
-      setActivePlatform(preferred)
-    }
-  }, [currentTier, selectedPlatforms, setSelectedPlatforms])
 
   useEffect(() => {
     if (!postContent) {

@@ -8,6 +8,7 @@ interface ActionButtonsProps {
   isSpellingChecked: boolean
   isEdited: boolean
   showSpellingCheck?: boolean
+  showEnhance?: boolean
   hasAISuggestion: boolean
 }
 
@@ -19,19 +20,30 @@ export function ActionButtons({
   isSpellingChecked,
   isEdited,
   showSpellingCheck = false,
+  showEnhance = true,
   hasAISuggestion
 }: ActionButtonsProps) {
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost.generate' })
   const enhanceDisabled = isEnhancing || isSpellChecking || (hasAISuggestion && !isEdited)
+  
+  console.log('[ActionButtons] Render:', {
+    hasAISuggestion,
+    isEdited,
+    isEnhancing,
+    isSpellChecking,
+    enhanceDisabled,
+    buttonText: hasAISuggestion ? 'Tilpas ud fra min ændring' : 'Foreslå tekst for mig'
+  })
+  
   return (
     <div className="flex flex-wrap gap-2">
-      <button
+      {showEnhance && <button
         onClick={onEnhance}
         disabled={enhanceDisabled}
         className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all shadow-sm ${
           enhanceDisabled
             ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-            : 'bg-[#0F2E32] text-[#88F2D7] hover:bg-[#12393D]'
+            : 'bg-brand text-mint hover:bg-[#12393D]'
         }`}
       >
         {isEnhancing ? (
@@ -47,9 +59,9 @@ export function ActionButtons({
                 ? t('adjustWithAI', 'Tilpas ud fra min ændring')
                 : t('enhanceWithAI', 'Foreslå tekst for mig')}
             </span>
-          </>
-        )}
-      </button>
+          </>)
+        }
+      </button>}
 
         {showSpellingCheck && (
           <button

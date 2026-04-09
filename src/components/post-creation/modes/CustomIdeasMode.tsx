@@ -44,13 +44,13 @@ export const CustomIdeasMode: React.FC<CustomIdeasModeProps> = ({
           value={websiteUrl}
           onChange={(e) => onWebsiteUrlChange(e.target.value)}
           placeholder={t('generate.urlPlaceholder', 'Enter your website URL (e.g., https://yourbusiness.com)')}
-          className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+          className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cta focus:border-cta text-sm"
           onKeyPress={(e) => e.key === 'Enter' && onAnalyzeWebsite()}
         />
         <button
           onClick={onAnalyzeWebsite}
           disabled={isGenerating || !websiteUrl.trim()}
-          className="px-4 py-2 bg-[#0F2E32] text-[#88F2D7] rounded-lg hover:bg-[#12393D] disabled:opacity-50 transition-all text-sm font-medium shadow-md flex items-center gap-2 justify-center whitespace-nowrap"
+          className="px-4 py-2 bg-brand text-mint rounded-lg hover:bg-[#12393D] disabled:opacity-50 transition-all text-sm font-medium shadow-md flex items-center gap-2 justify-center whitespace-nowrap"
         >
           {isGenerating ? (
             <>

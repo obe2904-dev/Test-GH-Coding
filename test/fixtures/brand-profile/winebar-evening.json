@@ -1,0 +1,41 @@
+{
+  "name": "winebar-evening",
+  "dataSources": {
+    "business": {
+      "id": "fixture-4",
+      "business_name": "Vinbaren",
+      "name": "Vinbaren",
+      "city": "København",
+      "country": "DK",
+      "vertical": "wine_bar",
+      "website_url": "https://vinbaren.dk"
+    },
+    "location": {
+      "enrichment": {
+        "macro": { "country": "DK", "city": "København", "city_tier": "TIER_1" },
+        "micro": {
+          "area_type": "neighborhood",
+          "nearby_signals": ["Vesterbro", "Istedgade"],
+          "confidence": 0.87
+        }
+      }
+    },
+    "profile": {
+      "short_description": "Vinbar på Vesterbro med naturvin, ostebræt og aftenatmosfære.",
+      "business_category": "bar"
+    },
+    "menu": [
+      { "name": "Naturvin", "description": "Udvalg af biodynamiske og naturvine" },
+      { "name": "Ostebræt", "description": "Sæsonens oste med tilbehør" },
+      { "name": "Charcuterie", "description": "Udvalgte pålæg og brød" },
+      { "name": "Cocktails", "description": "Klassiske og signaturcocktails" }
+    ],
+    "images": [],
+    "websiteAnalysis": {
+      "headers": ["Vin og hygge på Vesterbro", "Åbent fra kl. 16"],
+      "cta_texts": ["Book bord", "Vinkort"],
+      "hero_texts": ["Aftenens bedste glas"]
+    },
+    "socialAccounts": []
+  }
+}

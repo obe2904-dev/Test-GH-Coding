@@ -6,7 +6,7 @@ export function EmptyGoalsState({ onCreateClick }: EmptyGoalsStateProps) {
   return (
     <div className="text-center py-16 px-4">
       {/* Icon */}
-      <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6">
+      <div className="w-20 h-20 bg-cta-surface rounded-full flex items-center justify-center mx-auto mb-6">
         <span className="text-4xl">🎯</span>
       </div>
 
@@ -47,7 +47,7 @@ export function EmptyGoalsState({ onCreateClick }: EmptyGoalsStateProps) {
       {/* CTA */}
       <button
         onClick={onCreateClick}
-        className="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors text-sm shadow-md"
+        className="px-6 py-2 bg-cta text-white font-semibold rounded-lg hover:bg-cta-hover transition-colors text-sm shadow-md"
       >
         🎯 Opret dit første mål
       </button>

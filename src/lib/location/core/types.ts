@@ -13,6 +13,7 @@ export type LocationCategoryId =
   | 'transport_hub'
   | 'student'
   | 'waterfront'
+  | 'nature_park'
   | 'shopping_district'
   | 'mixed_use'
   | 'destination';

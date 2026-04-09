@@ -26,6 +26,7 @@ i18n
     debug: import.meta.env.DEV, // Only debug in development
     
     keySeparator: '.', // Use dots to separate keys
+    nsSeparator: false, // Disable ':' as namespace separator — time keys like "10:00" would otherwise be split at ':' during returnObjects recursion, causing "00" to appear as the resolved value
     returnEmptyString: false, // Don't return empty strings
     returnNull: false, // Don't return null
 
