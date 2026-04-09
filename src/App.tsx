@@ -74,7 +74,7 @@ const MenuPage = lazy(() =>
 )
 
 const BrandProfilePage = lazy(() =>
-  import('./pages/dashboard/BrandProfilePageNew').then((module) => ({ default: module.default }))
+  import('./pages/dashboard/BrandProfilePageV5').then((module) => ({ default: module.default }))
 )
 
 const SocialMediaPage = lazy(() =>
