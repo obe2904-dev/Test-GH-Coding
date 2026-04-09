@@ -132,17 +132,17 @@ function buildSharedToneCore(opts: PromptOptions): SharedToneCore {
 - FAKTAGRUNDLAG: Det der fremgår af INDHOLD-blokken er din eneste faktuelle kilde. Henvis ikke til retter, steder eller åbningstider der ikke er nævnt — heller ikke indirekte.
 - Opfind INGEN stedsspecifikke detaljer (udsigt, attraktioner, vand, vejr) — hverken fra din træningsdata om virksomheden ELLER fra stednavne der nævnes i INDHOLD
 - Stednavne i INDHOLD er destinationsreferencer, IKKE stemningstilladelse — skriv dem som faktum. Forbudt: "nærvær ved åen", "[årstid] lurer udenfor", "byens puls", "[sted] er din scene".
-- EKSPLICIT FORBUDT FRASE: "ved åen", "en pause ved åen", "hverdagen ved åen" og lignende lokation-som-stemning vendinger er forbudt uanset kontekst — stedets beliggenhed er ikke et kommercielt argument i teksten medmindre udeservering er bekræftet og vejret er ideelt.\n`,
+- EKSPLICIT FORBUDT — lokation-som-stemning i ENHVER konstruktion: "ved åen", "åen glitrer", "åen spejler", "åen render forbi", "udsigten over åen", "en pause ved åen", "hverdagen ved åen" — stedets beliggenhed er ikke et kommercielt argument medmindre udeservering er bekræftet og vejret er ideelt.\n- FORBUDT FOR STEMNINGS- OG SCENEOPSLAG: Opfind IKKE rekvisitter der ikke er bekræftet i 📸 PRIMÆR FAKTAKILDE eller INDHOLD — herunder: stearinlys, levende lys, blomster, kridt-tavler, vinduessæder, udsigt udenfor.\n`,
     sv: `\n🚫 FAKTAFÖRBUD
 - FAKTAUNDERLAG: Enbart vad som framgår av INNEHÅLL-blocket är din enda faktakälla. Referera inte till rätter, platser eller öppettider som inte nämns — inte ens indirekt.
 - Hitta inte på platsspecifika detaljer (utsikt, attraktioner, vatten, väder) — varken från din träningsdata om företaget ELLER från platsnamn som nämns i INNEHÅLL
 - Platsnamn i INNEHÅLL är destinationsreferenser, INTE stämningsstillstånd — skriv dem som fakta, aldrig som grund för påhittad vatten-/naturatmosfär.
-- EXPLICIT FÖRBJUDET: "vid ån", "en paus vid ån", "vardagen vid ån" och liknande plats-som-stämning fraser är förbjudna oavsett kontext.\n`,
+- EXPLICIT FÖRBJUDET — plats-som-stämning i VILKEN konstruktion som helst: "vid ån", "ån glittrar", "ån speglar", "ån rinner förbi", "utsikten över ån", "en paus vid ån", "vardagen vid ån" — platsens läge är inte ett kommersiellt argument om inte uteservering är bekräftad.\n- FÖRBJUDET FÖR STÄMNINGS- OCH SCENEINLÄGG: Hitta inte på rekvisita som inte bekräftas i 📸 PRIMÄR FAKTAKÄLLA eller INNEHÅLL — inklusive: stearinljus, levande ljus, blommor, kreidetavlor, fönsterplatser.\n`,
     de: `\n🚫 FAKTENVERBOT
 - FAKTENGRUNDLAGE: Nur was im INHALT-Block steht, ist deine einzige faktische Quelle. Verweise nicht auf Gerichte, Orte oder Öffnungszeiten, die nicht genannt werden — auch nicht indirekt.
 - Erfinde KEINE ortsspezifischen Details (Aussicht, Attraktionen, Wasser, Wetter) — weder aus deinen Trainingsdaten über das Unternehmen NOCH aus Ortsnamen, die im INHALT erwähnt werden
 - Ortsnamen im INHALT sind Destinationsreferenzen, KEIN Erlaubnis für Stimmungsatmosphäre — schreibe sie als Fakt, nie als Grundlage für erfundene Wasser-/Naturatmosphäre.
-- EXPLIZIT VERBOTEN: "am Fluss", "eine Pause am Fluss", "der Alltag am Fluss" und ähnliche Ort-als-Stimmung Wendungen sind verboten.\n`,
+- EXPLIZIT VERBOTEN — Ort-als-Stimmung in JEDER Konstruktion: "am Fluss", "der Fluss glitzert", "der Fluss spiegelt", "der Fluss fließt vorbei", "eine Pause am Fluss", "der Alltag am Fluss" — die Lage ist kein kommerzielles Argument, außer Außengastronomie ist bestätigt.\n- VERBOTEN FÜR STIMMUNGS- UND SZENENBEITRÄGE: Erfinde keine Requisiten, die nicht in 📸 PRIMÄRE FAKTENQUELLE oder INHALT bestätigt sind — einschließlich: Kerzen, lebende Flammen, Blumen, Kreidetafeln, Fensterplätze.\n`,
     en: `\n🚫 FACTS PROHIBITION
 - Invent NO location-specific details (views, attractions, water, weather) — neither from your training data about this business NOR from location names that may appear in CONTENT
 - Location names in CONTENT are destination references, NOT permission to invent water/nature atmosphere
