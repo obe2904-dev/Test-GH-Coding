@@ -127,27 +127,34 @@ function buildSharedToneCore(opts: PromptOptions): SharedToneCore {
   }
 
   // ── FAKTAFORBUD — single source, never duplicated ──────────────────────
+  // Principle-based, not phrase-based. Banning specific phrases is whack-a-mole
+  // and grows unbounded. Instead: establish that every claim must be traceable
+  // to a line in this prompt. This works for any language and any venue type.
   const faktaforbud: Record<string, string> = {
-    da: `\n🚫 FAKTAFORBUD
-- FAKTAGRUNDLAG: Det der fremgår af INDHOLD-blokken er din eneste faktuelle kilde. Henvis ikke til retter, steder eller åbningstider der ikke er nævnt — heller ikke indirekte.
-- Opfind INGEN stedsspecifikke detaljer (udsigt, attraktioner, vand, vejr) — hverken fra din træningsdata om virksomheden ELLER fra stednavne der nævnes i INDHOLD
-- Stednavne i INDHOLD er destinationsreferencer, IKKE stemningstilladelse — skriv dem som faktum. Forbudt: "nærvær ved åen", "[årstid] lurer udenfor", "byens puls", "[sted] er din scene".
-- EKSPLICIT FORBUDT — lokation-som-stemning i ENHVER konstruktion: "ved åen", "åen glitrer", "åen spejler", "åen render forbi", "udsigten over åen", "en pause ved åen", "hverdagen ved åen" — stedets beliggenhed er ikke et kommercielt argument medmindre udeservering er bekræftet og vejret er ideelt.\n- FORBUDT FOR STEMNINGS- OG SCENEOPSLAG: Opfind IKKE rekvisitter der ikke er bekræftet i 📸 PRIMÆR FAKTAKILDE eller INDHOLD — herunder: stearinlys, levende lys, blomster, kridt-tavler, vinduessæder, udsigt udenfor.\n`,
-    sv: `\n🚫 FAKTAFÖRBUD
-- FAKTAUNDERLAG: Enbart vad som framgår av INNEHÅLL-blocket är din enda faktakälla. Referera inte till rätter, platser eller öppettider som inte nämns — inte ens indirekt.
-- Hitta inte på platsspecifika detaljer (utsikt, attraktioner, vatten, väder) — varken från din träningsdata om företaget ELLER från platsnamn som nämns i INNEHÅLL
-- Platsnamn i INNEHÅLL är destinationsreferenser, INTE stämningsstillstånd — skriv dem som fakta, aldrig som grund för påhittad vatten-/naturatmosfär.
-- EXPLICIT FÖRBJUDET — plats-som-stämning i VILKEN konstruktion som helst: "vid ån", "ån glittrar", "ån speglar", "ån rinner förbi", "utsikten över ån", "en paus vid ån", "vardagen vid ån" — platsens läge är inte ett kommersiellt argument om inte uteservering är bekräftad.\n- FÖRBJUDET FÖR STÄMNINGS- OCH SCENEINLÄGG: Hitta inte på rekvisita som inte bekräftas i 📸 PRIMÄR FAKTAKÄLLA eller INNEHÅLL — inklusive: stearinljus, levande ljus, blommor, kreidetavlor, fönsterplatser.\n`,
-    de: `\n🚫 FAKTENVERBOT
-- FAKTENGRUNDLAGE: Nur was im INHALT-Block steht, ist deine einzige faktische Quelle. Verweise nicht auf Gerichte, Orte oder Öffnungszeiten, die nicht genannt werden — auch nicht indirekt.
-- Erfinde KEINE ortsspezifischen Details (Aussicht, Attraktionen, Wasser, Wetter) — weder aus deinen Trainingsdaten über das Unternehmen NOCH aus Ortsnamen, die im INHALT erwähnt werden
-- Ortsnamen im INHALT sind Destinationsreferenzen, KEIN Erlaubnis für Stimmungsatmosphäre — schreibe sie als Fakt, nie als Grundlage für erfundene Wasser-/Naturatmosphäre.
-- EXPLIZIT VERBOTEN — Ort-als-Stimmung in JEDER Konstruktion: "am Fluss", "der Fluss glitzert", "der Fluss spiegelt", "der Fluss fließt vorbei", "eine Pause am Fluss", "der Alltag am Fluss" — die Lage ist kein kommerzielles Argument, außer Außengastronomie ist bestätigt.\n- VERBOTEN FÜR STIMMUNGS- UND SZENENBEITRÄGE: Erfinde keine Requisiten, die nicht in 📸 PRIMÄRE FAKTENQUELLE oder INHALT bestätigt sind — einschließlich: Kerzen, lebende Flammen, Blumen, Kreidetafeln, Fensterplätze.\n`,
-    en: `\n🚫 FACTS PROHIBITION
-- Invent NO location-specific details (views, attractions, water, weather) — neither from your training data about this business NOR from location names that may appear in CONTENT
-- Location names in CONTENT are destination references, NOT permission to invent water/nature atmosphere
-- Mention NO food, dishes or drinks unless they appear in CONTENT
-- Use ONLY sensory details (sight/sound/texture/temperature) that can be derived DIRECTLY from CONTENT\n`,
+    da: `\n🚫 KILDEKRAV — gælder for ENHVER detalje i teksten
+Denne tekst er journalistik, ikke kreativ fiktion. Du må KUN skrive om det der er dokumenteret i denne prompt.
+- Hvert konkret substantiv, rekvisit, sansedetalje og lokationselement i din tekst skal kunne peges direkte tilbage til en linje i INDHOLD, 📸 PRIMÆR FAKTAKILDE eller BRANDSTEMME-blokken.
+- Kan du IKKE pege på kilden → slet elementet.
+- Stednavne i INDHOLD angiver lokation — de er IKKE tilladelse til at opfinde udsigt, natur, vejr eller interiør fra din generelle viden om det sted.
+- Din træningsdata om virksomheden er IKKE en gyldig kilde — brug KUN det der fremgår af denne prompt.\n`,
+    sv: `\n🚫 KÄLLKRAV — gäller för VARJE detalj i texten
+Den här texten är journalistik, inte kreativ fiktion. Du får BARA skriva om det som är dokumenterat i den här prompten.
+- Varje konkret substantiv, rekvisita, sinnesdetalj och platselement i din text måste kunna spåras direkt till en rad i INNEHÅLL, 📸 PRIMÄR FAKTAKÄLLA eller VARUMÄRKESRÖST-blocket.
+- Kan du INTE peka på källan → ta bort elementet.
+- Platsnamn i INNEHÅLL anger lokation — de är INTE tillstånd att uppfinna utsikt, natur, väder eller interiör från din allmänna kunskap om platsen.
+- Din träningsdata om företaget är INTE en giltig källa — använd KUN det som framgår av den här prompten.\n`,
+    de: `\n🚫 QUELLENGEBOT — gilt für JEDES Detail im Text
+Dieser Text ist Journalismus, keine kreative Fiktion. Du darfst NUR über das schreiben, was in diesem Prompt dokumentiert ist.
+- Jedes konkrete Substantiv, Requisit, Sinnesdetail und Standortelement in deinem Text muss direkt auf eine Zeile in INHALT, 📸 PRIMÄRE FAKTENQUELLE oder dem MARKENSTIMME-Block zurückgeführt werden können.
+- Kannst du die Quelle NICHT benennen → streiche das Element.
+- Ortsnamen im INHALT geben den Standort an — sie sind KEINE Erlaubnis, aus deinem Allgemeinwissen über diesen Ort Aussicht, Natur, Wetter oder Interieur zu erfinden.
+- Deine Trainingsdaten über das Unternehmen sind KEINE gültige Quelle — nutze NUR was aus diesem Prompt hervorgeht.\n`,
+    en: `\n🚫 SOURCE REQUIREMENT — applies to EVERY detail in the text
+This text is journalism, not creative fiction. You may ONLY write about what is documented in this prompt.
+- Every concrete noun, prop, sensory detail and location element in your text must be traceable directly to a line in CONTENT, 📸 PRIMARY FACT SOURCE or the BRAND VOICE block.
+- Cannot point to the source → remove the element.
+- Location names in CONTENT indicate location — they are NOT permission to invent views, nature, weather or interior from your general knowledge of that place.
+- Your training data about the business is NOT a valid source — use ONLY what appears in this prompt.\n`,
   }
 
   // ── Brand block caps ───────────────────────────────────────────────────
@@ -299,16 +306,14 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     ? `${dishProtagonistMap[language] || dishProtagonistMap.da}\n`
     : ''
 
-  // sceneMoodOpeningHint — for behind_scenes/atmosphere/team_people: reinforce brand rule
-  // that openings must be anchored in a concrete moment, not abstract mood.
-  // Also handles the no-venueIdentity case: when photos haven't been analyzed,
-  // direct the model to businessCharacter/contentAnchors instead of inventing atmosphere.
+  // sceneMoodOpeningHint — for behind_scenes/atmosphere/team_people: reinforce that
+  // openings must come from a documented source, not abstract mood or training knowledge.
   const sceneMoodOpeningHintMap: Record<string, string> = {
-    da: `⚠️ ÅBNINGSREGEL FOR DETTE OPSLAG: Brandets egne skriveregler foreskriver konkrete åbninger — IKKE abstrakt stemning. Forbudt som første sætning: stemningsord som åbner ("hygge", "varme", "ro", "stilhed", "hverdagen", "torsdag sætter stemningen", "[ugedag] er perfekt til X"). Åbn i stedet med ét konkret element: en handling der foregår, en genstand i rummet, et faktum om stedet, en direkte sætning med et specifikt tilbud. Hvis Interiørmærker er tilgængelige ovenfor — brug dem som faktuelt fundament.${!opts.venueIdentity ? ' Interiørmærker er ikke tilgængelige — brug BRANDSTEMME-blokkens konceptankre og stedsidentitet som det konkrete fundament i stedet.' : ''}
+    da: `⚠️ ÅBNINGSREGEL FOR DETTE OPSLAG: Brandets skriveregler kræver konkrete åbninger. Din første sætning SKAL være forankret i ét element du kan pege på i 📸 PRIMÆR FAKTAKILDE, INDHOLD eller BRANDSTEMME-blokken. Abstrakt stemning ("varmen spreder sig", "stilheden falder ind", "aftenen folder sig ud") er ikke en kilde — det er en generisk hallucination.${!opts.venueIdentity ? ' Ingen fotobeskrivelse er tilgængelig — brug konceptankre og stedsidentitet fra BRANDSTEMME-blokken som dit konkrete fundament.' : ''}
 `,
-    sv: `⚠️ ÖPPNINGSREGEL FÖR DETTA INLÄGG: Varumärkets egna skrivinstruktioner föreskriver konkreta öppningar — INTE abstrakt stämning. Förbjudet som första mening: stämningsord som öppning ("mysighet", "värme", "ro", "stillhet", "vardagen", "[veckodag] är perfekt för X"). Öppna istället med ett konkret element: en handling som sker, ett föremål i rummet, ett faktum om stället, en direkt mening med ett specifikt erbjudande.${!opts.venueIdentity ? ' Interiörmärken är inte tillgängliga — använd VARUMÄRKESRÖST-blockets konceptankare och platsidentitet som det konkreta fundamentet istället.' : ''}
+    sv: `⚠️ ÖPPNINGSREGEL FÖR DETTA INLÄGG: Varumärkets skrivinstruktioner kräver konkreta öppningar. Din första mening MÅSTE vara förankrad i ett element du kan peka på i 📸 PRIMÄR FAKTAKÄLLA, INNEHÅLL eller VARUMÄRKESRÖST-blocket. Abstrakt stämning ("värmen sprider sig", "tystnaden infinner sig") är inte en källa — det är en generisk hallucination.${!opts.venueIdentity ? ' Ingen fotobeskrivning tillgänglig — använd konceptankare och platsidentitet från VARUMÄRKESRÖST-blocket som ditt konkreta fundament.' : ''}
 `,
-    de: `⚠️ ERÖFFNUNGSREGEL FÜR DIESEN BEITRAG: Die eigenen Schreibregeln der Marke schreiben konkrete Eröffnungen vor — KEINE abstrakte Stimmung. Verboten als erster Satz: Stimmungswörter als Eröffnung ("Gemütlichkeit", "Wärme", "Ruhe", "Stille", "der Alltag", "[Wochentag] ist perfekt für X"). Öffne stattdessen mit einem konkreten Element: eine Handlung die stattfindet, ein Gegenstand im Raum, eine Tatsache über den Ort, ein direkter Satz mit einem spezifischen Angebot.${!opts.venueIdentity ? ' Interiormerkmale sind nicht verfügbar — nutze die Konzeptanker und Ortsidentität aus dem MARKENSTIMME-Block als konkretes Fundament.' : ''}
+    de: `⚠️ ERÖFFNUNGSREGEL FÜR DIESEN BEITRAG: Die Schreibregeln der Marke erfordern konkrete Eröffnungen. Dein erster Satz MUSS in einem Element verankert sein, das du in 📸 PRIMÄRE FAKTENQUELLE, INHALT oder dem MARKENSTIMME-Block nachweisen kannst. Abstrakte Stimmung ("die Wärme breitet sich aus", "die Stille senkt sich herab") ist keine Quelle — das ist eine generische Halluzination.${!opts.venueIdentity ? ' Keine Fotobeschreibung verfügbar — nutze Konzeptanker und Ortsidentität aus dem MARKENSTIMME-Block als konkretes Fundament.' : ''}
 `,
   }
   const sceneMoodOpeningHint = isSceneMoodPost
@@ -613,6 +618,19 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     sv: ctaStyle === 'strict' ? 'Avsluta alltid med CTA-raden' : 'Avsluta med texten ovan — intentionen och emojis bevaras, lätt omformulering tillåten',
     de: ctaStyle === 'strict' ? 'Beende immer mit der CTA-Zeile' : 'Beende mit dem Text oben — Intention und Emojis bleiben, leichte Umformulierung erlaubt',
   }
+
+  // WP: same principle-based opening rule as AI Ideas path — mirrors sceneMoodOpeningHint.
+  const wpSceneMoodOpeningHintMap: Record<string, string> = {
+    da: `⚠️ ÅBNINGSREGEL FOR DETTE OPSLAG: Brandets skriveregler kræver konkrete åbninger. Din første sætning SKAL være forankret i ét element du kan pege på i 📸 PRIMÆR FAKTAKILDE, INDHOLD eller BRANDSTEMME-blokken. Abstrakt stemning ("varmen spreder sig", "stilheden falder ind", "aftenen folder sig ud") er ikke en kilde — det er en generisk hallucination.${!venueIdentity ? ' Ingen fotobeskrivelse er tilgængelig — brug konceptankre og stedsidentitet fra BRANDSTEMME-blokken som dit konkrete fundament.' : ''}
+`,
+    sv: `⚠️ ÖPPNINGSREGEL FÖR DETTA INLÄGG: Varumärkets skrivinstruktioner kräver konkreta öppningar. Din första mening MÅSTE vara förankrad i ett element du kan peka på i 📸 PRIMÄR FAKTAKÄLLA, INNEHÅLL eller VARUMÄRKESRÖST-blocket. Abstrakt stämning ("värmen sprider sig", "tystnaden infinner sig") är inte en källa — det är en generisk hallucination.${!venueIdentity ? ' Ingen fotobeskrivning tillgänglig — använd konceptankare och platsidentitet från VARUMÄRKESRÖST-blocket som ditt konkreta fundament.' : ''}
+`,
+    de: `⚠️ ERÖFFNUNGSREGEL FÜR DIESEN BEITRAG: Die Schreibregeln der Marke erfordern konkrete Eröffnungen. Dein erster Satz MUSS in einem Element verankert sein, das du in 📸 PRIMÄRE FAKTENQUELLE, INHALT oder dem MARKENSTIMME-Block nachweisen kannst. Abstrakte Stimmung ("die Wärme breitet sich aus", "die Stille senkt sich herab") ist keine Quelle — das ist eine generische Halluzination.${!venueIdentity ? ' Keine Fotobeschreibung verfügbar — nutze Konzeptanker und Ortsidentität aus dem MARKENSTIMME-Block als konkretes Fundament.' : ''}
+`,
+  }
+  const wpSceneMoodOpeningHint = isSceneMoodPost
+    ? (wpSceneMoodOpeningHintMap[lang] || wpSceneMoodOpeningHintMap.da)
+    : ''
 
   const templates: Record<string, string> = {
     da: `OPGAVE
