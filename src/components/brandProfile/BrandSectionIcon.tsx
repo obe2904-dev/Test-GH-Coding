@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface BrandSectionIconProps {
   id: 'voice' | 'pillars' | 'limits' | 'strategy' | 'sparkles' | 'palette' | 'businessType';
   className?: string;

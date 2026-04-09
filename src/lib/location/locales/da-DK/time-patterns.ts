@@ -74,7 +74,9 @@ export const TIME_PATTERNS_DA: TimePatterns = {
         office: 0.8,
         student: 0.5,
         transport_hub: 1.1,
-        mixed_use: 1.1
+        mixed_use: 1.1,
+        nature_park: 1.5,
+        destination: 1.4
       }
     },
     
@@ -91,7 +93,9 @@ export const TIME_PATTERNS_DA: TimePatterns = {
         office: 1.0,
         student: 1.2,
         transport_hub: 1.0,
-        mixed_use: 1.0
+        mixed_use: 1.0,
+        nature_park: 0.6,
+        destination: 0.7
       }
     }
   }

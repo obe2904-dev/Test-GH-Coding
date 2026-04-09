@@ -146,8 +146,8 @@ async function fetchRecentPosts(userId: string): Promise<string[]> {
     const tenDaysAgo = new Date()
     tenDaysAgo.setDate(tenDaysAgo.getDate() - 10)
     
-    const { data, error } = await (supabase
-      .from('post_ideas') as any)
+    const { data, error } = await (supabase as any)
+      .from('post_ideas')
       .select('caption')
       .eq('business_id', userId)
       .gte('updated_at', tenDaysAgo.toISOString())

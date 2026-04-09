@@ -79,7 +79,7 @@ const SCORING_WEIGHTS: ScoringWeights = {
   }
 };
 
-export function scoreLocation(poiData: POIData, address: string): CategoryMatch[] {
+export function scoreLocation(poiData: POIData, _address: string): CategoryMatch[] {
   const matches: CategoryMatch[] = [];
   
   // Score each category

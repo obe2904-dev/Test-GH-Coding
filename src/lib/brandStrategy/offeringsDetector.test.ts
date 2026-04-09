@@ -2,7 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { detectCoreOfferings } from './offeringsDetector';
 import type { StrategyDeductionInputs } from './types';
 
-function baseInputs(partial: Partial<StrategyDeductionInputs>): StrategyDeductionInputs {
+function baseInputs(partial: {
+  businessType?: string;
+  locale?: string;
+  menu?: Partial<StrategyDeductionInputs['menu']>;
+  hours?: Partial<StrategyDeductionInputs['hours']>;
+  location?: Partial<StrategyDeductionInputs['location']>;
+  context?: Partial<StrategyDeductionInputs['context']>;
+}): StrategyDeductionInputs {
   return {
     menu: {
       categories: {},

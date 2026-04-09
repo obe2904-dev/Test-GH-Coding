@@ -54,7 +54,9 @@ export function scoreLocation(
     student: { score: 0, reasoning: [], signals: [] },
     waterfront: { score: 0, reasoning: [], signals: [] },
     shopping_district: { score: 0, reasoning: [], signals: [] },
-    mixed_use: { score: 0, reasoning: [], signals: [] }
+    mixed_use: { score: 0, reasoning: [], signals: [] },
+    nature_park: { score: 0, reasoning: [], signals: [] },
+    destination: { score: 0, reasoning: [], signals: [] }
   };
   
   // Score City Centre (locale-adjusted)
@@ -137,7 +139,7 @@ function scoreCityCentre(poiData: POIAnalysisResult, _context: ScoringContext, l
   const signals: AnalysisSignal[] = [];
   
   // Calculate total POIs for density-based scoring
-  const totalPOIs = poiData.restaurants + poiData.cafes + poiData.bars + 
+  const totalPOIs = poiData.restaurants + poiData.cafes + ((poiData as any).bars || 0) + 
                     poiData.hotels + poiData.shopping_centers + poiData.attractions +
                     poiData.offices + poiData.transit_stations;
   
@@ -362,13 +364,13 @@ function scoreWaterfront(poiData: POIAnalysisResult) {
   }
   
   // Entertainment + restaurants can indicate waterfront leisure areas
-  if (poiData.entertainment > 2 && poiData.restaurants > 3) {
+  if (((poiData as any).entertainment || 0) > 2 && poiData.restaurants > 3) {
     score += 20;
     reasoning.push('Fritids- og restaurantaktivitet');
   }
   
   // Bars + restaurants (nightlife by the water)
-  if (poiData.bars > 2 && poiData.restaurants > 5) {
+  if (((poiData as any).bars || 0) > 2 && poiData.restaurants > 5) {
     score += 20;
     reasoning.push('Aktivt udeliv og serveringssteder');
   }

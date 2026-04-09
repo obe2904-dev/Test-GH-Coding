@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import { AnalyzeIcon } from './BusinessProfileIcons';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { BrandStrategy } from '../../lib/brandStrategy/types';
+import { BrandStrategy, CommunicationGoalType } from '../../lib/brandStrategy/types';
 import { generateBrandStrategy, saveBrandStrategy } from '../../lib/brandStrategy/generator';
 import { BrandStrategyDisplay } from '../../components/brandStrategy/BrandStrategyDisplay';
 import { PhotoUploader } from '../../components/visualIdentity/PhotoUploader';
@@ -59,30 +59,31 @@ export default function BrandProfilePageNew() {
           .eq('business_id', bizId)
           .maybeSingle();
 
-        if (existingStrategy?.recognizable_interior_identity) {
-          setAtmosphereText(existingStrategy.recognizable_interior_identity);
+        if ((existingStrategy as any)?.recognizable_interior_identity) {
+          setAtmosphereText((existingStrategy as any).recognizable_interior_identity);
         }
 
         console.log('Existing strategy from DB:', existingStrategy);
 
         // @ts-ignore - New columns exist but types not yet regenerated after migration
-        if (existingStrategy && existingStrategy.core_offerings) {
+        if (existingStrategy && (existingStrategy as any).core_offerings) {
           // Transform from database format to BrandStrategy type
           // Ensure arrays are actually arrays
-          const coreOfferings = Array.isArray(existingStrategy.core_offerings) 
-            ? existingStrategy.core_offerings 
+          const strategyData = existingStrategy as any;
+          const coreOfferings = Array.isArray(strategyData.core_offerings) 
+            ? strategyData.core_offerings 
             : [];
-          const offeringsReasoning = Array.isArray(existingStrategy.offerings_reasoning)
-            ? existingStrategy.offerings_reasoning
+          const offeringsReasoning = Array.isArray(strategyData.offerings_reasoning)
+            ? strategyData.offerings_reasoning
             : [];
-          const primaryAudience = Array.isArray(existingStrategy.target_audience_primary)
-            ? existingStrategy.target_audience_primary
+          const primaryAudience = Array.isArray(strategyData.target_audience_primary)
+            ? strategyData.target_audience_primary
             : [];
-          const audienceReasoning = Array.isArray(existingStrategy.audience_reasoning)
-            ? existingStrategy.audience_reasoning
+          const audienceReasoning = Array.isArray(strategyData.audience_reasoning)
+            ? strategyData.audience_reasoning
             : [];
-          const goalReasoning = Array.isArray(existingStrategy.goal_reasoning)
-            ? existingStrategy.goal_reasoning
+          const goalReasoning = Array.isArray(strategyData.goal_reasoning)
+            ? strategyData.goal_reasoning
             : [];
 
           const loadedStrategy: BrandStrategy = {
@@ -91,40 +92,40 @@ export default function BrandProfilePageNew() {
               // @ts-ignore
               offerings: coreOfferings,
               // @ts-ignore
-              weights: existingStrategy.offerings_weights || {},
+              weights: strategyData.offerings_weights || {},
               // @ts-ignore
               reasoning: offeringsReasoning,
               // @ts-ignore
-              confidence: existingStrategy.offerings_confidence || 'low',
+              confidence: strategyData.offerings_confidence || 'low',
               // @ts-ignore
-              generated_at: existingStrategy.generated_at || new Date().toISOString()
+              generated_at: strategyData.generated_at || new Date().toISOString()
             },
             target_audience: {
               // @ts-ignore
               primary: primaryAudience,
               // @ts-ignore
-              seasonal: existingStrategy.target_audience_seasonal || [],
+              seasonal: strategyData.target_audience_seasonal || [],
               // @ts-ignore
               reasoning: audienceReasoning,
               // @ts-ignore
-              confidence: existingStrategy.audience_confidence || 'low'
+              confidence: strategyData.audience_confidence || 'low'
             },
             communication_goal: {
               // @ts-ignore
-              goal: existingStrategy.communication_goal || 'drive_visits',
+              goal: (strategyData.communication_goal || 'drive_visits') as CommunicationGoalType,
               // @ts-ignore
               reasoning: goalReasoning,
               // @ts-ignore
-              confidence: existingStrategy.goal_confidence || 'low'
+              confidence: strategyData.goal_confidence || 'low'
             },
             // @ts-ignore
-            locale: existingStrategy.locale || 'da-DK',
+            locale: strategyData.locale || 'da-DK',
             // @ts-ignore
-            version: existingStrategy.strategy_version || '1.0.0',
+            version: strategyData.strategy_version || '1.0.0',
             // @ts-ignore
-            generated_at: existingStrategy.generated_at || new Date().toISOString(),
+            generated_at: strategyData.generated_at || new Date().toISOString(),
             // @ts-ignore
-            approved_by_user: existingStrategy.approved_by_user || false
+            approved_by_user: strategyData.approved_by_user || false
           };
 
           console.log('Loaded strategy from DB:', loadedStrategy);
@@ -166,32 +167,33 @@ export default function BrandProfilePageNew() {
         .eq('business_id', businessId)
         .maybeSingle();
 
-      if (existingStrategy && Array.isArray(existingStrategy.core_offerings)) {
+      if (existingStrategy && Array.isArray((existingStrategy as any).core_offerings)) {
         // Use correct fields from schema
+        const sd = existingStrategy as any;
         const loadedStrategy: BrandStrategy = {
           business_id: businessId,
           core_offerings: {
-            offerings: existingStrategy.core_offerings || [],
-            weights: existingStrategy.offerings_weights || {},
-            reasoning: existingStrategy.offerings_reasoning || [],
-            confidence: existingStrategy.offerings_confidence || 'low',
-            generated_at: existingStrategy.generated_at || new Date().toISOString()
+            offerings: sd.core_offerings || [],
+            weights: sd.offerings_weights || {},
+            reasoning: sd.offerings_reasoning || [],
+            confidence: sd.offerings_confidence || 'low',
+            generated_at: sd.generated_at || new Date().toISOString()
           },
           target_audience: {
-            primary: existingStrategy.target_audience_primary || [],
-            seasonal: existingStrategy.target_audience_seasonal || [],
-            reasoning: existingStrategy.audience_reasoning || [],
-            confidence: existingStrategy.audience_confidence || 'low'
+            primary: sd.target_audience_primary || [],
+            seasonal: sd.target_audience_seasonal || [],
+            reasoning: sd.audience_reasoning || [],
+            confidence: sd.audience_confidence || 'low'
           },
           communication_goal: {
-            goal: existingStrategy.communication_goal || 'drive_visits',
-            reasoning: existingStrategy.goal_reasoning || [],
-            confidence: existingStrategy.goal_confidence || 'low'
+            goal: (sd.communication_goal || 'drive_visits') as CommunicationGoalType,
+            reasoning: sd.goal_reasoning || [],
+            confidence: sd.goal_confidence || 'low'
           },
-          locale: existingStrategy.locale || 'da-DK',
-          version: existingStrategy.strategy_version || '1.0.0',
-          generated_at: existingStrategy.generated_at || new Date().toISOString(),
-          approved_by_user: existingStrategy.approved_by_user || false
+          locale: sd.locale || 'da-DK',
+          version: sd.strategy_version || '1.0.0',
+          generated_at: sd.generated_at || new Date().toISOString(),
+          approved_by_user: sd.approved_by_user || false
         };
         setStrategy(loadedStrategy);
       } else {

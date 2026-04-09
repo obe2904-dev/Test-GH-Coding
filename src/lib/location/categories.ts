@@ -3,9 +3,9 @@
  * 9 universal location types for business positioning
  */
 
-import type { LocationCategory, LocationCategoryId } from '../../types/location';
+import type { LocationCategoryLegacy, LocationCategoryId } from '../../types/location';
 
-export const LOCATION_CATEGORIES: Record<LocationCategoryId, LocationCategory> = {
+export const LOCATION_CATEGORIES: Record<LocationCategoryId, LocationCategoryLegacy> = {
   city_centre: {
     id: 'city_centre',
     name: 'City Centre',
@@ -230,14 +230,14 @@ export const LOCATION_CATEGORIES: Record<LocationCategoryId, LocationCategory> =
 /**
  * Get category by ID
  */
-export function getCategoryById(id: LocationCategoryId): LocationCategory {
+export function getCategoryById(id: LocationCategoryId): LocationCategoryLegacy {
   return LOCATION_CATEGORIES[id];
 }
 
 /**
  * Get all categories as array
  */
-export function getAllCategories(): LocationCategory[] {
+export function getAllCategories(): LocationCategoryLegacy[] {
   return Object.values(LOCATION_CATEGORIES);
 }
 

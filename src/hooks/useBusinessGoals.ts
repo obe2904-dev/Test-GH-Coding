@@ -33,7 +33,7 @@ export function useBusinessGoals(businessId: string | null): UseBusinessGoalsRet
       setLoading(true);
       setError(null);
 
-      const { data, error: fetchError } = await supabase
+      const { data, error: fetchError } = await (supabase as any)
         .from('business_goals')
         .select('*')
         .eq('business_id', businessId)
@@ -42,7 +42,7 @@ export function useBusinessGoals(businessId: string | null): UseBusinessGoalsRet
 
       if (fetchError) throw fetchError;
 
-      setGoals(data as BusinessGoal[]);
+      setGoals(data as unknown as BusinessGoal[]);
     } catch (err) {
       console.error('Error fetching goals:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch goals');
@@ -56,7 +56,7 @@ export function useBusinessGoals(businessId: string | null): UseBusinessGoalsRet
     try {
       setError(null);
 
-      const { data, error: createError } = await supabase
+      const { data, error: createError } = await (supabase as any)
         .from('business_goals')
         .insert(goal)
         .select()
@@ -64,7 +64,7 @@ export function useBusinessGoals(businessId: string | null): UseBusinessGoalsRet
 
       if (createError) throw createError;
 
-      const newGoal = data as BusinessGoal;
+      const newGoal = data as unknown as BusinessGoal;
       setGoals(prev => [newGoal, ...prev]);
       
       return newGoal;
@@ -80,7 +80,7 @@ export function useBusinessGoals(businessId: string | null): UseBusinessGoalsRet
     try {
       setError(null);
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await (supabase as any)
         .from('business_goals')
         .update(updates)
         .eq('id', id);
@@ -107,7 +107,7 @@ export function useBusinessGoals(businessId: string | null): UseBusinessGoalsRet
     try {
       setError(null);
 
-      const { error: deleteError } = await supabase
+      const { error: deleteError } = await (supabase as any)
         .from('business_goals')
         .delete()
         .eq('id', id);

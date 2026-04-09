@@ -1,11 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
-interface PopulateLocationResult {
-  success: boolean;
-  error?: string;
-}
-
 interface UseLocationIntelligencePopulatorResult {
   populating: boolean;
   error: string | null;

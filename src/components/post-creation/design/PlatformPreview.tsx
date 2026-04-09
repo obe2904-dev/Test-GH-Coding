@@ -86,7 +86,7 @@ export function PlatformPreview({
   currentTier,
   businessName: businessNameProp,
   onEditCaption,
-  platformFormat,
+  platformFormat: _platformFormat,
 }: PlatformPreviewProps) {
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const [businessName, setBusinessName] = useState<string>(businessNameProp || '')

@@ -116,7 +116,7 @@ export function VisualIdentityCard({ businessId }: VisualIdentityCardProps) {
           </div>
           <div>
             <span className="text-sm font-medium text-gray-700">{t('identity.colorGrading')}:</span>
-            <p className="text-sm text-gray-900 mt-1">{identity.photography_style.color_grading}</p>
+            <p className="text-sm text-gray-900 mt-1">{identity.photography_style.color_temperature}</p>
           </div>
         </div>
       </div>
@@ -130,10 +130,10 @@ export function VisualIdentityCard({ businessId }: VisualIdentityCardProps) {
       )}
 
       {/* Recognizable Elements */}
-      {identity.recognizable_interior_identity && (
+      {identity.interior_style && (
         <div className="mb-4">
           <span className="text-sm font-medium text-gray-700">{t('identity.interiorIdentity')}:</span>
-          <p className="text-gray-900 mt-1">{identity.recognizable_interior_identity}</p>
+          <p className="text-gray-900 mt-1">{identity.interior_style}</p>
         </div>
       )}
 

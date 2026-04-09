@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next'
 import type { PhotoContent } from '../../../stores/postCreationStore'
 import { PlatformIndicator } from './PlatformIndicator'
-import { Download, Copy, ExternalLink, Link2 } from './icons'
+import { Download, Copy, ExternalLink } from './icons'
 import { formatPlatformList, getPlatformLabel } from './utils.ts'
 
 interface ManualPostModalProps {
@@ -27,7 +27,6 @@ export function ManualPostModal({
   t,
   onClose,
   onComplete,
-  onConnectPlatform,
   downloadPhoto,
   copyToClipboard,
   openPlatform,

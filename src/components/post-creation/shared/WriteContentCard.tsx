@@ -4,7 +4,6 @@ import type { PlatformHashtag } from '../../../stores/postCreationStore'
 import type { Tier } from '../../../stores/tierStore'
 import { HashtagDisplay } from './HashtagDisplay'
 import { ClarificationPrompt } from './ClarificationPrompt'
-import { AIFeaturePanel } from './AIFeaturePanel'
 import { ActionButtons } from './ActionButtons'
 
 type SupportedPlatform = 'facebook' | 'instagram'
@@ -70,22 +69,22 @@ export function WriteContentCard({
   hashtags,
   selectedHashtags,
   onToggleHashtag,
-  selectedPlatforms,
+  selectedPlatforms: _selectedPlatforms,
   supportedSelectedPlatforms,
-  currentTier,
-  availablePlatforms,
-  activePlatform,
-  onSelectPlatforms,
-  onActivePlatformChange,
+  currentTier: _currentTier,
+  availablePlatforms: _availablePlatforms,
+  activePlatform: _activePlatform,
+  onSelectPlatforms: _onSelectPlatforms,
+  onActivePlatformChange: _onActivePlatformChange,
   clarificationQuestion,
   clarificationInput,
   onClarificationChange,
   onClarificationSubmit,
   onClarificationDismiss,
-  hasBusinessProfile,
-  onToggleHashtags,
+  hasBusinessProfile: _hasBusinessProfile,
+  onToggleHashtags: _onToggleHashtags,
   onAddHashtag,
-  onUpgrade,
+  onUpgrade: _onUpgrade,
   onEnhance,
   onSpellingCheck,
   isEnhancing,

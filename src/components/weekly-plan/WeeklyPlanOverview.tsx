@@ -45,24 +45,6 @@ function formatWeekRange(start: string, end: string, t: TFunction): string {
   return `${startDayNum}. - ${endDayNum}. ${month} ${year}`
 }
 
-// Helper to get emoji for content type
-function getContentTypeEmoji(type: string): string {
-  const emojis: Record<string, string> = {
-    menu_highlight: '📸',
-    behind_scenes: '🎬',
-    atmosphere: '🌅',
-    location_story: '📍',
-    engagement: '💬',
-    event_promotion: '🎉',
-  }
-  return emojis[type] || '📝'
-}
-
-// Helper to get localised short day name
-function getDayName(englishDay: string, t: TFunction): string {
-  return t(`weeklyPlan.overview.days.short.${englishDay.substring(0, 3)}`, englishDay)
-}
-
 // Compute display week range: show Monday–Sunday (weekStart is Monday)
 function getDisplayWeekRange(weekStart: string): { start: string; end: string } {
   const [y, m, d] = weekStart.split('-').map(Number)
@@ -92,27 +74,6 @@ function weatherHeaderLabel(weekStart: string, weekNumber: number, t: TFunction)
 // Strip any leading "Uge X:" or "Uge X -" prefix from AI-generated headline
 function stripWeekPrefix(headline: string): string {
   return headline.replace(/^Uge\s+\d+\s*[:\-–]\s*/i, '').trim()
-}
-
-// Map weather condition to an emoji icon
-function weatherIcon(condition: string): string {
-  const icons: Record<string, string> = {
-    sunny: '☀️',
-    partly_cloudy: '⛅',
-    cloudy: '☁️',
-    rain: '🌧️',
-    snow: '❄️',
-    fog: '🌫️',
-  }
-  return icons[condition] || '🌤️'
-}
-
-// Short day name from ISO date string
-function shortDayName(dateStr: string, t: TFunction): string {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  const date = new Date(y, m - 1, d)
-  const days = t('weeklyPlan.overview.days.shortFromIndex', { returnObjects: true }) as string[]
-  return days[date.getDay()] ?? dateStr
 }
 
 // Generate a short sentence summarising the full week's weather
@@ -481,7 +442,7 @@ export function WeeklyPlanOverview({
         })
 
         // Build a map of date → weatherDay using the same normalizer
-        const weatherByDate = new Map<string, typeof plan.weatherDays[0]>()
+        const weatherByDate = new Map<string, NonNullable<typeof plan.weatherDays>[number]>()
         ;(plan.weatherDays ?? []).forEach(w => weatherByDate.set(toYMD(w.date ?? ''), w))
 
         // Calendar event badge helpers

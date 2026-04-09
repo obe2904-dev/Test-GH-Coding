@@ -68,7 +68,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'planned',
       dwellTime: 'long',
       groupSize: 'groups',
-      priceFamily: 'medium'
+      pricesensitivity: 'medium'
     },
     serviceExpectations: {
       speed: 'relaxed',
@@ -89,7 +89,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'impulse',
       dwellTime: 'medium',
       groupSize: 'mixed',
-      priceFamily: 'medium'
+      pricesensitivity: 'medium'
     },
     serviceExpectations: {
       speed: 'moderate',
@@ -110,7 +110,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'planned',
       dwellTime: 'short',
       groupSize: 'solo',
-      priceFamily: 'medium'
+      pricesensitivity: 'medium'
     },
     serviceExpectations: {
       speed: 'fast',
@@ -131,7 +131,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'impulse',
       dwellTime: 'short',
       groupSize: 'solo',
-      priceFamily: 'medium'
+      pricesensitivity: 'medium'
     },
     serviceExpectations: {
       speed: 'fast',
@@ -152,7 +152,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'mixed',
       dwellTime: 'long',
       groupSize: 'groups',
-      priceFamily: 'high'
+      pricesensitivity: 'high'
     },
     serviceExpectations: {
       speed: 'relaxed',
@@ -173,7 +173,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'impulse',
       dwellTime: 'long',
       groupSize: 'mixed',
-      priceFamily: 'medium'
+      pricesensitivity: 'medium'
     },
     serviceExpectations: {
       speed: 'relaxed',
@@ -194,7 +194,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'impulse',
       dwellTime: 'medium',
       groupSize: 'pairs',
-      priceFamily: 'medium'
+      pricesensitivity: 'medium'
     },
     serviceExpectations: {
       speed: 'moderate',
@@ -215,7 +215,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'mixed',
       dwellTime: 'medium',
       groupSize: 'mixed',
-      priceFamily: 'medium'
+      pricesensitivity: 'medium'
     },
     serviceExpectations: {
       speed: 'moderate',
@@ -236,7 +236,7 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
       visitStyle: 'planned',
       dwellTime: 'long',
       groupSize: 'groups',
-      priceFamily: 'low'
+      pricesensitivity: 'low'
     },
     serviceExpectations: {
       speed: 'relaxed',

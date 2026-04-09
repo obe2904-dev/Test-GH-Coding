@@ -276,7 +276,7 @@ export class ConceptFitAnalyzer {
   private evaluateServiceFit(
     serviceModel: ConceptFitInput['serviceModel'],
     menuPeriods: ConceptFitInput['menuPeriods'],
-    menuSummary: string | undefined,
+    _menuSummary: string | undefined,
     expectations: LocationExpectations
   ): { score: 'good' | 'moderate' | 'poor'; details: string } {
     if (!serviceModel) {
@@ -364,7 +364,7 @@ export class ConceptFitAnalyzer {
     categoryDisplayName: string,
     hoursFit: { score: string; details: string },
     priceFit: { score: string; details: string },
-    serviceFit: { score: string; details: string },
+    _serviceFit: { score: string; details: string },
     expectations: LocationExpectations
   ): { one_liner: string; best_marketing_angle: string } {
     const categoryName = categoryDisplayName; // Use actual category name from UI
@@ -428,8 +428,8 @@ export class ConceptFitAnalyzer {
     fitLevel: string,
     expectations: LocationExpectations,
     hoursFit: { score: string },
-    priceFit: { score: string },
-    serviceFit: { score: string }
+    _priceFit: { score: string },
+    _serviceFit: { score: string }
   ): ConceptFitOutput['marketing_implications'] {
     const contentEmphasis: string[] = [];
     const timingTweaks: string[] = [];
@@ -541,7 +541,7 @@ export class ConceptFitAnalyzer {
     fitLevel: string,
     hoursFit: { score: string },
     priceFit: { score: string },
-    serviceFit: { score: string },
+    _serviceFit: { score: string },
     expectations: LocationExpectations
   ): string[] {
     const watchouts: string[] = [];
@@ -648,7 +648,7 @@ export class ConceptFitAnalyzer {
   private getDefaultFit(
     areaType: string, 
     categoryScore: number, 
-    categoryDisplayName: string,
+    _categoryDisplayName: string,
     season?: Season,
     isStrategyDriver: boolean = false
   ): ConceptFitOutput {

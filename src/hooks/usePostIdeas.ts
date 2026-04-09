@@ -39,7 +39,7 @@ export function usePostIdeas(businessId: string | undefined): UsePostIdeasResult
       setLoading(true);
       setError(null);
 
-      const { data, error: fetchError } = await supabase
+      const { data, error: fetchError } = await (supabase as any)
         .from('post_ideas')
         .select('*')
         .eq('business_id', businessId)
@@ -58,8 +58,8 @@ export function usePostIdeas(businessId: string | undefined): UsePostIdeasResult
 
   const updateStatus = async (postId: string, status: string) => {
     try {
-      const { error: updateError } = await (supabase
-        .from('post_ideas') as any)
+      const { error: updateError } = await (supabase as any)
+        .from('post_ideas')
         .update({ status })
         .eq('id', postId);
 
@@ -74,8 +74,8 @@ export function usePostIdeas(businessId: string | undefined): UsePostIdeasResult
 
   const deletePost = async (postId: string) => {
     try {
-      const { error: deleteError } = await (supabase
-        .from('post_ideas') as any)
+      const { error: deleteError } = await (supabase as any)
+        .from('post_ideas')
         .delete()
         .eq('id', postId);
 

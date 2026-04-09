@@ -295,8 +295,11 @@ export function GenerateStep({
         })),
         aiGeneratedHashtags: generatedPost.hashtags,
         adjustments: {
+          length: 'current',
+          tone: 'brand',
           includeEmojis: true,
           includeHashtags: true,
+          includeBookingLink: false,
         },
       })
     }
@@ -829,7 +832,7 @@ export function GenerateStep({
           strategicIdea={strategicIdea ? {
             title: strategicIdea.title,
             rationale: strategicIdea.rationale,
-            contentType: strategicIdea.contentType,
+            contentType: strategicIdea.contentType ?? '',
             ctaIntent: strategicIdea.ctaIntent,
           } : undefined}
           onEdit={handleEditGenerated}

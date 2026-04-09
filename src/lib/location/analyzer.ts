@@ -23,8 +23,9 @@ export async function analyzeLocation(address: string): Promise<LocationAnalysis
   return {
     address: geocodingResult.formattedAddress,
     coordinates: geocodingResult.coordinates,
-    country: geocodingResult.country,
+    country: geocodingResult.country as any,
     city: geocodingResult.city,
+    locale: 'da-DK',
     matches,
     primaryCategory,
     analyzedAt: new Date().toISOString(),
@@ -34,7 +35,6 @@ export async function analyzeLocation(address: string): Promise<LocationAnalysis
 
 export function generateLocationProfile(analysis: LocationAnalysis): LocationProfile {
   const topMatches = analysis.matches.filter(m => m.score > 30).slice(0, 3);
-  const primaryMatch = topMatches[0];
   const secondaryCategories = topMatches.slice(1).map(m => m.categoryId);
   
   // Generate content strategy based on categories

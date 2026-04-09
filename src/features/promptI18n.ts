@@ -86,9 +86,9 @@ export interface PromptI18n {
 export function getPromptI18n(lang: PromptLanguage): PromptI18n {
   const src = lang === 'da' ? daJson : enJson
   return {
+    ...(src as unknown as PromptI18n),
     meta: {
       promptLanguageLine: (l) => `PROMPT_SPROG: ${l}`
     },
-    ...(src as unknown as PromptI18n)
   }
 }

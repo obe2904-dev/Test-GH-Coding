@@ -11,7 +11,7 @@ export default function TestBusinessGoals() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
-  const { goals, loading, error, createGoal, updateGoal, deleteGoal, refetch } = useBusinessGoals(businessId);
+  const { goals, loading, error, createGoal, updateGoal, deleteGoal } = useBusinessGoals(businessId);
 
   // Get current business ID
   useEffect(() => {

@@ -124,6 +124,10 @@ export interface LocationKeywords {
   cityCenter: string[];
   residential: string[];
   tourist: string[];
+  office?: string[];
+  student?: string[];
+  shopping?: string[];
+  leisure?: string[];
   // ... etc
 }
 

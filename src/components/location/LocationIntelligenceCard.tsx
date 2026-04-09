@@ -1,4 +1,3 @@
-import React from 'react';
 import { useLocationIntelligence } from '@/hooks/useBusinessKnowledge';
 import { useLocationIntelligencePopulator } from '@/hooks/useLocationIntelligencePopulator';
 

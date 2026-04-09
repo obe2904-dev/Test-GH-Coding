@@ -26,27 +26,11 @@ export interface ContextTrigger {
  * DISABLED: Weather should be fetched through backend Edge Functions only
  * See: supabase/functions/ai-generate-v2/data-sources/weather.ts
  */
-async function fetchWeatherData(city: string): Promise<any | null> {
+async function fetchWeatherData(_city: string): Promise<any | null> {
   // Frontend direct weather API calls disabled
   // Weather data is now handled by backend Edge Functions
   console.log('⚠️ Frontend weather fetch disabled - use backend Edge Functions')
   return null
-}
-
-/**
- * Helper: Determine weather mood for content generation
- */
-function getWeatherMood(condition: string, temp: number): string {
-  const conditionLower = condition.toLowerCase()
-  
-  if (conditionLower.includes('rain')) return 'rainy and cozy'
-  if (conditionLower.includes('snow')) return 'snowy and magical'
-  if (conditionLower.includes('clear') && temp > 20) return 'sunny and warm'
-  if (conditionLower.includes('clear') && temp <= 20) return 'crisp and clear'
-  if (conditionLower.includes('cloud')) return 'grey and contemplative'
-  if (conditionLower.includes('storm')) return 'stormy and dramatic'
-  
-  return 'pleasant'
 }
 
 /**

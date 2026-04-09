@@ -183,7 +183,6 @@ export const OFFERING_PATTERNS = {
 } as const;
 
 type OfferingId = keyof typeof OFFERING_PATTERNS;
-type IdentityType = (typeof OFFERING_PATTERNS)[OfferingId]['identityType'];
 
 function clamp0to100(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -402,7 +401,7 @@ function buildWhyBulletsDa(offeringId: OfferingId, candidate: CoreOfferingCandid
   return unique.slice(0, 4);
 }
 
-export function validateCoreOfferings(result: CoreOfferings, inputs: StrategyDeductionInputs): CoreOfferings {
+export function validateCoreOfferings(result: CoreOfferings, _inputs: StrategyDeductionInputs): CoreOfferings {
   const full = result.offeringsFull || [];
   const topIds = (result.coreOfferingsTop3 || result.offerings || []).filter(Boolean);
 

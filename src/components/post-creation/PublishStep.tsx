@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { usePostCreationStore, type PlatformContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useTierStore } from '../../stores/tierStore'
-import { ProgressStepper } from '../ui/ProgressStepper'
 import { ManualPostModal } from './publish/ManualPostModal'
 import { AiSuggestionGrid, type AiSuggestion } from './publish/AiSuggestionGrid'
 import { PublishModeSelector, type PublishMode } from './publish/PublishModeSelector'
@@ -44,7 +43,7 @@ interface PublishStepProps {
   hasUnsavedChanges?: boolean
 }
 
-export function PublishStep({ onNext, onBack, onStepClick, markAsSaved, hasUnsavedChanges }: PublishStepProps) {
+export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges }: PublishStepProps) {
   const { t: tPublish, i18n } = useTranslation(undefined, { keyPrefix: 'createPost.publish' })
   const { postContent, selectedPlatforms, photoContent, photoIdea, selectedIdea, aiIdeas, weeklyPlanPost, postCta } = usePostCreationStore()
   const { isConnected } = useConnectionsStore()

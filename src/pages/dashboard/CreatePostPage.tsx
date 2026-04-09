@@ -35,7 +35,7 @@ const StepLoader = () => (
 )
 
 export function CreatePostPage() {
-  const { isEnabled, loadPlatformsFromDatabase, enabledPlatforms } = useConnectionsStore()
+  const { isEnabled: _isEnabled, loadPlatformsFromDatabase, enabledPlatforms } = useConnectionsStore()
   const navigate = useNavigate()
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const { 
@@ -66,7 +66,7 @@ export function CreatePostPage() {
     draftMap,
     setDraftMapEntry,
     clearWeeklyPlanSession,
-    reset: resetStore,
+    reset: _resetStore,
     setPostCta,
     photoContent,
     setPhotoContent,
@@ -114,7 +114,7 @@ export function CreatePostPage() {
     : activePath === 'ai-ideas' && selectedSuggestionData?.id
       ? `p2g_draft_idea_${selectedSuggestionData.id}`
       : 'p2g_draft_manual'
-  const { save: saveDraft, restoreNow, clear: clearDraft } = useContextDraft(draftKey)
+  const { save: saveDraft, restoreNow, clear: _clearDraft } = useContextDraft(draftKey)
 
   // No-ops kept for backward compat with child component props
   const markAsChanged = () => {}
@@ -274,7 +274,7 @@ export function CreatePostPage() {
       try {
         // 2️⃣ Check DB cache (original AI-generated text)
         console.log('🔍 Checking DB cache for suggestion ID:', selectedSuggestionData.id)
-        const { data: cachedSuggestion, error: fetchError } = await supabase
+        const { data: cachedSuggestion, error: fetchError } = await (supabase as any)
           .from('daily_suggestions')
           .select('generated_text, generated_hashtags, generated_platform_content, generated_at, platforms_generated, text_generation_version')
           .eq('id', selectedSuggestionData.id)
@@ -404,7 +404,7 @@ export function CreatePostPage() {
               textPreview: (data.sharedText || data.facebook?.text || '').substring(0, 50)
             })
             
-            const { error: saveError } = await supabase
+            const { error: saveError } = await (supabase as any)
               .from('daily_suggestions')
               .update({
                 generated_text: data.sharedText || data.facebook?.text || '',
@@ -450,7 +450,7 @@ export function CreatePostPage() {
               headline: selectedSuggestionData.title,
               // Fall back to sharedText so cache hits without generated_platform_content still render
               text: data.facebook?.text || data.sharedText || '',
-              hashtags: hashtagArray.filter(h => h.platforms?.includes('facebook')),
+              hashtags: hashtagArray.filter((h: any) => h.platforms?.includes('facebook')),
               adjustments: {
                 length: 'current',
                 tone: 'brand',
@@ -462,7 +462,7 @@ export function CreatePostPage() {
             instagram: {
               headline: selectedSuggestionData.title,
               text: data.instagram?.text || data.sharedText || '',
-              hashtags: hashtagArray.filter(h => h.platforms?.includes('instagram')),
+              hashtags: hashtagArray.filter((h: any) => h.platforms?.includes('instagram')),
               adjustments: {
                 length: 'current',
                 tone: 'brand',
@@ -472,7 +472,7 @@ export function CreatePostPage() {
               }
             }
           },
-          aiGeneratedHashtags: hashtagArray.map(h => h.tag.replace(/^#/, ''))
+          aiGeneratedHashtags: hashtagArray.map((h: any) => h.tag.replace(/^#/, ''))
         })
         
         // Set photo idea

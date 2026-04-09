@@ -7,7 +7,6 @@
  * NEVER shows technical states - always translates to friendly language.
  */
 
-import React from 'react'
 import { getMenuStatusUI, type MenuSourceStatus, type MenuSourceType } from '@/lib/menu/statusUi'
 
 interface MenuStatusCardProps {

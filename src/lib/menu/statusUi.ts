@@ -169,7 +169,7 @@ function getFailedStatusUI(
       },
       secondaryAction: {
         label: 'Prøv igen',
-        action: 'retry'
+        action: 'manual'
       }
     }
   }

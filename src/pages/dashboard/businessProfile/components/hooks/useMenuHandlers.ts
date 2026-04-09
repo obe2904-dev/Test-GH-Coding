@@ -521,7 +521,7 @@ export function useMenuHandlers({
                 }
 
                 const currentText = menuDescription.trim()
-                const menuName = extractMenuNameFromSource(menuUrlState)
+                const menuName = extractMenuNameFromSource(menuUrlState!)
                 const summary = structured?.summary || 'Menu extracted'
                 const separator = `\n\n--- ${menuName} ---\n`
                 const newText = currentText
@@ -541,7 +541,7 @@ export function useMenuHandlers({
                       business_id: businessId,
                       menu_source_id: null,
                       menu_name: menuName,
-                      menu_type: menuUrlState.menuType,
+                      menu_type: menuUrlState!.menuType,
                       extracted_data: { categories: extractedCategories },
                       created_by: currentUserId || null,
                       updated_at: new Date().toISOString()
@@ -619,7 +619,7 @@ export function useMenuHandlers({
           }
 
           const currentText = menuDescription.trim()
-          const menuName = extractMenuNameFromSource(menuUrlState)
+          const menuName = extractMenuNameFromSource(menuUrlState!)
           const summary = structured?.summary || 'Menu extracted'
           const separator = `\n\n--- ${menuName} ---\n`
           const newText = currentText
@@ -639,7 +639,7 @@ export function useMenuHandlers({
                 business_id: businessId,
                 menu_source_id: null,
                 menu_name: menuName,
-                menu_type: menuUrlState.menuType,
+                menu_type: menuUrlState!.menuType,
                 extracted_data: { categories: extractedCategories },
                 created_by: currentUserId || null,
                 updated_at: new Date().toISOString()
@@ -698,7 +698,7 @@ export function useMenuHandlers({
             })
 
             const currentText = menuDescription.trim()
-            const menuName = extractMenuNameFromSource(menuUrlState)
+            const menuName = extractMenuNameFromSource(menuUrlState!)
             const summary = structured?.summary || 'Menu extracted'
             const separator = `\n\n--- ${menuName} ---\n`
             const newText = currentText
@@ -718,7 +718,7 @@ export function useMenuHandlers({
                   business_id: businessId,
                   menu_source_id: null,
                   menu_name: menuName,
-                  menu_type: menuUrlState.menuType,
+                  menu_type: menuUrlState!.menuType,
                   extracted_data: { categories: extractedCategories },
                   created_by: currentUserId || null,
                   updated_at: new Date().toISOString()

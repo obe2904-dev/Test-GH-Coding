@@ -106,7 +106,7 @@ export default function TestConceptFitPage() {
       // Fetch the saved result from database
       console.log('[Concept Fit] Fetching saved result from database...');
       
-      const { data: fitData, error: fitError } = await supabase
+      const { data: fitData, error: fitError } = await (supabase as any)
         .from('business_concept_fit')
         .select('*')
         .eq('business_id', selectedBusiness)
@@ -121,7 +121,7 @@ export default function TestConceptFitPage() {
         throw fitError;
       }
 
-      setResult(fitData);
+      setResult(fitData as any);
       console.log('[Concept Fit] ✅ Analysis complete!');
     } catch (err: any) {
       console.error('[Concept Fit] ❌ Error:', err);
@@ -138,7 +138,7 @@ export default function TestConceptFitPage() {
     setError(null);
 
     try {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('business_concept_fit')
         .select('*')
         .eq('business_id', selectedBusiness)
@@ -151,7 +151,7 @@ export default function TestConceptFitPage() {
           throw error;
         }
       } else {
-        setResult(data);
+        setResult(data as any);
       }
     } catch (err: any) {
       console.error('Error loading result:', err);

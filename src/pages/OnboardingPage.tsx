@@ -566,12 +566,12 @@ export function OnboardingPage() {
 
         if (hasServiceModelData) {
           console.log('💾 Saving service model data from onboarding analysis')
-          supabase.from('business_operations')
+          ;(supabase as any).from('business_operations')
             .insert({
               business_id: businessId,
               ...serviceModelData
             })
-            .then(({ error }) => {
+            .then(({ error }: { error: any }) => {
               if (error) {
                 console.warn('⚠️ Failed to save service model during onboarding:', error.message)
               } else {

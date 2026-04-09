@@ -145,7 +145,7 @@ export function MenuOfferingsPanel({
     const loadMenuSignal = async () => {
       const { data, error } = await supabase
         .from('business_profile')
-        .select('menu_signal')
+        .select('*')
         .eq('business_id', businessId)
         .single()
       
@@ -154,9 +154,9 @@ export function MenuOfferingsPanel({
         return
       }
       
-      if (data?.menu_signal) {
-        setMenuSignal(data.menu_signal as MenuSignalResult)
-        console.log('📋 Loaded menu_signal:', data.menu_signal)
+      if ((data as any)?.menu_signal) {
+        setMenuSignal((data as any).menu_signal as MenuSignalResult)
+        console.log('📋 Loaded menu_signal:', (data as any).menu_signal)
       }
     }
     

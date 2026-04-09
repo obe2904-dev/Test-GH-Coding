@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { BrandProfileSection } from './BrandProfileSection';
 import { BrandSectionIcon } from './BrandSectionIcon';
@@ -324,12 +324,6 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
           build_brand:    { label: t('brand.display.strategy.goals.build_brand'),    color: 'text-info',  bg: 'bg-info-surface',  border: 'border-info' },
           retain_loyalty: { label: t('brand.display.strategy.goals.retain_loyalty'), color: 'text-accent-text',bg: 'bg-accent-surface',border: 'border-accent' },
         };
-        const CCW_LABELS: Record<string, string> = {
-          product_menu: '🍽️ Produkt & menu',
-          craving_visual: '📸 Cravings & visuals',
-          behind_scenes: '🔧 Behind the scenes',
-          team_people: '👥 Team & personlighed',
-        };
         const GOAL_COLORS: Record<string, { bar: string; text: string }> = {
           drive_footfall: { bar: 'bg-success', text: 'text-success' },
           build_brand:    { bar: 'bg-info',  text: 'text-info' },
@@ -337,7 +331,6 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
         };
         const primaryMeta = GOAL_LABELS[cs.primary_goal] ?? GOAL_LABELS.drive_footfall;
         const blendEntries = Object.entries(cs.goal_blend ?? {}) as [string, number][];
-        const ccwEntries = Object.entries(cs.content_category_weights ?? {}) as [string, number][];
         const allSignals = [
           ...(cs.footfall_signals ?? []).map(s => ({ label: s, icon: '🏃', tip: t('brand.display.strategy.tips.footfall') })),
           ...(cs.brand_anchors ?? []).map(s => ({ label: s, icon: '⚓', tip: t('brand.display.strategy.tips.brand') })),

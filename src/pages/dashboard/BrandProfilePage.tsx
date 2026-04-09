@@ -1,12 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchBrandProfile, generateBrandProfile } from '../../services/brandProfileService'
 
-// Debug/reasoning fields for interim review (simulate backend fields)
-const DEBUG_REASONING = {
-  kendt: 'AI vurderede "kendt for" ud fra menu, anmeldelser og website.',
-  hvem: 'AI identificerede målgruppe baseret på sprog, billedvalg og tidligere opslag.',
-  kommunikationsmaal: 'AI satte kommunikationsmål ud fra virksomhedstype og ønsket effekt.'
-}
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
@@ -69,8 +63,8 @@ export default function BrandProfilePage() {
   }
   
   // New structured brand profile fields
-  const [socialStyle, setSocialStyle] = useState<SocialStyle | null>(null)
-  const [voiceExamples, setVoiceExamples] = useState<VoiceExamples | null>(null)
+  const [socialStyle, _setSocialStyle] = useState<SocialStyle | null>(null)
+  const [voiceExamples, _setVoiceExamples] = useState<VoiceExamples | null>(null)
 
   const markUnsaved = () => setHasUnsavedChanges(true)
 

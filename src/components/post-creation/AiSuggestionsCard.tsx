@@ -49,35 +49,6 @@ const CONTENT_TYPE_ICONS: Record<string, string> = {
   behind_scenes: '🎬',
 }
 
-const CONTENT_TYPE_KEYS: Record<string, string> = {
-  menu_item: 'dashboard.contentType.menu_item',
-  atmosphere: 'dashboard.contentType.atmosphere',
-  behind_scenes: 'dashboard.contentType.behind_scenes',
-}
-
-const TIME_REASON_KEYS: Record<string, string> = {
-  '08:00': 'dashboard.timeReason.08:00',
-  '09:00': 'dashboard.timeReason.09:00',
-  '10:00': 'dashboard.timeReason.10:00',
-  '11:00': 'dashboard.timeReason.11:00',
-  '12:00': 'dashboard.timeReason.12:00',
-  '13:00': 'dashboard.timeReason.13:00',
-  '14:00': 'dashboard.timeReason.14:00',
-  '16:00': 'dashboard.timeReason.16:00',
-  '17:00': 'dashboard.timeReason.17:00',
-  '18:00': 'dashboard.timeReason.18:00',
-  '20:00': 'dashboard.timeReason.20:00',
-}
-
-// Returns true if a HH:MM slot has already passed today
-function isTimePast(timeStr: string): boolean {
-  const [h, m] = timeStr.split(':').map(Number)
-  const now = new Date()
-  const slot = new Date()
-  slot.setHours(h, m, 0, 0)
-  return slot <= now
-}
-
 // Module-level cache: survives component remounts within the same browser session.
 // Keyed by businessId so multi-account setups stay isolated.
 interface SuggestionsSnapshot {

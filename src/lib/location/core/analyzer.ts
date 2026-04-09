@@ -8,7 +8,7 @@ import { detectWaterfront, WaterfrontDetectionResult } from '../detectors/waterf
 import { scrapeWebsiteForLocationContext } from '../detectors/website-scraper';
 import { scoreLocation } from './scoring-engine';
 import { getLocaleConfigByCountry } from '../locales';
-import { LocationAnalysis, CountryCode } from './types';
+import { LocationAnalysis, CountryCode, LocationCategoryId } from './types';
 
 interface AnalyzeOptions {
   businessWebsite?: string;
@@ -164,21 +164,21 @@ function transformSupabaseResult(intel: any, address: string): LocationAnalysis 
     });
     
     // Map Supabase landmark types to POI categories
-    const diningCount = landmarkTypes.filter(t => t.includes('dining') || t.includes('restaurant') || t.includes('food')).length;
-    const entertainmentCount = landmarkTypes.filter(t => t.includes('entertainment')).length;
-    const commercialCount = landmarkTypes.filter(t => t.includes('commercial') || t.includes('shopping') || t.includes('store')).length;
+    const diningCount = landmarkTypes.filter((t: string) => t.includes('dining') || t.includes('restaurant') || t.includes('food')).length;
+    const entertainmentCount = landmarkTypes.filter((t: string) => t.includes('entertainment')).length;
+    const commercialCount = landmarkTypes.filter((t: string) => t.includes('commercial') || t.includes('shopping') || t.includes('store')).length;
     
     poiData = {
       restaurants: diningCount,
       cafes: diningCount > 0 ? Math.ceil(diningCount / 2) : 0,
-      hotels: landmarkTypes.filter(t => t.includes('hotel') || t.includes('lodging')).length,
-      attractions: landmarkTypes.filter(t => t.includes('tourist') || t.includes('attraction') || t.includes('point_of_interest')).length,
-      offices: landmarkTypes.filter(t => t.includes('office')).length,
-      schools_universities: landmarkTypes.filter(t => t.includes('school') || t.includes('university') || t.includes('college') || t.includes('education')).length,
-      residential_buildings: landmarkTypes.filter(t => t.includes('residential')).length,
-      transit_stations: landmarkTypes.filter(t => t.includes('station') || t.includes('transit')).length,
+      hotels: landmarkTypes.filter((t: string) => t.includes('hotel') || t.includes('lodging')).length,
+      attractions: landmarkTypes.filter((t: string) => t.includes('tourist') || t.includes('attraction') || t.includes('point_of_interest')).length,
+      offices: landmarkTypes.filter((t: string) => t.includes('office')).length,
+      schools_universities: landmarkTypes.filter((t: string) => t.includes('school') || t.includes('university') || t.includes('college') || t.includes('education')).length,
+      residential_buildings: landmarkTypes.filter((t: string) => t.includes('residential')).length,
+      transit_stations: landmarkTypes.filter((t: string) => t.includes('station') || t.includes('transit')).length,
       shopping_centers: commercialCount,
-      parks: landmarkTypes.filter(t => t.includes('park')).length,
+      parks: landmarkTypes.filter((t: string) => t.includes('park')).length,
       entertainment_venues: entertainmentCount,
       water_distance: 9999,
       landmarks: landmarks.map((l: any) => ({

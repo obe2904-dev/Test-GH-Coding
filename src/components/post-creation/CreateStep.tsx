@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { usePostCreationStore, MediaItem, type PlatformContent } from '../../stores/postCreationStore'
+import { usePostCreationStore, MediaItem, type PlatformContent, type PhotoContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useTierStore } from '../../stores/tierStore'
@@ -44,7 +44,7 @@ const Sparkles = ({ className }: { className?: string }) => (
   </svg>
 )
 
-export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsSaved, hasUnsavedChanges, suggestionId, onSwitchIdea }: CreateStepProps) {
+export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsChanged, markAsSaved, hasUnsavedChanges, suggestionId, onSwitchIdea }: CreateStepProps) {
   const { t, i18n } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const {
     postContent, selectedPlatforms, photoContent, photoIdea, strategicIdea,
@@ -85,7 +85,7 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
   // State management
   const [selectedMediaIndex, setSelectedMediaIndex] = useState(0)
   const [, setViewMode] = useState<'original' | 'adjusted'>('original')
-  const [processingImage, setProcessingImage] = useState(false)
+  const [_processingImage, setProcessingImage] = useState(false)
   
   // Upgrade modal state
   const [showUpgradeModal, setShowUpgradeModal] = useState<'variations' | 'photo-picker' | 'scheduling' | 'tone-length' | null>(null)
@@ -126,12 +126,12 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
   useEffect(() => {
     if (suggestionId) {
       console.log('🔍 Loading saved data for suggestion:', suggestionId)
-      supabase
+      ;(supabase as any)
         .from('daily_suggestions')
         .select('uploaded_photo_url, photo_analysis, media_items')
         .eq('id', suggestionId)
         .single()
-        .then(({ data, error }) => {
+        .then(({ data, error }: { data: any; error: any }) => {
           if (error) {
             console.error('❌ Failed to load saved data:', error)
             return
@@ -333,7 +333,7 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
     console.log('📸 Media count:', serializableMedia.length)
 
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('daily_suggestions')
         .update({ media_items: serializableMedia })
         .eq('id', suggestionId)
@@ -543,7 +543,7 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
       }
       setViewMode('original')
       setPhotoContent({
-        ...photoContent,
+        ...(photoContent as PhotoContent),
         uploadedMedia: updatedMedia,
       })
       markAsChanged?.()
@@ -578,7 +578,8 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
     // Check if we have analysis results with improvement categories
     if (
       analysisResult && 
-      'improvementCategories' in analysisResult && 
+      typeof analysisResult === 'object' &&
+      'improvementCategories' in (analysisResult as object) && 
       (analysisResult as any).improvementCategories && 
       (analysisResult as any).improvementCategories.length > 0
     ) {
@@ -633,6 +634,25 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
       }
     }
 
+    // Detect pixel dimensions client-side
+    let imageWidth: number | undefined;
+    let imageHeight: number | undefined;
+    try {
+      const blob = await fetch(currentMedia.originalUrl).then(r => r.blob())
+      const blobUrl = URL.createObjectURL(blob)
+      const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(blobUrl) }
+        img.onerror = () => { URL.revokeObjectURL(blobUrl); reject() }
+        img.src = blobUrl
+      })
+      console.log('📐 Client-side image dimensions:', dims.w, '×', dims.h)
+      imageWidth = dims.w;
+      imageHeight = dims.h;
+    } catch {
+      // ignore
+    }
+
     const result = await analyzePhoto(
       currentMedia.originalUrl,
       postContent?.text || '',
@@ -641,24 +661,8 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
       currentTier, // tier
       currentMedia.type, // mediaType - 'image' or 'video'
       currentMedia.duration, // duration in seconds (for videos)
-      ...(await (async () => {
-        // Detect pixel dimensions client-side — far more reliable than server-side JPEG binary parsing.
-        // Browser Image element handles all formats (JPEG, PNG, HEIC-converted, WebP) correctly.
-        try {
-          const blob = await fetch(currentMedia.originalUrl).then(r => r.blob())
-          const blobUrl = URL.createObjectURL(blob)
-          const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
-            const img = new Image()
-            img.onload = () => { resolve({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(blobUrl) }
-            img.onerror = () => { URL.revokeObjectURL(blobUrl); reject() }
-            img.src = blobUrl
-          })
-          console.log('📐 Client-side image dimensions:', dims.w, '×', dims.h)
-          return [dims.w, dims.h]
-        } catch {
-          return [undefined, undefined]
-        }
-      })())
+      imageWidth,
+      imageHeight,
     )
 
     if (result) {
@@ -694,7 +698,7 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
         console.log('📊 Analysis data:', JSON.stringify(result, null, 2))
         
         try {
-          const { data, error } = await supabase
+          const { data, error } = await (supabase as any)
             .from('daily_suggestions')
             .update({
               uploaded_photo_url: currentMedia.originalUrl,
@@ -894,7 +898,7 @@ export function CreateStep({ onNext, onBack, onStepClick, markAsChanged, markAsS
     : 'write'
 
   // The analysis that belongs to the current context (undefined if context changed since last analysis)
-  const currentAnalysisResult = currentPhoto?.analysisCache?.[analysisContextKey]
+  const currentAnalysisResult = currentPhoto?.analysisCache?.[analysisContextKey] as any
 
   // Media suggestion: best available source per active path
   const mediaFormat = strategicIdea?.platformFormat || weeklyPlanSuggestion?.platformFormat

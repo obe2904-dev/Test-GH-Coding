@@ -1,8 +1,6 @@
 import { useState, useCallback, type Dispatch, type SetStateAction } from 'react'
 import type { TFunction } from 'i18next'
-import { buildPostIdeaPrompt, type AITier } from '../features/aiPromptBuilder'
 import { supabase } from '../lib/supabase'
-import { gatherEnhancedAIContext, fetchBrandProfileForAI } from '../services/enhancedAIContext'
 import type {
   GeneratedIdea,
   PhotoContent,
@@ -85,14 +83,10 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     language,
     currentTier,
     getTierLimits,
-    canUseAiIdeas,
     canUseCaptionGeneration,
-    incrementAiIdeas,
     incrementCaptionGeneration,
     businessData,
-    getOnboardingPlatforms,
     selectedPlatforms,
-    setAiIdeas,
     setShowBusinessInfoPrompt,
     isEnabled,
     photoContent,
@@ -122,7 +116,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     markAsChanged
   } = params
 
-  const [isGenerating, setIsGenerating] = useState(false)
+  const [isGenerating, _setIsGenerating] = useState(false)
   const [isAIEnhancing, setIsAIEnhancing] = useState(false)
   const [isSpellingChecking, setIsSpellingChecking] = useState(false)
   const [isSpellingChecked, setIsSpellingChecked] = useState(false)

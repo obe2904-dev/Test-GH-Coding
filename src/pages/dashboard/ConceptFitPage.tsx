@@ -304,7 +304,6 @@ export default function ConceptFitPage() {
         {/* Concept Fit Cards */}
         <div className="space-y-6">
           {eligibleCategories.map(([categoryId, fit]) => {
-            const score = categoryScores[categoryId] || 0;
             const categoryContent = (localeConfig.categories as any)[categoryId];
             const badge = getFitBadge(fit.fit_level);
 

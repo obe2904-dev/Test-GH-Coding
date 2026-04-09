@@ -168,7 +168,7 @@ export function BrandStrategyDisplay({ strategy, onApprove, onRegenerate }: Bran
                 </tr>
               </thead>
               <tbody>
-                {strategy.core_offerings.offeringsFull.map((c, idx) => (
+                {strategy.core_offerings.offeringsFull.map((c) => (
                   <tr key={c.id} className={c.eligible ? 'font-semibold text-blue-900' : 'text-gray-700'}>
                     <td className="pr-2">{OFFERING_LABELS[c.id] || c.id}</td>
                     <td className="pr-2">{c.availabilityScore}</td>

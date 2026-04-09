@@ -16,16 +16,6 @@ export default function LocationAnalysisDisplay({ analysis, conceptFits, onDelet
   // Load localized category content
   const localeConfig = getLocaleConfig(analysis.locale);
   
-  // Helper to get fit badge
-  const getFitBadge = (fitLevel: string) => {
-    switch (fitLevel) {
-      case 'strong': return { emoji: '✅', label: 'Stærk Match', color: 'bg-green-100 text-green-800 border-green-300' };
-      case 'moderate': return { emoji: '🟡', label: 'Moderat Match', color: 'bg-yellow-100 text-yellow-800 border-yellow-300' };
-      case 'challenging': return { emoji: '⚠️', label: 'Udfordrende Match', color: 'bg-amber-100 text-amber-800 border-amber-300' };
-      default: return { emoji: '❓', label: 'Ukendt', color: 'bg-gray-100 text-gray-800 border-gray-300' };
-    }
-  };
-  
   // Handle empty matches gracefully
   if (!analysis.matches || analysis.matches.length === 0) {
     return (

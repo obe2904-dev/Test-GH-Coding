@@ -181,9 +181,9 @@ export function BrandProfilePageV5() {
   const { user } = useAuthStore();
   const [businessId, setBusinessId] = React.useState<string | undefined>(undefined);
   const [fetchingBusiness, setFetchingBusiness] = React.useState(true);
-  const { profile, loading, error, updatedAt, refetch } = useBrandProfile(businessId);
+  const { profile, loading, error, updatedAt: _updatedAt, refetch } = useBrandProfile(businessId);
   const { generating, generate } = useBrandProfileGeneration();
-  const [interiorPhotoPaths, setInteriorPhotoPaths] = React.useState<string[]>([]);
+  const [_interiorPhotoPaths, setInteriorPhotoPaths] = React.useState<string[]>([]);
   const [atmosphereDescription, setAtmosphereDescription] = React.useState<string>('');
   const [editingAtmosphere, setEditingAtmosphere] = React.useState(false);
   const { analyzing, recognizableInteriorIdentity, analyze, checkAndAutoAnalyze } = useVisualIdentityAnalyzer();
@@ -233,12 +233,12 @@ export function BrandProfilePageV5() {
     // Load atmosphere text from DB
     supabase
       .from('business_brand_profile')
-      .select('recognizable_interior_identity')
+      .select('*')
       .eq('business_id', businessId)
       .maybeSingle()
       .then(({ data }) => {
-        if (data?.recognizable_interior_identity) {
-          setAtmosphereDescription(data.recognizable_interior_identity);
+        if ((data as any)?.recognizable_interior_identity) {
+          setAtmosphereDescription((data as any).recognizable_interior_identity);
         }
       });
     // Load existing photos from storage

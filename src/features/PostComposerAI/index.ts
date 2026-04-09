@@ -170,7 +170,7 @@ class PostComposerAI {
       
       // Add business-specific emojis
       if (context.businessProfile?.businessType) {
-        const categoryEmojis = this.getCategoryEmojis(context.businessProfile.businessType)
+        const categoryEmojis = this.getCategoryEmojis(context.businessProfile.businessType as string)
         baseEmojis.push(...categoryEmojis.slice(0, 2))
       }
     }
@@ -311,7 +311,7 @@ class PostComposerAI {
     
     return {
       brandName: profile.businessName,
-      industry: profile.businessType,
+      industry: profile.businessType as string,
       language: 'da' // Could be dynamic
     }
   }

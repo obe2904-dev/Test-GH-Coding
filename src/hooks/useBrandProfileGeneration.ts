@@ -57,7 +57,7 @@ async function pollForUpdatedProfile(
 
     const newUpdatedAt: string | null = data.updated_at ?? null;
     if (newUpdatedAt && newUpdatedAt !== updatedAtBefore) {
-      return data as BrandProfile;
+      return data as unknown as BrandProfile;
     }
   }
 
@@ -97,7 +97,7 @@ export function useBrandProfileGeneration(): UseBrandProfileGenerationResult {
         .invoke('brand-profile-generator', {
           body: { businessId, forceRegenerate: true },
         })
-        .then(({ data, error }) => {
+        .then(({ error }) => {
           if (error) {
             // FunctionsHttpError carries the HTTP status — 5xx means the function crashed
             const status = (error as any)?.status ?? (error as any)?.context?.status;

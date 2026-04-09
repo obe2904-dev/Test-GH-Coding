@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { LocationAnalysis } from '../../lib/location/core/types';
+import { LocationAnalysis, LocationCategoryId } from '../../lib/location/core/types';
 import type { SupportedLocale } from '../../lib/location/core/types';
-import LocationAnalysisDisplay from '../../components/setup/LocationAnalysis';
 import { LocationCategoryIcon } from '../../components/setup/LocationCategoryIcon';
 import { supabase } from '../../lib/supabase';
 import { analyzeLocation } from '../../lib/location/core/analyzer';
@@ -113,7 +112,7 @@ function LocationIntelligencePage() {
       try {
         console.log('🔄 Loading saved location intelligence data...');
         
-        const { data: savedData, error: loadError } = await supabase
+        const { data: savedData, error: loadError } = await (supabase as any)
           .from('business_location_intelligence')
           .select('*')
           .eq('business_id', businessId)
@@ -176,18 +175,20 @@ function LocationIntelligencePage() {
           // Reconstruct the analysis object from saved data
           const reconstructedAnalysis: LocationAnalysis = {
             address: address || `${savedData.neighborhood || ''}`,
-            neighborhood: savedData.neighborhood || '',
             city: savedData.neighborhood || '',
+            country: 'DK',
+            primaryCategory: (matches[0]?.categoryId || 'city_centre') as LocationCategoryId,
+            analyzedAt: new Date().toISOString(),
             locale: 'da-DK', // Default to Danish locale
-            coordinates: savedData.latitude && savedData.longitude 
-              ? { lat: savedData.latitude, lng: savedData.longitude }
-              : undefined,
+            coordinates: (savedData.latitude && savedData.longitude 
+              ? { lat: savedData.latitude as number, lng: savedData.longitude as number }
+              : { lat: 0, lng: 0 }),
             matches: matches,
-            culturalContext: savedData.neighborhood_character || savedData.location_marketing_hooks?.length > 0 ? {
+            culturalContext: (savedData.neighborhood_character || savedData.location_marketing_hooks?.length > 0 ? {
+              significance: 'medium' as const,
               description: savedData.neighborhood_character || '',
               knownFor: savedData.location_marketing_hooks || [],
-              marketingAngle: savedData.location_marketing_hooks?.[0] || ''
-            } : undefined
+            } : undefined),
           };
 
           setAnalysis(reconstructedAnalysis);
@@ -224,7 +225,6 @@ function LocationIntelligencePage() {
     if (!businessId) return null;
 
     try {
-      const untypedSupabase = supabase as any;
 
       // Load business profile (has description and other data)
       const { data: profile } = await supabase
@@ -289,7 +289,7 @@ function LocationIntelligencePage() {
       }
 
       // Load business operations for service model
-      const { data: operations } = await supabase
+      const { data: operations } = await (supabase as any)
         .from('business_operations')
         .select('has_takeaway, has_delivery, has_table_service')
         .eq('business_id', businessId)
@@ -298,11 +298,11 @@ function LocationIntelligencePage() {
       // Determine service model from operations data
       let serviceModel: 'dine-in' | 'takeaway' | 'both' | 'delivery' = 'dine-in';
       if (operations) {
-        if (operations.has_table_service && operations.has_takeaway) {
+        if ((operations as any).has_table_service && (operations as any).has_takeaway) {
           serviceModel = 'both';
-        } else if (operations.has_takeaway && !operations.has_table_service) {
+        } else if ((operations as any).has_takeaway && !(operations as any).has_table_service) {
           serviceModel = 'takeaway';
-        } else if (operations.has_delivery) {
+        } else if ((operations as any).has_delivery) {
           serviceModel = 'delivery';
         }
       }
@@ -444,7 +444,7 @@ function LocationIntelligencePage() {
                 category_score: category.score,
                 strategy_score: category.score,
                 seasonal_weight: 1.0,
-                seasonal_relevance: SEASONAL_PATTERN_MAP[category.categoryId] || 'year_round',
+                seasonal_relevance: (SEASONAL_PATTERN_MAP[category.categoryId] !== 'year_round' ? 'high' : 'medium') as 'high' | 'medium' | 'low',
                 is_strategy_driver: isStrategyDriver,
                 fit_level: edgeConceptFit.overall_fit_level === 'strong' ? 'strong' : 
                           edgeConceptFit.overall_fit_level === 'challenging' ? 'challenging' : 'moderate',
@@ -532,7 +532,7 @@ function LocationIntelligencePage() {
 
       const dataToSave: any = {
         business_id: businessId,
-        neighborhood: analysisData.neighborhood || analysisData.city || null,
+        neighborhood: analysisData.city || null,
         neighborhood_character: analysisData.culturalContext?.description || null,
         area_type: analysisData.matches[0].categoryId,
         category_scores: categoryScores, // Save ALL category scores
@@ -558,7 +558,7 @@ function LocationIntelligencePage() {
 
       console.log('💾 Auto-saving location data:', dataToSave);
 
-      const { error: saveError } = await supabase
+      const { error: saveError } = await (supabase as any)
         .from('business_location_intelligence')
         .upsert(dataToSave, {
           onConflict: 'business_id'
@@ -576,22 +576,6 @@ function LocationIntelligencePage() {
       setIsSaving(false);
     }
   };
-
-  const handleDeleteCategory = (categoryId: string) => {
-    if (!analysis) return;
-    
-    // Remove the category from matches
-    const updatedAnalysis = {
-      ...analysis,
-      matches: analysis.matches.filter(m => m.categoryId !== categoryId)
-    };
-    
-    setAnalysis(updatedAnalysis);
-    
-    // Re-save with updated categories
-    saveLocationProfile(updatedAnalysis);
-  };
-
 
   return (
     <div className="bg-surface-page min-h-full py-6 px-6">
@@ -752,25 +736,12 @@ function LocationIntelligencePage() {
               return eligibleCategories
                 .filter(([, fit]) => fit.fit_level !== 'challenging')
                 .map(([categoryId, fit]) => {
-                const categoryConfig = localeConfig.categories[categoryId];
-                const locationScore = locationTypeScores[categoryId] 
-                  ?? (analysis.matches.find(m => m.categoryId === categoryId)?.score || 0);
-                
-                const getFitBadge = (fitLevel: string) => {
-                  switch (fitLevel) {
-                    case 'strong': return { emoji: '✅', label: t('location.fitStrong'), color: 'bg-success-surface text-success-text border-success' };
-                    case 'moderate': return { emoji: '🟡', label: t('location.fitModerate'), color: 'bg-info-surface text-info-text border-info' };
-                    case 'challenging': return { emoji: '⚠️', label: t('location.fitChallenging'), color: 'bg-warning-surface text-warning-text border-warning' };
-                    default: return { emoji: '❓', label: t('location.fitUnknown'), color: 'bg-surface-alt text-text border-border' };
-                  }
-                };
-                
-                const fitBadge = getFitBadge(fit.fit_level);
+                const categoryConfig = (localeConfig.categories as any)[categoryId];
                 
                 return (
                   <div key={categoryId} className="bg-surface rounded-lg border border-border p-6">
                     <div className="flex items-start gap-4 mb-4">
-                      <LocationCategoryIcon categoryId={categoryId} className="w-10 h-10 text-text" />
+                      <LocationCategoryIcon categoryId={categoryId as any} className="w-10 h-10 text-text" />
                       <div className="flex-1">
                         <div className="flex items-start justify-between mb-2">
                           <h3 className="text-xl font-bold text-brand">{categoryConfig.name}</h3>

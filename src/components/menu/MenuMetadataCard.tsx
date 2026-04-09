@@ -65,8 +65,8 @@ export function MenuMetadataCard({ businessId }: MenuMetadataCardProps) {
         <div>
           <h3 className="text-lg font-semibold text-gray-900">🍽️ {t('metadata.title')}</h3>
           <p className="text-xs text-gray-500 mt-1">
-            {t('metadata.lastUpdated')}: {metadata.last_analyzed_at 
-              ? new Date(metadata.last_analyzed_at).toLocaleDateString('da-DK')
+            {t('metadata.lastUpdated')}: {metadata.last_updated 
+              ? new Date(metadata.last_updated).toLocaleDateString('da-DK')
               : t('metadata.never')}
           </p>
         </div>
@@ -108,7 +108,7 @@ export function MenuMetadataCard({ businessId }: MenuMetadataCardProps) {
           </div>
         )}
 
-        {metadata.local_ingredients_pct > 0 && (
+        {(metadata.local_ingredients_pct ?? 0) > 0 && (
           <div className="flex items-center gap-2 text-sm">
             <span className="text-green-600">🌱</span>
             <span className="text-gray-900">

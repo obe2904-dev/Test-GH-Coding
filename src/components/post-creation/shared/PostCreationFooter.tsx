@@ -10,7 +10,7 @@ interface PostCreationFooterProps {
   renderNextButton?: (options: { onNext: () => void }) => ReactNode
 }
 
-export function PostCreationFooter({ hasUnsavedChanges, hasPersistedDraft, onSaveDraft, onNext, nextLabel, renderNextButton }: PostCreationFooterProps) {
+export function PostCreationFooter({ hasPersistedDraft, onNext, nextLabel, renderNextButton }: Omit<PostCreationFooterProps, 'hasUnsavedChanges'> & { hasUnsavedChanges?: boolean }) {
   const [hasSavedOnce, setHasSavedOnce] = useState(hasPersistedDraft)
 
   useEffect(() => {
@@ -18,12 +18,6 @@ export function PostCreationFooter({ hasUnsavedChanges, hasPersistedDraft, onSav
       setHasSavedOnce(true)
     }
   }, [hasPersistedDraft, hasSavedOnce])
-
-  const isDisabled = !hasUnsavedChanges
-  const label = hasUnsavedChanges ? 'Gem kladde' : hasSavedOnce ? 'Gemt' : 'Gem kladde'
-  const buttonClasses = isDisabled
-    ? 'px-3 py-1.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-lg text-xs font-medium cursor-not-allowed'
-    : 'px-3 py-1.5 bg-white border border-slate-300 text-[#1F2937] rounded-lg text-xs font-medium hover:bg-slate-50 transition-all'
 
   return (
     <>
