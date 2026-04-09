@@ -86,8 +86,7 @@ serve(async (req) => {
     if (interiorText && interiorText !== 'Not yet analyzed') {
       const { error: brandProfileError } = await supabase
         .from('business_brand_profile')
-        .update({ recognizable_interior_identity: interiorText })
-        .eq('business_id', business_id);
+        .upsert({ business_id: business_id, recognizable_interior_identity: interiorText }, { onConflict: 'business_id' });
       if (brandProfileError) {
         console.warn('Could not save to business_brand_profile:', brandProfileError.message);
       }

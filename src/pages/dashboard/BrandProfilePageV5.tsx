@@ -183,10 +183,10 @@ export function BrandProfilePageV5() {
   const [fetchingBusiness, setFetchingBusiness] = React.useState(true);
   const { profile, loading, error, updatedAt: _updatedAt, refetch } = useBrandProfile(businessId);
   const { generating, generate } = useBrandProfileGeneration();
-  const [_interiorPhotoPaths, setInteriorPhotoPaths] = React.useState<string[]>([]);
+  const [interiorPhotoPaths, setInteriorPhotoPaths] = React.useState<string[]>([]);
   const [atmosphereDescription, setAtmosphereDescription] = React.useState<string>('');
   const [editingAtmosphere, setEditingAtmosphere] = React.useState(false);
-  const { analyzing, recognizableInteriorIdentity, analyze, checkAndAutoAnalyze } = useVisualIdentityAnalyzer();
+  const { analyzing, error: analyzerError, recognizableInteriorIdentity, analyze, checkAndAutoAnalyze } = useVisualIdentityAnalyzer();
 
   // Handle regeneration - actually call the Edge Function
   const handleRegenerate = async () => {
@@ -320,6 +320,23 @@ export function BrandProfilePageV5() {
               <p className="text-xs text-text-muted mt-0.5">AI analyserer dine fotos og bruger atmosfærebeskrivelsen i tekster om stemning, behind-the-scenes og brand.</p>
             </div>
           </div>
+          {/* Existing photos from storage */}
+          {interiorPhotoPaths.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {interiorPhotoPaths.map((path) => {
+                const { data } = supabase.storage.from('visual-identity').getPublicUrl(path);
+                return (
+                  <img
+                    key={path}
+                    src={data.publicUrl}
+                    alt=""
+                    className="w-16 h-16 object-cover rounded-lg border border-border"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                );
+              })}
+            </div>
+          )}
           <PhotoUploader
             businessId={businessId}
             onUploadComplete={(paths) => {
@@ -329,6 +346,9 @@ export function BrandProfilePageV5() {
           />
           {analyzing && (
             <p className="text-xs text-brand mt-3">AI analyserer fotos og registrerer atmosfære...</p>
+          )}
+          {analyzerError && (
+            <p className="text-xs text-error mt-3">Analyse fejlede: {analyzerError}</p>
           )}
           {atmosphereDescription && !editingAtmosphere && (
             <div className="mt-4">
