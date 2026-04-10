@@ -133,28 +133,40 @@ function buildSharedToneCore(opts: PromptOptions): SharedToneCore {
   const faktaforbud: Record<string, string> = {
     da: `\n🚫 KILDEKRAV — gælder for ENHVER detalje i teksten
 Denne tekst er journalistik, ikke kreativ fiktion. Du må KUN skrive om det der er dokumenteret i denne prompt.
-- Hvert konkret substantiv, rekvisit, sansedetalje og lokationselement i din tekst skal kunne peges direkte tilbage til en linje i INDHOLD, 📸 PRIMÆR FAKTAKILDE eller BRANDSTEMME-blokken.
+- Hvert konkret substantiv, rekvisit, sansedetalje og lokationselement i din tekst skal kunne peges direkte tilbage til en linje i INDHOLD eller 📸 PRIMÆR FAKTAKILDE.
 - Kan du IKKE pege på kilden → slet elementet.
 - Stednavne i INDHOLD angiver lokation — de er IKKE tilladelse til at opfinde udsigt, natur, vejr eller interiør fra din generelle viden om det sted.
+- BRANDSTEMME-blokken er en TONEKILDE, ikke en faktakilde. Konkrete omgivelser, rekvisitter og lokaliteter nævnt i brandeksempler (fx "ved åen", "udsigt", "vandet", "havnen") er scenedetaljer fra de eksempler — de er IKKE facts om det aktuelle opslag og må IKKE overføres.
+- Hvis 📸 PRIMÆR FAKTAKILDE beskriver rummet som lyst, kan du IKKE skrive dæmpet lys. Faktakilden er autoritativ og tilsidesætter enhver stemningsimpression fra andre steder.
 - Din træningsdata om virksomheden er IKKE en gyldig kilde — brug KUN det der fremgår af denne prompt.\n`,
+
     sv: `\n🚫 KÄLLKRAV — gäller för VARJE detalj i texten
 Den här texten är journalistik, inte kreativ fiktion. Du får BARA skriva om det som är dokumenterat i den här prompten.
-- Varje konkret substantiv, rekvisita, sinnesdetalj och platselement i din text måste kunna spåras direkt till en rad i INNEHÅLL, 📸 PRIMÄR FAKTAKÄLLA eller VARUMÄRKESRÖST-blocket.
+- Varje konkret substantiv, rekvisita, sinnesdetalj och platselement i din text måste kunna spåras direkt till en rad i INNEHÅLL eller 📸 PRIMÄR FAKTAKÄLLA.
 - Kan du INTE peka på källan → ta bort elementet.
 - Platsnamn i INNEHÅLL anger lokation — de är INTE tillstånd att uppfinna utsikt, natur, väder eller interiör från din allmänna kunskap om platsen.
+- VARUMÄRKESRÖST-blocket är en TONKÄLLA, inte en faktakälla. Konkreta miljöer, rekvisita och platser nämnda i varumärkesexempel (t.ex. "vid ån", "utsikt", "vattnet") är scenedetaljer från dessa exempel — de är INTE fakta om det aktuella inlägget och får INTE överföras.
+- Om 📸 PRIMÄR FAKTAKÄLLA beskriver lokalen som ljus kan du INTE skriva dämpad belysning. Faktakällan är auktoritativ.
 - Din träningsdata om företaget är INTE en giltig källa — använd KUN det som framgår av den här prompten.\n`,
+
     de: `\n🚫 QUELLENGEBOT — gilt für JEDES Detail im Text
 Dieser Text ist Journalismus, keine kreative Fiktion. Du darfst NUR über das schreiben, was in diesem Prompt dokumentiert ist.
-- Jedes konkrete Substantiv, Requisit, Sinnesdetail und Standortelement in deinem Text muss direkt auf eine Zeile in INHALT, 📸 PRIMÄRE FAKTENQUELLE oder dem MARKENSTIMME-Block zurückgeführt werden können.
+- Jedes konkrete Substantiv, Requisit, Sinnesdetail und Standortelement in deinem Text muss direkt auf eine Zeile in INHALT oder 📸 PRIMÄRE FAKTENQUELLE zurückgeführt werden können.
 - Kannst du die Quelle NICHT benennen → streiche das Element.
 - Ortsnamen im INHALT geben den Standort an — sie sind KEINE Erlaubnis, aus deinem Allgemeinwissen über diesen Ort Aussicht, Natur, Wetter oder Interieur zu erfinden.
+- Der MARKENSTIMME-Block ist eine TONQUELLE, keine Faktenquelle. Konkrete Umgebungen, Requisiten und Orte in Markenbeispielen (z.B. "am Fluss", "Aussicht", "das Wasser") sind Szenendetails dieser Beispiele — sie sind KEINE Fakten über den aktuellen Beitrag und dürfen NICHT übertragen werden.
+- Wenn 📸 PRIMÄRE FAKTENQUELLE den Raum als hell beschreibt, kannst du KEIN gedämpftes Licht schreiben. Die Faktenquelle ist autoritativ.
 - Deine Trainingsdaten über das Unternehmen sind KEINE gültige Quelle — nutze NUR was aus diesem Prompt hervorgeht.\n`,
+
     en: `\n🚫 SOURCE REQUIREMENT — applies to EVERY detail in the text
 This text is journalism, not creative fiction. You may ONLY write about what is documented in this prompt.
-- Every concrete noun, prop, sensory detail and location element in your text must be traceable directly to a line in CONTENT, 📸 PRIMARY FACT SOURCE or the BRAND VOICE block.
+- Every concrete noun, prop, sensory detail and location element in your text must be traceable directly to a line in CONTENT or 📸 PRIMARY FACT SOURCE.
 - Cannot point to the source → remove the element.
 - Location names in CONTENT indicate location — they are NOT permission to invent views, nature, weather or interior from your general knowledge of that place.
+- The BRAND VOICE block is a TONE source, not a fact source. Concrete settings, props and locations mentioned in brand examples (e.g. "by the river", "view", "the water") are scene details of those examples — they are NOT facts about the current post and MUST NOT be transferred.
+- If 📸 PRIMARY FACT SOURCE describes the space as bright, you CANNOT write dim lighting. The fact source is authoritative.
 - Your training data about the business is NOT a valid source — use ONLY what appears in this prompt.\n`,
+
   }
 
   // ── Brand block caps ───────────────────────────────────────────────────
@@ -222,7 +234,7 @@ function buildBrandBlock(o: BrandBlockOptions): string {
   // It goes first so the model treats it as the concrete foundation, not an afterthought.
   if (o.isSceneMoodPost) {
     if (o.venueIdentity) {
-      b += `\n📸 PRIMÆR FAKTAKILDE — brug dette som det konkrete fundament for dette opslag (ikke opfundet atmosfære):\n${o.venueIdentity}`
+      b += `\n📸 PRIMÆR FAKTAKILDE — eneste gyldige kilde til rumlig og visuel beskrivelse. Tilsidesætter enhver impression fra brandeksempler. Brug UDELUKKENDE det der er beskrevet her:\n${o.venueIdentity}`
     } else {
       b += `\n⚠️ Ingen fotobeskrivelse er tilgængelig. Opfind IKKE visuel atmosfære eller interiørdetaljer. Basér det konkrete element udelukkende på konceptankre og stedsidentitet nedenfor.`
     }
@@ -236,7 +248,7 @@ function buildBrandBlock(o: BrandBlockOptions): string {
   if (o.brandWritingRules.length)   b += `\nSkriveregler:\n${o.brandWritingRules.map(r => `- ${r}`).join('\n')}`
   if (o.brandGoodExamples.length) {
     const exLabel = o.isSceneMoodPost
-      ? 'Stemmeeksempler (disse er menu/produktindlæg — brug KUN sprogtone og rytme som reference, IKKE indholdet):'
+      ? 'Stemmeeksempler — KUN sprogtone og rytme. Konkrete omgivelser, lokaliteter og rekvisitter i disse eksempler (fx "ved åen", "udsigt", "vandet") tilhører EKSEMPLETS scene — de er IKKE facts om dette opslag:'
       : 'Gode eksempler (stil, ikke indhold):'
     b += `\n${exLabel}\n${o.brandGoodExamples.map(e => `- "${e}"`).join('\n')}`
   }
