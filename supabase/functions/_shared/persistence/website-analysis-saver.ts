@@ -1,10 +1,8 @@
 /**
  * Database persistence layer for website analysis results
  * Saves extracted data to multiple tables: website_analyses, business_profile,
- * business_brand_profile, business_locations, opening_hours, business_operations
+ * business_locations, opening_hours, business_operations
  */
-
-import { formatToneAsText } from '../ai-extractors/tone-of-voice-extractor.ts'
 
 export interface PersistenceResult {
   success: boolean
@@ -27,16 +25,295 @@ export interface SaveWebsiteAnalysisParams {
   authHeader?: string | null
 }
 
+const MAX_KEY_OFFERINGS = 5
+
+function compactText(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''
+}
+
+function normalizeKeyOffering(value: string): string {
+  return compactText(value).toLowerCase()
+}
+
+function dedupeOfferings(items: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const item of items) {
+    const cleaned = compactText(item)
+    if (!cleaned || /^ingen$/i.test(cleaned)) continue
+
+    const key = normalizeKeyOffering(cleaned)
+    if (seen.has(key)) continue
+
+    seen.add(key)
+    result.push(cleaned)
+  }
+
+  return result
+}
+
+function extractSnippet(source: string, needle: string): string | null {
+  const haystack = compactText(source)
+  const searchTerm = normalizeKeyOffering(needle)
+  if (!haystack || !searchTerm) return null
+
+  const index = haystack.toLowerCase().indexOf(searchTerm)
+  if (index === -1) return null
+
+  const start = Math.max(0, index - 80)
+  const end = Math.min(haystack.length, index + searchTerm.length + 140)
+  return compactText(haystack.slice(start, end))
+}
+
+function extractIngredientPhrase(source: string, needle: string): string | null {
+  const snippet = extractSnippet(source, needle)
+  if (!snippet) return null
+
+  const ingredientPatterns = [
+    /(?:med|serveres med|served with|fyldt med|toppet med|anrettet med|bestående af|indeholder)\s+([^\.\n;:]+)/i,
+    /(?:with)\s+([^\.\n;:]+)/i,
+  ]
+
+  for (const pattern of ingredientPatterns) {
+    const match = snippet.match(pattern)
+    if (!match?.[1]) continue
+
+    const phrase = compactText(match[1])
+    if (phrase.length >= 8 && phrase.length <= 120) {
+      return phrase.replace(/[,\s]+$/, '')
+    }
+  }
+
+  return null
+}
+
+function isGenericCategoryDetail(detail: string): boolean {
+  const normalized = normalizeKeyOffering(detail)
+  if (!normalized) return true
+
+  return /klassisk|signatur|frokostret|aftensret|dessert|burger|cocktail|snack|salat|pastaret|smørrebrød|smagemenu|skaldyr med pommes frites|grønt valg|børnevenlig ret/.test(normalized)
+}
+
+function canonicalIngredientHint(item: string): string | null {
+  const normalized = normalizeKeyOffering(item)
+  if (/pariserb[oø]f|parisarb[oø]f/.test(normalized)) return 'hakket oksekød, spejlæg, løg, rødbeder'
+  if (/faustburger|burger/.test(normalized)) return 'bøf, burgerbolle, ost, salat'
+  if (/moules?\s+frites/.test(normalized)) return 'blåmuslinger, pommes frites, hvidvin'
+  if (/(gammeldags\s+)?æblekage/.test(normalized)) return 'æbler, makroner, flødeskum'
+  if (/faust\s+stormy/.test(normalized)) return 'rom, ginger beer, lime'
+  if (/smørrebrød/.test(normalized)) return 'rugbrød, pålæg, garniture'
+  if (/brunch/.test(normalized)) return 'æg, brød, frugt, kaffe'
+  return null
+}
+
+function buildMenuExtractionText(menuExtraction: any): string {
+  const segments: string[] = []
+
+  const categories = Array.isArray(menuExtraction?.menuStructure)
+    ? menuExtraction.menuStructure
+    : Array.isArray(menuExtraction?.categories)
+      ? menuExtraction.categories
+      : []
+
+  for (const category of categories) {
+    const categoryName = compactText(category?.name || category?.title || '')
+    const categoryDescription = compactText(category?.categoryDescription || '')
+    if (categoryName) segments.push(categoryName)
+    if (categoryDescription) segments.push(categoryDescription)
+
+    const items = Array.isArray(category?.items) ? category.items : Array.isArray(category?.dishes) ? category.dishes : []
+    for (const item of items) {
+      const itemName = compactText(item?.name || item?.title || '')
+      const itemDescription = compactText(item?.description || item?.short_desc || '')
+      if (itemName) segments.push(itemName)
+      if (itemDescription) segments.push(itemDescription)
+    }
+  }
+
+  return compactText(segments.join(' '))
+}
+
+async function inferIngredientDetailsWithAI(
+  menuExtraction: any,
+  menuSignal: any,
+  candidates: string[]
+): Promise<Record<string, string>> {
+  const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
+  if (!openaiApiKey) {
+    console.warn('⚠️ OpenAI API key not found - key_offerings will use fallback patterns only')
+    return {}
+  }
+
+  const sourceText = [
+    buildMenuExtractionText(menuExtraction),
+    compactText(menuSignal?.menuDescription),
+    compactText(menuSignal?.rawExtract),
+    Array.isArray(menuSignal?.menuCategories) ? menuSignal.menuCategories.join(' ') : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 12000)
+
+  if (!sourceText) return {}
+
+  const prompt = `Du får en menu og en liste af tilbud. Din opgave er at returnere korte, konkrete ingrediens- eller komponentbeskrivelser for hvert tilbud.
+
+Krav:
+- Brug kun information der kan udledes fra teksten.
+- Skriv ingrediens-/komponentniveau, ikke kategori-labels som "klassisk frokostret", "signaturburger", "signaturcocktail" eller "klassisk dessert".
+- Hvis menuen ikke nævner ingredienser direkte, inferér de mest sandsynlige, almindeligt kendte komponenter for retter med tydeligt navn.
+- Svar kun i JSON.
+- Hvis der ikke kan udledes en ingrediens-/komponentbeskrivelse, returner tom streng for det tilbud.
+- Hold beskrivelserne korte: 2-6 ord.
+
+Tilbud:
+${candidates.map((item, index) => `${index + 1}. ${item}`).join('\n')}
+
+Tekst:
+${sourceText}
+
+Returner JSON på formen:
+{
+  "items": [
+    { "name": "...", "detail": "..." }
+  ]
+}`
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'Du udtrækker korte ingrediens- og komponentbeskrivelser fra menutekst.' },
+          { role: 'user', content: prompt },
+        ],
+      }),
+    })
+
+    if (!response.ok) {
+      console.warn('⚠️ Ingredient AI lookup failed:', response.status)
+      return {}
+    }
+
+    const data = await response.json()
+    const content = data.choices?.[0]?.message?.content
+    if (!content) return {}
+
+    const parsed = JSON.parse(content)
+    const items = Array.isArray(parsed?.items) ? parsed.items : []
+    const result: Record<string, string> = {}
+
+    for (const row of items) {
+      const name = compactText(row?.name || '')
+      const detail = compactText(row?.detail || '')
+      if (!name || !detail) continue
+      if (!isGenericCategoryDetail(detail)) {
+        result[name.toLowerCase()] = detail
+      }
+    }
+
+    console.log(`✅ AI enriched ${Object.keys(result).length}/${candidates.length} offerings`)
+    return result
+  } catch (error) {
+    console.warn('⚠️ Ingredient AI lookup error:', error)
+    return {}
+  }
+}
+
+function detailFromKeywords(item: string, menuSignal: any): string | null {
+  const normalizedItem = normalizeKeyOffering(item)
+  const combined = [
+    compactText(menuSignal?.menuExtractionText),
+    compactText(menuSignal?.menuDescription),
+    compactText(menuSignal?.rawExtract),
+    Array.isArray(menuSignal?.menuCategories) ? menuSignal.menuCategories.join(' ') : ''
+  ].join(' ')
+  const combinedNormalized = combined.toLowerCase()
+
+  const ingredientPhrase = extractIngredientPhrase(combined, item)
+  if (ingredientPhrase) {
+    return ingredientPhrase
+  }
+
+  const snippet = extractSnippet(combined, item)
+  if (!snippet) return null
+
+  const retterMatch = snippet.match(/(\d+)\s*retter/i)
+  if (retterMatch) {
+    const parts = [`${retterMatch[1]}-retters menu`]
+    const servingMatch = snippet.match(/serveres\s+([^\.\n]+)/i)
+    if (servingMatch?.[1]) {
+      parts.push(`serveres ${compactText(servingMatch[1])}`)
+    }
+
+    const serveringerMatch = snippet.match(/(\d+)\s*serveringer/i)
+    if (serveringerMatch?.[1]) {
+      parts.push(`${serveringerMatch[1]} serveringer`)
+    }
+
+    return parts.join(', ')
+  }
+
+  return null
+}
+
+async function buildEnrichedKeyOfferings(menuExtraction: any, menuSignal: any): Promise<string | null> {
+  const signatureItems = Array.isArray(menuSignal?.signatureItems)
+    ? menuSignal.signatureItems.map((item: string) => compactText(item))
+    : []
+
+  const programmeItems = Array.isArray(menuSignal?.programmes)
+    ? menuSignal.programmes.flatMap((programme: any) => Array.isArray(programme?.items) ? programme.items : [])
+    : []
+
+  const fallbackItems = Array.isArray(menuSignal?.menuCategories)
+    ? menuSignal.menuCategories
+        .map((category: string) => compactText(category))
+        .filter((category: string) => /cocktail|brunch|frokost|aften|dessert|smørrebrød|burger|sandwich|pasta|salat|nachos|børn|omakase|menu|retter/i.test(category))
+        .slice(0, MAX_KEY_OFFERINGS)
+    : []
+
+  const candidates = dedupeOfferings([
+    ...signatureItems,
+    ...programmeItems,
+    ...fallbackItems,
+  ]).slice(0, MAX_KEY_OFFERINGS)
+
+  if (candidates.length === 0) return null
+
+  const aiDetails = await inferIngredientDetailsWithAI(menuExtraction, menuSignal, candidates)
+
+  const enriched = candidates.map((item) => {
+    const detail = aiDetails[item.toLowerCase()]
+      || detailFromKeywords(item, {
+        ...menuSignal,
+        menuExtractionText: buildMenuExtractionText(menuExtraction),
+      })
+      || canonicalIngredientHint(item)
+
+    return detail ? `${item} - ${detail}` : item
+  })
+
+  return enriched.join('\n')
+}
+
 /**
  * Save complete website analysis to database
  * 
- * Updates 6 tables:
+ * Updates 5 tables:
  * 1. website_analyses - Raw analysis result
  * 2. business_profile - Short description, menu structure, booking URL, menu signal
- * 3. business_brand_profile - Tone of voice
- * 4. business_locations - Contact info (phone, email, address)
- * 5. opening_hours - Extracted hours
- * 6. business_operations - Establishment type classification
+ * 3. business_locations - Contact info (phone, email, address)
+ * 4. opening_hours - Extracted hours
+ * 5. business_operations - Establishment type classification
  */
 export async function saveWebsiteAnalysis(
   params: SaveWebsiteAnalysisParams
@@ -145,11 +422,23 @@ export async function saveWebsiteAnalysis(
     }
 
     if (analysisResult.shortDescription) {
-      profileData.short_description = analysisResult.shortDescription
+      profileData.long_description = analysisResult.shortDescription
     }
 
     if (menuExtraction?.menuStructure?.length > 0) {
       profileData.menu_structure = menuExtraction.menuStructure
+    }
+
+    if (menuSignal?.menuDescription) {
+      profileData.menu_description = menuSignal.menuDescription
+    }
+
+    if (menuSignal?.placeSynopsis && typeof menuSignal.placeSynopsis === 'string') {
+      const synopsis = menuSignal.placeSynopsis.trim()
+      if (synopsis.length > 0) {
+        profileData.ai_place_synopsis = synopsis
+        console.log('🧠 Saving place synopsis to ai_place_synopsis')
+      }
     }
 
     if (bookingUrl) {
@@ -160,6 +449,15 @@ export async function saveWebsiteAnalysis(
     if (menuSignal) {
       profileData.menu_signal = menuSignal
       console.log('🍽️ Saving menu signal to profile (hasMenu:', menuSignal.hasMenu, ')')
+      
+      // Auto-populate key_offerings from menu signal context.
+      // Keep it to five concise offerings that are useful for Free-tier AI ideas.
+      const keyOfferingsText = await buildEnrichedKeyOfferings(menuExtraction, menuSignal)
+      if (keyOfferingsText) {
+        profileData.key_offerings = keyOfferingsText
+        analysisResult.keyOfferings = keyOfferingsText
+        console.log('📋 Auto-populated key_offerings from menu signal context')
+      }
     }
 
     const { error: bpError } = await supabase
@@ -173,49 +471,27 @@ export async function saveWebsiteAnalysis(
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // 3. BUSINESS_BRAND_PROFILE - Tone of voice
+    // 2.5 BUSINESSES - Local location reference
     // ═══════════════════════════════════════════════════════════════════════════
 
-    if (toneOfVoice && businessId) {
-      const toneText = formatToneAsText(toneOfVoice)
+    if (analysisResult.localLocationReference) {
+      const { error: businessError } = await supabase
+        .from('businesses')
+        .update({ 
+          local_location_reference: analysisResult.localLocationReference,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', businessId)
 
-      const { data: existingBrand } = await supabase
-        .from('business_brand_profile')
-        .select('id')
-        .eq('business_id', businessId)
-        .maybeSingle()
-
-      if (existingBrand) {
-        // Update existing
-        const { error: toneError } = await supabase
-          .from('business_brand_profile')
-          .update({ tone_of_voice: toneText })
-          .eq('business_id', businessId)
-
-        if (toneError) {
-          console.warn('⚠️ Failed to save tone_of_voice:', toneError.message)
-        } else {
-          console.log('✅ Saved tone_of_voice to business_brand_profile')
-        }
+      if (businessError) {
+        console.warn('⚠️ Failed to save local_location_reference to businesses:', businessError.message)
       } else {
-        // Insert new brand profile
-        const { error: toneError } = await supabase
-          .from('business_brand_profile')
-          .insert({
-            business_id: businessId,
-            tone_of_voice: toneText
-          })
-
-        if (toneError) {
-          console.warn('⚠️ Failed to create business_brand_profile:', toneError.message)
-        } else {
-          console.log('✅ Created business_brand_profile with tone_of_voice')
-        }
+        console.log('✅ Saved local_location_reference to businesses:', analysisResult.localLocationReference)
       }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // 4. BUSINESS_LOCATIONS - Contact info
+    // 3. BUSINESS_LOCATIONS - Contact info
     // ═══════════════════════════════════════════════════════════════════════════
 
     if (analysisResult.contact) {
@@ -276,7 +552,7 @@ export async function saveWebsiteAnalysis(
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // 5. OPENING_HOURS - Extracted hours
+    // 4. OPENING_HOURS - Extracted hours
     // ═══════════════════════════════════════════════════════════════════════════
 
     if (analysisResult.openingHours && Object.keys(analysisResult.openingHours).length > 0) {
@@ -304,23 +580,33 @@ export async function saveWebsiteAnalysis(
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // 6. BUSINESS_OPERATIONS - Establishment type (FSE/SBO classification)
+    // 5. BUSINESS_OPERATIONS - Establishment type, kitchen close time
     // ═══════════════════════════════════════════════════════════════════════════
 
+    const operationsData: Record<string, any> = {
+      business_id: businessId,
+      updated_at: new Date().toISOString()
+    }
+
     if (analysisResult.establishmentType) {
+      operationsData.establishment_type = analysisResult.establishmentType
       console.log('🏢 Saving establishment type:', analysisResult.establishmentType)
+    }
+
+    if (analysisResult.kitchenCloseTime) {
+      operationsData.kitchen_close_time = analysisResult.kitchenCloseTime
+      console.log('🍳 Saving kitchen close time:', analysisResult.kitchenCloseTime)
+    }
+
+    if (Object.keys(operationsData).length > 2) {
       const { error: opsError } = await supabase
         .from('business_operations')
-        .upsert({
-          business_id: businessId,
-          establishment_type: analysisResult.establishmentType,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'business_id' })
+        .upsert(operationsData, { onConflict: 'business_id' })
 
       if (opsError) {
-        console.warn('⚠️ Failed to save establishment_type:', opsError.message)
+        console.warn('⚠️ Failed to save business_operations:', opsError.message)
       } else {
-        console.log('✅ Saved establishment_type to business_operations')
+        console.log('✅ Saved business_operations fields')
       }
     }
 
