@@ -41,45 +41,73 @@ export type Database = {
     Tables: {
       business_brand_profile: {
         Row: {
+          audience_breadth: string | null
           booking_link: string | null
+          brand_profile_v5: Json | null
+          brand_profile_v5_generated_at: string | null
+          brand_profile_v5_version: string | null
+          business_character: string | null
           business_id: string
+          business_model_type: string | null
           certifications: string[] | null
+          classification_rationale: string | null
           created_at: string | null
           cta_preference: string | null
           do_not_say: Json | null
-          offerings_full: Json | null
+          primary_copy_hook: string | null
           tone_keywords: string[] | null
           updated_at: string | null
           values: string[] | null
           voice_style: string | null
         }
         Insert: {
+          audience_breadth?: string | null
           booking_link?: string | null
+          brand_profile_v5?: Json | null
+          brand_profile_v5_generated_at?: string | null
+          brand_profile_v5_version?: string | null
+          business_character?: string | null
           business_id: string
+          business_model_type?: string | null
           certifications?: string[] | null
+          classification_rationale?: string | null
           created_at?: string | null
           cta_preference?: string | null
           do_not_say?: Json | null
-          offerings_full?: Json | null
+          primary_copy_hook?: string | null
           tone_keywords?: string[] | null
           updated_at?: string | null
           values?: string[] | null
           voice_style?: string | null
         }
         Update: {
+          audience_breadth?: string | null
           booking_link?: string | null
+          brand_profile_v5?: Json | null
+          brand_profile_v5_generated_at?: string | null
+          brand_profile_v5_version?: string | null
+          business_character?: string | null
           business_id?: string
+          business_model_type?: string | null
           certifications?: string[] | null
+          classification_rationale?: string | null
           created_at?: string | null
           cta_preference?: string | null
           do_not_say?: Json | null
-          offerings_full?: Json | null
+          primary_copy_hook?: string | null
           tone_keywords?: string[] | null
           updated_at?: string | null
           values?: string[] | null
           voice_style?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "business_brand_profile_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
           {
             foreignKeyName: "business_brand_profile_business_id_fkey"
             columns: ["business_id"]
@@ -134,143 +162,11 @@ export type Database = {
             foreignKeyName: "business_documents_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
-            referencedRelation: "businesses"
-            referencedColumns: ["id"]
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
           },
-        ]
-      }
-      weekly_content_plans: {
-        Row: {
-          id: string
-          user_id: string
-          business_id: string
-          week_number: number
-          week_start: string
-          week_end: string
-          generated_at: string | null
-          posts: Json
-          summary: Json | null
-          learning_data: Json | null
-          created_at: string | null
-          updated_at: string | null
-          strategy_id: string | null
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          business_id: string
-          week_number: number
-          week_start: string
-          week_end: string
-          generated_at?: string | null
-          posts?: Json
-          summary?: Json | null
-          learning_data?: Json | null
-          created_at?: string | null
-          updated_at?: string | null
-          strategy_id?: string | null
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          business_id?: string
-          week_number?: number
-          week_start?: string
-          week_end?: string
-          generated_at?: string | null
-          posts?: Json
-          summary?: Json | null
-          learning_data?: Json | null
-          created_at?: string | null
-          updated_at?: string | null
-          strategy_id?: string | null
-        }
-        Relationships: [
           {
-            foreignKeyName: "weekly_content_plans_strategy_id_fkey"
-            columns: ["strategy_id"]
-            isOneToOne: false
-            referencedRelation: "weekly_strategies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      weekly_strategies: {
-        Row: {
-          id: string
-          business_id: string
-          week_number: number
-          week_start: string
-          week_end: string
-          is_current_week: boolean | null
-          narrative: Json
-          strategic_priorities: Json
-          post_ideas: Json
-          selected_idea_ids: number[] | null
-          week_context_snapshot: Json | null
-          business_type: string
-          country: string | null
-          generated_at: string | null
-          status: string | null
-          platforms: string[] | null
-          subscription_tier: string | null
-          target_post_count: number | null
-          strategic_brief: Json | null
-          strategic_brief_raw: string | null
-          strategy_version: string | null
-          strategy_rationale: string | null
-        }
-        Insert: {
-          id?: string
-          business_id: string
-          week_number: number
-          week_start: string
-          week_end: string
-          is_current_week?: boolean | null
-          narrative: Json
-          strategic_priorities: Json
-          post_ideas: Json
-          selected_idea_ids?: number[] | null
-          week_context_snapshot?: Json | null
-          business_type: string
-          country?: string | null
-          generated_at?: string | null
-          status?: string | null
-          platforms?: string[] | null
-          subscription_tier?: string | null
-          target_post_count?: number | null
-          strategic_brief?: Json | null
-          strategic_brief_raw?: string | null
-          strategy_version?: string | null
-          strategy_rationale?: string | null
-        }
-        Update: {
-          id?: string
-          business_id?: string
-          week_number?: number
-          week_start?: string
-          week_end?: string
-          is_current_week?: boolean | null
-          narrative?: Json
-          strategic_priorities?: Json
-          post_ideas?: Json
-          selected_idea_ids?: number[] | null
-          week_context_snapshot?: Json | null
-          business_type?: string
-          country?: string | null
-          generated_at?: string | null
-          status?: string | null
-          platforms?: string[] | null
-          subscription_tier?: string | null
-          target_post_count?: number | null
-          strategic_brief?: Json | null
-          strategic_brief_raw?: string | null
-          strategy_version?: string | null
-          strategy_rationale?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "weekly_strategies_business_id_fkey"
+            foreignKeyName: "business_documents_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
@@ -282,9 +178,6 @@ export type Database = {
         Row: {
           area_type: string | null
           business_id: string
-          category_scores: Json | null
-          concept_fit_analyzed_at: string | null
-          concept_fit_by_category: Json | null
           created_at: string | null
           has_view: boolean | null
           is_hidden_gem: boolean | null
@@ -301,19 +194,10 @@ export type Database = {
           updated_at: string | null
           user_confirmed_at: string | null
           view_type: string[] | null
-          when_analysis: Json | null
-          when_analysis_internal: Json | null
-          who_analysis: Json | null
-          who_analysis_internal: Json | null
-          why_analysis: Json | null
-          why_analysis_internal: Json | null
         }
         Insert: {
           area_type?: string | null
           business_id: string
-          category_scores?: Json | null
-          concept_fit_analyzed_at?: string | null
-          concept_fit_by_category?: Json | null
           created_at?: string | null
           has_view?: boolean | null
           is_hidden_gem?: boolean | null
@@ -330,19 +214,10 @@ export type Database = {
           updated_at?: string | null
           user_confirmed_at?: string | null
           view_type?: string[] | null
-          when_analysis?: Json | null
-          when_analysis_internal?: Json | null
-          who_analysis?: Json | null
-          who_analysis_internal?: Json | null
-          why_analysis?: Json | null
-          why_analysis_internal?: Json | null
         }
         Update: {
           area_type?: string | null
           business_id?: string
-          category_scores?: Json | null
-          concept_fit_analyzed_at?: string | null
-          concept_fit_by_category?: Json | null
           created_at?: string | null
           has_view?: boolean | null
           is_hidden_gem?: boolean | null
@@ -359,14 +234,15 @@ export type Database = {
           updated_at?: string | null
           user_confirmed_at?: string | null
           view_type?: string[] | null
-          when_analysis?: Json | null
-          when_analysis_internal?: Json | null
-          who_analysis?: Json | null
-          who_analysis_internal?: Json | null
-          why_analysis?: Json | null
-          why_analysis_internal?: Json | null
         }
         Relationships: [
+          {
+            foreignKeyName: "business_location_intelligence_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
           {
             foreignKeyName: "business_location_intelligence_business_id_fkey"
             columns: ["business_id"]
@@ -427,6 +303,13 @@ export type Database = {
             foreignKeyName: "business_locations_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
+          {
+            foreignKeyName: "business_locations_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
@@ -439,12 +322,15 @@ export type Database = {
           business_id: string
           created_at: string | null
           currency: string | null
-          establishment_type: string | null
           has_delivery: boolean | null
           has_kids_menu: boolean | null
           has_outdoor_seating: boolean | null
+          has_parking: boolean | null
+          has_power_outlets: boolean | null
           has_table_service: boolean | null
           has_takeaway: boolean | null
+          has_wifi: boolean | null
+          kitchen_close_time: string | null
           opening_hours: Json | null
           price_level: string | null
           reservation_required: boolean | null
@@ -454,6 +340,7 @@ export type Database = {
           typical_busy_periods: Json | null
           typical_slow_periods: Json | null
           updated_at: string | null
+          weekly_programme: string | null
         }
         Insert: {
           accepts_walk_ins?: boolean | null
@@ -461,12 +348,15 @@ export type Database = {
           business_id: string
           created_at?: string | null
           currency?: string | null
-          establishment_type?: string | null
           has_delivery?: boolean | null
           has_kids_menu?: boolean | null
           has_outdoor_seating?: boolean | null
+          has_parking?: boolean | null
+          has_power_outlets?: boolean | null
           has_table_service?: boolean | null
           has_takeaway?: boolean | null
+          has_wifi?: boolean | null
+          kitchen_close_time?: string | null
           opening_hours?: Json | null
           price_level?: string | null
           reservation_required?: boolean | null
@@ -476,6 +366,7 @@ export type Database = {
           typical_busy_periods?: Json | null
           typical_slow_periods?: Json | null
           updated_at?: string | null
+          weekly_programme?: string | null
         }
         Update: {
           accepts_walk_ins?: boolean | null
@@ -483,12 +374,15 @@ export type Database = {
           business_id?: string
           created_at?: string | null
           currency?: string | null
-          establishment_type?: string | null
           has_delivery?: boolean | null
           has_kids_menu?: boolean | null
           has_outdoor_seating?: boolean | null
+          has_parking?: boolean | null
+          has_power_outlets?: boolean | null
           has_table_service?: boolean | null
           has_takeaway?: boolean | null
+          has_wifi?: boolean | null
+          kitchen_close_time?: string | null
           opening_hours?: Json | null
           price_level?: string | null
           reservation_required?: boolean | null
@@ -498,8 +392,16 @@ export type Database = {
           typical_busy_periods?: Json | null
           typical_slow_periods?: Json | null
           updated_at?: string | null
+          weekly_programme?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "business_operations_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
           {
             foreignKeyName: "business_operations_business_id_fkey"
             columns: ["business_id"]
@@ -514,15 +416,17 @@ export type Database = {
           ai_brand_context: string | null
           ai_brand_context_approved: boolean | null
           ai_brand_context_generated_at: string | null
+          booking_url: string | null
           business_id: string
           created_at: string | null
           detected_menu_urls: string[] | null
           founded_year: number | null
+          key_offerings: string | null
           long_description: string | null
           menu_description: string | null
+          menu_signal: Json | null
           menu_structure: Json | null
           price_level: string | null
-          short_description: string | null
           target_audience: string | null
           updated_at: string | null
         }
@@ -530,15 +434,17 @@ export type Database = {
           ai_brand_context?: string | null
           ai_brand_context_approved?: boolean | null
           ai_brand_context_generated_at?: string | null
+          booking_url?: string | null
           business_id: string
           created_at?: string | null
           detected_menu_urls?: string[] | null
           founded_year?: number | null
+          key_offerings?: string | null
           long_description?: string | null
           menu_description?: string | null
+          menu_signal?: Json | null
           menu_structure?: Json | null
           price_level?: string | null
-          short_description?: string | null
           target_audience?: string | null
           updated_at?: string | null
         }
@@ -546,19 +452,28 @@ export type Database = {
           ai_brand_context?: string | null
           ai_brand_context_approved?: boolean | null
           ai_brand_context_generated_at?: string | null
+          booking_url?: string | null
           business_id?: string
           created_at?: string | null
           detected_menu_urls?: string[] | null
           founded_year?: number | null
+          key_offerings?: string | null
           long_description?: string | null
           menu_description?: string | null
+          menu_signal?: Json | null
           menu_structure?: Json | null
           price_level?: string | null
-          short_description?: string | null
           target_audience?: string | null
           updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "business_profile_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
           {
             foreignKeyName: "business_profile_business_id_fkey"
             columns: ["business_id"]
@@ -598,6 +513,13 @@ export type Database = {
             foreignKeyName: "business_team_members_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
+          {
+            foreignKeyName: "business_team_members_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
@@ -607,11 +529,12 @@ export type Database = {
         Row: {
           ai_generations_this_month: number | null
           ai_generations_today: number | null
-          category: string | null
+          country: string
           created_at: string | null
           id: string
           last_daily_reset: string | null
           last_monthly_reset: string | null
+          last_quick_suggestions_reset: string | null
           logo_url: string | null
           name: string
           owner_id: string
@@ -619,9 +542,9 @@ export type Database = {
           pdf_uploads_today: number | null
           plan: string | null
           primary_language: string | null
+          quick_suggestions_today: number
           scheduled_posts_this_month: number | null
           subpage_urls: Json | null
-          subscription_tier: string | null
           updated_at: string | null
           vertical: string
           website_analysis_this_month: number | null
@@ -631,11 +554,12 @@ export type Database = {
         Insert: {
           ai_generations_this_month?: number | null
           ai_generations_today?: number | null
-          category?: string | null
+          country?: string
           created_at?: string | null
           id?: string
           last_daily_reset?: string | null
           last_monthly_reset?: string | null
+          last_quick_suggestions_reset?: string | null
           logo_url?: string | null
           name: string
           owner_id: string
@@ -643,9 +567,9 @@ export type Database = {
           pdf_uploads_today?: number | null
           plan?: string | null
           primary_language?: string | null
+          quick_suggestions_today?: number
           scheduled_posts_this_month?: number | null
           subpage_urls?: Json | null
-          subscription_tier?: string | null
           updated_at?: string | null
           vertical: string
           website_analysis_this_month?: number | null
@@ -655,11 +579,12 @@ export type Database = {
         Update: {
           ai_generations_this_month?: number | null
           ai_generations_today?: number | null
-          category?: string | null
+          country?: string
           created_at?: string | null
           id?: string
           last_daily_reset?: string | null
           last_monthly_reset?: string | null
+          last_quick_suggestions_reset?: string | null
           logo_url?: string | null
           name?: string
           owner_id?: string
@@ -667,9 +592,9 @@ export type Database = {
           pdf_uploads_today?: number | null
           plan?: string | null
           primary_language?: string | null
+          quick_suggestions_today?: number
           scheduled_posts_this_month?: number | null
           subpage_urls?: Json | null
-          subscription_tier?: string | null
           updated_at?: string | null
           vertical?: string
           website_analysis_this_month?: number | null
@@ -677,6 +602,108 @@ export type Database = {
           website_url?: string | null
         }
         Relationships: []
+      }
+      daily_suggestions: {
+        Row: {
+          business_id: string
+          caption_base: string | null
+          content_type: string
+          created_at: string
+          cta_intent: string | null
+          date: string
+          first_text_generated_at: string | null
+          generation_batch_id: string | null
+          id: number
+          is_active: boolean
+          last_text_generated_at: string | null
+          media_suggestion: Json | null
+          menu_item_description: string | null
+          menu_item_name: string | null
+          photo_idea: string | null
+          position: number
+          rationale: string | null
+          selected_at: string | null
+          consumed_at: string | null
+          published_at: string | null
+          status: string
+          suggested_time: string | null
+          text_generated_count: number | null
+          title: string
+          weather_forecast: Json | null
+          why_explanation: string | null
+        }
+        Insert: {
+          business_id: string
+          caption_base?: string | null
+          content_type?: string
+          created_at?: string
+          cta_intent?: string | null
+          date?: string
+          first_text_generated_at?: string | null
+          generation_batch_id?: string | null
+          id?: number
+          is_active?: boolean
+          last_text_generated_at?: string | null
+          media_suggestion?: Json | null
+          menu_item_description?: string | null
+          menu_item_name?: string | null
+          photo_idea?: string | null
+          position: number
+          rationale?: string | null
+          selected_at?: string | null
+          consumed_at?: string | null
+          published_at?: string | null
+          status?: string
+          suggested_time?: string | null
+          text_generated_count?: number | null
+          title: string
+          weather_forecast?: Json | null
+          why_explanation?: string | null
+        }
+        Update: {
+          business_id?: string
+          caption_base?: string | null
+          content_type?: string
+          created_at?: string
+          cta_intent?: string | null
+          date?: string
+          first_text_generated_at?: string | null
+          generation_batch_id?: string | null
+          id?: number
+          is_active?: boolean
+          last_text_generated_at?: string | null
+          media_suggestion?: Json | null
+          menu_item_description?: string | null
+          menu_item_name?: string | null
+          photo_idea?: string | null
+          position?: number
+          rationale?: string | null
+          selected_at?: string | null
+          consumed_at?: string | null
+          published_at?: string | null
+          status?: string
+          suggested_time?: string | null
+          text_generated_count?: number | null
+          title?: string
+          weather_forecast?: Json | null
+          why_explanation?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_suggestions_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
+          {
+            foreignKeyName: "daily_suggestions_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       media_assets: {
         Row: {
@@ -719,6 +746,13 @@ export type Database = {
           url?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "media_assets_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
           {
             foreignKeyName: "media_assets_business_id_fkey"
             columns: ["business_id"]
@@ -770,6 +804,13 @@ export type Database = {
             foreignKeyName: "menu_extractions_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
+          {
+            foreignKeyName: "menu_extractions_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
@@ -778,59 +819,6 @@ export type Database = {
             columns: ["menu_source_id"]
             isOneToOne: false
             referencedRelation: "menu_sources"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      menu_results: {
-        Row: {
-          business_id: string
-          confidence_score: number | null
-          created_at: string | null
-          error_message: string | null
-          id: string
-          ocr_engine: string | null
-          pdf_url: string
-          processing_time_ms: number | null
-          raw_text: string | null
-          status: string
-          structured_data: Json | null
-          updated_at: string | null
-        }
-        Insert: {
-          business_id: string
-          confidence_score?: number | null
-          created_at?: string | null
-          error_message?: string | null
-          id?: string
-          ocr_engine?: string | null
-          pdf_url: string
-          processing_time_ms?: number | null
-          raw_text?: string | null
-          status?: string
-          structured_data?: Json | null
-          updated_at?: string | null
-        }
-        Update: {
-          business_id?: string
-          confidence_score?: number | null
-          created_at?: string | null
-          error_message?: string | null
-          id?: string
-          ocr_engine?: string | null
-          pdf_url?: string
-          processing_time_ms?: number | null
-          raw_text?: string | null
-          status?: string
-          structured_data?: Json | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "menu_results_business_id_fkey"
-            columns: ["business_id"]
-            isOneToOne: false
-            referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
         ]
@@ -849,6 +837,7 @@ export type Database = {
           raw_text: string | null
           sha256: string | null
           source_content_type: string | null
+          source_id: string | null
           source_kind: string
           source_url: string | null
           status: string
@@ -870,6 +859,7 @@ export type Database = {
           raw_text?: string | null
           sha256?: string | null
           source_content_type?: string | null
+          source_id?: string | null
           source_kind?: string
           source_url?: string | null
           status?: string
@@ -891,6 +881,7 @@ export type Database = {
           raw_text?: string | null
           sha256?: string | null
           source_content_type?: string | null
+          source_id?: string | null
           source_kind?: string
           source_url?: string | null
           status?: string
@@ -904,7 +895,21 @@ export type Database = {
             foreignKeyName: "menu_results_v2_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
+          {
+            foreignKeyName: "menu_results_v2_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "menu_results_v2_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "menu_sources"
             referencedColumns: ["id"]
           },
         ]
@@ -960,72 +965,11 @@ export type Database = {
             foreignKeyName: "menu_sources_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
-            referencedRelation: "businesses"
-            referencedColumns: ["id"]
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
           },
-        ]
-      }
-      offerings: {
-        Row: {
-          active: boolean | null
-          business_id: string
-          category: string | null
-          created_at: string | null
-          description: string | null
-          dietary_tags: string[] | null
-          id: string
-          is_seasonal: boolean | null
-          is_signature: boolean | null
-          metadata: Json | null
-          name: string
-          price_max: number | null
-          price_min: number | null
-          season_label: string | null
-          tags: string[] | null
-          type: string
-          updated_at: string | null
-        }
-        Insert: {
-          active?: boolean | null
-          business_id: string
-          category?: string | null
-          created_at?: string | null
-          description?: string | null
-          dietary_tags?: string[] | null
-          id?: string
-          is_seasonal?: boolean | null
-          is_signature?: boolean | null
-          metadata?: Json | null
-          name: string
-          price_max?: number | null
-          price_min?: number | null
-          season_label?: string | null
-          tags?: string[] | null
-          type: string
-          updated_at?: string | null
-        }
-        Update: {
-          active?: boolean | null
-          business_id?: string
-          category?: string | null
-          created_at?: string | null
-          description?: string | null
-          dietary_tags?: string[] | null
-          id?: string
-          is_seasonal?: boolean | null
-          is_signature?: boolean | null
-          metadata?: Json | null
-          name?: string
-          price_max?: number | null
-          price_min?: number | null
-          season_label?: string | null
-          tags?: string[] | null
-          type?: string
-          updated_at?: string | null
-        }
-        Relationships: [
           {
-            foreignKeyName: "offerings_business_id_fkey"
+            foreignKeyName: "menu_sources_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
@@ -1069,123 +1013,144 @@ export type Database = {
             foreignKeyName: "opening_hours_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
+          {
+            foreignKeyName: "opening_hours_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
         ]
       }
-      post_drafts: {
+      platform_intelligence: {
         Row: {
-          created_at: string | null
-          id: string
-          photo_content: Json | null
-          photo_idea: string | null
-          post_content: Json | null
-          selected_platforms: string[] | null
-          updated_at: string | null
-          user_id: string
-          // Extended columns (migration 20260302000000)
-          idea_source: string | null
-          idea_data: Json | null
-          media_analysis: Json | null
-          caption_data: Json | null
-          phase: string | null
-          strategy_id: string | null
-          idea_index: number | null
+          facebook_algorithm: Json | null
+          google_my_business: Json | null
+          id: number
+          industry_benchmarks: Json | null
+          instagram_algorithm: Json | null
+          last_updated: string | null
+          version: number | null
         }
         Insert: {
-          created_at?: string | null
-          id?: string
-          photo_content?: Json | null
-          photo_idea?: string | null
-          post_content?: Json | null
-          selected_platforms?: string[] | null
-          updated_at?: string | null
-          user_id: string
-          idea_source?: string | null
-          idea_data?: Json | null
-          media_analysis?: Json | null
-          caption_data?: Json | null
-          phase?: string | null
-          strategy_id?: string | null
-          idea_index?: number | null
+          facebook_algorithm?: Json | null
+          google_my_business?: Json | null
+          id?: number
+          industry_benchmarks?: Json | null
+          instagram_algorithm?: Json | null
+          last_updated?: string | null
+          version?: number | null
         }
         Update: {
-          created_at?: string | null
-          id?: string
-          photo_content?: Json | null
-          photo_idea?: string | null
-          post_content?: Json | null
-          selected_platforms?: string[] | null
-          updated_at?: string | null
-          user_id?: string
-          idea_source?: string | null
-          idea_data?: Json | null
-          media_analysis?: Json | null
-          caption_data?: Json | null
-          phase?: string | null
-          strategy_id?: string | null
-          idea_index?: number | null
+          facebook_algorithm?: Json | null
+          google_my_business?: Json | null
+          id?: number
+          industry_benchmarks?: Json | null
+          instagram_algorithm?: Json | null
+          last_updated?: string | null
+          version?: number | null
         }
         Relationships: []
       }
       profiles: {
         Row: {
+          about_text: string | null
+          address: string | null
           ai_generations_this_month: number | null
           ai_generations_today: number | null
+          business_category: string | null
+          business_email: string | null
+          business_name: string | null
           business_type: string | null
+          country: string | null
           created_at: string | null
           email: string
+          has_booking_button: boolean | null
           id: string
+          keywords: string[] | null
           last_daily_reset: string | null
           last_monthly_reset: string | null
           onboarding_completed: boolean | null
+          opening_hours: Json | null
           pdf_uploads_this_month: number | null
           pdf_uploads_today: number | null
+          phone: string | null
           plan: string | null
+          profile_completed: boolean | null
           scheduled_posts_this_month: number | null
           selected_platforms: Json | null
+          social_platforms: string[] | null
           updated_at: string | null
           website_analysis_this_month: number | null
           website_analysis_today: number | null
+          website_url: string | null
         }
         Insert: {
+          about_text?: string | null
+          address?: string | null
           ai_generations_this_month?: number | null
           ai_generations_today?: number | null
+          business_category?: string | null
+          business_email?: string | null
+          business_name?: string | null
           business_type?: string | null
+          country?: string | null
           created_at?: string | null
           email: string
+          has_booking_button?: boolean | null
           id: string
+          keywords?: string[] | null
           last_daily_reset?: string | null
           last_monthly_reset?: string | null
           onboarding_completed?: boolean | null
+          opening_hours?: Json | null
           pdf_uploads_this_month?: number | null
           pdf_uploads_today?: number | null
+          phone?: string | null
           plan?: string | null
+          profile_completed?: boolean | null
           scheduled_posts_this_month?: number | null
           selected_platforms?: Json | null
+          social_platforms?: string[] | null
           updated_at?: string | null
           website_analysis_this_month?: number | null
           website_analysis_today?: number | null
+          website_url?: string | null
         }
         Update: {
+          about_text?: string | null
+          address?: string | null
           ai_generations_this_month?: number | null
           ai_generations_today?: number | null
+          business_category?: string | null
+          business_email?: string | null
+          business_name?: string | null
           business_type?: string | null
+          country?: string | null
           created_at?: string | null
           email?: string
+          has_booking_button?: boolean | null
           id?: string
+          keywords?: string[] | null
           last_daily_reset?: string | null
           last_monthly_reset?: string | null
           onboarding_completed?: boolean | null
+          opening_hours?: Json | null
           pdf_uploads_this_month?: number | null
           pdf_uploads_today?: number | null
+          phone?: string | null
           plan?: string | null
+          profile_completed?: boolean | null
           scheduled_posts_this_month?: number | null
           selected_platforms?: Json | null
+          social_platforms?: string[] | null
           updated_at?: string | null
           website_analysis_this_month?: number | null
           website_analysis_today?: number | null
+          website_url?: string | null
         }
         Relationships: []
       }
@@ -1225,57 +1190,11 @@ export type Database = {
             foreignKeyName: "social_accounts_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
-            referencedRelation: "businesses"
-            referencedColumns: ["id"]
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
           },
-        ]
-      }
-      specials: {
-        Row: {
-          active: boolean | null
-          business_id: string
-          created_at: string | null
-          description: string | null
-          end_date: string | null
-          id: string
-          link_url: string | null
-          price_info: string | null
-          recurrence_rule: string | null
-          start_date: string | null
-          title: string
-          type: string
-        }
-        Insert: {
-          active?: boolean | null
-          business_id: string
-          created_at?: string | null
-          description?: string | null
-          end_date?: string | null
-          id?: string
-          link_url?: string | null
-          price_info?: string | null
-          recurrence_rule?: string | null
-          start_date?: string | null
-          title: string
-          type: string
-        }
-        Update: {
-          active?: boolean | null
-          business_id?: string
-          created_at?: string | null
-          description?: string | null
-          end_date?: string | null
-          id?: string
-          link_url?: string | null
-          price_info?: string | null
-          recurrence_rule?: string | null
-          start_date?: string | null
-          title?: string
-          type?: string
-        }
-        Relationships: [
           {
-            foreignKeyName: "specials_business_id_fkey"
+            foreignKeyName: "social_accounts_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
@@ -1322,6 +1241,13 @@ export type Database = {
             foreignKeyName: "website_analyses_business_id_fkey"
             columns: ["business_id"]
             isOneToOne: false
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
+          {
+            foreignKeyName: "website_analyses_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
             referencedRelation: "businesses"
             referencedColumns: ["id"]
           },
@@ -1329,7 +1255,55 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      business_knowledge_complete: {
+        Row: {
+          active_goals_count: number | null
+          area_type: string | null
+          business_id: string | null
+          food_philosophy: string | null
+          interior_style: string | null
+          location_marketing_hooks: string[] | null
+          market_position: Json | null
+          neighborhood: string | null
+          opening_hours: Json | null
+          photography_style: Json | null
+          price_level: string | null
+          seating_capacity_indoor: number | null
+          signature_items_count: number | null
+          total_items_count: number | null
+        }
+        Relationships: []
+      }
+      v5_profile_summary: {
+        Row: {
+          brand_essence: string | null
+          brand_profile_v5_generated_at: string | null
+          business_id: string | null
+          business_name: string | null
+          completeness_status: string | null
+          never_say_count: number | null
+          programme_count: number | null
+          tone_rules_count: number | null
+          typical_openings_count: number | null
+          v5_version: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "business_brand_profile_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "business_knowledge_complete"
+            referencedColumns: ["business_id"]
+          },
+          {
+            foreignKeyName: "business_brand_profile_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: true
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       check_ai_generation_quota: {
@@ -1365,6 +1339,7 @@ export type Database = {
           raw_text: string | null
           sha256: string | null
           source_content_type: string | null
+          source_id: string | null
           source_kind: string
           source_url: string | null
           status: string
@@ -1380,6 +1355,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      cleanup_old_daily_suggestions: { Args: never; Returns: undefined }
       create_business_onboarding: {
         Args: {
           p_business_name: string
@@ -1389,8 +1365,26 @@ export type Database = {
           p_postal_code: string
           p_selected_platforms: string[]
           p_user_id: string
+          p_website_url?: string
         }
         Returns: string
+      }
+      deactivate_old_suggestions: {
+        Args: { p_business_id: string; p_date: string }
+        Returns: undefined
+      }
+      delete_user_account: { Args: never; Returns: Json }
+      exec_sql: { Args: { query: string }; Returns: undefined }
+      get_daily_usage_stats: {
+        Args: { p_business_id: string; p_date?: string }
+        Returns: {
+          regenerations_limit: number
+          regenerations_used: number
+          suggestions_count: number
+          suggestions_selected: number
+          texts_generated: number
+          tier: string
+        }[]
       }
       get_user_business_id: { Args: { user_id: string }; Returns: string }
       get_user_business_tier: { Args: { user_id: string }; Returns: string }
@@ -1402,6 +1396,10 @@ export type Database = {
       }
       is_business_owner: { Args: { business_uuid: string }; Returns: boolean }
       is_team_member: { Args: { business_uuid: string }; Returns: boolean }
+      record_text_generation: {
+        Args: { p_suggestion_id: number }
+        Returns: undefined
+      }
       requeue_stale_menu_results_v2: {
         Args: { max_age_minutes?: number }
         Returns: number

@@ -1,282 +1,56 @@
 /**
- * Location Type Expectations
+ * Location Type Expectations (BACKWARD COMPATIBILITY LAYER)
  * 
- * Defines the 7 factors for each of the 10 location types.
- * These are the baseline expectations that businesses are evaluated against.
+ * This file now re-exports from the new split architecture:
+ * - geographic-location-types.ts (WHERE: city_centre, waterfront, etc.)
+ * - demographic-profiles.ts (WHO: student -> university_area, tourist -> tourist_area)
+ * 
+ * This maintains backward compatibility while the system migrates to the new architecture.
  */
 
-export interface LocationExpectations {
-  locationTypeId: string;
-  displayName: string;
-  
-  // Factor 1: WHO (typical customers)
-  typical_customers: string[];
-  
-  // Factor 2: WHY (visit motivations) - with prevalence
-  typical_motivations: Array<{
-    motivation: string;
-    prevalence: 'very_high' | 'high' | 'medium' | 'low';
-  }>;
-  
-  // Factor 3: FLOW (pace)
-  pace: 'very_fast' | 'fast' | 'medium' | 'slow' | 'mixed';
-  
-  // Factor 4: BUDGET (price sensitivity)
-  price_sensitivity: 'low' | 'medium' | 'high';
-  
-  // Factor 5: WHAT WINS (winning angles)
-  winning_angles: string[];
-  
-  // Factor 6: WEATHER IMPACT (weather sensitivity)
-  weather_sensitivity: 'low' | 'medium' | 'high';
-  
-  // Factor 7: SEASON IMPACT (seasonality)
-  seasonality: {
-    pattern: 'stable' | 'summer_peak' | 'winter_peak' | 'holiday_spikes';
-    seasonal_weights: {
-      winter: number;  // 0.0 to 1.0 (1.0 = full strength)
-      spring: number;
-      summer: number;
-      autumn: number;
-    };
-  };
-}
+import { 
+  GEOGRAPHIC_LOCATION_TYPES, 
+  LocationExpectations,
+  getGeographicLocationExpectations,
+  getAllGeographicLocationIds,
+  isGeographicLocationType 
+} from './geographic-location-types.ts';
 
+import { 
+  DEMOGRAPHIC_PROFILES,
+  DemographicProfile,
+  getDemographicProfile,
+  getAllDemographicIds,
+  isDemographic
+} from './demographic-profiles.ts';
+
+// Re-export types for backward compatibility
+export type { LocationExpectations, DemographicProfile };
+
+// Export geographic types
+export { 
+  GEOGRAPHIC_LOCATION_TYPES,
+  getGeographicLocationExpectations,
+  getAllGeographicLocationIds,
+  isGeographicLocationType
+};
+
+// Export demographic types
+export { 
+  DEMOGRAPHIC_PROFILES,
+  getDemographicProfile,
+  getAllDemographicIds,
+  isDemographic
+};
+
+// LEGACY: Maintain backward compatibility by merging geographic types with legacy student/tourist
+// New code should use GEOGRAPHIC_LOCATION_TYPES or DEMOGRAPHIC_PROFILES directly
 export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
+  // Copy all geographic types
+  ...GEOGRAPHIC_LOCATION_TYPES,
   
-  // 1. CITY CENTRE
-  city_centre: {
-    locationTypeId: "city_centre",
-    displayName: "City Centre",
-    
-    typical_customers: [
-      "shoppers on break",
-      "tourists",
-      "office workers",
-      "nightlife guests",
-      "event visitors",
-      "couples",
-      "families with kids",
-      "friends / social groups",
-      "couple groups / double dates"
-    ],
-    
-    typical_motivations: [
-      { motivation: "convenience", prevalence: "very_high" },
-      { motivation: "social meet-up", prevalence: "high" },
-      { motivation: "discovery/trying new", prevalence: "high" },
-      { motivation: "lunch necessity", prevalence: "high" },
-      { motivation: "pre-event/post-event", prevalence: "medium" },
-      { motivation: "date/couple time", prevalence: "medium" }
-    ],
-    
-    pace: "fast",
-    price_sensitivity: "medium",
-    
-    winning_angles: [
-      "Central location",
-      "Quick service",
-      "Diverse menu options",
-      "Extended hours",
-      "Tourist-friendly"
-    ],
-    
-    weather_sensitivity: "medium",
-    
-    seasonality: {
-      pattern: "stable",
-      seasonal_weights: {
-        winter: 0.95,
-        spring: 1.0,
-        summer: 1.0,
-        autumn: 1.0
-      }
-    }
-  },
-  
-  // 2. RESIDENTIAL AREA
-  residential: {
-    locationTypeId: "residential",
-    displayName: "Residential Area",
-    
-    typical_customers: [
-      "local regulars",
-      "families with kids",
-      "parents with babies/strollers",
-      "retirees/pensioners",
-      "remote workers",
-      "cyclists"
-    ],
-    
-    typical_motivations: [
-      { motivation: "routine habit", prevalence: "very_high" },
-      { motivation: "social meet-up", prevalence: "high" },
-      { motivation: "family outing", prevalence: "high" },
-      { motivation: "work/productivity", prevalence: "medium" },
-      { motivation: "support local/ethical choice", prevalence: "medium" },
-      { motivation: "celebration/milestone", prevalence: "medium" }
-    ],
-    
-    pace: "medium",
-    price_sensitivity: "medium",
-    
-    winning_angles: [
-      "Community hub",
-      "Neighborhood favorite",
-      "Family-friendly",
-      "Local ownership",
-      "Regular spot",
-      "Kid-friendly"
-    ],
-    
-    weather_sensitivity: "medium",
-    
-    seasonality: {
-      pattern: "stable",
-      seasonal_weights: {
-        winter: 0.95,
-        spring: 1.0,
-        summer: 1.05,  // Slightly higher (outdoor activities)
-        autumn: 1.0
-      }
-    }
-  },
-  
-  // 3. TOURIST AREA
-  tourist: {
-    locationTypeId: "tourist",
-    displayName: "Tourist Area",
-    
-    typical_customers: [
-      "tourists",
-      "day visitors",
-      "families on outings",
-      "couples",
-      "event visitors",
-      "couple groups / double dates"
-    ],
-    
-    typical_motivations: [
-      { motivation: "destination visit", prevalence: "very_high" },
-      { motivation: "discovery/trying new", prevalence: "very_high" },
-      { motivation: "treat/reward", prevalence: "high" },
-      { motivation: "family outing", prevalence: "high" },
-      { motivation: "social meet-up", prevalence: "medium" }
-    ],
-    
-    pace: "medium",
-    price_sensitivity: "low",
-    
-    winning_angles: [
-      "Instagram-worthy presentation",
-      "Local/authentic vibe",
-      "Tourist-friendly (English menu)",
-      "Unique experience",
-      "Photo opportunities"
-    ],
-    
-    weather_sensitivity: "high",
-    
-    seasonality: {
-      pattern: "summer_peak",
-      seasonal_weights: {
-        winter: 0.4,   // 40% of summer traffic
-        spring: 0.7,
-        summer: 1.0,   // Peak
-        autumn: 0.6
-      }
-    }
-  },
-  
-  // 4. OFFICE / BUSINESS DISTRICT
-  office: {
-    locationTypeId: "office",
-    displayName: "Office / Business District",
-    
-    typical_customers: [
-      "office workers",
-      "commuters",
-      "business meetings",
-      "remote workers"
-    ],
-    
-    typical_motivations: [
-      { motivation: "work break", prevalence: "very_high" },
-      { motivation: "lunch necessity", prevalence: "very_high" },
-      { motivation: "business meeting", prevalence: "high" },
-      { motivation: "routine habit", prevalence: "high" },
-      { motivation: "convenience", prevalence: "medium" },
-      { motivation: "work/productivity", prevalence: "medium" }
-    ],
-    
-    pace: "fast",
-    price_sensitivity: "medium",
-    
-    winning_angles: [
-      "Quick service",
-      "Convenient location",
-      "Value lunch combos",
-      "Professional atmosphere",
-      "WiFi available",
-      "Takeaway options"
-    ],
-    
-    weather_sensitivity: "low",
-    
-    seasonality: {
-      pattern: "stable",
-      seasonal_weights: {
-        winter: 1.0,
-        spring: 1.0,
-        summer: 0.85,  // Lower (summer holidays)
-        autumn: 1.0
-      }
-    }
-  },
-  
-  // 5. TRANSPORT HUB
-  transport_hub: {
-    locationTypeId: "transport_hub",
-    displayName: "Transport Hub",
-    
-    typical_customers: [
-      "commuters",
-      "travelers",
-      "tourists in transit"
-    ],
-    
-    typical_motivations: [
-      { motivation: "waiting time filler", prevalence: "very_high" },
-      { motivation: "convenience", prevalence: "very_high" },
-      { motivation: "energy boost/caffeine need", prevalence: "high" },
-      { motivation: "routine habit", prevalence: "medium" }
-    ],
-    
-    pace: "very_fast",
-    price_sensitivity: "medium",
-    
-    winning_angles: [
-      "Grab-and-go speed",
-      "Takeaway focus",
-      "Easy mobile ordering",
-      "Quick turnaround",
-      "24/7 or extended hours"
-    ],
-    
-    weather_sensitivity: "low",
-    
-    seasonality: {
-      pattern: "stable",
-      seasonal_weights: {
-        winter: 1.0,
-        spring: 1.0,
-        summer: 0.95,
-        autumn: 1.0
-      }
-    }
-  },
-  
-  // 6. STUDENT / EDUCATIONAL AREA
+  // Legacy compatibility: Keep student and tourist for old code
+  // These map to 'university_area' and 'tourist_area' in demographic_proximity
   student: {
     locationTypeId: "student",
     displayName: "Student / Educational Area",
@@ -321,237 +95,54 @@ export const LOCATION_EXPECTATIONS: Record<string, LocationExpectations> = {
     }
   },
   
-  // 7. WATERFRONT / LEISURE
-  waterfront: {
-    locationTypeId: "waterfront",
-    displayName: "Waterfront / Leisure",
+  tourist: {
+    locationTypeId: "tourist",
+    displayName: "Tourist Area",
     
     typical_customers: [
-      "walkers/runners/dog owners",
-      "families on outings",
-      "cyclists",
-      "couples",
       "tourists",
-      "friends / social groups",
+      "day visitors",
+      "families on outings",
+      "couples",
+      "event visitors",
       "couple groups / double dates"
     ],
     
     typical_motivations: [
-      { motivation: "destination visit", prevalence: "high" },
-      { motivation: "family outing", prevalence: "high" },
-      { motivation: "social meet-up", prevalence: "high" },
-      { motivation: "treat/reward", prevalence: "medium" },
-      { motivation: "warm-up/shelter", prevalence: "medium" }
-    ],
-    
-    pace: "medium",
-    price_sensitivity: "low",
-    
-    winning_angles: [
-      "Scenic location",
-      "Outdoor seating",
-      "Relaxed atmosphere",
-      "Perfect for walks",
-      "Weather-dependent specials"
-    ],
-    
-    weather_sensitivity: "high",
-    
-    seasonality: {
-      pattern: "summer_peak",
-      seasonal_weights: {
-        winter: 0.5,   // 50% of summer
-        spring: 0.8,
-        summer: 1.0,
-        autumn: 0.7
-      }
-    }
-  },
-  
-  // 8. SHOPPING DISTRICT
-  shopping_district: {
-    locationTypeId: "shopping_district",
-    displayName: "Shopping District",
-    
-    typical_customers: [
-      "shoppers on break",
-      "retail workers",
-      "families shopping",
-      "couples",
-      "friends / social groups"
-    ],
-    
-    typical_motivations: [
-      { motivation: "waiting time filler", prevalence: "very_high" },
-      { motivation: "convenience", prevalence: "high" },
-      { motivation: "work break", prevalence: "high" },
-      { motivation: "social meet-up", prevalence: "medium" },
-      { motivation: "treat/reward", prevalence: "medium" }
-    ],
-    
-    pace: "fast",
-    price_sensitivity: "medium",
-    
-    winning_angles: [
-      "Quick service",
-      "Convenient location",
-      "Takeaway options",
-      "Shopping break friendly",
-      "Value combos"
-    ],
-    
-    weather_sensitivity: "medium",
-    
-    seasonality: {
-      pattern: "holiday_spikes",
-      seasonal_weights: {
-        winter: 1.1,   // Christmas shopping boost
-        spring: 0.95,
-        summer: 0.9,
-        autumn: 0.95
-      }
-    }
-  },
-  
-  // 9. MIXED-USE / MODERN DEVELOPMENT
-  mixed_use: {
-    locationTypeId: "mixed_use",
-    displayName: "Mixed-Use / Modern Development",
-    
-    typical_customers: [
-      "local regulars",
-      "office workers",
-      "families with kids",
-      "remote workers",
-      "young professionals",
-      "friends / social groups"
-    ],
-    
-    typical_motivations: [
-      { motivation: "routine habit", prevalence: "high" },
-      { motivation: "convenience", prevalence: "high" },
-      { motivation: "work/productivity", prevalence: "medium" },
-      { motivation: "social meet-up", prevalence: "medium" },
-      { motivation: "lunch necessity", prevalence: "medium" }
-    ],
-    
-    pace: "medium",
-    price_sensitivity: "medium",
-    
-    winning_angles: [
-      "Versatile offering",
-      "All-day menu",
-      "Community hub",
-      "Modern atmosphere",
-      "Flexible seating"
-    ],
-    
-    weather_sensitivity: "medium",
-    
-    seasonality: {
-      pattern: "stable",
-      seasonal_weights: {
-        winter: 0.95,
-        spring: 1.0,
-        summer: 1.0,
-        autumn: 1.0
-      }
-    }
-  },
-  
-  // 10. DESTINATION / DRIVE-TO AREA
-  destination: {
-    locationTypeId: "destination",
-    displayName: "Destination / Drive-To Area",
-    
-    typical_customers: [
-      "planned visitors",
-      "couples",
-      "celebration groups",
-      "food enthusiasts",
-      "weekend explorers"
-    ],
-    
-    typical_motivations: [
       { motivation: "destination visit", prevalence: "very_high" },
-      { motivation: "celebration/milestone", prevalence: "high" },
-      { motivation: "date/couple time", prevalence: "high" },
-      { motivation: "discovery/trying new", prevalence: "medium" },
-      { motivation: "family outing", prevalence: "medium" }
+      { motivation: "discovery/trying new", prevalence: "very_high" },
+      { motivation: "treat/reward", prevalence: "high" },
+      { motivation: "family outing", prevalence: "high" },
+      { motivation: "social meet-up", prevalence: "medium" }
     ],
     
-    pace: "slow",
+    pace: "medium",
     price_sensitivity: "low",
     
     winning_angles: [
+      "Instagram-worthy presentation",
+      "Local/authentic vibe",
+      "Tourist-friendly (English menu)",
       "Unique experience",
-      "Worth the trip",
-      "Reservations recommended",
-      "Parking available",
-      "Special occasion dining",
-      "Quality over convenience"
+      "Photo opportunities"
     ],
     
-    weather_sensitivity: "medium",
-    
-    seasonality: {
-      pattern: "stable",
-      seasonal_weights: {
-        winter: 0.9,
-        spring: 1.0,
-        summer: 1.05,
-        autumn: 1.0
-      }
-    }
-  },
-
-  // 11. PARK / NATURE AREA
-  nature_park: {
-    locationTypeId: "nature_park",
-    displayName: "Park / Nature Area",
-
-    typical_customers: [
-      "walkers/runners/dog owners",
-      "families with kids",
-      "cyclists",
-      "parents with babies/strollers",
-      "local regulars"
-    ],
-
-    typical_motivations: [
-      { motivation: "warm-up/shelter", prevalence: "high" },
-      { motivation: "family outing", prevalence: "high" },
-      { motivation: "routine habit", prevalence: "medium" },
-      { motivation: "treat/reward", prevalence: "medium" }
-    ],
-
-    pace: "medium",
-    price_sensitivity: "medium",
-
-    winning_angles: [
-      "Outdoor seating",
-      "Dog-friendly",
-      "Takeaway coffee",
-      "Family-friendly",
-      "Park views",
-      "Healthy options"
-    ],
-
     weather_sensitivity: "high",
-
+    
     seasonality: {
       pattern: "summer_peak",
       seasonal_weights: {
-        winter: 0.55,
-        spring: 0.85,
-        summer: 1.0,
-        autumn: 0.75
+        winter: 0.4,   // 40% of summer traffic
+        spring: 0.7,
+        summer: 1.0,   // Peak
+        autumn: 0.6
       }
     }
   }
 };
 
-// Helper function to get expectations by location type
+// Helper function to get expectations by location type (backward compatibility)
+// Checks both geographic types and legacy student/tourist
 export function getLocationExpectations(locationTypeId: string): LocationExpectations | null {
   return LOCATION_EXPECTATIONS[locationTypeId] || null;
 }

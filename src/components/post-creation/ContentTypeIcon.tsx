@@ -8,7 +8,9 @@ interface ContentTypeIconProps {
 }
 
 export function ContentTypeIcon({ contentType, className = 'w-5 h-5' }: ContentTypeIconProps) {
-  switch (contentType) {
+  const normalized = (contentType || '').toLowerCase()
+
+  switch (normalized) {
     case 'menu_item':
     case 'menu_highlight':
     case 'product_menu':
@@ -47,19 +49,33 @@ export function ContentTypeIcon({ contentType, className = 'w-5 h-5' }: ContentT
           <path strokeLinecap="round" strokeLinejoin="round" d="M7 4v2m4-2v2m4-2v2M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" />
         </svg>
       )
-    case 'location_story':
-      // Map pin — location story
-      return (
-        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      )
     case 'team_people':
-      // Silhouette group — team/people content
+      // People group — team content
       return (
         <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-5.447-3.724M17 20H7m10 0v-2c0-.768-.231-1.48-.626-2.076M7 20H2v-2a4 4 0 015.447-3.724M7 20v-2c0-.768.231-1.48.626-2.076m0 0A4 4 0 0112 12a4 4 0 014.374 3.924M12 12a4 4 0 100-8 4 4 0 000 8z" />
+        </svg>
+      )
+    case 'location_story':
+      // Compass — location/story content
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <circle cx="12" cy="12" r="9" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 9.5l-1.5 5-5 1.5 1.5-5 5-1.5z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2M12 19v2M3 12h2M19 12h2" />
+        </svg>
+      )
+    case 'outdoor_seating':
+      // Patio set — outdoor / terrace seating
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.45}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 8.5a7.5 5.5 0 0 1 15 0" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 8.5h15" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v16" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5.5 13v3.5h3" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5.5 16.5v2.5 M8.5 16.5v2.5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 13v3.5h-3" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 16.5v2.5 M15.5 16.5v2.5" />
         </svg>
       )
     case 'engagement':
@@ -70,11 +86,18 @@ export function ContentTypeIcon({ contentType, className = 'w-5 h-5' }: ContentT
         </svg>
       )
     case 'event_promotion':
-      // Calendar with dot — event/special occasion
+      // Calendar — event/special occasion
       return (
         <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 13v3m0 0h.01" />
+        </svg>
+      )
+    case 'seasonal':
+      // Sun — seasonal content
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2m0 14v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M3 12h2m14 0h2M4.22 19.78l1.42-1.42m12.72-12.72l1.42-1.42M12 7a5 5 0 100 10 5 5 0 000-10z" />
         </svg>
       )
     default:

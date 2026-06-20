@@ -86,7 +86,6 @@ export function runForbiddenGate(out: any, allowedSet: Set<string> = new Set()):
     'target_audience',
     'core_offerings',
     'content_focus',
-    'cta_style',
     'communication_goal',
   ]
 

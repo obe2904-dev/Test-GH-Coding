@@ -23,10 +23,91 @@
  */
 
 import type { WeekContext, StrategicBrief, ContextualAnalysis, Platform, CTAIntent } from '../../types/strategy-types.ts';
+import type { BusinessIntelligence } from '../../assemble-business-intelligence.ts';
 import { callAI } from '../../../ai-caption-generator/ai-provider.ts';
 import { silentSpellingCorrection } from '../infrastructure.ts';
 import { translateCondition } from '../platform-helpers.ts';
-import { buildForbiddenBlock } from '../forbidden-phrases.ts';
+import type { MenuTiming } from '../../assemble-business-intelligence.ts';
+
+/**
+ * Normalize ALL CAPS titles from database to proper case.
+ * Works on both fully-uppercase strings and ALL-CAPS words embedded in mixed-case strings.
+ * Example: "FAVORITTEN" → "Favoritten", "MOULES FRITES med friskbagt brød" → "Moules frites med friskbagt brød"
+ */
+function normalizeTitle(title: string): string {
+  // Fast path: if not all-caps string, check word by word for embedded ALL-CAPS segments
+  if (title !== title.toUpperCase()) {
+    // Normalize any ALL-CAPS word sequences (2+ consecutive ALL-CAPS words) within the string
+    return title.replace(/\b([A-ZÆØÅ]{2,}(?:\s+[A-ZÆØÅ&]{2,})*)\b/g, (match) => {
+      // Only convert if the matched segment is itself all-caps (ignore single abbreviations like "CTA")
+      if (match === match.toUpperCase() && match.length > 3) {
+        return match.charAt(0).toUpperCase() + match.slice(1).toLowerCase();
+      }
+      return match;
+    });
+  }
+  // Fully ALL-CAPS string → sentence case
+  return title.charAt(0).toUpperCase() + title.slice(1).toLowerCase();
+}
+
+/**
+ * Infer service period from slot timing using FACTUAL menu timing data
+ * Falls back to time-based heuristics if no menu data available
+ */
+function inferServicePeriod(
+  postSlot: any, 
+  canonicalTime: string,
+  menuTiming?: MenuTiming[]
+): string | undefined {
+  // Parse time (format: "HH:MM")
+  const [hourStr, minuteStr] = canonicalTime.split(':');
+  const hour = parseInt(hourStr, 10);
+  const minute = parseInt(minuteStr || '0', 10);
+  const totalMinutes = hour * 60 + minute;
+  
+  console.log(`[inferServicePeriod] time=${canonicalTime}, totalMinutes=${totalMinutes}`);
+  
+  // FACT-BASED: Use actual menu timing if available
+  if (menuTiming && menuTiming.length > 0) {
+    console.log(`[inferServicePeriod] Using ${menuTiming.length} menu timing facts`);
+    
+    // Find which menu period this time falls into
+    for (const menu of menuTiming) {
+      if (!menu.startTime || !menu.endTime) continue;
+      
+      const [startHourStr, startMinStr] = menu.startTime.split(':');
+      const startMinutes = parseInt(startHourStr) * 60 + parseInt(startMinStr || '0');
+      
+      const [endHourStr, endMinStr] = menu.endTime.split(':');
+      const endMinutes = parseInt(endHourStr) * 60 + parseInt(endMinStr || '0');
+      
+      // Check if time falls within this menu period
+      if (totalMinutes >= startMinutes && totalMinutes < endMinutes) {
+        console.log(`[inferServicePeriod] → ${menu.servicePeriodName} (matched ${menu.menuTitle}: ${menu.startTime}-${menu.endTime})`);
+        return menu.servicePeriodName;
+      }
+    }
+    console.log('[inferServicePeriod] No menu period matched, using fallback');
+  }
+  
+  // FALLBACK: Hardcoded heuristics if no menu data
+  if (hour >= 7 && hour < 11) {
+    console.log('[inferServicePeriod] → FROKOST (early morning fallback)');
+    return 'FROKOST';
+  } else if (hour >= 11 && hour < 15) {
+    console.log('[inferServicePeriod] → FROKOST (lunch fallback)');
+    return 'FROKOST';
+  } else if (hour >= 15 && hour < 18) {
+    console.log('[inferServicePeriod] → AFTEN (afternoon fallback)');
+    return 'AFTEN';
+  } else if (hour >= 18 && hour < 23) {
+    console.log('[inferServicePeriod] → AFTEN (evening fallback)');
+    return 'AFTEN';
+  }
+  
+  console.log('[inferServicePeriod] → undefined (no match)');
+  return undefined;
+}
 
 export async function generatePostDetail(
   postSlot: { id: number; type: string; angle_focus: string; suggested_day: string; platforms: Platform[]; goal_mode?: string; content_category?: string; slot_id?: string },
@@ -34,11 +115,16 @@ export async function generatePostDetail(
   strategicBrief: StrategicBrief,
   contextualAnalysis: ContextualAnalysis,
   contentPlan: Array<{ type: string; angle_focus: string }>,
-  usedMenuItems: string[] = [],
+  usedMenuItems: string[] = [],     // Deprecated: kept for backward compatibility, use usedMenuItemIds instead
   usedExperiencePosts: Array<{ title: string; angle_focus: string }> = [],
   resolvedCtaIntent: CTAIntent = 'engagement',
   usedRationaleThemes: string[] = [],
   ctaFlavorIndex: number = 0,
+  businessIntelligencePrompt?: string,
+  businessIntelligence?: BusinessIntelligence,
+  usedMenuCategories: string[] = [], // NEW: Track used categories to prevent duplicate categories
+  postIndex: number = 0,            // Position in the week's post sequence — drives format rotation
+  usedMenuItemIds: Set<string> = new Set(), // NEW: UUID-based deduplication (preferred over name matching)
 ): Promise<any> {
 
   // ── Template routing: prefer content_category, fall back to legacy type ──
@@ -46,9 +132,10 @@ export async function generatePostDetail(
   const goalMode = postSlot.goal_mode as string | undefined;
 
   // Map content_category → whether this post can use menu items
-  const isMenuPost = contentCategory === 'product_menu' || contentCategory === 'craving_visual'
+  // NOTE: craving_visual = venue benefits posts — concrete facilities/features (NO specific menu items)
+  const isMenuPost = contentCategory === 'product_menu'
     ? true
-    : contentCategory === 'behind_scenes' || contentCategory === 'team_people'
+    : contentCategory === 'behind_scenes' || contentCategory === 'team_people' || contentCategory === 'craving_visual'
       ? false
       : postSlot.type === 'menu_item'; // legacy fallback
 
@@ -57,15 +144,23 @@ export async function generatePostDetail(
   const hasFacebook = postSlot.platforms.includes('facebook' as any);
   const hasInstagram = postSlot.platforms.includes('instagram' as any);
 
+  // BOOKING MODEL — the primary CTA signal. Phase 1 decides cta_mode per angle based
+  // on booking_model + week context. Phase 2b executes that decision.
+  // cta_mode overrides the old day-of-week heuristics for drive_footfall posts.
+  const ctaModeFromAngle = (postSlot as any).cta_mode as 'walk_in' | 'booking' | 'hybrid' | undefined;
+  const bm = (context as any).booking_model;
+  // Derive fallback cta_mode from booking_model when Phase 1 didn't set it
+  const ctaMode: 'walk_in' | 'booking' | 'hybrid' = ctaModeFromAngle
+    ?? (bm?.reservation_required ? 'booking'
+        : (bm?.accepts_walk_ins && bookingLink) ? 'hybrid'
+        : bm?.accepts_walk_ins ? 'walk_in'
+        : 'booking');
+
   // CTA strength: modulated by economic timing
-  // salary_week / december_high → hard CTA with link
-  // budget_conscious → soften, no pricing pressure
-  // normal_spend / july_vacation → standard hard CTA
   const economicPattern = (context.economic as any)?.pattern || 'normal_spend';
   const isBudgetWeek = economicPattern === 'budget_conscious';
 
-  // Day-of-week CTA signals:
-  // - Same-day urgency: Fri/Sat post at 14:00+ → tables fill up tonight
+  // Day-of-week CTA signals (retained for urgency modulation, not for cta_mode selection):
   // - Advance booking: Wed/Thu post → book your Fri/Sat table now
   const postDay: string = (postSlot.suggested_day || '').toLowerCase();
   const postHour: number = (() => {
@@ -73,65 +168,90 @@ export async function generatePostDetail(
     return t.length >= 1 ? parseInt(t[0], 10) : 0;
   })();
   const isWeekendDinnerPost = (postDay === 'friday' || postDay === 'saturday') && postHour >= 14;
-  const isAdvanceBookingPost = (postDay === 'wednesday' || postDay === 'thursday') &&
-    goalMode === 'drive_footfall';
+  // Advance booking fires on Wed/Thu (standard), and also on Mon/Tue when the week
+  // strategy centres on a weekend occasion (brunch, family event, etc.) — those
+  // posts need a 4–5 day lead so families can plan ahead.
+  const weekSummaryLower = (strategicBrief.week_summary || '').toLowerCase();
+  const isWeekendOccasionStrategy = [
+    'brunch', 'familiebrunch', 'familie', 'weekend', 'lørdag', 'søndag',
+  ].some(kw => weekSummaryLower.includes(kw));
+  // Spontaneous-visit strategies (walk-in, drop-by, hverdagsfrokost) should NOT get
+  // advance-booking CTAs — "book your weekend table" conflicts with the spontaneous framing.
+  const isSpontaneousStrategy = [
+    'spontan', 'walk-in', 'drop-by', 'impuls',
+  ].some(kw => weekSummaryLower.includes(kw));
+  const isAdvanceBookingPost = (
+    (postDay === 'wednesday' || postDay === 'thursday') ||
+    ((postDay === 'monday' || postDay === 'tuesday') && isWeekendOccasionStrategy)
+  ) && goalMode === 'drive_footfall' && !isSpontaneousStrategy;
 
   const buildFootfallCta = (): string => {
-    // Budget-conscious weeks: soften — light invitation, no sales pressure
+    // Budget-conscious weeks: always soften regardless of cta_mode
     if (isBudgetWeek) {
-      if (!bookingLink) return 'MEDIUM CTA: Inviter blidt folk til at komme forbi — nævn tidspunkt, ingen salgspres.';
+      if (!bookingLink || ctaMode === 'walk_in') return 'MEDIUM CTA: Inviter blidt folk til at komme forbi — nævn tidspunkt, ingen salgspres.';
       if (hasFacebook) return `MEDIUM CTA: Nævn tidspunkt naturligt og booking-link: ${bookingLink} — blød, inviterende tone.`;
       return 'MEDIUM CTA: Sig "link i bio" naturligt — inviterende tone, ingen salgspres.';
     }
 
-    // Same-day weekend dinner urgency
+    // ── WALK_IN: low-threshold invitation, no booking push ──
+    if (ctaMode === 'walk_in') {
+      // Add same-day urgency on Fri/Sat evenings even for walk-in businesses
+      if (isWeekendDinnerPost) {
+        const dayDk = postDay === 'friday' ? 'fredag' : 'lørdag';
+        return `MEDIUM-HÅRD CTA (${dayDk} aften — spontan invitation): Opfordre til at komme forbi nu eller om lidt — nævn åbningstid og at de er velkomne uden reservation. Ingen booking-link push.`;
+      }
+      return 'WALK-IN CTA: Lav-tærskel invitation — "vi har plads", "kom forbi i dag", nævn åbningstid. INGEN booking-link eller reservationsopfordring. Gæsten beslutte spontant.';
+    }
+
+    // ── BOOKING: hard booking push ──
+    if (ctaMode === 'booking') {
+      // Same-day weekend dinner: highest urgency
+      if (isWeekendDinnerPost) {
+        const dayDk = postDay === 'friday' ? 'fredag' : 'lørdag';
+        if (!bookingLink) return `HÅRD CTA (${dayDk} aften): Bordene fylder op — ring og reservér eller kom tidligt. Nævn åbningstid.`;
+        if (hasFacebook && hasInstagram) {
+          return `HÅRD CTA (${dayDk} aften — borde fylder op):\n  Facebook: "Book bord nu" + link: ${bookingLink}\n  Instagram: "Book via link i bio" — skriv IKKE URL'en.`;
+        }
+        return `HÅRD CTA (${dayDk} aften): ${hasFacebook ? `"Book bord nu" + link: ${bookingLink}` : '"Book via link i bio" — nævn at bordene fylder op.'}`;
+      }
+      // Advance booking (Wed/Thu or occasion-driven)
+      if (isAdvanceBookingPost) {
+        if (!bookingLink) return 'HÅRD CTA (forhåndsbook): Opfordre til at reservere bord til weekenden — nævn at det er en god idé at sikre sig plads i tide.';
+        if (hasFacebook && hasInstagram) {
+          return `HÅRD CTA (forhåndsbook weekend):\n  Facebook: "Sikr din plads" + link: ${bookingLink}\n  Instagram: "Book via link i bio" — skriv IKKE URL'en.`;
+        }
+        return `HÅRD CTA (forhåndsbook): ${hasFacebook ? `"Sikr din plads" + link: ${bookingLink}` : '"Book via link i bio" — opfordre til at reservere til weekenden.'}`;
+      }
+      // Standard booking CTA
+      if (!bookingLink) return 'HÅRD CTA: Nævn tidspunkt og opfordre til at reservere bord.';
+      if (hasFacebook && hasInstagram) {
+        return `HÅRD CTA:\n  Facebook: booking-URL direkte: ${bookingLink}\n  Instagram: "link i bio" — skriv IKKE URL'en.`;
+      }
+      return `HÅRD CTA: ${hasFacebook ? `Inkludér booking-URL: ${bookingLink}` : '"Book via link i bio". Nævn tidspunkt og opfordring til at booke.'}`;
+    }
+
+    // ── HYBRID: both options, let guest choose ──
+    // Same-day weekend → lean toward booking urgency
     if (isWeekendDinnerPost) {
       const dayDk = postDay === 'friday' ? 'fredag' : 'lørdag';
-      if (!bookingLink) {
-        return `HÅRD CTA påkrævet (${dayDk} aften): Bordene fylder op — opfordre til at ringe og reservere eller komme tidligt. Nævn åbningstid.`;
-      }
+      if (!bookingLink) return `HYBRID CTA (${dayDk} aften): Kom forbi eller ring og reservér — nævn åbningstid og at walk-in er muligt men pladser er begrænsede.`;
       if (hasFacebook && hasInstagram) {
-        return `HÅRD CTA påkrævet (${dayDk} aften — borde fylder op):\n` +
-          `  Facebook: "Book bord nu" + link direkte: ${bookingLink}\n` +
-          `  Instagram: "Book via link i bio" — skriv IKKE URL'en.`;
+        return `HYBRID CTA (${dayDk} aften):\n  Facebook: "Book bord eller kom forbi" + link: ${bookingLink}\n  Instagram: "Book via link i bio eller kom direkte" — skriv IKKE URL'en.`;
       }
-      if (hasFacebook) {
-        return `HÅRD CTA påkrævet (${dayDk} aften — borde fylder op): "Book bord nu" + link: ${bookingLink}`;
-      }
-      return `HÅRD CTA påkrævet (${dayDk} aften): "Book via link i bio" — nævn at bordene fylder op.`;
+      return `HYBRID CTA (${dayDk} aften): ${hasFacebook ? `"Book bord eller kom forbi" + link: ${bookingLink}` : '"Book via link i bio eller kom forbi direkte."'}`;
     }
-
-    // Advance booking for upcoming weekend (Wed/Thu posts)
-    if (isAdvanceBookingPost) {
-      if (!bookingLink) {
-        return 'HÅRD CTA påkrævet (forhåndsbook weekend): Opfordre til at reservere bord til fredag eller lørdag aften — nævn at det er en god idé at sikre sig plads i tide.';
-      }
+    // Advance booking window → lean toward planning
+    if (isAdvanceBookingPost && bookingLink) {
       if (hasFacebook && hasInstagram) {
-        return `HÅRD CTA påkrævet (forhåndsbook weekend):\n` +
-          `  Facebook: "Sikr din plads til weekenden" + link: ${bookingLink}\n` +
-          `  Instagram: "Book via link i bio" — skriv IKKE URL'en.`;
+        return `HYBRID CTA (planlæg weekenden):\n  Facebook: "Book bord eller kom forbi — link: ${bookingLink}"\n  Instagram: "Book via link i bio eller mød os direkte."`;
       }
-      if (hasFacebook) {
-        return `HÅRD CTA påkrævet (forhåndsbook weekend): "Sikr din plads til weekenden" + link: ${bookingLink}`;
-      }
-      return `HÅRD CTA påkrævet (forhåndsbook weekend): "Book via link i bio" — opfordre til at reservere til fredag/lørdag.`;
+      return `HYBRID CTA: Invitér til at booke (${bookingLink}) eller bare komme forbi — begge muligheder er velkomne.`;
     }
-
-    // Standard drive_footfall CTA
-    if (!bookingLink) {
-      return 'HÅRD CTA påkrævet: Nævn tidspunkt, book-mulighed eller telefonnummer i rationale.';
+    // Default hybrid: walk-in invitation + mention booking exists
+    if (bookingLink) {
+      return `HYBRID CTA: Lav-tærskel invitation — "kom forbi" er det primære budskab. Nævn kort at booking også er muligt${hasFacebook ? ` (link: ${bookingLink})` : ' (link i bio)'}. Walk-in er altid velkomment.`;
     }
-    if (hasFacebook && hasInstagram) {
-      // Both platforms — give per-platform instructions since captions will differ
-      return `HÅRD CTA påkrævet:\n` +
-        `  Facebook: Inkludér booking-URL direkte i rationale: ${bookingLink}\n` +
-        `  Instagram: Sig "link i bio" — skriv IKKE URL'en i Instagram-caption.`;
-    }
-    if (hasFacebook) {
-      return `HÅRD CTA påkrævet: Inkludér booking-URL direkte: ${bookingLink}`;
-    }
-    // Instagram only — no clickable links allowed in captions
-    return 'HÅRD CTA påkrævet: Sig "link i bio" (Instagram tillader ikke klikbare links i opslag). Nævn tidspunkt og opfordring til at booke.';
+    return 'WALK-IN CTA: Kom forbi — vi har plads. Nævn åbningstid.';
   };
 
   // Rotate brand-builder engagement flavors week over week so the same call-to-action
@@ -201,6 +321,33 @@ export async function generatePostDetail(
   const hasDinner = servicePeriods.includes('dinner');
   const hasLunch  = servicePeriods.includes('lunch') || servicePeriods.includes('brunch');
 
+  // FACT-BASED TIMING: Use actual menu availability windows from menu_results_v2
+  // instead of hardcoded assumptions
+  const menuTiming = businessIntelligence?.menuIntelligence?.menuTiming || [];
+  
+  // Extract actual service period times from menu data
+  // NOTE: service_period_name uses lowercase: 'dinner', 'lunch', 'brunch' (not 'AFTEN', 'FROKOST')
+  const aftenMenu = menuTiming.find(m => 
+    m.menuTitle === 'AFTEN' || 
+    m.servicePeriodName === 'dinner' ||
+    m.menuTitle === 'EVENING DINNER'
+  );
+  const frokostMenu = menuTiming.find(m => 
+    m.menuTitle === 'FROKOST' || 
+    m.servicePeriodName === 'lunch'
+  );
+  const brunchMenu = menuTiming.find(m => 
+    m.menuTitle?.includes('BRUNCH') || 
+    m.menuTitle?.includes('Brunch') ||
+    m.servicePeriodName === 'brunch'
+  );
+  
+  console.log('[Phase 2b] Menu timing facts:', {
+    aftenAvailable: aftenMenu ? `${aftenMenu.startTime}-${aftenMenu.endTime}` : 'none',
+    frokostAvailable: frokostMenu ? `${frokostMenu.startTime}-${frokostMenu.endTime}` : 'none',
+    brunchAvailable: brunchMenu ? `${brunchMenu.startTime}-${brunchMenu.endTime}` : 'none'
+  });
+
   // Slot D has timing_window='any' so it has no explicit time in timing_window.
   // Make it day-of-week aware: weekend (Sat/Sun) → brunch window 10:00;
   // weekday → lunch decision time 12:00.
@@ -210,15 +357,73 @@ export async function generatePostDetail(
   })();
   const slotDTime = (suggestedDow === 0 || suggestedDow === 6) ? '10:00' : '12:00';
 
-  const SLOT_CANONICAL_TIMES: Record<string, string> = hasDinner || servicePeriods.length === 0
-    ? { A: '14:00', B: '11:00', C: '09:00', D: slotDTime }  // dinner-focused or unknown
-    : hasLunch
-    ? { A: '10:30', B: '09:00', C: '08:00', D: '10:00' }    // lunch/brunch only
-    : { A: '09:00', B: '08:00', C: '07:30', D: '08:30' };   // breakfast only
+  // FACT-BASED DECISION-MAKING WINDOWS:
+  // Menu timing tells us WHAT to post about (which menu items are available)
+  // Marketing strategy dictates WHEN to post (customer decision-making windows)
+  // 
+  // Key insight: Menu service time ≠ Optimal posting time
+  // - AFTEN menu (17:30-21:30) → Post at 14:00-16:00 (afternoon planning/shopping hours)
+  // - FROKOST menu (09:00-17:30) → Post at 09:00-11:00 (morning decision time)
+  // - BRUNCH menu (09:00-14:00) → Post at 09:00-10:00 (early morning or previous evening)
+  //
+  // Posting windows optimized for:
+  // - Book table: Post 3-5 hours before service (decision-making time)
+  // - Spontaneous walk-in: Post 1-2 hours before service
+  // - Planned visits: Post during shopping/commute hours (12:00-16:00 for dinner)
+  const SLOT_CANONICAL_TIMES: Record<string, string> = (() => {
+    // If we have actual AFTEN/dinner menu, post during DECISION-MAKING hours (afternoon)
+    // NOT during service hours — people plan dinner during lunch/shopping (14:00-16:00)
+    // EXCEPTION: when the strategy is explicitly about lunch/brunch/spontaneous visits,
+    // use morning decision windows even if the business also has a dinner menu.
+    const isLunchFocusedStrategy = isSpontaneousStrategy || [
+      'frokost', 'brunch', 'formiddag', 'morgen',
+    ].some(kw => weekSummaryLower.includes(kw));
+    if (aftenMenu && !isLunchFocusedStrategy) {
+      console.log('[Phase 2b] AFTEN menu detected → Using decision-making windows (afternoon for dinner planning)');
+      return {
+        A: '16:00',        // Slot A: Afternoon decision time (pre-dinner planning/booking)
+        B: '11:00',        // Slot B: Late morning (lunch planning)
+        C: '09:00',        // Slot C: Morning (brunch/early lunch)
+        D: slotDTime       // Slot D: Day-aware
+      };
+    }
+    if (aftenMenu && isLunchFocusedStrategy) {
+      console.log('[Phase 2b] AFTEN menu detected but lunch/spontaneous strategy → Using morning decision windows');
+      return {
+        A: '11:00',        // Slot A: Late morning (lunch decision time)
+        B: '09:00',        // Slot B: Early morning
+        C: '08:30',        // Slot C: Commute hours
+        D: slotDTime       // Slot D: Day-aware
+      };
+    }
+    
+    // If FROKOST/lunch menu available, post during morning decision hours
+    if (frokostMenu) {
+      console.log('[Phase 2b] FROKOST menu detected → Morning decision windows');
+      return {
+        A: '11:00',        // Slot A: Late morning (lunch decision time)
+        B: '09:00',        // Slot B: Early morning
+        C: '08:30',        // Slot C: Commute hours
+        D: slotDTime       // Slot D: Day-aware
+      };
+    }
+    
+    // Fallback to original logic if no menu timing data
+    return hasDinner || servicePeriods.length === 0
+      ? { A: '14:00', B: '11:00', C: '09:00', D: slotDTime }  // dinner-focused or unknown
+      : hasLunch
+      ? { A: '10:30', B: '09:00', C: '08:00', D: '10:00' }    // lunch/brunch only
+      : { A: '09:00', B: '08:00', C: '07:30', D: '08:30' };   // breakfast only
+  })();
+  
+  console.log('[Phase 2b] SLOT_CANONICAL_TIMES:', SLOT_CANONICAL_TIMES);
   // Prefer the time explicitly encoded in timing_window (e.g. 'Thu-Fri 14:00' → '14:00').
   // This makes slot timing_window the single source of truth, so service-period logic
   // only applies for slots with no explicit time (e.g. Slot D = 'any').
+  // EXCEPTION: walk_in / spontaneous strategies — timing is decision-window driven (morning),
+  // so we ignore the Phase 1 time and let SLOT_CANONICAL_TIMES control it.
   const timingWindowTime = (() => {
+    if (ctaMode === 'walk_in') return null; // spontaneous week → always use SLOT_CANONICAL_TIMES
     const tw = (postSlot as any).timing_window as string | undefined;
     if (!tw) return null;
     const match = tw.match(/(\d{1,2}:\d{2})/);
@@ -252,6 +457,22 @@ export async function generatePostDetail(
   const angle = strategicBrief.angles.find(a => a.focus === postSlot.angle_focus);
   const angleSummary = angle ? `${angle.focus}: ${angle.reasoning}` : postSlot.angle_focus;
 
+  // FORMAT ROTATION — cycles across the 4 visual presentation formats so back-to-back posts
+  // never land on the same format. Deterministic: driven by postIndex so same plan = same formats.
+  // Applied as a single line near the top of each prompt where it's seen before any other context.
+  const FORMAT_LABELS: string[] = [
+    'Sensorisk nærbillede — damp, tekstur, farve, flydende/smeltet element i centrum. Skab trang.',
+    'Menneskefokus — en person (gæst, køkkenpersonale, ejer) i aktion i stedet. Skab identitet.',
+    'Atmosfære — vidvinkel af lokalet og miljøet. Vis oplevelsen af at være der. Brug ALDRIG "terrassen" — brug "udeserveringen" kun hvis det er egnet vejr, ellers hold dig til lokalet.',
+    'Informationsvinkel — klar, ren ramme med én tydelig besked: hvad, hvornår, pris/åbningstid.',
+  ];
+  // For menu posts: cycles between Sensory and Atmosphere (more visually varied than product every time)
+  // For experience posts: cycles all 4 formats
+  const formatIndex = postIndex % FORMAT_LABELS.length;
+  const menuFormatIndex = postIndex % 2; // alternates Sensory ↔ Atmosphere for menu posts
+  const menuFormatLabel = [FORMAT_LABELS[0], FORMAT_LABELS[2]][menuFormatIndex];
+  const experienceFormatLabel = FORMAT_LABELS[formatIndex];
+
   const dayWeather = (context.weather as any).days?.find((d: any) => d.date === postSlot.suggested_day);
   const weatherLine = dayWeather
     ? `${dayWeather.temp_min}-${dayWeather.temp_max}°C, ${translateCondition(dayWeather.condition)}`
@@ -265,59 +486,75 @@ export async function generatePostDetail(
   const voiceConstraint = (context.brand_voice as any)?.voice_constraints
     || (((context.brand_voice as any)?.never_say || []).slice(0, 3).join(', ') || '');
 
+  // Tone-of-voice style signals — used by titleStyleHint in both menu and experience post branches
+  const _toneKeywordsLower = toneKeywords.toLowerCase();
+  const _humorLevel = ((context.brand_voice as any)?.tone_model?.humor_level || (context.brand_voice as any)?.humor_level || '').toLowerCase();
+  const isPlayful = /playful|legesyg|humorist|witty/.test(_toneKeywordsLower) || /playful|high/.test(_humorLevel);
+  const isSophisticated = /sofistik|elegant|premium|refined/.test(_toneKeywordsLower);
+  const isModern = /modern|kontemporær|frisk/.test(_toneKeywordsLower);
+  const isWarm = /varm|indbydende|nærværende|hyggelig/.test(_toneKeywordsLower);
+  const isPoetic = /poetisk|drømmende|lyrisk/.test(_toneKeywordsLower);
+  const titleStyleHint = (() => {
+    const parts: string[] = [];
+    if (isPlayful) parts.push('gerne et konkret øjeblik med energi eller et uventet detalje');
+    if (isSophisticated && !isPoetic) parts.push('præcist og konkret — ingen generisk stemningsskrivning');
+    if (isModern) parts.push('direkte, nutidigt sprog — ingen svulstig poesi');
+    if (isWarm && !isPoetic) parts.push('nærværende tone med et konkret menneskeligt element');
+    if (parts.length === 0) parts.push('konkret og direkte — fortæl hvad der sker, ikke hvad det føles som');
+    return parts.join('; ');
+  })();
+
   const businessCharacterLine = (context as any).business_character
     ? `STEDSTYPE: ${(context as any).business_character}`
     : '';
-  // v5: voice_rationale — "Hvorfor denne anbefaling?" — negative register constraint.
-  // Tells the AI exactly which register is wrong for this business and why.
-  // Only injected for atmosphere/behind_scenes/team_people posts.
+  // v5: voice_rationale — negative register constraint for experience posts.
   const voiceRationaleLine = (context.brand_voice as any)?.voice_rationale
-    ? `🚫 REGISTERVAGT — læs inden du skriver: ${(context.brand_voice as any).voice_rationale}`
+    ? `🚫 REGISTERVAGT: ${(context.brand_voice as any).voice_rationale}`
     : '';
-  // v5: recognizable_interior_identity — verified factual venue description from photo analysis.
-  // Replaces training-data interpolation with real spatial facts for atmosphere posts.
+  // v5: recognizable_interior_identity — verified factual venue description.
   const venueIdentityLine = (context.brand_voice as any)?.recognizable_interior_identity
-    ? `KENDTE STEDSDETALJER (faktuelle — brug disse; opfind IKKE andre): ${(context.brand_voice as any).recognizable_interior_identity}`
-    : '';
-  // V2: brand_essence_elaboration — gives AI hybrid/programme-aware identity context at post level
-  const brandEssenceElaborationLine = (context.brand_voice as any)?.brand_essence_elaboration
-    ? `IDENTITETSUDDYBNING: ${(context.brand_voice as any).brand_essence_elaboration}`
-    : '';
-  // FIX: was (context as any).target_audience — that field doesn't exist on WeekContext;
-  // target_audience only lives inside brand_voice (fetched from business_brand_profile)
-  const targetAudienceRaw = (context.brand_voice as any)?.target_audience;
-  const targetAudienceLine = targetAudienceRaw
-    ? `MÅLGRUPPE: ${typeof targetAudienceRaw === 'string' ? targetAudienceRaw : (targetAudienceRaw?.primary_demographic || JSON.stringify(targetAudienceRaw))}`
+    ? `STEDSDETALJER (faktuelle): ${(context.brand_voice as any).recognizable_interior_identity}`
     : '';
 
-  // Content strategy signals — injected per goal_mode so AI uses business-specific anchors
+  // CONSOLIDATED brand block — collapses 6 separate sub-blocks into 2 lines.
+  // Keeps AI attention on the task; avoids context dilution from over-specified brand sections.
+  const brandEssenceRaw = (context.brand_voice as any)?.brand_essence_elaboration || '';
+  const targetAudienceRaw = (context.brand_voice as any)?.target_audience;
+  const targetAudienceStr = targetAudienceRaw
+    ? (typeof targetAudienceRaw === 'string' ? targetAudienceRaw : (targetAudienceRaw?.primary_demographic || ''))
+    : '';
+  // Pick the single most relevant content-strategy signal for this goal_mode (was 4-item list)
   const cs = (context.brand_voice as any)?.content_strategy;
-  const contentStrategyHint = (() => {
+  const contentStrategyAnchor = (() => {
     if (!cs || !goalMode) return '';
-    if (goalMode === 'drive_footfall' && cs.footfall_signals?.length > 0) {
-      return `FODFÆSTE-SIGNALER (brug mindst ét i rationale — disse er baseret på din Post Strategi):\n${(cs.footfall_signals as string[]).slice(0, 4).map((s) => `- ${s}`).join('\n')}`;
-    }
-    if (goalMode === 'build_brand' && cs.brand_anchors?.length > 0) {
-      return `BRAND-ANKRE (væv mindst ét ind i rationale — disse er baseret på din Post Strategi):\n${(cs.brand_anchors as string[]).slice(0, 4).map((s) => `- ${s}`).join('\n')}`;
-    }
-    if (goalMode === 'retain_loyalty' && cs.loyalty_hooks?.length > 0) {
-      return `LOYALITETSHOOKS (brug mindst ét i rationale — disse er baseret på din Post Strategi):\n${(cs.loyalty_hooks as string[]).slice(0, 4).map((s) => `- ${s}`).join('\n')}`;
-    }
+    if (goalMode === 'drive_footfall' && cs.footfall_signals?.length > 0) return (cs.footfall_signals as string[])[0];
+    if (goalMode === 'build_brand' && cs.brand_anchors?.length > 0) return (cs.brand_anchors as string[])[0];
+    if (goalMode === 'retain_loyalty' && cs.loyalty_hooks?.length > 0) return (cs.loyalty_hooks as string[])[0];
     return '';
   })();
+  // Line 1: who they are + who they serve
+  const brandIdentityLine = [
+    businessCharacterLine,
+    brandEssenceRaw ? `Identitet: ${brandEssenceRaw}` : '',
+    targetAudienceStr ? `Målgruppe: ${targetAudienceStr}` : '',
+  ].filter(Boolean).join(' | ');
+  // Line 2: how to write
+  const brandToneLine = [
+    `Tone: ${toneKeywords}`,
+    voiceConstraint ? `Undgå: ${voiceConstraint}` : '',
+    contentStrategyAnchor ? `Nøglesignal: ${contentStrategyAnchor}` : '',
+  ].filter(Boolean).join(' | ');
 
-  // Writing patterns — brand's actual vocabulary, opening/closing patterns and communication goal
-  const typicalOpenings: string[] = ((context.brand_voice as any)?.typical_openings || []).slice(0, 2);
-  const typicalClosings: string[] = ((context.brand_voice as any)?.typical_closings || []).slice(0, 2);
-  const signaturePhrases: string[] = ((context.brand_voice as any)?.signature_phrases || []).slice(0, 4);
+  // Writing patterns — condensed to 1 opening + 2 signature phrases max
+  const typicalOpenings: string[] = ((context.brand_voice as any)?.typical_openings || []).slice(0, 1);
+  const signaturePhrases: string[] = ((context.brand_voice as any)?.signature_phrases || []).slice(0, 2);
   const communicationGoal: string | null = (context.brand_voice as any)?.communication_goal || null;
-  const writingPatternBlock = (typicalOpenings.length > 0 || typicalClosings.length > 0 || signaturePhrases.length > 0 || communicationGoal)
+  const writingPatternBlock = (typicalOpenings.length > 0 || signaturePhrases.length > 0 || communicationGoal)
     ? [
-        'SKRIVEMØNSTER (brug det der passer — naturligt og ægte, ikke mekanisk):',
-        communicationGoal ? `• Kommunikationsmål: ${communicationGoal}` : null,
-        typicalOpenings.length > 0 ? `• Typiske åbninger: ${typicalOpenings.map((o: string) => `"${o}"`).join(' / ')}` : null,
-        typicalClosings.length > 0 ? `• Typiske afslutninger: ${typicalClosings.map((c: string) => `"${c}"`).join(' / ')}` : null,
-        signaturePhrases.length > 0 ? `• Signaturfraser (kun i caption-tekst, IKKE i titel): ${signaturePhrases.map((p: string) => `"${p}"`).join(', ')}` : null,
+        'SKRIVEMØNSTER:',
+        communicationGoal ? `• ${communicationGoal}` : null,
+        typicalOpenings.length > 0 ? `• Åbning: ${typicalOpenings.map((o: string) => `"${o}"`).join(' / ')}` : null,
+        signaturePhrases.length > 0 ? `• Fraser: ${signaturePhrases.map((p: string) => `"${p}"`).join(', ')}` : null,
       ].filter(Boolean).join('\n')
     : '';
 
@@ -336,7 +573,15 @@ export async function generatePostDetail(
     const dayName = day ? new Date(day + 'T12:00:00').toLocaleDateString('da-DK', { weekday: 'long' }) : '';
     const capitalDay = dayName.charAt(0).toUpperCase() + dayName.slice(1); // e.g. "Mandag"
     if (slotId === 'A') {
-      // Thu/Fri footfall driver — but use actual day, not hardcoded 'fredag'.
+      // Thu/Fri footfall driver — framing depends on cta_mode from Phase 1.
+      const isWeekendForwardSlot = isWeekendOccasionStrategy &&
+        (postDay === 'thursday' || postDay === 'friday');
+      if (isWeekendForwardSlot && ctaMode !== 'walk_in') {
+        return `${weekArgPrefix}POST-ROLLE I UGENS ARC: WEEKENDTEASER — ${capitalDay} er det ideelle tidspunkt at så beslutningen om weekendbesøget. Denne post skal gøre det let at vælge netop det ugens argument lover: sæt scenen, vis hvad der venter i weekenden, og giv en konkret CTA mod weekenden (f.eks. "kom forbi lørdag" eller "book til weekenden"). IKKE en standalone ${capitalDay.toLowerCase()}spost — en bro frem mod weekendens oplevelse.`;
+      }
+      if (ctaMode === 'walk_in') {
+        return `${weekArgPrefix}POST-ROLLE I UGENS ARC: SPONTANDRIVER — ${capitalDay} er dagen hvor folk beslutter sig i øjeblikket. Denne post skal gøre det let at vælge stedet NU — vis hvad der venter dem i dag, giv en konkret men lav-tærskel invitation ("kom forbi til frokost", "vi er åbne fra kl. X"). INGEN forhåndsbook-CTA — dette er en spontan walk-in beslutning.`;
+      }
       return `${weekArgPrefix}POST-ROLLE I UGENS ARC: KONVERTERINGSDRIVER — ${capitalDay} trækker folk ud som en belønning efter en hård arbejdsuge. Denne post omsætter ugens argument til et konkret besøgstilbud. Kobl rettens appel direkte til denne energi og til ugens argument ovenfor.`;
     }
     if (slotId === 'B') {
@@ -370,32 +615,18 @@ export async function generatePostDetail(
     ? `FORBUDT RATIONALE-ÅBNING (disse vinkler er allerede brugt af tidligere posts denne uge — vælg en ANDEN):\n${usedRationaleThemes.map(t => `- "${t}"`).join('\n')}`
     : '';
 
-  // ── Phase 0 summary grouped by type ──
-  // Weather factors are omitted here — the specific day's weather is already shown
-  // in KONTEKST FOR DENNE DAG → Vejr above. Week-level weather averages would dilute it.
+  // ── Phase 0 summary: COMPRESSED — reference only, no full details ──
+  // Phase 0 analysis already fed into Phase 1 strategic brief.
+  // Phase 2b needs only the compact week synthesis, not factor-by-factor details.
   const phase0Factors = contextualAnalysis.key_factors || [];
-  const seasonFactors = phase0Factors.filter((f: any) => f.type === 'season');
-  const eventFactors = phase0Factors.filter((f: any) => f.type === 'special_day');
-  const economicFactors = phase0Factors.filter((f: any) => f.type === 'economic');
-  const otherFactors = phase0Factors.filter((f: any) => !['weather', 'season', 'special_day', 'economic'].includes(f.type));
-
-  let phase0Summary = 'KONTEKST FRA PHASE 0:\n';
-  if (seasonFactors.length > 0) {
-    phase0Summary += '\nSÆSON:\n';
-    phase0Summary += seasonFactors.map((f: any) => `- ${f.name}: ${f.behavioral_impact} (${f.strategic_weight} vægt)`).join('\n');
-  }
-  if (eventFactors.length > 0) {
-    phase0Summary += '\n\nEVENTS:\n';
-    phase0Summary += eventFactors.map((f: any) => `- ${f.name}: ${f.behavioral_impact} (${f.strategic_weight} vægt)`).join('\n');
-  }
-  if (economicFactors.length > 0) {
-    phase0Summary += '\n\nØKONOMISK TIMING:\n';
-    phase0Summary += economicFactors.map((f: any) => `- ${f.name}: ${f.behavioral_impact} (${f.strategic_weight} vægt)`).join('\n');
-  }
-  if (otherFactors.length > 0) {
-    phase0Summary += '\n\nØVRIGT:\n';
-    phase0Summary += otherFactors.map((f: any) => `- ${f.name}: ${f.behavioral_impact} (${f.strategic_weight} vægt)`).join('\n');
-  }
+  const hasSeason = phase0Factors.some((f: any) => f.type === 'season');
+  const hasEvents = phase0Factors.some((f: any) => f.type === 'special_day');
+  const hasEconomic = phase0Factors.some((f: any) => f.type === 'economic');
+  
+  // Condensed reference (saves ~350-500 tokens per post)
+  const phase0Summary = phase0Factors.length > 0
+    ? `Uge-kontekst: ${phase0Factors.map((f: any) => f.name).join(', ')}${hasSeason || hasEvents || hasEconomic ? '' : ' (normal uge)'}` 
+    : 'Normal uge (ingen afvigende faktorer)'
 
   const allAnglesSummary = strategicBrief.angles
     .map(a => `- ${a.focus} (${Math.round(a.weight * 100)}%): ${a.reasoning}`)
@@ -404,10 +635,7 @@ export async function generatePostDetail(
   const totalMenu = contentPlan.filter(p => p.type === 'menu_item').length;
   const totalExperience = contentPlan.length - totalMenu;
   const menuPct = Math.round((totalMenu / contentPlan.length) * 100);
-  const contentDistribution = `CONTENT MIX DENNE UGE: ${totalMenu} menu_item posts + ${totalExperience} atmosphere/behind_scenes posts\nHvorfor: ${angle?.focus || 'Hovedvinklen'} har ${Math.round((angle?.weight || 0) * 100)}% vægt, og vi balancerer produkt-fokus med oplevelser.`;
-
-  // Shared prompt blocks — identical in both menu and experience templates
-  const sharedForbiddenBlock = buildForbiddenBlock('post');
+  const contentDistribution = `CONTENT MIX DENNE UGE: ${totalMenu} menu_item posts + ${totalExperience} venue_benefits/behind_scenes posts\nHvorfor: ${angle?.focus || 'Hovedvinklen'} har ${Math.round((angle?.weight || 0) * 100)}% vægt, og vi balancerer produkt-fokus med stedsfordele.`;
 
   // If the post falls on a public holiday, inject mandatory holiday framing into the prompt.
   // This ensures Easter Sunday, Good Friday etc. get correct framing regardless of what
@@ -448,7 +676,7 @@ export async function generatePostDetail(
   console.log(`[Phase 2b] Post ${postSlot.id} using template: ${templateLabel}`);
 
   if (isMenuPost) {
-    type DishEntry = { name: string; description?: string; category?: string; isSignature?: boolean };
+    type DishEntry = { id?: string; name: string; description?: string; category?: string; isSignature?: boolean };
     const fallbackDishes: DishEntry[] = [
       { name: 'Dagens ret' }, { name: 'Husets special' }, { name: 'Vores populære ret' }
     ];
@@ -500,19 +728,127 @@ export async function generatePostDetail(
     const preferencePool: DishEntry[] = allWithDesc.length >= 2 ? allWithDesc : allItems;
 
     // STEP 2 — Remove already-used items from the preference pool.
-    // Use substring matching (not exact): "Pariserbøf med rødbeder" matches "Pariserbøf" etc.
-    const isUsed = (name: string): boolean => {
-      const nameLower = name.toLowerCase().trim();
+    // PRIMARY: UUID-based matching (most reliable when available)
+    // FALLBACK: Name-based matching with core dish extraction for items without UUIDs
+    const isUsed = (item: DishEntry): boolean => {
+      // UUID-based deduplication (preferred method)
+      if (item.id && usedMenuItemIds.has(item.id)) {
+        console.log(`[Phase 2b] UUID duplicate: "${item.name}" (${item.id}) already used this week`);
+        return true;
+      }
+      
+      // Name-based fallback for items without UUIDs (legacy menu_results_v2 data)
+      const nameLower = item.name.toLowerCase().trim();
+      
+      // Helper: Extract core dish name (before modifiers like "med", "with", "på", "i", etc.)
+      const extractCoreDish = (name: string): string => {
+        const lowerName = name.toLowerCase().trim();
+        // Split on common Danish/English modifiers that indicate variations
+        const modifiers = [' med ', ' with ', ' på ', ' i ', ' af ', ' og ', ' and ', ','];
+        for (const mod of modifiers) {
+          const parts = lowerName.split(mod);
+          if (parts.length > 1) {
+            // Return everything before the first modifier, but keep multi-word dish names
+            // E.g., "Klassisk pariserbøf med rødbeder" → "klassisk pariserbøf"
+            return parts[0].trim();
+          }
+        }
+        return lowerName;
+      };
+      
+      // Helper: Extract significant words (4+ chars) from dish name for fuzzy matching
+      const extractSignificantWords = (name: string): Set<string> => {
+        return new Set(
+          name.toLowerCase()
+            .replace(/[^\wæøåéüö\s]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length >= 4)
+            .filter(w => !['klassisk', 'classic', 'dagens', 'today', 'vores', 'fresh'].includes(w)) // Filter generic modifiers
+        );
+      };
+      
+      const itemCore = extractCoreDish(nameLower);
+      const itemWords = extractSignificantWords(itemCore);
+      
       return usedMenuItems.some(used => {
         const usedLower = used.toLowerCase().trim();
-        return usedLower === nameLower || usedLower.includes(nameLower) || nameLower.includes(usedLower);
+        
+        // 1. Exact match
+        if (usedLower === nameLower) {
+          return true;
+        }
+        
+        // 2. Full substring match (one contains the other completely)
+        if (usedLower.includes(nameLower) || nameLower.includes(usedLower)) {
+          return true;
+        }
+        
+        // 3. CRITICAL: Core dish name matching
+        // E.g., "pariserbøf med æggeblomme" and "pariserbøf med rødbeder" both have core "pariserbøf"
+        const usedCore = extractCoreDish(usedLower);
+        const usedWords = extractSignificantWords(usedCore);
+        
+        // Check if core dish names share significant words
+        const sharedWords = [...itemWords].filter(w => usedWords.has(w));
+        
+        // If they share 2+ significant words, or 1 significant word that's 6+ chars (unique dish name)
+        if (sharedWords.length >= 2 || (sharedWords.length === 1 && sharedWords[0].length >= 6)) {
+          console.log(`[Phase 2b] Core dish match detected: "${item.name}" matches "${used}" (shared: ${sharedWords.join(', ')})`);
+          return true;
+        }
+        
+        // 4. Ingredient similarity check for language variants
+        // Extract core ingredients from both items (words 4+ chars that appear in both)
+        if (item.description && item.description.length > 20) {
+          const extractIngredients = (text: string): Set<string> => {
+            return new Set(
+              text.toLowerCase()
+                .replace(/[^\wæøåéüö\s]/g, ' ')  // Keep Nordic chars
+                .split(/\s+/)
+                .filter(w => w.length >= 4)  // Minimum word length
+                .filter(w => !['with', 'beef', 'done', 'well', 'min.', 'med', 'oksekød', 'gennemstegt'].includes(w))  // Filter stopwords
+            );
+          };
+          
+          const itemIngredients = extractIngredients(item.description);
+          const usedIngredients = extractIngredients(used);
+          
+          // Find intersection
+          const intersection = new Set([...itemIngredients].filter(i => usedIngredients.has(i)));
+          
+          // If 70%+ ingredients match, consider it a duplicate (catches language variants)
+          if (itemIngredients.size > 0 && intersection.size / itemIngredients.size >= 0.7) {
+            console.log(`[Phase 2b] Semantic duplicate detected: "${item.name}" matches "${used}" (${intersection.size}/${itemIngredients.size} ingredients: ${[...intersection].join(', ')})`);
+            return true;
+          }
+        }
+        
+        return false;
       });
     };
 
-    let menuItems: DishEntry[] = preferencePool.filter(item => !isUsed(item.name));
+    let menuItems: DishEntry[] = preferencePool.filter(item => !isUsed(item));
 
     if (menuItems.length < preferencePool.length) {
       console.log(`[Phase 2b] Post ${postSlot.id}: Filtered out ${preferencePool.length - menuItems.length} already-used dishes. ${menuItems.length} available.`);
+    }
+
+    // STEP 2.5 — Filter out items from already-used categories (prevents 2x BRUNCH, 2x DESSERT, etc.)
+    if (usedMenuCategories.length > 0) {
+      const beforeCategoryFilter = menuItems.length;
+      menuItems = menuItems.filter(item => {
+        const category = (item as any).category as string | undefined;
+        if (!category) return true; // No category = always include
+        const categoryUpper = category.toUpperCase().trim();
+        const isUsedCategory = usedMenuCategories.some(used => used.toUpperCase().trim() === categoryUpper);
+        if (isUsedCategory) {
+          console.log(`[Phase 2b] Skipping "${item.name}" - category "${category}" already used this week`);
+        }
+        return !isUsedCategory;
+      });
+      if (menuItems.length < beforeCategoryFilter) {
+        console.log(`[Phase 2b] Post ${postSlot.id}: Category filter removed ${beforeCategoryFilter - menuItems.length} items from used categories. ${menuItems.length} available.`);
+      }
     }
 
     // STEP 3 — Safety: if dedup leaves fewer than 2 candidates, widen back to full preference pool;
@@ -529,12 +865,30 @@ export async function generatePostDetail(
 
     // Format dishes for the prompt: include description when available
     // Annotate signature dishes so AI knows they're prominent — but doesn't HAVE to pick them
+    // Normalize ALL-CAPS dish names so AI doesn't reproduce them verbatim in post titles.
+    // COMPREHENSIVE MENU DETECTION: Identify all-inclusive offerings (brunch plates, set menus)
     const formatDish = (d: DishEntry): string => {
-      let line = `- ${d.name}`;
-      if (d.description) line += `: ${d.description}`;
+      let line = `- ${normalizeTitle(d.name)}`;
+      if (d.description) {
+        // Detect comprehensive offerings: 3+ items separated by commas
+        const itemCount = d.description.split(',').length;
+        const isComprehensive = itemCount >= 3;
+        
+        if (isComprehensive) {
+          line += `: ${d.description} [ALL-INCLUSIVE BRUNCH/SET MENU med ${itemCount} elementer]`;
+        } else {
+          line += `: ${d.description}`;
+        }
+      }
       const periods = (d as any).service_periods as string[] | undefined;
-      const periodLabel = periods && periods.length > 0 ? periods[0].toUpperCase() : (d.category || '');
-      if (periodLabel) line += ` [${periodLabel}]`;
+      const category = d.category;
+      
+      // Show both service period AND category when available (different information)
+      const labels: string[] = [];
+      if (periods && periods.length > 0) labels.push(periods[0].toUpperCase());
+      if (category && category !== periods?.[0]) labels.push(category);
+      if (labels.length > 0) line += ` [${labels.join(' · ')}]`;
+      
       if (d.isSignature) line += ' ⭐';
       return line;
     };
@@ -554,7 +908,15 @@ export async function generatePostDetail(
       slotHour < 14 ? 'BRUNCH ELLER FROKOST (BRUNCH/LUNCH)' :
       slotHour < 17 ? 'FROKOST ELLER AFTENSMENU (LUNCH/DINNER)' :
       'AFTENSMENU (DINNER)';
-    const servicePeriodHint = `DIT TIDSPUNKT: ${canonicalTime}. Vælg KUN retter fra ${slotServiceLabel}-menuen — se [BRUNCH], [LUNCH] eller [DINNER] etiketten bag hvert dish. Posten markedsfører den N\u00c6STE service gæsten kan komme til, ikke en anden. ALDRIG frokostretter til aftenstidsposter og omvendt.`;
+    
+    // Build service period timing info from menuTiming data
+    const servicePeriodTimingInfo: string[] = [];
+    if (brunchMenu) servicePeriodTimingInfo.push(`BRUNCH serveres ${brunchMenu.startTime.replace(/:\d\d$/, '')}-${brunchMenu.endTime.replace(/:\d\d$/, '')}`);
+    if (frokostMenu) servicePeriodTimingInfo.push(`FROKOST serveres ${frokostMenu.startTime.replace(/:\d\d$/, '')}-${frokostMenu.endTime.replace(/:\d\d$/, '')}`);
+    if (aftenMenu) servicePeriodTimingInfo.push(`AFTEN serveres ${aftenMenu.startTime.replace(/:\d\d$/, '')}-${aftenMenu.endTime.replace(/:\d\d$/, '')}`);
+    const servicePeriodTimingLine = servicePeriodTimingInfo.length > 0 ? ` ${servicePeriodTimingInfo.join('. ')}.` : '';
+    
+    const servicePeriodHint = `DIT TIDSPUNKT: ${canonicalTime}. Vælg KUN retter fra ${slotServiceLabel}-menuen — se [BRUNCH], [LUNCH] eller [DINNER] etiketten bag hvert dish.${servicePeriodTimingLine} Posten markedsfører den N\u00c6STE service gæsten kan komme til, ikke en anden. ALDRIG frokostretter til aftenstidsposter og omvendt.`;
 
     // Template-specific rules based on content_category
     const templateTypeLabel = contentCategory === 'craving_visual'
@@ -562,80 +924,121 @@ export async function generatePostDetail(
       : 'Produkt-post med drifts-info (fokus på specifik ret + booking-mulighed)';
 
     const titleRule = contentCategory === 'craving_visual'
-      ? `3. Title: 3-7 ord. Skal starte med sanselig beskrivelse, gerne med rettens navn.
-   Gode eksempler: "Cremet pastaret med sprød parmesan", "Syrlig citustærte med flødecreme", "Mørke chokoladetrøfler"
-   FORBUDTE STARTER: Forkæl, Nyd, Oplev, Tag, Prøv, Smag, Forestil, Drøm, Velkommen`
-      : `3. Title: 3-7 ord. SKAL starte med rettens navn. Gode eksempler: "Pariserbøf med rødbeder", "Koldrøget laks på brødskive", "Brunchburger med bacon og æg"
-   FORBUDTE STARTER (første ord): Forkæl, Nyd, Oplev, Tag, Prøv, Smag, Forestil, Drøm, Velkommen`;
+      ? `3. Title: 3-7 ord. SKAL kommunikere klar produktværdi — hvad kan kunden få/spise?
+   ROLLE: Marketing manager (ikke Instagram-poet). Titlen skal sælge et konkret produkt/oplevelse.
+   
+   GODE EKSEMPLER (produkt + værdi):
+   - "Cremet pastaret med sprød parmesan"
+   - "Syrlig citustærte med flødecreme"
+   - "Mørke chokoladetrøfler"
+   
+   TONE: ${titleStyleHint}
+   
+   ⛔ FORBUDTE STARTER: Forkæl, Nyd, Oplev, Tag, Prøv, Smag, Forestil, Drøm, Velkommen, Mærk, Find
+   
+   ⛔ FORBUDT: Poetiske/abstrakte beskrivelser uden kommerciel værdi:
+   - "Morgenens første damp stiger" (hvad får kunden?)
+   - "Stemningen vågner" (intet produkt)
+   - "Varmen siver ind" (ingen handlingsværdi)
+   - "[Årstid/Tidspunkt] + stemningsord" (fx "Efterårsmagi", "Morgenhygge")
+   
+   KRAV: Titel skal besvare "Hvad kan jeg få/bestille?" — ikke "Hvad er stemningen?"`
+      : `3. Title: 3-7 ord. SKAL starte med rettens konkrete navn + nøgleingrediens/tilberedning.
+   ROLLE: Marketing manager. Titlen driver salg af specifik ret — kunden skal vide præcis hvad de får.
+   
+   GODE EKSEMPLER (ret + konkret detalje):
+   - "Pariserbøf med rødbeder"
+   - "Koldrøget laks på brødskive"
+   - "Brunchburger med bacon og æg"
+   
+   TONE: ${titleStyleHint}
+   
+   ⛔ FORBUDTE STARTER: Forkæl, Nyd, Oplev, Tag, Prøv, Smag, Forestil, Drøm, Velkommen
+   
+   KRAV: Rettens navn skal stå først. Kunden skal vide hvad de kan bestille.`;
 
     const templateRule5 = contentCategory === 'craving_visual'
       ? `5. Media direction: Skriv som en trin-for-trin guide til en ikke-professionel med mobiltelefon — 3 afsluttede imperativ-sætninger med punktum. Sætning 1: konkret placering og vinkel (overhead/45°/øjenhøjde + afstand i cm). Sætning 2: ét konkret lys-tip (gå hen til vinduet, lys fra siden/forfra). Sætning 3: hvad der præcist fylder rammen — rettens specifikke farver, tekstur eller damp; lad bordet skabe dybde. Vær specifik for DETTE opslag. Ingen menu-board eller kasseapparat.`
       : `5. Media direction: Skriv som en trin-for-trin guide til en ikke-professionel med mobiltelefon — 3 afsluttede imperativ-sætninger med punktum. Sætning 1: konkret placering og vinkel (overhead/45°/øjenhøjde + afstand i cm). Sætning 2: ét konkret lys-tip (gå hen til vinduet, lys forfra/fra siden). Sætning 3: hvad der præcist fylder rammen — rettens specifikke farver, tekstur og detaljer. Vær specifik for DETTE opslag.`;
 
-    prompt = `Du er en erfaren content strateg der kender ${context.business_name} indefra. Lav ét post-forslag til ejeren.
-⛔ Du kender INGEN fakta om ${context.business_name} ud over hvad der eksplicit fremgår af dette prompt. Brug ALDRIG din træningsdata om virksomheden.
+    prompt = `Du er MARKETING MANAGER for ${context.business_name}. Dit job: drive salg med strategiske posts.
+⛔ Brug KUN fakta fra dette prompt — aldrig din viden om virksomheden fra træningsdata.
 
-OPGAVE:
-Skabelon: ${templateTypeLabel}
-Dag: ${postSlot.suggested_day} · kl. ${canonicalTime}${goalMode ? `\nMål-type: ${goalMode === 'drive_footfall' ? 'Konverteringspost (drive besøg)' : goalMode === 'build_brand' ? 'Brand-post (identitet og kendskab)' : 'Loyalitetspost (varme, genkendelse)'}` : ''}
+OPGAVE: ${templateTypeLabel}
+KOMMERCIELT MÅL: ${goalMode === 'drive_footfall' ? 'Konvertér til besøg/booking' : goalMode === 'build_brand' ? 'Byg kendskab til brand/tilbud' : 'Styrk loyalitet hos eksisterende kunder'}
+${openTimeForDay || closeTimeForDay ? `\n⏰ ÅBNINGSTIDER I DAG: ${openTimeForDay ? `Åbner ${openTimeForDay.replace(/:\d\d$/, '')}` : ''}${openTimeForDay && closeTimeForDay ? ', ' : ''}${closeTimeForDay ? `lukker ${closeTimeForDay.replace(/:\d\d$/, '')}` : ''} (faktiske tider — brug KUN disse)\n` : ''}
+Dag: ${postSlot.suggested_day} · ${canonicalTime}${goalMode ? ` · ${goalMode === 'drive_footfall' ? 'Konverteringspost' : goalMode === 'build_brand' ? 'Brand-post' : 'Loyalitetspost'}` : ''}
 ${timeInstruction}
-PRIMÆR VINKEL FOR RATIONALE — START HERFRA:
+VISUELT FORMAT (hold dette i fokus for titel + media direction):
+${menuFormatLabel}
+
+PRIMÆR VINKEL — START HERFRA:
 ${slotRationaleFocus}${ctaInstruction ? `\n${ctaInstruction}` : ''}
 
-BRAND & TONE:
-${businessCharacterLine ? businessCharacterLine + '\n' : ''}${brandEssenceElaborationLine ? brandEssenceElaborationLine + '\n' : ''}${targetAudienceLine ? targetAudienceLine + '\n' : ''}TONE: ${toneKeywords}
-${voiceConstraint ? `SKRIVEPRINCIP: ${voiceConstraint}\n` : ''}${writingPatternBlock ? `\n${writingPatternBlock}\n` : ''}${contentStrategyHint ? `\n${contentStrategyHint}\n` : ''}
-KONTEKST FOR DENNE DAG:
-Vinkel: ${angleSummary}
-${angle?.content_direction ? `Eksekveringsvejledning: ${angle.content_direction}\n` : ''}${angle?.menu_alignment ? `Menufit: ${angle.menu_alignment}\n` : ''}Vejr: ${weatherLine}${holidayFramingBlock}
+BRAND:
+${brandIdentityLine ? brandIdentityLine + '\n' : ''}${brandToneLine}${writingPatternBlock ? `\n${writingPatternBlock}` : ''}
+
+KONTEKST:
+Vejr: ${weatherLine}${holidayFramingBlock}
 ${phase0Summary}
 
-${servicePeriodHint ? `\n${servicePeriodHint}\n` : ''}${menuSummariesBlock}
-RETTER FRA MENUEN (vælg én — vær specifik og brug beskrivelsen i din rationale):
-(⭐ = fremhævet signaturret — du bestemmer selv om det passer til strategien)
+${servicePeriodHint ? `${servicePeriodHint}\n` : ''}${businessIntelligence?.servicePeriodStrategies && businessIntelligence.servicePeriodStrategies.length > 0 ? (() => {
+  const matchingStrategy = businessIntelligence.servicePeriodStrategies.find(sp => {
+    const progName = sp.programmeName.toLowerCase();
+    const progType = sp.programmeType.toLowerCase();
+    const slotService = slotServiceLabel.toLowerCase();
+    return slotService.includes(progName) || slotService.includes(progType) || 
+           (slotService.includes('brunch') && (progName.includes('brunch') || progType === 'morning')) ||
+           (slotService.includes('lunch') && (progName.includes('frokost') || progType === 'lunch')) ||
+           (slotService.includes('dinner') && (progName.includes('aften') || progType === 'dinner'));
+  });
+  if (!matchingStrategy) return '';
+  const goals = matchingStrategy.commercialGoals;
+  const topGoal = Object.entries(goals).sort((a, b) => b[1] - a[1])[0];
+  const goalName = topGoal[0] === 'drive_footfall' ? 'drive besøg' : topGoal[0] === 'strengthen_brand' ? 'styrke brand' : 'fastholde stamgæster';
+  const topSegments = matchingStrategy.audienceSegments.slice(0, 2).map(s => s.segment_name).join(', ');
+  return `\n📊 KOMMERCIEL STRATEGI FOR ${matchingStrategy.programmeName.toUpperCase()}:\nHovedmål: ${goalName} (${topGoal[1]}%)\nMålgrupper: ${topSegments}\nContent-vinkler: ${matchingStrategy.contentAngles.slice(0, 3).join(', ')}\n\n`;
+})() : ''}${menuSummariesBlock}
+RETTER FRA MENUEN (vælg én — brug beskrivelsen aktivt i rationale og media direction):
+(⭐ = signaturret)
 ${menuItemLines}
-${usedMenuItems.length > 0 ? `ALLEREDE BRUGT DENNE UGE (vælg IKKE disse): ${usedMenuItems.join(', ')}\n` : ''}
+${usedMenuItems.length > 0 ? `BRUGT DENNE UGE — vælg IKKE disse: ${usedMenuItems.map(normalizeTitle).join(', ')}\n` : ''}
 REGLER:
-1. Vælg én ret fra listen der kan stå ALENE som et komplet måltid (forret, hovedret, brunchret, drinksmenu o.l.).
-   Undgå tillæg, tilbehør og bioretter der normalt følger med en anden ret (fx "brød med smør", "salat på siden", "chips", "dipsauce").
-   Opfind ingen nye retter. Hver ret må kun vises én gang denne uge!
-2. Brug rettens BESKRIVELSE aktivt i rationale og media direction — det er her de konkrete detaljer gemmer sig.
-   ⛔ OPFIND ALDRIG ingredienser, kødtyper, saucenavn eller garniturer der IKKE eksplicit fremgår af rettens beskrivelse i listen. Fx: skriv ikke "kalv" hvis listen kun siger "mørbrad", skriv ikke "rødvinssauce" hvis listen siger "portvinsglace". Brug ordlyden fra listen — ord for ord.
+1. Vælg én ret der kan stå ALENE som komplet måltid. Undgå tillæg og bioretter ("brød med smør", "chips").
+   ⛔ Opfind INGEN nye retter — brug PRÆCIS et navn fra listen ord for ord. Ingen "Mørk tapas" hvis listen siger "TAPAS".
+   
+   🎯 ALL-INCLUSIVE MENU ITEMS (mærket [ALL-INCLUSIVE BRUNCH/SET MENU]):
+   Disse er KOMPLETTE måltider med mange elementer (fx brunch-tallerken med 10+ items).
+   - Titlen skal TYDELIGT kommunikere den samlede VÆRDI, ikke bare ét element
+   - FORKERT: "Skyr med æblekompot" (kun 1 af 12 items)
+   - RIGTIGT: "Den ene brunch — komplet brunch-tallerken" eller "Brunch-menuen med 12 retter"
+   - Captions skal fremhæve mangfoldigheden og det all-inclusive format (189 DKK dækker ALT)
+
+2. Brug rettens beskrivelse — opfind ALDRIG ingredienser, kødtyper eller sauce-navne der ikke fremgår af listen.
 ${titleRule}
-   FORBUDTE TITELSUFFIKSER: "- ved Åen", "ved Åen", "ved åen" — stedets placering er implicit, skriv det IKKE i titlen
-   FORBUDTE MØNSTRE: "Forkæl dig...", "[noget] ved Åen", "X-magi", "[Sæson]-X"
-4. Rationale: 2-3 konkrete sætninger. ALLE tre punkter SKAL være til stede:
-   a) TEMA-RELEVANS: Hvordan advancerer denne post ugens centrale argument (se PRIMÆR VINKEL ovenfor)?
-      ✓ "Brunch-positioneringen drives frem af at vise et konkret brunchmåltid der beviser præmissen"
-      ✗ "Det viser vores dedikation til god mad" (intet argument, ingen ugeskobling)
-   b) POST-ROLLE: Hvad er denne posts specifikke rolle i ugens arc — åbner, driver eller afslutter den ugens argument?
-      ✓ "[Navn]s fredag-post er ugens konverteringsdriver — her omsættes ugens fortælling til et konkret besøgstilbud"
-      ✗ "Vi sætter altid gæsten i centrum" (generisk, ingen rolle i ugens fortælling)
-   c) TIMING: Timing som støtte-argument for denne posts rolle — ikke som ugens primære åbner.
-      ✓ "Fredag kl. 14 er beslutningsklar timing — folk planlægger aktivt weekendbesøg på dette tidspunkt"
-      ✗ "Det er en god post til denne dag" (ingen slot-logik)
-   ⛔ Brug ALDRIG vejr-adjektiver ("mildt", "smukt", "varmt", "koldt", "mild", "kølig", "kølige", "frisk", "friske", "skøn", "skønt") — brug kun faktisk temperatur fra "Vejr" eller undlad vejrreferencer.
-   ⛔ Brug ALDRIG: "det viser vores dedikation", "den ægte start", "god oplevelse fra morgenstunden", "starter ugen rigtigt"
+   ⛔ IKKE i titlen: "ved Åen", "ved åen", "Forkæl dig", "X-magi", "[Sæson]-X"
+   Skriv IKKE ALL CAPS — omskriv: "BØF & BEARNAISE" → "Bøf & bearnaise"
+4. Rationale (2-3 sætninger): a) Hvordan driver posten ugens argument? b) Hvad er postens rolle i ugen? c) Hvorfor dette tidspunkt?
+   ⛔ Ingen vejr-adjektiver, "dedikation", "den ægte start"
 ${usedThemesBlock ? `${usedThemesBlock}\n` : ''}${templateRule5}
-   TITEL: Skriv med normal skrifttype — IKKE ALL CAPS. Retter med store bogstaver i menulisten skrives om: "BØF & BEARNAISE med RIBEYE" → "Bøf & bearnaise med ribeye".
-${sharedForbiddenBlock}
-PLATFORM-CAPTIONS — skriv korte captions til hvert netværk (basér på titel + rationale + rettens beskrivelse):
-- caption_facebook: 1-2 sætninger. ${goalMode === 'drive_footfall' ? 'Følg CTA-instruktionen fra OPGAVE ovenfor (link, urgency, timing).' : 'Inviterende tone. Gerne med konkret handlingsopfordring.'}
-- caption_instagram: 1-2 sætninger (kortere end Facebook). ${goalMode === 'drive_footfall' ? 'Følg CTA-instruktionen fra OPGAVE ("link i bio" — ingen URL). ' : ''}Afslut med 5-8 relevante hashtags på dansk. INGEN URL.
+
+CAPTIONS:
+- caption_facebook: 1-2 sætninger. ${goalMode === 'drive_footfall' ? 'Følg CTA-instruktionen ovenfor.' : 'Inviterende tone med konkret opfordring.'}
+- caption_instagram: 1-2 sætninger kortere. ${goalMode === 'drive_footfall' ? '"Link i bio" — ingen URL. ' : ''}5-8 danske hashtags. Ingen URL.
 
 Svar KUN med JSON:
 {
   "title": "Pariserbøf med rødbeder",
-  "rationale": "2-3 konkrete sætninger der forbinder denne dag, dette tidspunkt og denne ret",
-  "menu_item_used": "Præcis det valgte rets NAVN fra listen (kun navnet, ikke beskrivelsen)",
-  "menu_item_description": "Rettens beskrivelse fra listen (kopier direkte fra listen — tomt hvis ingen beskrivelse)",
-  "caption_facebook": "1-2 sætninger med CTA som angivet i OPGAVE${bookingLink && goalMode === 'drive_footfall' ? ` — inkl. booking-link` : ''}",
-  "caption_instagram": "1-2 sætninger kortere + #hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5",
+  "rationale": "2-3 konkrete sætninger",
+  "menu_item_used": "Præcis retnavn fra listen",
+  "menu_item_description": "Rettens beskrivelse fra listen (kopier direkte)",
+  "caption_facebook": "1-2 sætninger${bookingLink && goalMode === 'drive_footfall' ? ` inkl. booking-link` : ''}",
+  "caption_instagram": "1-2 sætninger + #hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5",
   "suggested_time": "${canonicalTime}",
   "cta_intent": "${resolvedCtaIntent}",
   "suggested_media": {
     "type": "photo",
-    "direction": "Placer retten på et lyst bord og hold telefonen 50–70 cm over retten i let skrå vinkel. Gå hen til vinduet så lyset falder skråt fra siden. Fyld rammen med retten — læg tallerkenen lidt off-center og lad bordet skabe baggrund.",
+    "direction": "3 imperativ-sætninger: 1) placering og vinkel (afstand i cm), 2) lys-tip, 3) hvad der fylder rammen.",
     "photo_count": 1
   }
 }`;
@@ -646,6 +1049,19 @@ Svar KUN med JSON:
       ((context.location as any)?.has_outdoor_seating && outdoorSeatingOk) ? 'har udeservering' : null,
     ].filter(Boolean).join(', ');
 
+    // Build location marketing hooks from businessIntelligence (if available)
+    let locationMarketingBlock = '';
+    if (businessIntelligence?.locationPositioning?.marketingHooks && businessIntelligence.locationPositioning.marketingHooks.length > 0) {
+      const hooks = businessIntelligence.locationPositioning.marketingHooks.slice(0, 3);
+      const context = businessIntelligence.locationPositioning.primaryContext;
+      locationMarketingBlock = `
+
+🎯 LOKATIONS-FORDELE (brug i titel/rationale hvis relevant):
+Sted: ${context}
+Marketing-vinkler: ${hooks.join(' | ')}
+`;
+    }
+
     // Template-specific type description based on content_category (preferred) or legacy type
     const typeDescription = contentCategory === 'behind_scenes'
       ? 'Bag kulisserne (vis specifik scene, tidspunkt, rolle i køkkenet eller lokalet — ingen mad-navne)'
@@ -653,86 +1069,152 @@ Svar KUN med JSON:
         ? 'Menneskepost (vis en person, rolle, konkret fakta — blød tone, ingen hård salgstale)'
         : postSlot.type === 'behind_scenes'
           ? 'Bag kulisserne (vis mennesker, forberedelse, køkkenet)'
-          : 'Stemnings-post (vis stedet, udsigten, atmosfæren)';
+          : 'Facilitetspost (vis konkret kundefordel: placering, udsigt, åbningstid, faciliteter, tilgængelighed)';
 
     // Template-specific title rule
+    // Derive "avoid poetic" constraint and experience title rules using the outer-scope titleStyleHint.
+
+    // Build "avoid" examples based on what the brand is NOT
+    const titleAvoidPoetic = (!isPoetic && (isModern || isSophisticated))
+      ? `\n   ⛔ UNDGÅ poetisk/lyrisk stemningsskrivning som "Regndråber på ruden og varm kaffe", "Åens spejling kl. 11", "En stille tirsdag morgen" — disse er for generiske og matcher IKKE brandets tone (${toneKeywords}).`
+      : '';
+
     const experienceTitleRule = contentCategory === 'team_people'
-      ? `3. Title: 3-7 ord. Skal fremhæve en person, rolle eller specifik menneskelig detalje.
-   GODE EKSEMPLER: "Kokken der starter kl. 7", "En mandag med Martin", "Bartender på sin yndlingsaften"
-   FORBUDTE STARTER: Forkæl, Nyd, Oplev, Tag, Prøv, Forestil, Drøm`
-      : `3. Title: 3-7 ord. SKAL have et KONKRET anker: specifik scene, tidspunkt, aktivitet.
-   GODE EKSEMPLER: "Bag marmitterne på en fredag", "Morgenkaffen er klar kl. 8", "En stille tirsdag inden frokostrushet", "Kl. 7:58 — køkkenet er allerede i gang", "Regndråber på ruden og varm kaffe"
-   FORBUDTE STARTER (første ord): Forkæl, Nyd, Oplev, Tag, Prøv, Forestil, Drøm
-   FORBUDT MØNSTER: Titler der åbner med '[Stedets/Værtens/Køkkenets/Gæstens] [adjektiv] [abstraktum]' — fx "Værtens velkendte smil", "Stedets varme atmosfære". Disse er holllow. Vis i stedet det konkrete øjeblik.`;
+      ? `3. Title: 3-7 ord. SKAL kommunikere hvem/hvad kunden møder ved besøg.
+   ROLLE: Marketing manager (ikke feature writer). Titlen skal bygge tillid og give konkret info.
+   
+   GODE EKSEMPLER (person/rolle + handling/værdi):
+   - "Vores kok starter kl. 7 hver morgen"
+   - "Martin bag baren — 15 års erfaring"
+   - "Bakkeriet åbner før solopgang"
+   
+   TONE: ${titleStyleHint}
+   
+   ⛔ FORBUDTE STARTER: Forkæl, Nyd, Oplev, Tag, Prøv, Forestil, Drøm, Mød, Mærk
+   
+   ⛔ FORBUDT: Abstrakte/poetiske stemningsbeskrivelser:
+   - "Hænderne der former dagen" (hvem er det?)
+   - "Passionen bag maden" (intet konkret)
+   - "Hjertet i køkkenet" (for metaforisk)
+   
+   KRAV: Kunden skal få konkret info — hvem gør hvad, hvornår?`
+      : `3. Title: 3-7 ord. SKAL kommunikere konkret kundefordel eller besøgsværdi.
+   ROLLE: Marketing manager (ikke poet). Titlen skal give kunden en GRUND til at besøge — konkret facilitet eller fordel.
+   
+   GODE EKSEMPLER (facilitet/fordel + kontekst):
+   - "Åbent fra kl. 8 — morgenkaffe klar"
+   - "Terrasse med udsigt til åen"
+   - "Weekend-brunch til kl. 14"
+   - "Plads ved vinduerne — lyst og rummeligt"
+   - "Parkering lige ved indgangen"
+   - "Udeservering åben i dag"
+   
+   DÅRLIGE EKSEMPLER (for abstrakte — giv INGEN værdi):
+   - "Morgenens første damp stiger" (hvad får kunden?)
+   - "Køkkenet vågner kl. 08:30" (irrelevant for kunde)
+   - "Lørdag morgen" (intet konkret tilbud)
+   - "Stemningen sætter sig" (ingen handling)
+   
+   TONE: ${titleStyleHint}
+   
+   ⛔ FORBUDTE STARTER: Forkæl, Nyd, Oplev, Tag, Prøv, Forestil, Drøm, Mærk, Find${titleAvoidPoetic}
+   
+   ⛔ FORBUDT MØNSTER #1: '[Abstrakt substantiv] + [adjektiv]' uden konkret kundeværdi:
+   - "Værtens varme smil", "Stedets autentiske atmosfære", "Morgenhyggen kalder"
+   
+   ⛔ FORBUDT MØNSTER #2: '[Tidspunkt/Sted] + poetisk verbum' uden produktinfo:
+   - "Morgenens første damp stiger" (hvad sælger vi?)
+   - "Middagens lys falder", "Stemningen vågner", "Varmen siver ind"
+   - "Køkkenet vågner" (intern proces — irrelevant for kunde)
+   
+   ⛔ FORBUDT MØNSTER #3: Generiske tidsmarkører uden tilbud:
+   - "Lørdag morgen", "Søndag eftermiddag", "En tirsdag"
+   
+   KRAV: Titel skal besvare "Hvilken konkret fordel får jeg her?" 
+   - Fremhæv målbar fordel (udsigt, plads, parkering, åbningstid, lys)
+   - Eller specifik facilitet (terrasse, udeservering, tilgængelighed)
+   - Universelt anvendelig: skal fungere for restaurant, butik, kontor, klinik
+   - ALDRIG bare "stemning", "følelse" eller "atmosfære"`;
 
     // Template-specific rule 5
     const experienceRule5 = contentCategory === 'team_people'
       ? `5. Media direction: Skriv som en trin-for-trin guide til en ikke-professionel med mobiltelefon — 3 afsluttede imperativ-sætninger med punktum. Sætning 1: konkret placering og vinkel (øjenhøjde + afstand i cm). Sætning 2: ét konkret lys-tip (gå hen til vinduet, naturligt lys fra siden). Sætning 3: hvad der præcist fylder rammen — personen i aktion, ikke poserende. Vær specifik for DETTE opslag.`
       : `5. Media direction: Skriv som en trin-for-trin guide til en ikke-professionel med mobiltelefon — 3 afsluttede imperativ-sætninger med punktum. Sætning 1: konkret placering og vinkel (øjenhøjde/let hævet + afstand i cm). Sætning 2: ét konkret lys-tip (naturligt lys fra vinduet). Sætning 3: hvad der præcist fylder rammen — det centrale element i scenen med dybde. SKAL vise en anden scene end de allerede brugte.`;
 
-    prompt = `Du er en erfaren content strateg der kender ${context.business_name} indefra. Lav ét post-forslag til ejeren.
-⛔ Du kender INGEN fakta om ${context.business_name} ud over hvad der eksplicit fremgår af dette prompt. Brug ALDRIG din træningsdata om virksomheden — ikke stedsdetaljer, atmosfære, menudetaljer eller lokal viden.
+    prompt = `Du er MARKETING MANAGER for ${context.business_name}. Dit job: drive besøg med værdiskabende posts.
+⛔ Brug KUN fakta fra dette prompt — aldrig din viden om stedet fra træningsdata (ikke stedsdetaljer, atmosfære, menu eller lokal viden).
 
-OPGAVE:
-Skabelon: ${typeDescription}
-Dag: ${postSlot.suggested_day} · kl. ${canonicalTime}${goalMode ? `\nMål-type: ${goalMode === 'drive_footfall' ? 'Konverteringspost (drive besøg)' : goalMode === 'build_brand' ? 'Brand-post (identitet og kendskab)' : 'Loyalitetspost (tilbagevendende øjeblik)'}` : ''}
+💡 NØGLE-PRINCIP: Hver post skal give kunden en KLAR GRUND til at besøge.
+Titler skal være KONKRETE (facilitet/fordel + kontekst), IKKE abstrakte beskrivelser.
+Eksempel på DÅRLIG titel: "Aftenstemning" (ingen værdi)
+Eksempel på GOD titel: "Terrasse åben — plads ved vinduerne" (konkret fordel)
+
+OPGAVE: ${typeDescription}
+KOMMERCIELT MÅL: ${goalMode === 'drive_footfall' ? 'Konvertér til besøg/booking' : goalMode === 'build_brand' ? 'Byg kendskab til brand/oplevelse' : 'Styrk loyalitet hos eksisterende'}
+${openTimeForDay || closeTimeForDay ? `\n⏰ ÅBNINGSTIDER I DAG: ${openTimeForDay ? `Åbner ${openTimeForDay.replace(/:\d\d$/, '')}` : ''}${openTimeForDay && closeTimeForDay ? ', ' : ''}${closeTimeForDay ? `lukker ${closeTimeForDay.replace(/:\d\d$/, '')}` : ''} (faktiske tider — brug KUN disse)\n` : ''}
+Dag: ${postSlot.suggested_day} · ${canonicalTime}${goalMode ? ` · ${goalMode === 'drive_footfall' ? 'Konverteringspost' : goalMode === 'build_brand' ? 'Brand-post' : 'Loyalitetspost'}` : ''}
 ${timeInstruction}
-PRIMÆR VINKEL FOR RATIONALE — START HERFRA:
+VISUELT FORMAT (hold dette i fokus for titel + media direction):
+${experienceFormatLabel}
+
+PRIMÆR VINKEL — START HERFRA:
 ${slotRationaleFocus}${ctaInstruction ? `\n${ctaInstruction}` : ''}
 
-BRAND & TONE:
-${brandEssenceElaborationLine ? brandEssenceElaborationLine + '\n' : ''}${targetAudienceLine ? targetAudienceLine + '\n' : ''}TONE: ${toneKeywords}
-${voiceConstraint ? `SKRIVEPRINCIP: ${voiceConstraint}\n` : ''}${writingPatternBlock ? `\n${writingPatternBlock}\n` : ''}${contentStrategyHint ? `\n${contentStrategyHint}\n` : ''}
-KONTEKST FOR DENNE DAG:
-Vinkel: ${angleSummary}
-${angle?.content_direction ? `Eksekveringsvejledning: ${angle.content_direction}\n` : ''}${angle?.menu_alignment ? `Menufit: ${angle.menu_alignment}\n` : ''}Vejr: ${weatherLine}${holidayFramingBlock}
-STED: ${locationInfo}
-${businessCharacterLine ? businessCharacterLine + '\n' : ''}${venueIdentityLine ? venueIdentityLine + '\n' : ''}SÆSON: ${context.season.current}
+BRAND:
+${brandIdentityLine ? brandIdentityLine + '\n' : ''}${brandToneLine}${writingPatternBlock ? `\n${writingPatternBlock}` : ''}
+${venueIdentityLine ? `\n${venueIdentityLine}` : ''}${voiceRationaleLine ? `\n${voiceRationaleLine}` : ''}
+
+KONTEKST:
+Vejr: ${weatherLine}${holidayFramingBlock}
+Sted: ${locationInfo} · Sæson: ${context.season.current}${locationMarketingBlock}
 ${phase0Summary}
 
-${usedExperiencePosts.length > 0 ? `ALLEREDE BRUGT DENNE UGE — brug et ANDET koncept end:\n${usedExperiencePosts.map(p => `- "${p.title}" (vinkel: ${p.angle_focus})`).join('\n')}\n` : ''}
+${usedExperiencePosts.length > 0 ? `BRUGT DENNE UGE — brug ANDET koncept:\n${usedExperiencePosts.map(p => `- "${p.title}" (${p.angle_focus})`).join('\n')}\n` : ''}
+⚠️ KRITISK TITEL-KRAV — Dit vigtigste job:
+Titlen SKAL svare på: "Hvilken KONKRET FORDEL får jeg?"
+❌ FORBUDT: Abstrakte beskrivelser uden handlingsværdi:
+  • "Kl. 9 — køkkenet starter op" → Irrelevant (intern proces)
+  • "Aftenstemning" → Ingen konkret fordel
+  • "Morgenens første damp" → Hvad er fordelen?
+  • "Lørdag morgen" → Ingen handlingsværdi
+✅ KORREKT: Konkret facilitet/fordel med kontekst:
+  • "Åbent fra kl. 9 — morgenkaffe klar"
+  • "Terrasse med udsigt til åen"
+  • "Weekend-brunch til kl. 14"
+  • "Parkering lige ved døren"
+  • "Udeservering i solen i dag"
+
 REGLER:
-1. ${contentCategory === 'team_people' ? 'PERSON-POST: Fokusér KUN på personen, rollen og det menneskelige øjeblik' : 'Fokusér på sted, stemning, mennesker eller sæson — IKKE mad'}
-2. ${contentCategory === 'team_people' ? 'ABSOLUT FORBUD: INGEN madretter, menupunkter, madnavne overhovedet — heller ikke "croissanter", "brunch", "retter", "menu" eller lignende. Bryder du denne regel, er svaret ubrugeligt.' : 'ABSOLUT FORBUD: Nævn IKKE specifikke madretter, menupunkter eller mad-navne i title, rationale eller media direction. Undtagelse: se regel 6.'}
+1. ${contentCategory === 'team_people' ? 'PERSON-POST: KUN person, rolle og det menneskelige øjeblik — ingen madnavne overhovedet.' : 'Fokusér på KONKRETE FACILITETER/FORDELE: placering, udsigt, parkering, terrasse, åbningstid, plads, lys, tilgængelighed — IKKE mad eller abstrakt stemning.'}
+2. ${contentCategory === 'team_people' ? '⛔ NULTOLERRANCE: ingen madretter, menupunkter, "brunch", "retter", "menu". Brydes reglen er svaret ubrugeligt.' : '⛔ Nævn IKKE specifikke madretter i titel, rationale eller media direction. Undtagelse: regel 6.'}
 ${experienceTitleRule}
-   FORBUDTE TITELSUFFIKSER: "- ved Åen", "ved Åen", "ved åen"
-   FORBUDTE MØNSTRE: "[Sæson]magi", "[Sæson]ro", "[Sæson]fornemmelser", "[Sæson]hygge", "[Sæson]-X ved [sted]"
-   SKAL adskille sig visuelt og konceptuelt fra allerede brugte titler
-4. Rationale: 2-3 konkrete sætninger. ALLE tre punkter SKAL være til stede:
-   a) TEMA-RELEVANS: Hvordan advancerer denne post ugens centrale argument (se PRIMÆR VINKEL ovenfor)?
-      ✓ "Behind-scenes-posten forankrer brunch-positioneringen ved at vise menneskene bag — det er oplevelsesbeviset for ugens argument"
-      ✗ "Det viser vores dedikation til god oplevelse fra morgenstunden" (intet argument, ingen ugeskobling)
-   b) POST-ROLLE: Hvad er denne posts specifikke rolle i ugens arc — åbner, støtter eller afslutter den ugens argument?
-      ✓ "[Navn]s mandagspost er ugens identitetsåbner — den sætter tonen og troværdigheden for hele ugens fortælling"
-      ✗ "Vi viser den ægte start på ugen" (abstrakt, ingen rolle i ugens arc)
-   c) TIMING: Timing som støtte-argument for denne posts rolle — ikke som ugens primære åbner.
-      ✓ "Mandag kl. 9 er lavtempo-vindue — ideelt til inspirationsindhold der sætter ugens tema"
-      ✗ "Det er en god dag til dette indhold" (ingen timing-logik)
-   ⛔ Brug ALDRIG egne vejr-adjektiver ("mildt", "smukt", "varmt", "koldt", "kølig", "kølige", "frisk", "friske", "skøn", "skønt") — brug kun faktisk temperatur fra "Vejr" eller udelad vejrreferencer helt.
-   ⛔ Brug ALDRIG: "det viser vores dedikation", "den ægte start", "god oplevelse fra morgenstunden", "starter ugen rigtigt"
+   ⛔ Ikke i titel: "ved Åen", "[Sæson]magi", "[Sæson]ro", "[Sæson]hygge"
+   SKAL adskille sig visuelt og konceptuelt fra brugte titler
+4. Rationale (2-3 sætninger): a) Hvordan driver posten ugens argument? b) Postens rolle i ugen? c) Hvorfor dette tidspunkt?
+   ⛔ Ingen vejr-adjektiver, "dedikation", "den ægte start"
 ${usedThemesBlock ? `${usedThemesBlock}\n` : ''}${experienceRule5}
-${contentCategory === 'behind_scenes' ? `6. VALGFRIT — kun hvis scenen konkret viser tilberedning af en specifik ret eller drink:
-   Inkludér "menu_item_used" med rettens/drinkens præcise navn (fx "Pariserbøf", "Negroni", "Confiteret nakkefilet af gris").
-   Nævn IKKE retten i title eller rationale — kun i menu_item_used-feltet.
-   Ren stemningsscene uden konkret madlavning → udelad feltet helt.` : ''}
-${voiceRationaleLine ? `\n${voiceRationaleLine}\n` : ''}
-${sharedForbiddenBlock}
-PLATFORM-CAPTIONS — skriv korte captions til hvert netværk (basér på titel + rationale + stemning/person):
-- caption_facebook: 1-2 sætninger. ${goalMode === 'drive_footfall' ? 'Følg CTA-instruktionen fra OPGAVE ovenfor (link, urgency, timing).' : 'Inviterende tone. Gerne et spørgsmål til engagement.'}
-- caption_instagram: 1-2 sætninger (kortere end Facebook). ${goalMode === 'drive_footfall' ? 'Følg CTA-instruktionen fra OPGAVE ("link i bio" — ingen URL). ' : ''}Afslut med 5-8 relevante hashtags på dansk. INGEN URL.
+${contentCategory === 'behind_scenes' ? `6. VALGFRIT: Hvis scenen konkret viser tilberedning af en ret/drink → inkludér "menu_item_used" med præcist navn. Nævn det IKKE i titel/rationale. Ren scene uden madforberedelse → udelad feltet.` : ''}
+
+CAPTIONS:
+- caption_facebook: 1-2 sætninger. ${goalMode === 'drive_footfall' ? 'Følg CTA-instruktionen ovenfor.' : 'Inviterende tone. Gerne et engagementspørgsmål.'}
+- caption_instagram: 1-2 sætninger kortere. ${goalMode === 'drive_footfall' ? '"Link i bio" — ingen URL. ' : ''}5-8 danske hashtags. Ingen URL.
+
+⛔ SIDSTE TJEK FØR DU SVARER:
+Læs din titel højt og spørg: "Giver denne titel kunden en GRUND til at besøge?"
+Hvis svaret er "nej" eller "måske" → OMSKRIV titlen til noget konkret (tilbud + timing).
 
 Svar KUN med JSON:
 {
-  "title": "${contentCategory === 'team_people' ? 'Kokken der starter kl. 7' : 'Bag marmitterne på en fredag'}",
-  "rationale": "2-3 konkrete sætninger der forbinder denne dag, dette tidspunkt og denne post",${contentCategory === 'behind_scenes' ? `
-  "menu_item_used": "Kun hvis scenen viser konkret tilberedning — ellers udelad dette felt",` : ''}
-  "caption_facebook": "1-2 sætninger med CTA som angivet i OPGAVE${bookingLink && goalMode === 'drive_footfall' ? ` — inkl. booking-link` : ''}",
+  "title": "${contentCategory === 'team_people' ? 'Vores kok starter kl. 7 hver morgen' : 'Terrasse med udsigt til åen'}",
+  "rationale": "2-3 konkrete sætninger",${contentCategory === 'behind_scenes' ? `
+  "menu_item_used": "Kun hvis scenen viser konkret tilberedning — ellers udelad",` : ''}
+  "caption_facebook": "1-2 sætninger${bookingLink && goalMode === 'drive_footfall' ? ` inkl. booking-link` : ''}",
   "caption_instagram": "1-2 sætninger kortere + #hashtag1 #hashtag2 #hashtag3 #hashtag4 #hashtag5",
   "suggested_time": "${canonicalTime}",
   "cta_intent": "${resolvedCtaIntent}",
   "suggested_media": {
     "type": "photo",
-    "direction": "${contentCategory === 'team_people' ? 'Sæt kameraet i øjenhøjde ca. 60 cm fra personen. Gå hen til vinduet så det naturlige lys falder fra siden. Fang personen i aktion — ikke poserende.' : 'Stå to skridt tilbage og hold kameraet let hævet i øjenhøjde. Brug lyset fra det nærmeste vindue forfra eller fra siden. Fang det centrale element med omgivelserne som dybde.'}",
+    "direction": "3 imperativ-sætninger: 1) placering og vinkel (afstand i cm), 2) lys-tip, 3) hvad der fylder rammen.",
     "photo_count": 1
   }
 }`;
@@ -795,11 +1277,22 @@ Svar KUN med JSON:
       console.warn(`[Phase 2b] Spelling correction failed for post ${postSlot.id}:`, spellingError);
     }
 
-    // Safety net: if outdoor seating is not suitable (cold/overcast) and the title
-    // opens with an outdoor-seating reference ("Terrassen" or "Udeservering"), block it
-    if (!outdoorSeatingOk && /^(terrassen|udeservering)\b/i.test(correctedTitle)) {
-      console.log(`[Phase 2b] Blocked outdoor-seating title "${correctedTitle}" — outdoor seating not suited today. Using neutral fallback.`);
-      correctedTitle = 'En stille dag bag disken';
+    // Safety net: if outdoor seating is not suitable, block ANY title mentioning terrassen
+    if (!outdoorSeatingOk && /\bterrassen\b/i.test(correctedTitle)) {
+      console.log(`[Phase 2b] Blocked terrasse reference in title "${correctedTitle}" — outdoor seating not suited today. Using neutral fallback.`);
+      correctedTitle = isMenuPost
+        ? (result.parsed.menu_item_used ? normalizeTitle(result.parsed.menu_item_used) : 'Husets specialitet')
+        : 'Kl. 9 — køkkenet starter op';
+    }
+
+    // Safety net: catch poetic "abstract noun + poetic verb" AI hallucinations
+    // e.g. "Morgenens første damp stiger", "Stemningen vågner", "Varmen siver ind"
+    const poeticAbstractPattern = /\b\w+ens\s+\w+\s+(stiger|falder|vågner|siver|breder|folder|åbner|bølger|synker|hæver|letter|toner|hviler)\b/i;
+    if (poeticAbstractPattern.test(correctedTitle)) {
+      console.log(`[Phase 2b] Rejected poetic abstract title "${correctedTitle}" — using concrete fallback.`);
+      correctedTitle = isMenuPost
+        ? (result.parsed.menu_item_used ? normalizeTitle(result.parsed.menu_item_used) : 'Husets specialitet')
+        : 'Bag disken kl. ' + canonicalTime.split(':')[0];
     }
 
     // Safety net: strip "ved Åen" / "ved åen" when used as a bare mechanical suffix
@@ -820,9 +1313,46 @@ Svar KUN med JSON:
       console.warn(`[Phase 2b] Title "${correctedTitle}" starts with forbidden imperative — using dish name or fallback`);
       // For menu posts, try to use menu_item_used as title base
       if (isMenuPost && result.parsed.menu_item_used) {
-        correctedTitle = result.parsed.menu_item_used;
+        correctedTitle = normalizeTitle(result.parsed.menu_item_used);
       }
     }
+
+    // Normalize ALL CAPS titles from database (e.g., "FAVORITTEN" → "Favoritten")
+    if (correctedTitle === correctedTitle.toUpperCase() && correctedTitle.length > 2) {
+      correctedTitle = normalizeTitle(correctedTitle);
+      console.log(`[Phase 2b] Normalized ALL CAPS title to: "${correctedTitle}"`);
+    }
+
+    // Look up menu category and UUID for deduplication
+    // Category: prevent multiple posts from same category (e.g., 2x BRUNCH)
+    // UUID: prevent same dish appearing twice with different modifiers
+    let menuCategory: string | undefined = undefined;
+    let menuItemId: string | undefined = undefined;
+    if (isMenuPost && result.parsed.menu_item_used && Array.isArray(context.signature_items)) {
+      const menuItemName = result.parsed.menu_item_used.toLowerCase().trim();
+      const matchedItem = (context.signature_items as any[]).find((item: any) => 
+        item.name && item.name.toLowerCase().trim() === menuItemName
+      );
+      if (matchedItem) {
+        if (matchedItem.category) {
+          menuCategory = matchedItem.category;
+          console.log(`[Phase 2b] Menu item "${result.parsed.menu_item_used}" is from category: ${menuCategory}`);
+        }
+        if (matchedItem.id) {
+          menuItemId = matchedItem.id;
+          console.log(`[Phase 2b] Menu item "${result.parsed.menu_item_used}" has UUID: ${menuItemId}`);
+        }
+      }
+    }
+
+    // Build strategic_intent: carries the Phase 1 angle's narrative purpose through to the
+    // plan generator so cross-day booking/occasion logic survives the phase boundary.
+    const angleForIntent = strategicBrief.angles.find(a => a.focus === postSlot.angle_focus);
+    const strategicIntent = [
+      strategicBrief.week_summary ? `Ugens strategi: "${strategicBrief.week_summary}"` : null,
+      angleForIntent?.reasoning ? `Vinkel: ${angleForIntent.reasoning}` : null,
+      postSlot.goal_mode ? `Mål: ${postSlot.goal_mode}` : null,
+    ].filter(Boolean).join(' | ');
 
     return {
       id: postSlot.id,
@@ -838,9 +1368,15 @@ Svar KUN med JSON:
       content_category: postSlot.content_category,
       slot_id: postSlot.slot_id,
       ...result.parsed,
+      menu_category: menuCategory, // Track category for deduplication
+      menu_item_id: menuItemId,    // Track UUID for deduplication (most reliable)
       suggested_time: canonicalTime, // always use our computed canonical time — AI output may be wrong
       title: correctedTitle,
       rationale: correctedRationale,
+      // Service period tracking (Option B): infer from timing_window using FACT-BASED menu timing
+      service_period: inferServicePeriod(postSlot, canonicalTime, menuTiming),
+      // Strategic intent — carries Phase 1 narrative to the plan generator and caption prompt
+      strategic_intent: strategicIntent || undefined,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -857,6 +1393,13 @@ Svar KUN med JSON:
       signature_items_count: context.signature_items?.length || 0,
       items_with_descriptions: (context.signature_items as any[])?.filter((i: any) => i?.description)?.length || 0,
     });
+    const angleForIntentFb = strategicBrief.angles.find(a => a.focus === postSlot.angle_focus);
+    const strategicIntentFb = [
+      strategicBrief.week_summary ? `Ugens strategi: "${strategicBrief.week_summary}"` : null,
+      angleForIntentFb?.reasoning ? `Vinkel: ${angleForIntentFb.reasoning}` : null,
+      postSlot.goal_mode ? `Mål: ${postSlot.goal_mode}` : null,
+    ].filter(Boolean).join(' | ');
+
     return {
       id: postSlot.id,
       angle_focus: postSlot.angle_focus,
@@ -879,6 +1422,9 @@ Svar KUN med JSON:
       goal_mode: postSlot.goal_mode,
       content_category: postSlot.content_category,
       slot_id: postSlot.slot_id,
+      // Service period tracking (Option B): fact-based using menu timing
+      service_period: inferServicePeriod(postSlot, canonicalTime, menuTiming),
+      strategic_intent: strategicIntentFb || undefined,
     };
   }
 }

@@ -8,6 +8,7 @@
  */
 
 import type { LocationEnrichment } from '../types/location-enrichment.ts'
+import { detectWaterfrontTerm, enhanceWaterfrontSignals } from './waterfront-detector.ts'
 
 /**
  * Input data for location enrichment
@@ -21,6 +22,8 @@ export interface LocationInput {
   // Optional coordinates (if available from onboarding or geocoding)
   latitude?: number | null
   longitude?: number | null
+  // Optional business name (for waterfront detection)
+  business_name?: string | null
 }
 
 /**
@@ -370,7 +373,20 @@ export function computeLocationEnrichment(input: LocationInput): LocationEnrichm
   const behavioralSignals = extractNearbySignals(address, city, country, area_type)
   
   // Combine signals (limit to 6 total)
-  const nearby_signals = [...initialSignals, ...behavioralSignals].slice(0, 6)
+  let nearby_signals = [...initialSignals, ...behavioralSignals].slice(0, 6)
+
+  // Detect specific waterfront term if area_type is waterfront
+  let waterfrontTerm: string | undefined
+  if (area_type === 'waterfront') {
+    const businessName = input.business_name || ''
+    const detectedTerm = detectWaterfrontTerm(city, address, businessName)
+    
+    if (detectedTerm) {
+      waterfrontTerm = detectedTerm
+      // Enhance nearby_signals to use specific term instead of generic "waterfront"
+      nearby_signals = enhanceWaterfrontSignals(nearby_signals, city, address, businessName)
+    }
+  }
 
   // Compute confidence
   const hasGeo = Boolean(input.latitude && input.longitude)
@@ -387,7 +403,8 @@ export function computeLocationEnrichment(input: LocationInput): LocationEnrichm
     micro: {
       area_type,
       nearby_signals,
-      confidence
+      confidence,
+      ...(waterfrontTerm && { waterfront_term: waterfrontTerm })
     }
   }
 

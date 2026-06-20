@@ -28,7 +28,7 @@ export function DraftRecoveryModal({ isOpen, onRecover, onDiscard }: DraftRecove
           </button>
           <button
             onClick={onRecover}
-            className="flex-1 px-4 py-2 bg-brand text-mint rounded-lg text-sm font-medium hover:bg-[#12393D] focus:ring-2 focus:ring-[#9AF5DF] transition-colors"
+            className="flex-1 px-4 py-2 bg-cta text-text-inverse rounded-lg text-sm font-medium hover:bg-cta-hover focus:ring-2 focus:ring-cta transition-colors"
           >
             Ja, gendan kladde
           </button>

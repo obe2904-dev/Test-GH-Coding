@@ -21,6 +21,7 @@ export interface Programme {
 
 export interface MenuSignalResult {
   hasMenu: boolean
+  placeSynopsis: string | null
   menuDescription: string | null
   menuCategories: string[] | null
   signatureItems: string[] | null
@@ -86,6 +87,7 @@ Instruktioner:
 1. Afgør om der er menu-indhold på websitet (JA/NEJ)
 2. Hvis JA, udtræk:
    - Kort overordnet menubeskrivelse (2-3 sætninger)
+   - Kort stedssynopsis (1-2 sætninger): hvad stedet er, hvad det tilbyder, og den overordnede stemning
    - Hovedkategorier på menuen (liste)
    - 3-5 signatur-/fremhævede retter
    - Separate driftsprogrammer (fx brunch, frokost, aften, bar, drinks, tapas)
@@ -94,6 +96,7 @@ Instruktioner:
 
 Formatér dit svar som ren tekst med tydelige sektioner:
 HAS_MENU: [JA/NEJ]
+PLACE_SYNOPSIS: [1-2 sætninger]
 DESCRIPTION: [tekst]
 CATEGORIES: [kommasepareret liste]
 SIGNATURE_ITEMS: [kommasepareret liste]
@@ -115,7 +118,8 @@ Hvis NEJ til menu, svar kun: "HAS_MENU: NEJ"`
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 2500
+            maxOutputTokens: 2500,
+            thinkingConfig: { thinkingBudget: 0 }
           }
         })
       }
@@ -167,6 +171,9 @@ function parseGeminiResponse(text: string): MenuSignalResult {
     return createEmptyResult()
   }
 
+  const synopsisMatch = text.match(/PLACE_SYNOPSIS:\s*(.+?)(?=\n[A-Z_]+:|$)/s)
+  const placeSynopsis = synopsisMatch?.[1]?.trim().replace(/\n+/g, ' ') || null
+
   // Extract description (multi-line, stops at next section)
   const descMatch = text.match(/DESCRIPTION:\s*(.+?)(?=\n[A-Z_]+:|$)/s)
   const menuDescription = descMatch?.[1]?.trim().replace(/\n+/g, ' ') || null
@@ -208,6 +215,7 @@ function parseGeminiResponse(text: string): MenuSignalResult {
 
   return {
     hasMenu: true,
+    placeSynopsis,
     menuDescription,
     menuCategories: menuCategories && menuCategories.length > 0 ? menuCategories : null,
     signatureItems: signatureItems && signatureItems.length > 0 ? signatureItems : null,
@@ -222,6 +230,7 @@ function parseGeminiResponse(text: string): MenuSignalResult {
 function createEmptyResult(): MenuSignalResult {
   return {
     hasMenu: false,
+    placeSynopsis: null,
     menuDescription: null,
     menuCategories: null,
     signatureItems: null,

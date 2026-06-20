@@ -57,8 +57,13 @@ export {
   buildPromptA,
   buildPromptB,
   buildSystemPromptB,
+  buildClassifyBusinessSystemPrompt,
+  buildClassifyBusinessUserPrompt,
+  buildSegmentAudienceSystemPrompt,
+  buildSegmentAudienceUserPrompt,
   computeAllowedSet
 } from './prompts/index.ts'
+export type { ClassifyBusinessPromptParams, SegmentAudiencePromptParams } from './prompts/index.ts'
 
 // Validators
 export {
@@ -100,8 +105,10 @@ export {
   buildTargetAudienceFallback,
   buildToneOfVoiceFallback,
   buildContentFocusFallback,
+  buildContentStrategyFallback,
   removeBannedWords,
   sanitizeBannedWords,
+  sanitizeString,
   FallbackTier
 } from './fallbacks.ts'
 export type { FallbackContext, FallbackResult } from './fallbacks.ts'

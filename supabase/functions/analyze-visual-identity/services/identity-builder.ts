@@ -23,6 +23,10 @@ interface VisualIdentity {
     };
   };
   recognizable_interior_identity: string;
+  venue_character: string;
+  venue_scene: string;
+  venue_energy: string;
+  guest_situation_type: string;
   signature_visual_elements: string[];
   primary_colors: ColorDefinition[];
 }
@@ -50,6 +54,10 @@ export class IdentityBuilder {
         },
       },
       recognizable_interior_identity: this.buildInteriorIdentity(analysis.venue_description, analysis.recognizable_elements),
+      venue_character: analysis.venue_character || '',
+      venue_scene: analysis.venue_scene || '',
+      venue_energy: analysis.energy_word || '',
+      guest_situation_type: analysis.guest_situation_type || '',
       signature_visual_elements: analysis.recognizable_elements || [],
       primary_colors: colors,
     };

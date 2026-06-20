@@ -8,6 +8,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
 import { MenuAnalyzer } from './services/menu-analyzer.ts';
 import { DatabaseSaver } from './services/database-saver.ts';
+import { detectEffectiveVertical } from '../_shared/business-type-helpers.ts';
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -49,6 +50,26 @@ serve(async (req) => {
 
     if (businessError) throw businessError;
 
+    const { data: brandProfile } = await supabase
+      .from('business_brand_profile')
+      .select('business_character, business_identity_persona, identity_keywords, brand_profile_v5')
+      .eq('business_id', business_id)
+      .maybeSingle();
+
+    const businessIdentityPersona =
+      brandProfile?.brand_profile_v5?.layer_0_intelligence?.business_identity?.system_persona ||
+      brandProfile?.business_identity_persona ||
+      brandProfile?.business_character ||
+      '';
+    const identityKeywords = Array.isArray(brandProfile?.identity_keywords)
+      ? brandProfile.identity_keywords
+      : [];
+    const effectiveBusinessType = detectEffectiveVertical(
+      business.vertical || 'restaurant',
+      businessIdentityPersona,
+      identityKeywords,
+    );
+
     // Step 2: Fetch menu items
     const { data: menuItems, error: menuError } = await supabase
       .from('menu_items')
@@ -76,7 +97,7 @@ serve(async (req) => {
 
     const businessContext = {
       business_name: business.name,
-      business_type: business.vertical,
+      business_type: effectiveBusinessType,
       city: location?.city || 'Unknown',
     };
 

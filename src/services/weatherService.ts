@@ -188,7 +188,7 @@ export function formatWeatherForPrompt(weather: WeatherData): string {
   if (weather.temperature >= 25) {
     lines.push('- Suggestion: Perfect for cold drinks, ice cream, outdoor seating')
   } else if (weather.temperature >= 15 && weather.isGoodWeather) {
-    lines.push('- Suggestion: Good weather for outdoor activities, terrasse dining')
+    lines.push('- Suggestion: Good weather for outdoor activities, outdoor dining')
   } else if (weather.temperature < 10) {
     lines.push('- Suggestion: Perfect for warm drinks, comfort food, cozy atmosphere')
   }

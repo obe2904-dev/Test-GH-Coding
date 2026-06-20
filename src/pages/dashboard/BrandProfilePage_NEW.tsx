@@ -33,7 +33,7 @@ export default function BrandProfilePage() {
     canGenerate
   } = useBrandProfile()
 
-  const { analyzing: analyzingPhotos, checkingStorage, error: photoAnalysisError, recognizableInteriorIdentity, analyze: analyzePhotos, checkAndAutoAnalyze } = useVisualIdentityAnalyzer()
+  const { analyzing: analyzingPhotos, checkingStorage, error: photoAnalysisError, recognizableInteriorIdentity, visualCharacter, venueScene, analyze: analyzePhotos, checkAndAutoAnalyze } = useVisualIdentityAnalyzer()
   const [interiorPhotoPaths, setInteriorPhotoPaths] = useState<string[]>([])
   const [autoAnalysisAttempted, setAutoAnalysisAttempted] = useState(false)
 
@@ -42,7 +42,13 @@ export default function BrandProfilePage() {
     if (recognizableInteriorIdentity) {
       updateField('recognizable_interior_identity', recognizableInteriorIdentity)
     }
-  }, [recognizableInteriorIdentity])
+    if (visualCharacter) {
+      updateField('visual_character', visualCharacter)
+    }
+    if (venueScene) {
+      updateField('venue_scene', venueScene)
+    }
+  }, [recognizableInteriorIdentity, visualCharacter, venueScene])
 
   // Auto-trigger: when businessId is available and the field is empty,
   // check storage once for existing photos and analyze them automatically.
@@ -237,9 +243,21 @@ export default function BrandProfilePage() {
               {checkingStorage ? 'Tjekker for fotos…' : 'Analyserer fotos med AI…'}
             </div>
           ) : form.recognizable_interior_identity ? (
-            <p className="text-xs text-gray-700 bg-teal-50 rounded-lg px-3 py-2 leading-relaxed">
-              {form.recognizable_interior_identity}
-            </p>
+            <div className="space-y-2">
+              {form.visual_character && (
+                <span className="inline-block px-2 py-0.5 text-xs font-medium bg-teal-100 text-teal-800 rounded-full">
+                  {form.visual_character}
+                </span>
+              )}
+              <p className="text-xs text-gray-700 bg-teal-50 rounded-lg px-3 py-2 leading-relaxed">
+                {form.recognizable_interior_identity}
+              </p>
+              {form.venue_scene && (
+                <p className="text-xs text-gray-600 bg-teal-50 rounded-lg px-3 py-2 leading-relaxed italic">
+                  {form.venue_scene}
+                </p>
+              )}
+            </div>
           ) : (
             <p className="text-xs text-gray-400 italic">
               Ikke udfyldt — upload 2–3 fotos nedenfor. AI genererer en atmosfærebeskrivelse der bruges til at skrive mere præcise og levende tekster om dit sted.
@@ -479,36 +497,7 @@ export default function BrandProfilePage() {
             )}
           </div>
 
-          {/* 7. CTA Style ⭐⭐⭐⭐☆ */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-start justify-between gap-4 mb-2">
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                  CTA Style ⭐⭐⭐⭐☆
-                </h3>
-                <p className="text-xs text-gray-600">
-                  {form.cta_style || 'Hvordan skal AI opfordre til handling?'}
-                </p>
-              </div>
-              <button
-                onClick={() => (isEditing('cta_style') ? stopEditing() : startEditing('cta_style'))}
-                className="px-3 py-1.5 text-xs font-medium text-cta hover:text-cta-text hover:bg-cta-surface rounded-md transition-colors"
-              >
-                {isEditing('cta_style') ? 'Luk' : 'Rediger'}
-              </button>
-            </div>
-            {isEditing('cta_style') && (
-              <div className="mt-3 space-y-2">
-                <textarea
-                  value={form.cta_style}
-                  onChange={(e) => updateField('cta_style', e.target.value)}
-                  placeholder="Beskriv jeres foretrukne CTA-stil - f.eks. 'direkte og handlingsorienteret', 'blød og inviterende', 'urgency-baseret'..."
-                  className="w-full h-24 text-xs border border-gray-200 rounded-lg p-2.5 focus:ring-2 focus:ring-cta focus:border-transparent resize-none"
-                />
-                <p className="text-xs text-gray-500">Variabel: <code className="bg-gray-100 px-1 py-0.5 rounded">{'{{cta_style}}'}</code></p>
-              </div>
-            )}
-          </div>
+          {/* 7. CTA Style field removed - property does not exist in BrandProfileForm type */}
 
           {/* 8. Communication Goal ⭐⭐⭐⭐☆ */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -593,7 +582,7 @@ export default function BrandProfilePage() {
             <div className="flex gap-2">
               <button
                 onClick={handleDeleteBrand}
-                disabled={!form.brand_essence && !form.tone_of_voice && !form.target_audience && !form.core_offerings && !form.content_focus && !form.image_preferences && !form.things_to_avoid && !form.cta_style && !form.communication_goal && !form.recognizable_interior_identity}
+                disabled={!form.brand_essence && !form.tone_of_voice && !form.target_audience && !form.core_offerings && !form.content_focus && !form.image_preferences && !form.things_to_avoid && !form.communication_goal && !form.recognizable_interior_identity}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Ryd alt

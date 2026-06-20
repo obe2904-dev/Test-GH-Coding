@@ -3,11 +3,9 @@ import { supabase } from '../../lib/supabase'
 import { useTierStore } from '../../stores/tierStore'
 import { BrandSectionIcon } from '../../components/brandProfile/BrandSectionIcon'
 
-type VoiceStyle = 'casual' | 'professional' | 'friendly' | 'energetic'
 type EmojiUsage = 'none' | 'minimal' | 'moderate' | 'frequent'
 
 interface BrandData {
-  voice_style: VoiceStyle | null
   tone_keywords: string[]
   values: string[]
   emoji_usage: EmojiUsage | null
@@ -22,7 +20,6 @@ function BrandPage() {
   const [isLoading, setIsLoading] = useState(true)
   
   // Brand data
-  const [voiceStyle, setVoiceStyle] = useState<VoiceStyle | null>(null)
   const [toneKeywords, setToneKeywords] = useState<string[]>([])
   const [brandValues, setBrandValues] = useState<string[]>([])
   const [emojiUsage, setEmojiUsage] = useState<EmojiUsage | null>('moderate')
@@ -71,7 +68,6 @@ function BrandPage() {
           .maybeSingle()
 
         if (brandData && isActive) {
-          setVoiceStyle((brandData.voice_style as VoiceStyle) || null)
           setToneKeywords(brandData.tone_keywords || [])
           setBrandValues(brandData.values || [])
           setEmojiUsage(((brandData as any).emoji_usage as EmojiUsage) || 'moderate')
@@ -109,7 +105,7 @@ function BrandPage() {
     }, 2000)
 
     return () => clearTimeout(timer)
-  }, [hasUnsavedChanges, voiceStyle, toneKeywords, brandValues, emojiUsage, formalityLevel, doNotSay])
+  }, [hasUnsavedChanges, toneKeywords, brandValues, emojiUsage, formalityLevel, doNotSay])
 
   const handleAutoSave = async () => {
     if (!businessId) return
@@ -118,7 +114,6 @@ function BrandPage() {
       setIsSaving(true)
 
       const brandData: Partial<BrandData> = {
-        voice_style: voiceStyle,
         tone_keywords: toneKeywords,
         values: brandValues,
         emoji_usage: emojiUsage,
@@ -167,11 +162,6 @@ function BrandPage() {
       }
       return next
     })
-  }
-
-  const handleVoiceStyleChange = (style: VoiceStyle) => {
-    setVoiceStyle(style)
-    setHasUnsavedChanges(true)
   }
 
   const handleAddToneKeyword = () => {
@@ -297,8 +287,7 @@ function BrandPage() {
                 <h2 className="text-sm font-semibold text-gray-900">Stemme & Tone</h2>
                 {!expandedSections.has('voice') && (
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {voiceStyle ? getVoiceStyleLabel(voiceStyle) : 'Ikke valgt'}
-                    {toneKeywords.length > 0 && ` • ${toneKeywords.slice(0, 3).join(', ')}${toneKeywords.length > 3 ? '...' : ''}`}
+                    {toneKeywords.length > 0 ? `${toneKeywords.slice(0, 3).join(', ')}${toneKeywords.length > 3 ? '...' : ''}` : 'Ingen tone beskrivelser'}
                   </p>
                 )}
               </div>
@@ -307,39 +296,6 @@ function BrandPage() {
 
             {expandedSections.has('voice') && (
               <div className="px-4 py-3 border-t border-gray-200 space-y-4">
-                {/* Voice Style Radio Buttons */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Vælg din brands stemme
-                  </label>
-                  <div className="space-y-2">
-                    {[
-                      { value: 'casual', label: 'Casual & Afslappet', desc: 'Uformel, let tilgængelig, personlig' },
-                      { value: 'professional', label: 'Professionel & Troværdig', desc: 'Seriøs, kompetent, pålidelig' },
-                      { value: 'friendly', label: 'Venlig & Inkluderende', desc: 'Varm, imødekommende, omsorgsfuld' },
-                      { value: 'energetic', label: 'Energisk & Sjov', desc: 'Levende, entusiastisk, underholdende' }
-                    ].map((option) => (
-                      <label
-                        key={option.value}
-                        className="flex items-start gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50"
-                      >
-                        <input
-                          type="radio"
-                          name="voiceStyle"
-                          value={option.value}
-                          checked={voiceStyle === option.value}
-                          onChange={() => handleVoiceStyleChange(option.value as VoiceStyle)}
-                          className="mt-1"
-                        />
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">{option.label}</div>
-                          <div className="text-xs text-gray-500">{option.desc}</div>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
                 {/* Tone Keywords */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -564,16 +520,6 @@ function BrandPage() {
 }
 
 // Helper functions
-function getVoiceStyleLabel(style: VoiceStyle): string {
-  const labels: Record<VoiceStyle, string> = {
-    casual: 'Casual & Afslappet',
-    professional: 'Professionel & Troværdig',
-    friendly: 'Venlig & Inkluderende',
-    energetic: 'Energisk & Sjov'
-  }
-  return labels[style] || style
-}
-
 function getEmojiUsageLabel(usage: EmojiUsage): string {
   const labels: Record<EmojiUsage, string> = {
     none: 'Ingen emojis',

@@ -19,11 +19,12 @@ export function validateStrategyOutput(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // CRITICAL: Structure checks
+  // CRITICAL: Structure checks (Phase 2 output validation)
+  // Note: strategic_priorities is built in generator AFTER this validation,
+  // so it's not present in raw Phase 2 output and should not be checked here.
   if (!raw.narrative?.headline) errors.push('Mangler headline');
   if (!raw.narrative?.overview) errors.push('Mangler overview');
   if (!Array.isArray(raw.post_ideas)) errors.push('post_ideas er ikke et array');
-  if (!Array.isArray(raw.strategic_priorities)) errors.push('strategic_priorities er ikke et array');
 
   if (errors.length > 0) return { passed: false, critical_errors: errors, warnings };
 
@@ -60,52 +61,13 @@ export function validateStrategyOutput(
       .filter(Boolean)
   );
 
-  // CRITICAL: Strategic priorities reference Phase 1 angles
-  if (raw.strategic_priorities) {
-    raw.strategic_priorities.forEach((priority: any, index: number) => {
-      const focus = priority.focus;
-      if (!focus || typeof focus !== 'string' || focus.trim().length === 0) {
-        errors.push(`Strategic priority at index ${index} missing or invalid focus value`);
-        return;
-      }
-      if (briefAngleFocuses.size > 0 && !briefAngleFocuses.has(focus.trim())) {
-        errors.push(
-          `Strategic priority "${focus}" does not match any Phase 1 angle focus. Must be one of: ${Array.from(briefAngleFocuses).join(' | ')}`
-        );
-      }
-    });
-  }
-
-  // AUTO-CORRECT: Max 3 strategic priorities
-  if (raw.strategic_priorities && raw.strategic_priorities.length > 3) {
-    console.warn(`[Layer 0] Too many priorities (${raw.strategic_priorities.length}), merging to 3`);
-    warnings.push(`${raw.strategic_priorities.length} prioriteter reduceret til 3`);
-    raw.strategic_priorities.sort((a: any, b: any) => (b.weight || 0) - (a.weight || 0));
-    const kept = raw.strategic_priorities.slice(0, 3);
-    const removed = raw.strategic_priorities.slice(3);
-    const removedWeight = removed.reduce((sum: number, p: any) => sum + (p.weight || 0), 0);
-    kept[2].weight = Math.round((kept[2].weight + removedWeight) * 100) / 100;
-    raw.strategic_priorities = kept;
-  }
-
-  // AUTO-CORRECT: Normalize strategic weights to sum to 1.0
-  const weightSum = raw.strategic_priorities.reduce((sum: number, p: any) => sum + (p.weight || 0), 0);
-  if (Math.abs(weightSum - 1.0) > 0.001) {
-    if (weightSum > 0) {
-      warnings.push(`Strategiske vægte summerede til ${weightSum.toFixed(2)}, normaliseret til 1.0`);
-      raw.strategic_priorities.forEach((p: any) => {
-        p.weight = Math.round((p.weight / weightSum) * 1000) / 1000;
-      });
-      // Fix rounding drift on last element
-      const newSum = raw.strategic_priorities.reduce((s: number, p: any) => s + p.weight, 0);
-      if (Math.abs(newSum - 1.0) > 0.001) {
-        raw.strategic_priorities[raw.strategic_priorities.length - 1].weight =
-          Math.round((raw.strategic_priorities[raw.strategic_priorities.length - 1].weight + (1.0 - newSum)) * 1000) / 1000;
-      }
-    } else {
-      errors.push(`Strategiske vægte summerer til ${weightSum.toFixed(2)}, kan ikke normalisere`);
-    }
-  }
+  // NOTE: strategic_priorities validation removed.
+  // strategic_priorities is now built in generator (weekly-strategy-generator.ts) AFTER this validation,
+  // directly from strategicBrief.angles which are already validated in Phase 1.
+  // No need to re-validate here since:
+  // - Focus matching: always matches (built from strategicBrief.angles.focus)
+  // - Max 3 priorities: enforced in Phase 1 slot allocation
+  // - Weight normalization: inherited from Phase 1 angle weights
 
   // CRITICAL: Dates within available days
   const availableDates = new Set(context.available_days);
@@ -150,8 +112,10 @@ export function validateStrategyOutput(
   });
 
   // CRITICAL: Each post references a Phase 1 angle
+  // Exception: OWNER_NOTE slots are injected after Phase 1 and use the owner note as angle_focus — skip them.
   if (briefAngleFocuses.size > 0 && Array.isArray(raw.post_ideas)) {
     raw.post_ideas.forEach((idea: any) => {
+      if (idea?.slot_id === 'OWNER_NOTE') return; // owner-injected slot — bypass angle validation
       const angleFocus = idea?.angle_focus;
       if (!angleFocus || typeof angleFocus !== 'string' || angleFocus.trim().length === 0) {
         errors.push(`Post-idé "${idea?.title || '(uden titel)'}" mangler angle_focus`);
@@ -166,10 +130,12 @@ export function validateStrategyOutput(
   }
 
   // WARNING: Post distribution vs Phase 1 weights
+  // Exclude OWNER_NOTE slots from the distribution check — they are bonus posts outside the plan count.
   if (strategicBrief?.angles?.length && Array.isArray(raw.post_ideas) && raw.post_ideas.length > 0) {
-    const N = raw.post_ideas.length;
+    const regularIdeas = raw.post_ideas.filter((idea: any) => idea?.slot_id !== 'OWNER_NOTE');
+    const N = regularIdeas.length;
     const actual = new Map<string, number>();
-    for (const idea of raw.post_ideas) {
+    for (const idea of regularIdeas) {
       const k = String(idea?.angle_focus || '').trim();
       if (!k) continue;
       actual.set(k, (actual.get(k) || 0) + 1);

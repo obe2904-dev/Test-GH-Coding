@@ -1,5 +1,13 @@
 /**
  * Tone-safe naturalness pass using gpt-4o-mini.
+ * 
+ * VERSION: v5.1.6 (2026-06-14)
+ * 
+ * v5.1.6 CRITICAL FIX: Added explicit guard for subordinate clauses
+ *   - Prevents truncation of grammatically correct compound sentences
+ *   - Example bug: "Vi har åbent, og du er velkommen, når du er klar" → "Vi har åbent, og."
+ *   - Root cause: Rule #5 was treating "når" clauses as incomplete sentences
+ *   - Fix: Added CRITICAL note after Rule #5 to preserve sentences with når/da/mens/selvom/fordi/eftersom
  *
  * Approach: holistic native-reader evaluation, NOT a rule checklist.
  * The model reads the text as a native speaker would and identifies anything
@@ -40,21 +48,33 @@ When in doubt about whether something is wrong — respond PASS. Only fix what i
 
 You may NEVER:
 - Change tone, style, or writing register
-- Rephrase or restructure sentences  
+- Rephrase or restructure sentences unless required by one of the explicit fixes below
 - Change word choices unless they are clearly unnatural to a native speaker
 - Alter CTA text, emojis, or hashtags
-- Add or remove sentences
+- Add or remove sentences unless required by one of the explicit fixes below
 
-One additional fix you MUST make if present:
-- " - " or " – " used as a stylistic connector between sentence parts (e.g. "great food – great vibe – book now") is an AI writing tell. Replace it with natural sentence structure. This is the only restructuring you are allowed to perform.${toneGuard}`
+Additional fixes you MUST make if present (these are the ONLY exceptions to the rules above):
+1. " - ", " – ", or " — " (hyphen, en-dash, or em-dash) used as a stylistic connector between sentence parts (e.g. "great food — great vibe — book now", "Vi har åbent — og du er velkommen") is an AI writing tell. Replace with proper sentence structure (use period + capital letter).
+2. A period appearing mid-sentence where the following word is lowercase (e.g. "Smagen er. fantastisk" → "Smagen er fantastisk"). Remove the misplaced period.
+3. A sentence that ends abruptly with an open conjunction or preposition (with or without emoji), leaving it grammatically incomplete (e.g. "Kom og", "Tag med til", "Vi har åbent. Og 🥑."). Remove the incomplete fragment entirely — do not try to complete it. Examples:
+   - "Vi har åbent. Og 🥑." → "Vi har åbent."
+   - "Kom forbi. Men" → "Kom forbi."
+   - "Tag med til" → "Tag med."
+4. Danish compound words split with hyphen where they should be joined (e.g. "menu-kort" → "menukort", "brunch-tilbud" → "brunchtilbud", "morgen-mad" → "morgenmad"). Join them unless it's a proper noun or a compound that requires hyphen by Danish orthography rules (e.g. "e-mail", "non-stop" are correct with hyphen).
+5. Run-on sentence: two independent clauses joined without proper punctuation (e.g. "Køkkenet lukker tidligt baren holder" should be "Køkkenet lukker tidligt — baren holder åben" or split into two sentences). Insert appropriate punctuation (em dash, period, or semicolon) and complete any incomplete clause.
+
+CRITICAL: Sentences containing subordinate clauses introduced by "når", "mens", "da", "selvom", "fordi", "eftersom" are NOT incomplete or run-on sentences — these are grammatically correct compound sentences. Do NOT truncate them. Example: "Vi har åbent, og du er velkommen, når du er klar" is a complete, correct sentence. DO NOT change it.${toneGuard}`
 
   try {
+    const scController = new AbortController()
+    const scTimeoutId = setTimeout(() => scController.abort(), 8000)
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`
       },
+      signal: scController.signal,
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         messages: [
@@ -65,6 +85,7 @@ One additional fix you MUST make if present:
         max_tokens: 400
       })
     })
+    clearTimeout(scTimeoutId)
     if (!res.ok) return text
     const data = await res.json()
     const result = data.choices?.[0]?.message?.content?.trim()

@@ -1,8 +1,9 @@
+// v7
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { generateWeeklyPlan, saveWeeklyPlan } from '../_shared/post-helpers/weekly-plan-generator.ts'
 import { validateStrategyFeasibility, buildCapabilitiesFromProfile, formatValidationReport } from '../_shared/post-helpers/strategy-feasibility-validator.ts'
-import { getWeatherForecast } from '../_shared/post-helpers/weather.ts'
+import { countryToLanguageCode } from '../_shared/helpers/country-to-language.ts'
 
 // v1.7 - Enhanced with opening_hours table and menu service periods extraction
 // v1.8 - V17 Robustness: GPT-4o + positive framing + validation (hotfix2: model tracking)
@@ -98,11 +99,10 @@ function buildWeeklyPlanInput(opts: {
   resolvedTier: 'smart' | 'pro'
   strategy: any
   strategyId: string | undefined
-  selectedIdeaIds: string[] | undefined
+  selectedIdeaIds: number[] | undefined
   weekStart: string
   contextEvents?: any[]
   previousPlans?: any[]
-  weatherForecast?: any[]
 }) {
   return {
     businessId: opts.business.id,
@@ -125,10 +125,17 @@ function buildWeeklyPlanInput(opts: {
     strategyId: opts.strategyId,
     selectedIdeaIds: opts.selectedIdeaIds,
     subscriptionTier: opts.resolvedTier,
-    targetPostCount: opts.resolvedTier === 'smart' ? 4 : (opts.strategy?.target_post_count ?? 4),
+    targetPostCount: opts.resolvedTier === 'smart' ? 3 : (opts.strategy?.target_post_count ?? 3),
     contextEvents: opts.contextEvents ?? [],
-    weatherForecast: opts.weatherForecast || [],
   }
+}
+
+function normalizeSelectedIdeaIds(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const normalized = value
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0)
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -141,6 +148,7 @@ serve(async (req) => {
   try {
     // Parse request body first so we can decide which client to create
     const { weekStart, regenerate = false, strategy_id, selected_idea_ids, business_id, skip_validation = false } = await req.json()
+    const normalizedSelectedIdeaIds = normalizeSelectedIdeaIds(selected_idea_ids)
 
     // Two distinct auth paths:
     //   1. User auth: anon key + forwarded JWT → RLS enforces ownership
@@ -180,6 +188,13 @@ serve(async (req) => {
 
     if (!weekStart) {
       return new Response(JSON.stringify({ error: 'weekStart is required' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 400,
+      })
+    }
+
+    if (!strategy_id) {
+      return new Response(JSON.stringify({ error: 'strategy_id is required — legacy Path B has been removed' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400,
       })
@@ -257,7 +272,10 @@ serve(async (req) => {
       
       if (strategyError || !strategyData) {
         console.error('[generate-weekly-plan] ❌ Strategy not found or error:', strategy_id, strategyError)
-        // Fall through to legacy path (strategy remains undefined)
+        return new Response(JSON.stringify({ error: 'Strategy not found', strategy_id }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400,
+        })
       } else {
         strategyId = strategyData.id
         
@@ -299,7 +317,7 @@ serve(async (req) => {
           has_priorities: !!strategy.strategic_priorities,
           post_ideas_count: Array.isArray(strategy.post_ideas) ? strategy.post_ideas.length : 0,
           will_use_strategy_path: !!strategy && Array.isArray(strategy.post_ideas) && strategy.post_ideas.length > 0,
-          selected: selected_idea_ids || 'all',
+          selected: normalizedSelectedIdeaIds || 'all',
         })
       }
     }
@@ -317,7 +335,9 @@ serve(async (req) => {
     let brandProfile: any
     let businessProfile: any
     let locationIntel: any
+    let menuItemsNormalized: any[] | null
     let menuItemsRaw: any[] | null
+    let businessProgrammes: any[] | null
     let businessOps: any
     let openingHoursRaw: any[] | null
     let recentPlansRaw: any[] | null
@@ -325,22 +345,25 @@ serve(async (req) => {
     if (hasSnap) {
       // Reconstruct brandProfile-compatible object from the snapshot's brand_voice block
       const bv = snap.brand_voice ?? {}
+      // NEW (June 12, 2026): Use flattened voice_guardrails, fallback to nested structure
+      const guardrails = (snap as any).voice_guardrails || bv.brand_profile_v5?.guardrails || {}
+      
       brandProfile = {
         tone_model: bv.tone_model ?? null,
         tone_of_voice: bv.tone_of_voice ?? null,
         brand_essence: bv.brand_essence ?? '',
         brand_essence_elaboration: bv.brand_essence_elaboration ?? null,
-        target_audience: bv.target_audience ?? null,
-        business_character: snap.business_character ?? null,
+        // NEW (June 12, 2026): Use flattened business_identity_persona, fallback to nested
+        business_character: (snap as any).business_identity_persona || snap.business_character || null,
         booking_link: snap.booking_link ?? null,
         content_strategy: bv.content_strategy ?? null,
-        signature_phrases: bv.signature_phrases ?? [],
         never_say: bv.never_say ?? [],
         typical_openings: bv.typical_openings ?? [],
-        typical_closings: bv.typical_closings ?? [],
-        humor_level: bv.humor_level ?? 'moderate',
-        voice_constraints: bv.voice_constraints ?? null,
-        identity_keywords: bv.identity_keywords ?? null,
+        audience_segments: bv.audience_segments ?? null,
+        // CRITICAL: Forbidden phrases enforcement (customer-facing posts)
+        forbidden_phrases: guardrails.forbidden_phrases ?? [],
+        technical_terms: guardrails.technical_terms ?? [],
+        weather_cliches: guardrails.weather_cliches ?? [],
       }
 
       // Reconstruct businessProfile-compatible minimal object (only menu_signal used in Layer 1)
@@ -367,18 +390,67 @@ serve(async (req) => {
         has_outdoor_seating: loc.has_outdoor_seating ?? false,
         has_takeaway: loc.has_takeaway ?? false,
         has_table_service: loc.has_table_service ?? false,
+        // Booking model — required for CTA selection in plan generator
+        reservation_required: snap.booking_model?.reservation_required ?? false,
+        accepts_walk_ins: snap.booking_model?.accepts_walk_ins ?? true,
+        has_booking_link: snap.booking_model?.has_booking_link ?? false,
+        booking_link: snap.booking_link ?? null,
       }
 
-      // Reconstruct menu items from snapshot signature_items (name + description enough for Layer 1)
-      // Full per-dish DB lookups happen later in mapIdeaToEnrichedSlot via menu_items_normalized.
-      menuItemsRaw = (snap.signature_items ?? []).map((item: any) => ({
-        name: item.name ?? item.item_name ?? '',
-        description: item.description ?? item.item_description ?? '',
-        price: item.price ?? '',
-        is_signature: true,
-        service_periods: item.service_period ? [item.service_period] : (item.service_periods ?? []),
-        structured_data: null, // Not needed for Path A
-      }))
+      // Fetch menu_items_normalized live — the snapshot's signature_items lack service_period
+      // metadata needed for service-period filtering and deriveServicePeriods(). Without this,
+      // servicePeriods ends up empty and primaryServicePeriod defaults to 'lunch', causing
+      // dish selection to be biased toward lunch regardless of the weekly strategy.
+      // Also fetch menu_result_ids filtered to local language so foreign-language menus are excluded.
+      const businessLangSnap = (() => {
+        const COUNTRY_TO_LANG: Record<string, string> = { DK: 'da', NO: 'no', SE: 'sv', FI: 'fi', IS: 'is', DE: 'de', FR: 'fr', ES: 'es', IT: 'it', NL: 'nl' };
+        const rawCountry = (snap.country || 'DK').toUpperCase();
+        return COUNTRY_TO_LANG[rawCountry] ?? 'da';
+      })();
+      const [{ data: _localMenuResults }, { data: _opsLang }] = await Promise.all([
+        supabaseClient
+          .from('menu_results_v2')
+          .select('id, language_code')
+          .eq('business_id', business.id)
+          .eq('status', 'done'),
+        supabaseClient
+          .from('business_operations')
+          .select('enabled_menu_languages')
+          .eq('business_id', business.id)
+          .maybeSingle(),
+      ]);
+      // Smart: local language only. Pro: uses enabled_menu_languages if set.
+      const allowedLangsSnap: string[] = Array.isArray(_opsLang?.enabled_menu_languages) && _opsLang.enabled_menu_languages.length > 0
+        ? _opsLang.enabled_menu_languages as string[]
+        : [businessLangSnap];
+      const localMenuResultIdsSnap = new Set<string>(
+        (_localMenuResults ?? [])
+          .filter((r: any) => !r.language_code || allowedLangsSnap.includes(r.language_code))
+          .map((r: any) => r.id)
+      );
+      console.log(`[generate-weekly-plan] Language filter (snap path): allowed=${allowedLangsSnap.join(',')}, local_ids=${localMenuResultIdsSnap.size}/${(_localMenuResults ?? []).length}`);
+
+      const { data: _menuItemsNorm } = await supabaseClient
+        .from('menu_items_normalized')
+        .select('item_name, item_description, service_periods, service_period_name, menu_result_id')
+        .eq('business_id', business.id)
+        .eq('is_active', true)
+      // Filter to local-language menus only
+      menuItemsNormalized = (_menuItemsNorm ?? []).filter(
+        (item: any) => !item.menu_result_id || localMenuResultIdsSnap.size === 0 || localMenuResultIdsSnap.has(item.menu_result_id)
+      )
+      console.log(`[generate-weekly-plan] menu_items_normalized: ${_menuItemsNorm?.length ?? 0} total → ${menuItemsNormalized.length} after language filter`)
+      businessProgrammes = [] // Not available in snapshot
+      menuItemsRaw = menuItemsNormalized.length > 0
+        ? [] // will be processed from menuItemsNormalized below
+        : (snap.signature_items ?? []).map((item: any) => ({
+          name: item.name ?? item.item_name ?? '',
+          description: item.description ?? item.item_description ?? '',
+          price: item.price ?? '',
+          is_signature: true,
+          service_periods: item.service_period ? [item.service_period] : (item.service_periods ?? []),
+          structured_data: null,
+        }))
 
       // Reconstruct opening hours raw rows from daily_open_time / daily_close_time maps
       const openTimes: Record<string, string | null> = snap.daily_open_time ?? {}
@@ -404,34 +476,140 @@ serve(async (req) => {
       recentPlansRaw = _recentPlans
       console.log('[generate-weekly-plan] ⚡ Snapshot shortcut: skipped 6 DB queries (using week_context_snapshot)')
     } else {
-      // No snapshot available — fetch everything from DB (legacy Path B or first-ever plan)
+      // Detect language for filtering menu results
+      const countryToLanguage: Record<string, string> = { DK: 'da', NO: 'no', SE: 'sv', DE: 'de', FR: 'fr', ES: 'es', IT: 'it' }
+      const language = business.primary_language || countryToLanguage[business.country] || 'da'
+      console.log(`[generate-weekly-plan] 🌐 Language detected: ${language} (from ${business.primary_language ? 'business.primary_language' : 'country mapping'})`)
+      
+      // No snapshot available — fetch everything from DB (strategy exists but has no snapshot yet)
       const [
         { data: _brandProfile },
         { data: _businessProfile },
         { data: _locationIntel },
+        { data: _menuItemsNormalized },
         { data: _menuItemsRaw },
+        { data: _businessProgrammes },
         { data: _businessOps },
         { data: _openingHoursRaw },
         { data: _recentPlansRaw },
       ] = await Promise.all([
-        supabaseClient.from('business_brand_profile').select('*').eq('business_id', business.id).single(),
+        supabaseClient.from('business_brand_profile').select('*, voice_guardrails, business_identity_persona').eq('business_id', business.id).single(),
         supabaseClient.from('business_profile').select('*').eq('business_id', business.id).single(),
         supabaseClient.from('business_location_intelligence').select('*').eq('business_id', business.id).single(),
-        supabaseClient.from('menu_results_v2').select('*').eq('business_id', business.id),
+        supabaseClient.from('menu_items_normalized').select('item_name, item_description, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', business.id).eq('menu_language', countryToLanguageCode(business.country)),
+        // Fetch all statuses, filter by language below (so we have IDs to cross-reference)
+        supabaseClient.from('menu_results_v2').select('id, language_code, structured_data, service_periods, is_signature, ai_summary, source_url, service_period_name').eq('business_id', business.id).eq('status', 'done'),
+        supabaseClient.from('business_programme_profiles').select('programme_type, programme_name, time_windows, operating_days, is_active').eq('business_id', business.id).eq('is_active', true),
         supabaseClient.from('business_operations').select('*').eq('business_id', business.id).single(),
         supabaseClient.from('opening_hours').select('*').eq('business_id', business.id).order('weekday'),
         supabaseClient.from('weekly_content_plans').select('posts, week_start, generated_at').eq('business_id', business.id).neq('week_start', weekStart).order('generated_at', { ascending: false }).limit(3),
       ])
+      // Apply language filter: Pro uses enabled_menu_languages, Smart falls back to local language
+      const allowedLangsNoSnap: string[] = Array.isArray(_businessOps?.enabled_menu_languages) && _businessOps.enabled_menu_languages.length > 0
+        ? _businessOps.enabled_menu_languages as string[]
+        : [language];
+      const localMenuResultIdsNoSnap = new Set<string>(
+        (_menuItemsRaw ?? [])
+          .filter((r: any) => !r.language_code || allowedLangsNoSnap.includes(r.language_code))
+          .map((r: any) => r.id)
+      );
+      console.log(`[generate-weekly-plan] Language filter (no-snap path): allowed=${allowedLangsNoSnap.join(',')}, local_ids=${localMenuResultIdsNoSnap.size}/${(_menuItemsRaw ?? []).length}`);
       brandProfile = _brandProfile
       businessProfile = _businessProfile
       locationIntel = _locationIntel
-      menuItemsRaw = _menuItemsRaw
+      // Filter menu_items_normalized to local-language menus only
+      menuItemsNormalized = (_menuItemsNormalized ?? []).filter(
+        (item: any) => !item.menu_result_id || localMenuResultIdsNoSnap.size === 0 || localMenuResultIdsNoSnap.has(item.menu_result_id)
+      )
+      // Filter menu_results_v2 to local-language menus only
+      menuItemsRaw = (_menuItemsRaw ?? []).filter((r: any) => !r.language_code || allowedLangsNoSnap.includes(r.language_code))
+      businessProgrammes = _businessProgrammes
       businessOps = _businessOps
       openingHoursRaw = _openingHoursRaw
       recentPlansRaw = _recentPlansRaw
     }
 
-    // Resolve tier: PATH A uses strategy tier, PATH B uses the already-fetched business record
+    // Build active programme types and names for filtering
+    const activeProgrammeTypes = new Set<string>();
+    const activeProgrammeNames = new Set<string>();
+    
+    if (businessProgrammes && businessProgrammes.length > 0) {
+      businessProgrammes.forEach((prog: any) => {
+        if (prog.programme_type) {
+          activeProgrammeTypes.add(prog.programme_type.toLowerCase());
+        }
+        if (prog.programme_name) {
+          activeProgrammeNames.add(prog.programme_name.toLowerCase());
+        }
+      });
+      console.log('[generate-weekly-plan] Active programmes:', {
+        types: Array.from(activeProgrammeTypes),
+        names: Array.from(activeProgrammeNames)
+      });
+    }
+    
+    // Build unified menu data with cascade: menu_items_normalized → menu_results_v2
+    let menuDataSource = 'none';
+    const processedMenuForWeekly: any[] = [];
+    
+    if (menuItemsNormalized && menuItemsNormalized.length > 0) {
+      // Primary source: menu_items_normalized (already cleaned, 100 items)
+      menuDataSource = 'menu_items_normalized';
+      
+      // Convert to menu_results_v2 compatible format and filter by active programmes
+      menuItemsNormalized.forEach((item: any) => {
+        // Parse service_periods if it's a string
+        let periods = item.service_periods;
+        if (typeof periods === 'string') {
+          try {
+            periods = JSON.parse(periods);
+          } catch (e) {
+            console.warn(`Failed to parse service_periods for ${item.item_name}:`, periods);
+            periods = [];
+          }
+        }
+        
+        // Check if item matches any active programme
+        const matchesActiveProgramme = !periods || periods.length === 0 || 
+          periods.some((period: string) => {
+            const periodLower = period.toLowerCase();
+            return activeProgrammeTypes.has(periodLower) || activeProgrammeNames.has(periodLower);
+          });
+        
+        if (matchesActiveProgramme) {
+          // Convert to menu_results_v2 format for compatibility
+          processedMenuForWeekly.push({
+            name: item.item_name,
+            description: item.item_description || '',
+            service_periods: periods || [],
+            service_period_name: item.service_period_name,
+            is_signature: false,
+            structured_data: {
+              menuStructure: [{
+                name: item.service_period_name || 'Main Menu',
+                items: [{
+                  name: item.item_name,
+                  description: item.item_description || '',
+                }]
+              }]
+            }
+          });
+        }
+      });
+      
+      console.log(`🍽️  Menu: ${menuItemsNormalized.length} total → ${processedMenuForWeekly.length} available for active programmes`);
+    }
+    
+    // If no menu_items_normalized, use menuItemsRaw (from menu_results_v2 or snapshot)
+    if (processedMenuForWeekly.length === 0 && menuItemsRaw && menuItemsRaw.length > 0) {
+      menuDataSource = 'menu_results_v2';
+      processedMenuForWeekly.push(...menuItemsRaw);
+      console.log(`⚠️  No menu_items_normalized found, using menu_results_v2/snapshot: ${menuItemsRaw.length} items`);
+    }
+    
+    console.log('[generate-weekly-plan] Menu data source:', menuDataSource, `(${processedMenuForWeekly.length} items)`);
+
+    // Resolve tier: from strategy, fallback to business record
     const resolvedTier: 'smart' | 'pro' = strategy?.subscription_tier
       ? (strategy.subscription_tier as 'smart' | 'pro')
       : (business.subscription_tier === 'pro' ? 'pro' : 'smart')
@@ -439,16 +617,16 @@ serve(async (req) => {
     // Filter out price-modifier add-ons (e.g. "GLUTENFRI PASTA +20,-", "EKSTRA SOVS +10")
     // These are option additions scraped alongside real dishes and pollute content ideas.
     // Modifier pattern: item name contains "+<digits>" anywhere (price add-on suffix).
-    const menuItems = (menuItemsRaw || []).filter((item: any) => {
+    const menuItems = (processedMenuForWeekly || []).filter((item: any) => {
       const name = (item.name || '').trim()
       return !/\+\d/.test(name)
     })
 
-    if ((menuItemsRaw?.length || 0) > menuItems.length) {
+    if ((processedMenuForWeekly?.length || 0) > menuItems.length) {
       console.log('[Layer 1] Filtered out menu modifier items:', {
-        before: menuItemsRaw?.length,
+        before: processedMenuForWeekly?.length,
         after: menuItems.length,
-        removed: (menuItemsRaw?.length || 0) - menuItems.length,
+        removed: (processedMenuForWeekly?.length || 0) - menuItems.length,
       })
     }
 
@@ -479,28 +657,19 @@ serve(async (req) => {
       console.log('[Layer 1] Previous plans found:', previousPlans.length, '— recently featured:', allDishes.join(', '))
     }
 
-    // Fetch 7-day weather forecast (non-blocking — falls back to [] if API key missing)
-    const city = (locationIntel as any)?.neighborhood || (locationIntel as any)?.city || ''
-    let weatherForecast: any[] = []
-    if (city) {
-      try {
-        weatherForecast = await getWeatherForecast(city, 7)
-        console.log('[Layer 1] Weather forecast fetched:', weatherForecast.length, 'days for', city)
-      } catch (weatherErr) {
-        console.warn('[Layer 1] Weather fetch failed (non-fatal):', (weatherErr as Error).message)
-      }
-    }
-
     const selectedPlatforms = business.selected_platforms || ['instagram', 'facebook']
 
     // Check for existing plan
     if (!regenerate) {
-      const { data: existingPlan } = await supabaseClient
+      const { data: existingPlans } = await supabaseClient
         .from('weekly_content_plans')
         .select('*')
         .eq('business_id', business.id)
         .eq('week_start', weekStart)
-        .single()
+        .order('generated_at', { ascending: false })
+        .limit(1)
+
+      const existingPlan = existingPlans?.[0]
 
       if (existingPlan) {
         // Transform database snake_case to camelCase for frontend
@@ -537,11 +706,10 @@ serve(async (req) => {
       resolvedTier,
       strategy,
       strategyId,
-      selectedIdeaIds: selected_idea_ids || (Array.isArray(strategy?.post_ideas) ? strategy.post_ideas.map((i: any) => i.id) : undefined),
+      selectedIdeaIds: normalizedSelectedIdeaIds || (Array.isArray(strategy?.post_ideas) ? strategy.post_ideas.map((i: any) => i.id) : undefined),
       weekStart,
       contextEvents,
       previousPlans,
-      weatherForecast,
     })
 
     // Enhanced logging for debugging
@@ -626,8 +794,8 @@ serve(async (req) => {
       })
       
       // Filter to selected ideas
-      const selectedIdeas = selected_idea_ids
-        ? strategy.post_ideas.filter((idea: any) => selected_idea_ids.includes(idea.id))
+      const selectedIdeas = normalizedSelectedIdeaIds
+        ? strategy.post_ideas.filter((idea: any) => normalizedSelectedIdeaIds.includes(idea.id))
         : strategy.post_ideas
       
       // Run validation
@@ -669,7 +837,7 @@ serve(async (req) => {
       
       console.log('[FeasibilityCheck] ✅ Validation passed, proceeding to Layer 6')
     } else {
-      console.log('[FeasibilityCheck] Skipping validation:', skip_validation ? 'skip_validation=true' : 'PATH B - legacy flow')
+      console.log('[FeasibilityCheck] Skipping validation: skip_validation=true')
     }
 
     // ========================================================================
@@ -687,13 +855,27 @@ serve(async (req) => {
         // This ensures RLS never silently blocks status updates or inserts.
         const plan = await generateWeeklyPlan(input, bgClient)
 
+        // Derive the actually executed idea IDs from generated posts.
+        // This is the source of truth for downstream status + suggestion persistence.
+        const executedIdeaIds = Array.from(new Set(
+          (plan.posts || [])
+            .map((p: any) => Number(p.idea_id))
+            .filter((id: number) => Number.isInteger(id) && id > 0)
+        ))
+
+        const ideasForSuggestions = Array.isArray(strategy?.post_ideas)
+          ? strategy.post_ideas.filter((idea: any) => executedIdeaIds.includes(Number(idea?.id)))
+          : undefined
+
         console.log('[Edge Function] Plan generated:', {
           weekNumber: plan.weekNumber,
           postsCount: plan.posts.length,
           summary: plan.summary,
+          executedIdeaIds,
         })
 
-        const saveResult = await saveWeeklyPlan(plan, bgClient)
+        // Pass only the executed ideas so daily_suggestions matches what was actually selected/generated.
+        const saveResult = await saveWeeklyPlan(plan, bgClient, ideasForSuggestions)
 
         if (!saveResult.success) {
           console.error('Failed to save plan:', saveResult.error)
@@ -705,7 +887,7 @@ serve(async (req) => {
             .from('weekly_strategies')
             .update({
               status: 'posts_created',
-              selected_idea_ids: selected_idea_ids || (Array.isArray(strategy.post_ideas) ? strategy.post_ideas.map((i: any) => i.id) : []),
+              selected_idea_ids: executedIdeaIds,
             })
             .eq('id', strategyId)
 
@@ -743,7 +925,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       status: 'generating',
       strategy_id: strategyId ?? null,
-      poll: strategyId ? 'weekly_strategies' : 'weekly_content_plans',
+      poll: 'weekly_strategies',
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 202,

@@ -2,11 +2,14 @@
 -- Date: 2025-11-21
 -- Purpose: Support multiple business verticals (salons, gyms, etc.) beyond just food & drink
 
+-- Enable UUID extension
+
+
 -- =====================================================
 -- SERVICE LIST (for salons, spas, gyms, professional services)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS business_services (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   
   -- Service details
@@ -43,7 +46,7 @@ CREATE INDEX idx_business_services_category ON business_services(business_id, ca
 -- STAFF/TEAM MEMBERS (stylists, trainers, chefs, professionals)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS business_staff (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   
   -- Personal info
@@ -82,7 +85,7 @@ CREATE INDEX idx_business_staff_business_id ON business_staff(business_id);
 -- PRODUCT CATALOG (retail products sold by salons, gyms, etc.)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS business_products (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   
   -- Product details
@@ -119,7 +122,7 @@ CREATE INDEX idx_business_products_category ON business_products(business_id, ca
 -- CLASS SCHEDULE (for gyms, yoga studios, fitness centers)
 -- =====================================================
 CREATE TABLE IF NOT EXISTS business_classes (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   
   -- Class details

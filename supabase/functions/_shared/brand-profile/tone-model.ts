@@ -25,17 +25,22 @@ export interface ToneModelV2 {
 
 /**
  * Sanitizes and normalizes a tone_model object for DB insertion.
- * 
+ *
  * @param input - Raw tone_model from AI or fallback
  * @param languageCode - Fallback language code (e.g., 'da', 'en')
+ * @param onFailure - Optional callback called with a failure reason string when sanitization fails.
+ *   Used to write the failure into generation_errors so it is visible in the DB without digging
+ *   through edge function logs.
  * @returns Normalized ToneModelV2 object or null if invalid
  */
 export function sanitizeToneModelForDb(
   input: any,
-  languageCode: string
+  languageCode: string,
+  onFailure?: (reason: string) => void
 ): ToneModelV2 | null {
   // If input is null, undefined, or not an object, return null
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    onFailure?.('tone_model input is null, non-object, or array')
     return null
   }
 
@@ -56,14 +61,26 @@ export function sanitizeToneModelForDb(
       return filtered.length >= minLength ? filtered : null
     }
 
-    // Normalize arrays
+    // Normalize arrays.
+    // Minimums are intentionally relaxed vs. the DB schema constraint (which is AI-output quality
+    // guidance, not a hard DB constraint). Saving a partial tone_model is vastly better than NULL.
+    // writing_rules: min 2 (schema says 3; relaxed so thin-data businesses still get a model)
+    // good_examples:  min 1 (schema says 2; one example beats none)
+    // avoid_examples: min 1 (schema says 2; same reasoning)
     const primary_keywords = normalizeStringArray(input.primary_keywords, 2, 6)
-    const writing_rules = normalizeStringArray(input.writing_rules, 3, 8)
-    const good_examples = normalizeStringArray(input.good_examples, 2, 6)
-    const avoid_examples = normalizeStringArray(input.avoid_examples, 2, 6)
+    const writing_rules    = normalizeStringArray(input.writing_rules,    2, 8)
+    const good_examples    = normalizeStringArray(input.good_examples,    1, 6)
+    const avoid_examples   = normalizeStringArray(input.avoid_examples,   1, 6)
 
-    // If any required array is invalid, return null
+    // If any required array is invalid, report and return null
     if (!primary_keywords || !writing_rules || !good_examples || !avoid_examples) {
+      const missing = [
+        !primary_keywords ? `primary_keywords(${JSON.stringify(input.primary_keywords)})` : null,
+        !writing_rules    ? `writing_rules(${JSON.stringify(input.writing_rules)})` : null,
+        !good_examples    ? `good_examples(${JSON.stringify(input.good_examples)})` : null,
+        !avoid_examples   ? `avoid_examples(${JSON.stringify(input.avoid_examples)})` : null,
+      ].filter(Boolean).join(', ')
+      onFailure?.(`tone_model required arrays invalid after sanitization: ${missing}`)
       return null
     }
 
@@ -132,7 +149,9 @@ export function sanitizeToneModelForDb(
     return normalized
   } catch (error) {
     // If any error occurs during normalization, return null
+    const msg = error instanceof Error ? error.message : String(error)
     console.error('[sanitizeToneModelForDb] Normalization failed:', error)
+    onFailure?.(`tone_model normalization threw: ${msg}`)
     return null
   }
 }

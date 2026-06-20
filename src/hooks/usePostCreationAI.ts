@@ -1,6 +1,7 @@
 import { useState, useCallback, type Dispatch, type SetStateAction } from 'react'
 import type { TFunction } from 'i18next'
 import { supabase } from '../lib/supabase'
+import { resolveEffectiveVertical } from '../config/businessVerticals'
 import type {
   GeneratedIdea,
   PhotoContent,
@@ -9,6 +10,61 @@ import type {
 import type { Tier } from '../stores/tierStore'
 
 type PlatformTextMap = Record<string, { headline: string; text: string }>
+
+type GeneratedHashtagPayload = {
+  hashtags?: unknown
+  facebookHashtags?: unknown
+  instagramHashtags?: unknown
+  hashtag_groups?: Record<string, unknown>
+  hashtagGroups?: Record<string, unknown>
+}
+
+function sanitizeHashtagValue(value: string): string {
+  return value.replace(/^#+/, '').trim()
+}
+
+function normalizeHashtagKey(value: string): string {
+  return sanitizeHashtagValue(value).replace(/\s+/g, '').toLowerCase()
+}
+
+function toHashtagList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((tag): tag is string => typeof tag === 'string')
+    .map((tag) => sanitizeHashtagValue(tag))
+    .filter((tag) => tag.length > 0)
+}
+
+function extractHashtagPlatforms(data: GeneratedHashtagPayload): { facebook: string[]; instagram: string[]; combined: string[]; explicit: boolean } {
+  const facebook = toHashtagList(data.facebookHashtags ?? (data.hashtag_groups as any)?.facebook ?? (data.hashtagGroups as any)?.facebook)
+  const instagram = toHashtagList(data.instagramHashtags ?? (data.hashtag_groups as any)?.instagram ?? (data.hashtagGroups as any)?.instagram)
+  const combined = Array.from(new Set([...facebook, ...instagram, ...toHashtagList(data.hashtags)]))
+  return {
+    facebook,
+    instagram,
+    combined,
+    explicit: facebook.length > 0 || instagram.length > 0,
+  }
+}
+
+async function resolveBusinessCategoryForBusiness(businessId: string): Promise<string> {
+  const { data: brandProfile } = await supabase
+    .from('business_brand_profile')
+    .select('business_character, business_identity_persona, identity_keywords, brand_profile_v5')
+    .eq('business_id', businessId)
+    .maybeSingle()
+
+  const businessCharacter =
+    brandProfile?.brand_profile_v5?.layer_0_intelligence?.business_identity?.system_persona ||
+    brandProfile?.business_identity_persona ||
+    brandProfile?.business_character ||
+    ''
+  const identityKeywords = Array.isArray(brandProfile?.identity_keywords)
+    ? brandProfile.identity_keywords
+    : []
+
+  return resolveEffectiveVertical('cafe', businessCharacter, identityKeywords)
+}
 
 export interface UsePostCreationAIParams {
   t: TFunction
@@ -161,14 +217,15 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
       if (user) {
         const { data: business } = await supabase
           .from('businesses')
-          .select('name, vertical')
+          .select('id, name, vertical')
           .eq('owner_id', user.id)
           .maybeSingle()
 
         if (business) {
+          const businessCategory = await resolveBusinessCategoryForBusiness(business.id)
           businessProfile = {
             business_name: business.name,
-            business_category: business.vertical
+            business_category: businessCategory
           }
         }
       }
@@ -259,6 +316,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
 
         if (business) {
           businessId = business.id
+          const businessCategory = await resolveBusinessCategoryForBusiness(business.id)
 
           // Get location data (primary location, or first with country if no primary)
           let location = null
@@ -325,7 +383,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
 
           businessProfile = {
             business_name: business.name,
-            business_category: business.vertical,
+            business_category: businessCategory,
             address: location?.city || null,
             opening_hours: openingHours,
             keywords: userProfile?.keywords || null,
@@ -395,8 +453,6 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
       }
 
       if (data?.text) {
-        const sanitizeHashtag = (value: string) => value.replace(/^#+/, '').trim()
-        const normalizeKey = (value: string) => sanitizeHashtag(value).replace(/\s+/g, '').toLowerCase()
         if (customizePerPlatform) {
           setPlatformTexts((prev) => ({
             ...prev,
@@ -416,10 +472,10 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
         let nextIncludeHashtags = includeHashtags
         let platformAssignmentRecord = hashtagPlatforms
 
-        if (data.hashtags && Array.isArray(data.hashtags) && data.hashtags.length > 0) {
-          const sanitizedAiTags: string[] = data.hashtags
-            .map((tag: string) => sanitizeHashtag(tag))
-            .filter((tag: string): tag is string => tag.length > 0)
+        const hashtagPayload = extractHashtagPlatforms(data as GeneratedHashtagPayload)
+
+        if (hashtagPayload.combined.length > 0) {
+          const sanitizedAiTags: string[] = hashtagPayload.combined
 
           if (sanitizedAiTags.length > 0 && (isEdited || hashtags.length === 0)) {
             const nextAiSetLocal: Set<string> = new Set(sanitizedAiTags)
@@ -452,9 +508,9 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
               if (!Array.isArray(tags)) return
               tags.forEach((rawTag) => {
                 if (typeof rawTag !== 'string') return
-                const clean = sanitizeHashtag(rawTag)
+                const clean = sanitizeHashtagValue(rawTag)
                 if (!clean) return
-                const key = normalizeKey(clean)
+                const key = normalizeHashtagKey(clean)
                 if (!key) return
                 const entry = baseMap.get(key) ?? new Set<string>()
                 platforms.forEach((platform) => entry.add(platform))
@@ -462,22 +518,29 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
               })
             }
 
-            const groups = data.hashtag_groups
+            const groups = (data as any)?.hashtag_groups ?? (data as any)?.hashtagGroups
             console.log('📊 Hashtag groups received:', JSON.stringify(groups, null, 2))
             console.log('🎯 Selected platforms:', selectedPlatforms)
             
             const hasInstagram = selectedPlatforms.includes('instagram')
             const instagramOnlyPlatforms = hasInstagram ? ['instagram'] : []
             
-            // Primary and local: shared across all platforms (includes Facebook brand, location, and mood)
-            assignPlatforms(groups?.primary, sharedPlatforms)
-            assignPlatforms(groups?.local, sharedPlatforms)
-            
-            // Foodie and extras: Instagram ONLY (never show on Facebook)
-            assignPlatforms(groups?.foodie, instagramOnlyPlatforms)
-            assignPlatforms(groups?.extras, instagramOnlyPlatforms)
+            if (hashtagPayload.explicit) {
+              assignPlatforms(hashtagPayload.facebook, ['facebook'])
+              assignPlatforms(hashtagPayload.instagram, ['instagram'])
+            } else {
+              // Primary and local: shared across all platforms (includes Facebook brand, location, and mood)
+              assignPlatforms(groups?.primary, sharedPlatforms)
+              assignPlatforms(groups?.local, sharedPlatforms)
+              
+              // Foodie and extras: Instagram ONLY (never show on Facebook)
+              assignPlatforms(groups?.foodie, instagramOnlyPlatforms)
+              assignPlatforms(groups?.extras, instagramOnlyPlatforms)
+            }
             
             console.log('✅ Platform assignments:', {
+              facebook: hashtagPayload.facebook.length,
+              instagram: hashtagPayload.instagram.length,
               primary: groups?.primary?.length || 0,
               local: groups?.local?.length || 0,
               foodie: groups?.foodie?.length || 0,
@@ -487,7 +550,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
             })
 
             sanitizedAiTags.forEach((tag: string) => {
-              const key = normalizeKey(tag)
+              const key = normalizeHashtagKey(tag)
               if (!baseMap.has(key)) {
                 baseMap.set(key, new Set(sharedPlatforms))
               }
@@ -526,8 +589,8 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
             includeBookingLink: false
           },
           hashtags: nextHashtagsList.map((tag) => {
-            const clean = sanitizeHashtag(tag)
-            const key = normalizeKey(clean)
+            const clean = sanitizeHashtagValue(tag)
+            const key = normalizeHashtagKey(clean)
             const platforms = platformAssignmentRecord[key] && platformAssignmentRecord[key].length > 0
               ? platformAssignmentRecord[key]
               : (selectedPlatforms.length > 0 ? selectedPlatforms : ['facebook'])
@@ -639,7 +702,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
 
           businessProfile = {
             business_name: business.name,
-            business_category: business.vertical, // Use vertical from businesses table
+            business_category: await resolveBusinessCategoryForBusiness(business.id),
             short_description: (profileData as any)?.short_description,
             city: location?.city,
             country: location?.country || 'DK'
@@ -680,12 +743,10 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
 
       const data = await response.json()
 
-      if (data?.hashtags && Array.isArray(data.hashtags) && data.hashtags.length > 0) {
-        const sanitizeHashtag = (value: string) => value.replace(/^#+/, '').trim()
-        const normalizeKey = (value: string) => sanitizeHashtag(value).replace(/\s+/g, '').toLowerCase()
-        const sanitizedTags: string[] = data.hashtags
-          .map((tag: string) => sanitizeHashtag(tag))
-          .filter((tag: string): tag is string => tag.length > 0)
+      const hashtagPayload = extractHashtagPlatforms(data as GeneratedHashtagPayload)
+
+      if (hashtagPayload.combined.length > 0) {
+        const sanitizedTags: string[] = hashtagPayload.combined
 
         if (sanitizedTags.length > 0) {
           console.log('[generateHashtagsOnly] Generated hashtags:', sanitizedTags)
@@ -713,9 +774,9 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
               if (!Array.isArray(tags)) return
               tags.forEach((rawTag) => {
                 if (typeof rawTag !== 'string') return
-                const clean = sanitizeHashtag(rawTag)
+                const clean = sanitizeHashtagValue(rawTag)
                 if (!clean) return
-                const key = normalizeKey(clean)
+                const key = normalizeHashtagKey(clean)
                 if (!key) return
                 const entry = baseMap.get(key) ?? new Set<string>()
                 platforms.forEach((platform) => entry.add(platform))
@@ -723,15 +784,20 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
               })
             }
 
-            // Keep the same rules as handleAIUpdate
-            assignPlatforms(groups?.primary, sharedPlatforms)
-            assignPlatforms(groups?.local, sharedPlatforms)
-            assignPlatforms(groups?.foodie, instagramOnlyPlatforms)
-            assignPlatforms(groups?.extras, instagramOnlyPlatforms)
+            if (hashtagPayload.explicit) {
+              assignPlatforms(hashtagPayload.facebook, ['facebook'])
+              assignPlatforms(hashtagPayload.instagram, ['instagram'])
+            } else {
+              // Keep the same rules as handleAIUpdate
+              assignPlatforms(groups?.primary, sharedPlatforms)
+              assignPlatforms(groups?.local, sharedPlatforms)
+              assignPlatforms(groups?.foodie, instagramOnlyPlatforms)
+              assignPlatforms(groups?.extras, instagramOnlyPlatforms)
+            }
 
             // Ensure every AI tag has a fallback assignment
             sanitizedTags.forEach((tag: string) => {
-              const key = normalizeKey(tag)
+              const key = normalizeHashtagKey(tag)
               if (!baseMap.has(key)) {
                 baseMap.set(key, new Set(sharedPlatforms))
               }

@@ -6,6 +6,8 @@ interface UseVisualIdentityAnalyzerResult {
   checkingStorage: boolean;
   error: string | null;
   recognizableInteriorIdentity: string | null;
+  visualCharacter: string | null;
+  venueScene: string | null;
   analyze: (businessId: string, photoPaths: string[]) => Promise<boolean>;
   checkAndAutoAnalyze: (businessId: string) => Promise<string[]>;
 }
@@ -15,6 +17,8 @@ export function useVisualIdentityAnalyzer(): UseVisualIdentityAnalyzerResult {
   const [checkingStorage, setCheckingStorage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recognizableInteriorIdentity, setRecognizableInteriorIdentity] = useState<string | null>(null);
+  const [visualCharacter, setVisualCharacter] = useState<string | null>(null);
+  const [venueScene, setVenueScene] = useState<string | null>(null);
 
   // Lists photos from the visual-identity storage bucket for a given business.
   // Returns the array of storage paths (e.g. "{businessId}/photo.jpg").
@@ -50,6 +54,8 @@ export function useVisualIdentityAnalyzer(): UseVisualIdentityAnalyzerResult {
       setAnalyzing(true);
       setError(null);
       setRecognizableInteriorIdentity(null);
+      setVisualCharacter(null);
+      setVenueScene(null);
 
       const { data, error: functionError } = await supabase.functions.invoke(
         'analyze-visual-identity',
@@ -63,8 +69,15 @@ export function useVisualIdentityAnalyzer(): UseVisualIdentityAnalyzerResult {
       );
 
       if (functionError) {
-        // The Supabase SDK wraps the real error — check data.error for the actual message
-        const actualError = data?.error || functionError.message || 'Analysis failed';
+        // The Supabase SDK wraps the real error. For non-2xx responses the body
+        // is in functionError.context (a Response object) rather than data.
+        let actualError = functionError.message || 'Analysis failed';
+        try {
+          const body = await (functionError as any).context?.json?.();
+          if (body?.error) actualError = body.error;
+        } catch {
+          // body not JSON or context not available — keep SDK message
+        }
         throw new Error(actualError);
       }
 
@@ -74,6 +87,8 @@ export function useVisualIdentityAnalyzer(): UseVisualIdentityAnalyzerResult {
 
       const interiorText: string = data.visual_identity?.recognizable_interior_identity ?? '';
       setRecognizableInteriorIdentity(interiorText);
+      setVisualCharacter(data.visual_identity?.venue_character ?? null);
+      setVenueScene(data.visual_identity?.venue_scene ?? null);
 
       return true;
     } catch (err) {
@@ -91,6 +106,8 @@ export function useVisualIdentityAnalyzer(): UseVisualIdentityAnalyzerResult {
     checkingStorage,
     error,
     recognizableInteriorIdentity,
+    visualCharacter,
+    venueScene,
     analyze,
     checkAndAutoAnalyze,
   };

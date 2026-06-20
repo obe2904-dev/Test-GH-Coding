@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '../../lib/supabase'
 import { usePostCreationStore } from '../../stores/postCreationStore'
+import type { PostContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useTierStore } from '../../stores/tierStore'
 import { useBusinessData } from '../../hooks/useBusinessData'
 import { useTextHelpers } from '../../hooks/useTextHelpers'
 import { usePostCreationAI } from '../../hooks/usePostCreationAI'
+import { useWriteDraft } from '../../hooks/useWriteDraft'
 import { BusinessSetupModal } from './BusinessSetupModal'
 import { BusinessInfoPromptModal } from './BusinessInfoPromptModal'
 import { canonicalizePlatformList, normalizeHashtagKey, sanitizeTagValue, type CanonicalPlatform } from '../../lib/hashtags'
@@ -61,6 +64,8 @@ interface GenerateStepProps {
   generatedPost?: GeneratedPost
   isStrategyMode?: boolean
   isGenerating?: boolean
+  /** suggestion_ids committed (published/scheduled) today — used to lock cards */
+  committedSuggestionIds?: Set<number>
 }
 
 export function GenerateStep({ 
@@ -71,7 +76,8 @@ export function GenerateStep({
   hasUnsavedChanges,
   generatedPost,
   isStrategyMode = false,
-  isGenerating = false
+  isGenerating = false,
+  committedSuggestionIds,
 }: GenerateStepProps) {
   const { t, i18n } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const navigate = useNavigate()
@@ -88,9 +94,11 @@ export function GenerateStep({
     photoIdea,
     setPhotoIdea,
     photoContent,
+    setPhotoContent,
     selectedSuggestionData,
     setSelectedSuggestionData,
-    activePath
+    activePath,
+    setActivePath
   } = usePostCreationStore()
 
   const { isEnabled, loadPlatformsFromDatabase } = useConnectionsStore()
@@ -310,18 +318,77 @@ export function GenerateStep({
   const [showBusinessSetup, setShowBusinessSetup] = useState(false)
   const [showBusinessInfoPrompt, setShowBusinessInfoPrompt] = useState(false)
 
-  // Track businessId from localStorage or businessData
-  const [businessId, setBusinessId] = useState<string | null>(() => {
-    return localStorage.getItem('onboarding:businessId') || null
+  // Track the authenticated business only. Do not trust stale onboarding state.
+  const [businessId, setBusinessId] = useState<string | null>(null)
+
+  // DB-only draft persistence for write mode (single source of truth)
+  const isWriteMode = activePath === 'write'
+  const writeDraft = useWriteDraft({ 
+    businessId: businessData?.business?.id || null,
+    enabled: isWriteMode 
   })
 
   // Update businessId when businessData loads
   useEffect(() => {
-    if (!businessId && businessData?.business?.id) {
-      console.log('[GenerateStep] Setting businessId from businessData:', businessData.business.id)
-      setBusinessId(businessData.business.id)
+    const resolvedBusinessId = businessData?.business?.id || null
+
+    if (resolvedBusinessId) {
+      setBusinessId(prevBusinessId => {
+        if (prevBusinessId === resolvedBusinessId) {
+          return prevBusinessId
+        }
+
+        console.log('[GenerateStep] Setting businessId from authenticated businessData:', resolvedBusinessId)
+        return resolvedBusinessId
+      })
+
+      if (typeof window !== 'undefined') {
+        const storedBusinessId = localStorage.getItem('onboarding:businessId')
+        if (storedBusinessId !== resolvedBusinessId) {
+          localStorage.setItem('onboarding:businessId', resolvedBusinessId)
+        }
+      }
     }
   }, [businessData?.business?.id, businessId])
+
+  // Load draft on mount (write mode only)
+  useEffect(() => {
+    if (!isWriteMode || !businessData?.business?.id) return
+
+    const loadWriteDraft = async () => {
+      const draft = await writeDraft.loadDraft()
+      if (draft?.content) {
+        console.log('[GenerateStep] Loaded write draft from DB')
+        setPostContent(draft.content)
+        
+        if (draft.photo_content) {
+          setPhotoContent(draft.photo_content)
+        }
+        
+        if (draft.selected_platforms && draft.selected_platforms.length > 0) {
+          setSelectedPlatforms(draft.selected_platforms)
+        }
+      }
+    }
+
+    loadWriteDraft()
+  }, [isWriteMode, businessData?.business?.id]) // Only run on mount when business loads
+
+  // Auto-save draft on content change (write mode only)
+  useEffect(() => {
+    if (!isWriteMode || !businessData?.business?.id) return
+    if (!postContent) return
+
+    // Only save if there's actual content (don't save empty drafts)
+    const hasContent = postContent.text?.trim() || postContent.headline?.trim()
+    if (!hasContent) return
+
+    writeDraft.saveDraft({
+      content: postContent,
+      photo_content: photoContent,
+      selected_platforms: selectedPlatforms
+    })
+  }, [isWriteMode, businessData?.business?.id, postContent, photoContent, selectedPlatforms])
   
   // Show tabs if: user has a business and not in strategy mode
   // Tabs should always be visible (not dependent on dismissal)
@@ -355,6 +422,53 @@ export function GenerateStep({
     // Store the full suggestion for text generation when user clicks "Next"
     setSelectedIdea(suggestion.id.toString())
     setSelectedSuggestionData(suggestion)
+    setActivePath('ai-ideas')
+    
+    // Photos will be saved/restored automatically by CreatePostPage's draft system
+    // No need to manually clear - each suggestion's draft includes its photos
+
+    // Write selection signal to DB for future bias learning (1D)
+    if (suggestion.id && businessData.business?.id) {
+      void (async () => {
+        try {
+          const { error } = await (supabase as any)
+            .from('daily_suggestions')
+            .update({
+              status: 'selected',
+              selected: true,
+              is_active: false,
+              selected_at: new Date().toISOString(),
+            })
+            .eq('id', suggestion.id)
+            .eq('business_id', businessData.business!.id)
+
+          if (error) {
+            throw error
+          }
+
+          console.log(`📊 Suggestion ${suggestion.id} marked as selected`)
+        } catch (e: unknown) {
+          console.warn('⚠️ Could not mark suggestion as selected:', e)
+        }
+      })()
+    } else if (suggestion.id) {
+      console.warn('⚠️ Could not mark suggestion as selected: missing business id context')
+    }
+
+    // Clear any previously generated text so the editor never shows stale content
+    // from a different idea (e.g. switching from idea 2 to idea 3).
+    setPostContent(null)
+
+    // Clear photo state so a photo uploaded for idea A never bleeds into idea B.
+    // The draft restore in CreatePostPage will re-populate photos if idea B had
+    // its own uploaded photos saved to its draft.
+    setPhotoContent({
+      uploadedMedia: [],
+      selectedMedia: null,
+      isOriginal: true,
+      photoAdjustments: null,
+      carouselMode: false,
+    })
     
     console.log('[GenerateStep] Stored suggestion in selectedSuggestionData')
     
@@ -363,7 +477,7 @@ export function GenerateStep({
     
     // Mark as changed
     markAsChanged?.()
-  }, [setHeadline, setSelectedIdea, setSelectedSuggestionData, markAsChanged])
+  }, [setHeadline, setSelectedIdea, setSelectedSuggestionData, setActivePath, setPostContent, markAsChanged, businessData.business?.id])
 
   useEffect(() => {
     if (!postContent) {
@@ -495,10 +609,54 @@ export function GenerateStep({
     [baseUpdateCurrentText, setIsSpellingChecked]
   )
 
-  const handleClearContent = useCallback(() => {
+  const createClearedContent = useCallback((): PostContent => {
+    const platformContent = customizePerPlatform && selectedPlatforms.length > 1
+      ? selectedPlatforms.reduce<Record<string, any>>((acc, platform) => {
+          acc[platform] = {
+            headline: '',
+            text: '',
+            adjustments: {
+              length: 'current',
+              tone: 'professional',
+              includeHashtags,
+              includeEmojis,
+              includeBookingLink: false,
+            },
+            hashtags: [],
+          }
+          return acc
+        }, {})
+      : undefined
+
+    return {
+      headline: '',
+      text: '',
+      textWithHashtags: '',
+      adjustments: {
+        length: 'current',
+        tone: 'professional',
+        includeHashtags,
+        includeEmojis,
+        includeBookingLink: false,
+      },
+      platformSpecific: Boolean(platformContent),
+      platformContent,
+      hashtags: [],
+      platformHashtagViews: {},
+      aiGeneratedHashtags: [],
+    }
+  }, [customizePerPlatform, selectedPlatforms, includeHashtags, includeEmojis])
+
+  const handleClearContent = useCallback(async () => {
     baseHandleClearContent()
+    setPostContent(createClearedContent())
     setIsSpellingChecked(false)
-  }, [baseHandleClearContent, setIsSpellingChecked])
+    
+    // Delete DB draft for write mode
+    if (isWriteMode) {
+      await writeDraft.deleteDraft()
+    }
+  }, [baseHandleClearContent, createClearedContent, setIsSpellingChecked, setPostContent, isWriteMode, writeDraft])
 
   const { toggleHashtagSelection, handleAddCustomHashtag } = useHashtagInteractions({
     hashtags,
@@ -651,8 +809,38 @@ export function GenerateStep({
     platformTexts,
     text,
     photoContent,
-    t
+    t,
+    activePath,
+    selectedSuggestionData
   })
+
+  const selectedSuggestionIsCommitted = Boolean(
+    selectedSuggestionData?.id != null &&
+    committedSuggestionIds?.has(selectedSuggestionData.id)
+  )
+
+  useEffect(() => {
+    if (!selectedSuggestionIsCommitted) return
+
+    // A committed AI idea must not re-enter the Create/Design step from the AI flow.
+    // Clear the stale selection so the user has to choose a fresh idea.
+    setSelectedIdea(null)
+    setSelectedSuggestionData(null)
+    setPostContent(null)
+    setPhotoContent({
+      uploadedMedia: [],
+      selectedMedia: null,
+      isOriginal: true,
+      photoAdjustments: null,
+      carouselMode: false,
+    })
+  }, [
+    selectedSuggestionIsCommitted,
+    setSelectedIdea,
+    setSelectedSuggestionData,
+    setPostContent,
+    setPhotoContent,
+  ])
 
   const handleValidatedNext = useCallback(() => {
     if (!validateBeforeNext()) {
@@ -661,14 +849,20 @@ export function GenerateStep({
     
     // If an AI suggestion is selected, skip the normal flow and let CreatePostPage handle generation
     if (selectedSuggestionData && selectedSuggestionData.id !== 0) {
+      if (selectedSuggestionIsCommitted) {
+        console.warn('[GenerateStep] Blocked navigation for committed AI suggestion:', selectedSuggestionData.id)
+        return
+      }
       console.log('[GenerateStep] AI suggestion selected, calling onNext directly for generation')
       onNext()  // Call CreatePostPage's handleGenerateNext which will do the AI generation
       return
     }
     
-    // Normal flow: save current editor content and proceed
+    // Normal flow: save current editor content and proceed to Design
+    // Note: We keep the DB draft so content carries forward to Design stage
+    // Draft is only deleted when user clicks "Slet alt" or publishes
     proceedToDesign()
-  }, [validateBeforeNext, proceedToDesign, selectedSuggestionData, onNext])
+  }, [validateBeforeNext, proceedToDesign, selectedSuggestionData, selectedSuggestionIsCommitted, onNext])
 
   const supportedSelectedPlatforms: CanonicalPlatform[] = canonicalSelectedPlatforms
 
@@ -761,7 +955,8 @@ export function GenerateStep({
     isEdited,
     hasPersistedDraft,
     onSaveDraft: handleSaveDraft,
-    onNext: handleValidatedNext
+    onNext: handleValidatedNext,
+    disabled: validationIssues.length > 0
   })
 
   const validationBanner = (
@@ -778,9 +973,10 @@ export function GenerateStep({
             <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold text-cta uppercase tracking-wide mb-0.5">Fra ugeplanen</div>
               <div className="text-sm font-bold text-slate-900 mb-1 leading-snug">{strategicIdea.title}</div>
-              {strategicIdea.rationale && (
+              {/* Rationale hidden - shown in popup instead */}
+              {/* {strategicIdea.rationale && (
                 <div className="text-xs text-cta-text leading-relaxed mb-2">💡 {strategicIdea.rationale}</div>
-              )}
+              )} */}
               <div className="flex flex-wrap gap-1.5 mb-3">
                 {strategicIdea.contentType && (
                   <span className="inline-flex text-[10px] font-medium bg-cta-surface text-cta-text px-2 py-0.5 rounded-full capitalize">
@@ -798,11 +994,12 @@ export function GenerateStep({
                   </span>
                 )}
               </div>
-              {strategicIdea.suggestedMedia?.direction && (
+              {/* Visual direction hidden - shown in popup instead */}
+              {/* {strategicIdea.suggestedMedia?.direction && (
                 <div className="mb-3 text-[11px] text-slate-500 italic">
                   Visuel retning: {strategicIdea.suggestedMedia.direction}
                 </div>
-              )}
+              )} */}
               <div className="flex gap-2">
                 <button
                   onClick={onDirectTransfer}
@@ -859,6 +1056,7 @@ export function GenerateStep({
                   onGenerate={handleValidatedNext}
                   businessId={businessId}
                   selectedIdea={selectedIdea}
+                  committedSuggestionIds={committedSuggestionIds}
                 />
               </div>
             )}

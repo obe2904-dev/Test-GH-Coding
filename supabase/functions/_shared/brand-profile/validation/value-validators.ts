@@ -14,6 +14,13 @@ export function isBadTargetAudienceValue(value: string): boolean {
   if (n.includes('who are you speaking to') || n.includes('who do you speak to')) return true
   // Reject old demographic persona formats: "Lokale gæster/besøgende der søger", "Folk der...", "Dem der..."
   if (/^(lokale\s+gæster|folk\s+der|dem\s+der|de\s+der|visitors?\s+looking|locals?\s+and|gæster\s+der|kunder\s+der)/i.test(n)) return true
+  // Reject segment-label format: "Primær: ...", "Sekundær: ...", "Primary: ...", "Secondary: ..."
+  if (/^(primær|sekundær|primary|secondary)\s*:/i.test(n)) return true
+  // Reject persona/demographic framing: "Unge voksne", "Studerende og...", "Turister"
+  if (/^(unge\s+voksne|studerende\s+og|turister\s+der|millennials|business\s+professionals)/i.test(n)) return true
+  // Reject any value that doesn't start with 'når' — the schema mandates "Når gæster..." format
+  // A valid value MUST start with 'Når gæster' or 'når gæster' (multi-occasion string)
+  if (!n.startsWith('når ')) return true
   return false
 }
 

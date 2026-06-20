@@ -148,30 +148,46 @@ export function validateBrandEssence(
 ): ValidationResult {
   const errors: string[] = []
   const normalized = value.toLowerCase()
-  
-  // Check 1: Contains canonical location hook
-  if (!normalized.includes(constraints.canonicalHook.toLowerCase())) {
-    errors.push(`Missing canonical location hook: "${constraints.canonicalHook}"`)
+
+  // Check 1: Minimum length (too short = not a real sentence)
+  if (!value || value.length < 20) {
+    errors.push(`brand_essence too short (${value?.length ?? 0} chars — min 20)`)
   }
-  
-  // Check 2: Contains at least one menu anchor
-  const hasMenuAnchor = constraints.menuAnchors.some(anchor => 
-    normalized.includes(anchor.toLowerCase())
-  )
-  if (!hasMenuAnchor && constraints.menuAnchors.length > 0) {
-    errors.push(`Missing menu anchor (expected one of: ${constraints.menuAnchors.slice(0,3).join(', ')})`)
+
+  // Check 2: Maximum length (too long = business_character, not essence)
+  if (value && value.length > 180) {
+    errors.push(`brand_essence too long (${value.length} chars — max 180)`)
   }
-  
-  // Check 3: Contains behavioral hint
-  const hasBehavioralHint = constraints.behavioralHints.some(hint =>
-    normalized.includes(hint.toLowerCase())
-  )
-  if (!hasBehavioralHint) {
-    errors.push(`Missing behavioral hook (expected one of: ${constraints.behavioralHints[0]})`)
+
+  // Check 3: Contains at least one location signal (flexible — not hardcoded phrase)
+  const locationSignals = [
+    constraints.canonicalHook.toLowerCase(),
+    constraints.locationPhrase.toLowerCase(),
+    constraints.city.toLowerCase(),
+    'ved vandet',  // Fallback only - specific terms preferred (åen, fjorden, søen, havnen, bugten)
+    'åboulevarden',
+    'åen',
+  ]
+  const hasLocation = locationSignals.some(s => s.length > 2 && normalized.includes(s))
+  if (!hasLocation) {
+    errors.push(`Missing location signal (expected one of: ${locationSignals.slice(0, 3).join(', ')})`)
   }
-  
-  // Check 4: No banned words (basic check - full check done elsewhere)
-  const bannedWords = ['hyggelig', 'afslappet', 'autentisk', 'unik', 'charmerende']
+
+  // Check 4: Must NOT be business_character (descriptive list of programmes)
+  const descriptivePatterns = [
+    'serverer frokost',
+    'skifter til cocktails',
+    'café, restaurant og bar',
+    'om dagen og',
+    'om aftenen',
+  ]
+  const isDescriptive = descriptivePatterns.some(p => normalized.includes(p))
+  if (isDescriptive) {
+    errors.push(`brand_essence reads like business_character (contains descriptive programme list)`)
+  }
+
+  // Check 5: No banned words (basic check — full sanitization done elsewhere)
+  const bannedWords = ['hyggelig', 'afslappet', 'autentisk', 'unik', 'charmerende', 'lækker']
   const foundBanned = bannedWords.find(word => {
     const regex = new RegExp(`\\b${word}\\b`, 'i')
     return regex.test(value)
@@ -179,7 +195,7 @@ export function validateBrandEssence(
   if (foundBanned) {
     errors.push(`Contains banned word: "${foundBanned}"`)
   }
-  
+
   return {
     valid: errors.length === 0,
     errors

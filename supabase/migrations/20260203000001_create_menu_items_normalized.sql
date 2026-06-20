@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS menu_items_normalized (
   -- Core item data (from structured_data JSON)
   item_name TEXT NOT NULL,
   item_description TEXT,
+  media_category TEXT CHECK (media_category IS NULL OR media_category IN ('FOOD', 'DRINK')),
   item_price TEXT,
   category_name TEXT NOT NULL,
   category_type TEXT NOT NULL, -- 'main', 'kids_menu', 'dessert', 'appetizer', 'sides'
@@ -53,16 +54,20 @@ CREATE TABLE IF NOT EXISTS menu_items_normalized (
   UNIQUE(menu_result_id, item_name, category_name)
 );
 
+ALTER TABLE menu_items_normalized
+  ADD COLUMN IF NOT EXISTS media_category TEXT CHECK (media_category IS NULL OR media_category IN ('FOOD', 'DRINK'));
+
 -- Indexes for fast querying
-CREATE INDEX idx_menu_items_normalized_business ON menu_items_normalized(business_id);
-CREATE INDEX idx_menu_items_normalized_service_periods ON menu_items_normalized USING GIN(service_periods);
-CREATE INDEX idx_menu_items_normalized_category_type ON menu_items_normalized(category_type);
-CREATE INDEX idx_menu_items_normalized_menu_result ON menu_items_normalized(menu_result_id);
-CREATE INDEX idx_menu_items_normalized_temp_category ON menu_items_normalized(dish_temp_category);
-CREATE INDEX idx_menu_items_normalized_signature ON menu_items_normalized(is_signature) WHERE is_signature = true;
+CREATE INDEX IF NOT EXISTS idx_menu_items_normalized_business ON menu_items_normalized(business_id);
+CREATE INDEX IF NOT EXISTS idx_menu_items_normalized_service_periods ON menu_items_normalized USING GIN(service_periods);
+CREATE INDEX IF NOT EXISTS idx_menu_items_normalized_category_type ON menu_items_normalized(category_type);
+CREATE INDEX IF NOT EXISTS idx_menu_items_normalized_menu_result ON menu_items_normalized(menu_result_id);
+CREATE INDEX IF NOT EXISTS idx_menu_items_normalized_temp_category ON menu_items_normalized(dish_temp_category);
+CREATE INDEX IF NOT EXISTS idx_menu_items_normalized_signature ON menu_items_normalized(is_signature) WHERE is_signature = true;
 
 -- Comments for documentation
 COMMENT ON TABLE menu_items_normalized IS 'Normalized menu items extracted from menu_results_v2.structured_data, enriched with metadata. Used for content generation and scoring.';
+COMMENT ON COLUMN menu_items_normalized.media_category IS 'Nullable media classification: FOOD or DRINK; NULL when the item is ambiguous.';
 COMMENT ON COLUMN menu_items_normalized.category_type IS 'Classification of category: main (adult dishes), kids_menu (børnemenu), dessert, appetizer, sides';
 COMMENT ON COLUMN menu_items_normalized.service_periods IS 'Array of service periods when item is available: brunch, lunch, dinner';
 COMMENT ON COLUMN menu_items_normalized.dish_temp_category IS 'Temperature category for seasonal matching: hot, cold, warm, neutral';
@@ -71,21 +76,25 @@ COMMENT ON COLUMN menu_items_normalized.source_sha256 IS 'SHA256 hash of parent 
 -- RLS Policy (match menu_results_v2 security)
 ALTER TABLE menu_items_normalized ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Allow read access for authenticated users" ON menu_items_normalized;
 CREATE POLICY "Allow read access for authenticated users" ON menu_items_normalized
   FOR SELECT
   TO authenticated
   USING (true);
 
+DROP POLICY IF EXISTS "Allow insert for service role" ON menu_items_normalized;
 CREATE POLICY "Allow insert for service role" ON menu_items_normalized
   FOR INSERT
   TO service_role
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Allow update for service role" ON menu_items_normalized;
 CREATE POLICY "Allow update for service role" ON menu_items_normalized
   FOR UPDATE
   TO service_role
   USING (true);
 
+DROP POLICY IF EXISTS "Allow delete for service role" ON menu_items_normalized;
 CREATE POLICY "Allow delete for service role" ON menu_items_normalized
   FOR DELETE
   TO service_role
@@ -125,6 +134,76 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 COMMENT ON FUNCTION classify_category_type IS 'Automatically classify menu category type from name for filtering';
+
+CREATE OR REPLACE FUNCTION classify_media_category(category_name TEXT, item_name TEXT, item_description TEXT)
+RETURNS TEXT AS $$
+DECLARE
+  v_text TEXT := LOWER(CONCAT_WS(' ', category_name, item_name, item_description));
+  v_category_lower TEXT := LOWER(COALESCE(category_name, ''));
+  v_normalized_text TEXT := ' ' || regexp_replace(v_text, '[^[:alnum:]]+', ' ', 'g') || ' ';
+  v_drink_categories TEXT[] := ARRAY[
+    'cocktail', 'mocktail', 'drink', 'beverage', 'apéritif', 'aperitif', 'bar', 'spirits'
+  ];
+  v_food_categories TEXT[] := ARRAY[
+    'brunch', 'lunch', 'dinner', 'breakfast', 'main', 'forretter', 'appetizer', 'starter',
+    'dessert', 'salad', 'classic', 'smørrebrød'
+  ];
+  v_drink_phrases TEXT[] := ARRAY[
+    'still water', 'sparkling water', 'mineral water', 'draft beer', 'draught beer',
+    'tap beer', 'cold brew', 'iced coffee', 'hot chocolate', 'non alcoholic'
+  ];
+  v_drink_keywords TEXT[] := ARRAY[
+    'beer', 'wine', 'cocktail', 'mocktail', 'spirits', 'liquor', 'gin', 'vodka', 'rum', 'whisky', 'whiskey',
+    'tequila', 'aperitif', 'aperitivo', 'prosecco', 'champagne', 'cider', 'ale', 'lager', 'stout', 'ipa', 'espresso',
+    'coffee', 'cappuccino', 'latte', 'americano', 'macchiato', 'tea', 'matcha', 'juice', 'smoothie', 'milkshake',
+    'shake', 'soda', 'cola', 'lemonade', 'tonic', 'kombucha', 'chai', 'spritz', 'martini', 'negroni', 'mojito',
+    'margarita', 'bloody mary'
+  ];
+BEGIN
+  IF v_text IS NULL OR TRIM(v_text) = '' THEN
+    RETURN NULL;
+  END IF;
+
+  -- Check if category is a drink category
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(v_drink_categories) AS cat
+    WHERE v_category_lower LIKE '%' || cat || '%'
+  ) THEN
+    RETURN 'DRINK';
+  END IF;
+
+  -- Check if category is a food category
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(v_food_categories) AS cat
+    WHERE v_category_lower LIKE '%' || cat || '%'
+  ) THEN
+    RETURN 'FOOD';
+  END IF;
+
+  -- Fall back to keyword matching
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(v_drink_phrases) AS phrase
+    WHERE v_normalized_text LIKE '% ' || phrase || ' %'
+  ) THEN
+    RETURN 'DRINK';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM unnest(v_drink_keywords) AS keyword
+    WHERE v_normalized_text LIKE '% ' || keyword || ' %'
+  ) THEN
+    RETURN 'DRINK';
+  END IF;
+
+  RETURN 'FOOD';
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
+COMMENT ON FUNCTION classify_media_category IS 'Classify menu items as DRINK when beverage signals are present; otherwise treat non-empty items as FOOD';
 
 -- =====================================================
 -- Stats View for Monitoring

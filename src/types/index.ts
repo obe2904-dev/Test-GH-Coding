@@ -29,6 +29,7 @@ export type {
   UpdateBusinessOperations,
 } from './database/operations';
 
+// ⚠️ DROPPED TABLE — business_menu_metadata removed April 2026. Do NOT use in new code.
 export type {
   BusinessMenuMetadata,
   CreateMenuMetadata,
@@ -41,12 +42,14 @@ export type {
   UpdateVisualIdentity,
 } from './database/brand';
 
+// ⚠️ DROPPED TABLE — business_goals removed April 2026. Do NOT use in new code.
 export type {
   BusinessGoal,
   CreateBusinessGoal,
   UpdateBusinessGoal,
 } from './database/goals';
 
+// ⚠️ DROPPED TABLE — business_audience_profile removed April 2026. Do NOT use in new code.
 export type {
   BusinessAudienceProfile,
   CreateAudienceProfile,
@@ -57,15 +60,16 @@ export type {
   PlatformIntelligence,
 } from './database/platform';
 
-// Complete business knowledge aggregate type
+// Complete business knowledge aggregate type.
+// LIVE TABLES ONLY — fields for dropped tables have been removed.
 export interface BusinessKnowledge {
   business_id: string;
   location?: import('./database/location').BusinessLocationIntelligence;
   operations?: import('./database/operations').BusinessOperations;
-  menu_metadata?: import('./database/menu').BusinessMenuMetadata;
   visual_identity?: import('./database/brand').BusinessVisualIdentity;
-  goals?: import('./database/goals').BusinessGoal[];
-  audience_profile?: import('./database/audience').BusinessAudienceProfile;
+  // menu_metadata: REMOVED — business_menu_metadata table dropped April 2026
+  // goals: REMOVED — business_goals table dropped April 2026
+  // audience_profile: REMOVED — business_audience_profile table dropped April 2026
 }
 
 // =====================================================

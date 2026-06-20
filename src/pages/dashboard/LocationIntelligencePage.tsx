@@ -10,6 +10,34 @@ import { analyzeLocation } from '../../lib/location/core/analyzer';
 import { analyzeConceptFit, ConceptFitInput, ConceptFitOutput } from '../../lib/location/conceptFitAnalyzer';
 import { getLocaleConfig } from '../../lib/location/locales';
 
+// Icon component
+const CheckCircleIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+  </svg>
+);
+
+const MapPinIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+    <path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+    <path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+  </svg>
+);
+
+// Geographic location types (excludes demographics: student, tourist)
+// Demographics are now stored in demographic_proximity, not displayed as location types
+const GEOGRAPHIC_LOCATION_TYPES = new Set([
+  'city_centre',
+  'residential',
+  'office',
+  'transport_hub',
+  'waterfront',
+  'shopping_district',
+  'mixed_use',
+  'destination',
+  'nature_park'
+]);
+
 // Seasonal relevance mapping for each location type
 const SEASONAL_PATTERN_MAP: Record<string, 'year_round' | 'summer_peak' | 'semester_only' | 'weekday_only'> = {
   waterfront: 'summer_peak',
@@ -49,6 +77,8 @@ function LocationIntelligencePage() {
   const [isSaving, setIsSaving] = useState(false);
   // ISO string of the last time AI analysis completed — used to gate re-analysis
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
+  // Task 4.5: Force refresh option to bypass 90-day cache
+  const [forceRefresh, setForceRefresh] = useState(false);
 
   // Save analysis to sessionStorage whenever it changes
   useEffect(() => {
@@ -349,7 +379,8 @@ function LocationIntelligencePage() {
         useSupabaseFunction: !!useSupabase,
         businessId: businessId || undefined,
         supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
-        accessToken: session.data.session?.access_token
+        accessToken: session.data.session?.access_token,
+        forceRefresh: forceRefresh  // Task 4.5: Pass force refresh flag
       });
       
       console.log('✅ Analysis complete:', analysis);
@@ -405,9 +436,11 @@ function LocationIntelligencePage() {
           displayName: localeConfig.categories[m.categoryId]?.name || m.categoryId
         }));
 
-        // Filter categories >= 60% to call Edge Function
-        const eligibleCategories = categories.filter(cat => cat.score >= 60);
-        console.log(`🚀 Calling Edge Function for ${eligibleCategories.length} categories (≥60%):`, eligibleCategories.map(c => c.categoryId).join(', '));
+        // Filter categories >= 60% AND geographic types only (exclude demographics)
+        const eligibleCategories = categories.filter(cat => 
+          cat.score >= 60 && GEOGRAPHIC_LOCATION_TYPES.has(cat.categoryId)
+        );
+        console.log(`🚀 Calling Edge Function for ${eligibleCategories.length} geographic categories (≥60%):`, eligibleCategories.map(c => c.categoryId).join(', '));
         
         let fitResults: Record<string, ConceptFitOutput> = {};
         let edgeFunctionSuccessCount = 0;
@@ -579,7 +612,7 @@ function LocationIntelligencePage() {
 
   return (
     <div className="bg-surface-page min-h-full py-6 px-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
       {/* Progress indicator */}
       <div className="mb-6">
         <div className="flex items-center justify-center gap-2 text-sm">
@@ -587,16 +620,23 @@ function LocationIntelligencePage() {
           <span className="text-text-muted">→</span>
           <a href="/dashboard/menu" className="text-text-muted hover:text-text-secondary">{t('location.breadcrumb.menu')}</a>
           <span className="text-text-muted">→</span>
-          <span className="text-brand font-semibold">{t('location.breadcrumb.location')}</span>
+          <span className="bg-[#E6F4F1] text-brand font-medium px-3 py-1 rounded-lg">{t('location.breadcrumb.location')}</span>
           <span className="text-text-muted">→</span>
           <a href="/dashboard/brand-v5" className="text-text-muted hover:text-text-secondary">{t('location.breadcrumb.brand')}</a>
         </div>
       </div>
 
       <div className="text-center mb-4">
-        <h1 className="text-xl font-bold text-brand mb-1">{t('location.title')}</h1>
+        <h1 className="text-xl font-medium text-brand mb-1">{t('location.title')}</h1>
         <p className="text-sm text-text-secondary">{t('location.subtitle')}</p>
       </div>
+
+      {/* AI usage transparency banner — shown once analysis data exists */}
+      {(analysis || lastAnalyzedAt) && (
+        <div className="mb-4 px-4 py-3 bg-[#F0EEFE] border-[0.5px] border-[#C7BAF7] rounded-lg text-[13px] text-[#5547C4]">
+          <strong className="font-medium text-[#3D339A]">{t('location.aiDataUsageLabel')}</strong> {t('location.aiDataUsageInfo')}
+        </div>
+      )}
 
       {/* Loading state */}
       {isLoadingAddress && (
@@ -615,7 +655,7 @@ function LocationIntelligencePage() {
 
       {/* Address Display Card */}
       {!isLoadingAddress && (
-        <div className="bg-surface rounded-lg border border-border p-6 mb-6">
+        <div className="bg-surface rounded-lg border border-border p-4 mb-6">
           {address ? (
             <div className="space-y-4">
               {/* Read-only address display */}
@@ -623,11 +663,11 @@ function LocationIntelligencePage() {
                 <label className="block text-sm font-medium text-text-secondary mb-2">
                   {t('location.addressLabel')}
                 </label>
-                <div className="bg-surface-alt border border-border rounded-lg p-4">
-                  <p className="text-text font-medium">{address}</p>
-                  <p className="text-xs text-text-muted mt-2">
+                <div className="bg-[#F4F1EC] border-[0.5px] border-[#C8C3BB] rounded-lg px-3 py-2.5">
+                  <p className="text-[15px] font-medium text-[#111714]">{address}</p>
+                  <p className="text-[12px] text-[#A09A91] mt-2">
                     {t('location.addressNote')}
-                    <a href="/dashboard/profile" className="text-cta hover:text-cta-text hover:underline ml-1">
+                    <a href="/dashboard/profile" className="text-[#076B4E] font-medium ml-1">
                       {t('location.addressNoteLink')}
                     </a>
                   </p>
@@ -640,7 +680,7 @@ function LocationIntelligencePage() {
                 </div>
               )}
 
-              {/* Cache gate: hide the blue button when analysis is < 7 days old */}
+              {/* Cache gate: show info + prominent re-analyze button when analysis is < 7 days old */}
               {(() => {
                 const GATE_DAYS = 7;
                 const cacheAgeDays = lastAnalyzedAt
@@ -650,14 +690,24 @@ function LocationIntelligencePage() {
 
                 if (isCacheRecent) {
                   return (
-                    <div className="flex items-center justify-between p-3 bg-success-surface border border-success rounded-lg">
-                      <p className="text-sm text-success-text">
-                        {t('location.cacheValid', { count: Math.round(cacheAgeDays!) })}
+                    <div className="p-3 bg-surface-alt border border-border rounded-lg">
+                      <p className="text-xs text-text-muted mb-2">
+                        {t('location.cacheValid', { count: Math.round(cacheAgeDays!) })} — Re-analysér hvis I har skiftet lokation eller ændret jeres koncept.
                       </p>
+                      {/* Task 4.5: Force refresh checkbox */}
+                      <label className="flex items-center gap-2 mb-2 text-xs text-text-secondary cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={forceRefresh}
+                          onChange={(e) => setForceRefresh(e.target.checked)}
+                          className="rounded border-border text-info focus:ring-info"
+                        />
+                        <span>{t('location.forceRefreshShort')}</span>
+                      </label>
                       <button
                         onClick={handleAnalyze}
                         disabled={isAnalyzing}
-                        className="text-sm text-success-text hover:opacity-90 underline disabled:no-underline disabled:cursor-not-allowed ml-4 whitespace-nowrap"
+                        className="w-full px-4 py-2 text-sm font-medium border border-border rounded-lg text-text-secondary hover:bg-surface hover:border-brand hover:text-brand disabled:cursor-not-allowed transition-colors"
                       >
                         {isAnalyzing ? t('location.analyzing') : t('location.forceReanalyze')}
                       </button>
@@ -666,13 +716,25 @@ function LocationIntelligencePage() {
                 }
 
                 return (
-                  <button
-                    onClick={handleAnalyze}
-                    disabled={isAnalyzing}
-                    className="w-full px-6 py-3 bg-cta text-text-inverse font-medium rounded-lg hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed transition-colors"
-                  >
-                    {isAnalyzing ? t('location.analyzing') : t('location.analyzeButton')}
-                  </button>
+                  <>
+                    {/* Task 4.5: Force refresh checkbox for primary analyze button */}
+                    <label className="flex items-center gap-2 mb-3 text-xs text-text-secondary cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={forceRefresh}
+                        onChange={(e) => setForceRefresh(e.target.checked)}
+                        className="rounded border-border text-info focus:ring-info"
+                      />
+                      <span>{t('location.forceRefreshLong')}</span>
+                    </label>
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={isAnalyzing}
+                      className="w-full px-5 py-2.5 text-[13px] bg-cta text-text-inverse font-medium rounded-lg hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed transition-colors"
+                    >
+                      {isAnalyzing ? t('location.analyzing') : t('location.analyzeButton')}
+                    </button>
+                  </>
                 );
               })()}
             </div>
@@ -713,11 +775,14 @@ function LocationIntelligencePage() {
           */}
           
           {/* Show Concept Fit cards directly */}
-          <div className="space-y-4">
+          <div className="space-y-3">
             {(() => {
               const localeConfig = getLocaleConfig(uiLocale);
               const eligibleCategories = Object.entries(conceptFit)
                 .filter(([categoryId]) => {
+                  // Filter to geographic types only (exclude demographics: student, tourist)
+                  if (!GEOGRAPHIC_LOCATION_TYPES.has(categoryId)) return false;
+                  
                   // Use fresh scores (locationTypeScores) if available, else fall back to stored analysis
                   const score = locationTypeScores[categoryId] 
                     ?? (analysis.matches.find(m => m.categoryId === categoryId)?.score || 0);
@@ -741,43 +806,47 @@ function LocationIntelligencePage() {
                 return (
                   <div key={categoryId} className="bg-surface rounded-lg border border-border p-6">
                     <div className="flex items-start gap-4 mb-4">
-                      <LocationCategoryIcon categoryId={categoryId as any} className="w-10 h-10 text-text" />
+                      <LocationCategoryIcon categoryId={categoryId as any} className="w-10 h-10 text-[#0A7D5F]" />
                       <div className="flex-1">
                         <div className="flex items-start justify-between mb-2">
-                          <h3 className="text-xl font-bold text-brand">{categoryConfig.name}</h3>
+                          <h3 className="text-xl font-medium text-brand">{categoryConfig.name}</h3>
                           {fit.is_strategy_driver && (
-                            <span className="px-3 py-1 rounded-full text-xs font-medium bg-info-surface text-info-text">
-                              📍 {t('location.strategyFocus')}
+                            <span className="inline-flex items-center gap-1 bg-[#F0EEFE] text-[#3D339A] border-[0.5px] border-[#C7BAF7] rounded-full px-[10px] py-[3px] text-[11px] font-medium">
+                              <MapPinIcon className="w-3 h-3 text-[#6B5CE7]" />
+                              {t('location.strategyFocus')}
                             </span>
                           )}
                         </div>
 
                         {fit.ui_summary && (
-                          <p className="text-text-secondary mb-3">
-                            <strong>{fit.ui_summary.one_liner}</strong>
+                          <p className="text-[14px] font-medium text-[#3C3830] mb-3">
+                            {fit.ui_summary.one_liner}
                           </p>
                         )}
                         {fit.fit_reasons && fit.fit_reasons.length > 0 && (
                           <div className="mb-3">
-                            <p className="text-sm font-semibold text-text-secondary mb-1">{t('location.strengths')}</p>
-                            <ul className="text-sm text-text-secondary space-y-1">
+                            <p className="text-[11px] font-medium tracking-[0.07em] uppercase text-[#A09A91] mb-1">{t('location.strengths')}</p>
+                            <ul className="text-[13px] text-[#5C5650] space-y-1" style={{lineHeight: '1.7'}}>
                               {fit.fit_reasons.map((reason: string, i: number) => (
-                                <li key={i}>✓ {reason}</li>
+                                <li key={i} className="flex items-start gap-2">
+                                  <CheckCircleIcon className="w-[14px] h-[14px] text-[#0A7D5F] flex-shrink-0 mt-0.5" />
+                                  <span>{reason}</span>
+                                </li>
                               ))}
                             </ul>
                           </div>
                         )}
                         {fit.marketing_implications && (
-                          <div className="mt-3 p-3 bg-info-surface rounded border border-info">
-                            <p className="text-sm font-semibold text-info-text mb-1">{t('location.marketingStrategy')}</p>
+                          <div className="mt-3 bg-[#F0EEFE] border-[0.5px] border-[#C7BAF7] rounded-lg px-[14px] py-3">
+                            <p className="text-[12px] font-medium text-[#3D339A] tracking-[0.05em] uppercase mb-1">{t('location.marketingStrategy')}</p>
                             {fit.marketing_implications.content_emphasis && fit.marketing_implications.content_emphasis.length > 0 ? (
-                              <ul className="text-sm text-info-text space-y-1">
+                              <ul className="text-[13px] text-[#5547C4] space-y-1">
                                 {fit.marketing_implications.content_emphasis.map((item: string, i: number) => (
                                   <li key={i}>&rarr; {item}</li>
                                 ))}
                               </ul>
                             ) : (
-                              <p className="text-sm text-info-text">{fit.ui_summary?.best_marketing_angle}</p>
+                              <p className="text-[13px] text-[#5547C4]">{fit.ui_summary?.best_marketing_angle}</p>
                             )}
                           </div>
                         )}

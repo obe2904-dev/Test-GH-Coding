@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next'
+import { useTierStore } from '../../stores/tierStore'
 
 export function PlansPage() {
   const { t } = useTranslation()
+  const currentTier = useTierStore((state) => state.currentTier)
 
   const plans = [
     {
@@ -63,6 +65,15 @@ export function PlansPage() {
         <p className="text-sm text-gray-600">
           {t('plans.subtitle')}
         </p>
+      </div>
+
+      <div className="mx-auto mb-8 max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-sm text-sm text-slate-600">
+        <div className="flex items-center justify-between gap-4">
+          <span>{t('plans.currentPlan', 'Current plan')}</span>
+          <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+            {currentTier === 'free' ? 'Free' : currentTier === 'standardplus' ? 'Smart' : 'Pro'}
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">

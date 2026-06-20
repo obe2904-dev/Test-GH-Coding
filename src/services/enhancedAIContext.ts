@@ -20,7 +20,6 @@ export interface EnhancedAIContext {
     toneOfVoice: string | null
     socialStyle: any
     voiceExamples: any
-    ctaStyle: string | null
     thingsToAvoid: string | null
     toneModel: any
     contentPillars: any
@@ -86,41 +85,34 @@ export function mapToBrandProfileForAI(dbProfile: BusinessBrandProfile | null): 
   if (!dbProfile) return null
   
   // Check if any meaningful data exists
-  const hasData = dbProfile.brand_essence || 
-                  dbProfile.tone_of_voice || 
+  // NOTE: brand_essence deprecated - use signature_themes from menu intelligence instead
+  const hasData = dbProfile.tone_of_voice || 
                   dbProfile.target_audience ||
                   dbProfile.core_offerings ||
                   dbProfile.things_to_avoid ||
                   dbProfile.content_focus ||
-                  dbProfile.cta_style ||
                   dbProfile.communication_goal ||
                   dbProfile.image_preferences ||
                   dbProfile.tone_model ||
-                  dbProfile.content_pillars_jsonb
+                  (dbProfile as any).signature_themes  // Menu intelligence
   
   if (!hasData) return null
 
-  // Parse content_pillars_jsonb into a flat string array
-  const contentPillars: string[] | null = (() => {
-    const raw = dbProfile.content_pillars_jsonb
-    if (!raw) return null
-    const arr = Array.isArray(raw) ? raw : (typeof raw === 'object' && (raw as any).pillars ? (raw as any).pillars : null)
-    if (!arr) return null
-    return (arr as any[]).map((p: any) => (typeof p === 'string' ? p : p?.name || p?.title || String(p))).filter(Boolean)
-  })()
+  // (content_pillars_jsonb was dropped April 2026 — content_strategy is the canonical field)
+  const contentPillars: string[] | null = null
 
   return {
-    brandEssence: dbProfile.brand_essence || undefined,
+    // DEPRECATED: brandEssence removed - use signature_themes from menu intelligence
+    brandEssence: undefined,
     identityKeywords: dbProfile.identity_keywords ?? null,
     voiceConstraints: dbProfile.voice_constraints ?? null,
-    toneOfVoice: dbProfile.tone_of_voice || undefined,
-    thingsToAvoid: dbProfile.things_to_avoid || undefined,
-    targetAudience: dbProfile.target_audience || undefined,
-    coreOfferings: dbProfile.core_offerings || undefined,
-    contentFocus: dbProfile.content_focus || undefined,
-    ctaStyle: dbProfile.cta_style || undefined,
-    communicationGoal: dbProfile.communication_goal || undefined,
-    imagePreferences: dbProfile.image_preferences || undefined,
+    toneOfVoice: (typeof dbProfile.tone_of_voice === 'string' ? dbProfile.tone_of_voice : undefined),
+    thingsToAvoid: (typeof dbProfile.things_to_avoid === 'string' ? dbProfile.things_to_avoid : undefined),
+    targetAudience: (typeof dbProfile.target_audience === 'string' ? dbProfile.target_audience : undefined),
+    coreOfferings: (typeof dbProfile.core_offerings === 'string' || Array.isArray(dbProfile.core_offerings) ? dbProfile.core_offerings : undefined),
+    contentFocus: (typeof dbProfile.content_focus === 'string' ? dbProfile.content_focus : undefined),
+    communicationGoal: (typeof dbProfile.communication_goal === 'string' ? dbProfile.communication_goal : undefined),
+    imagePreferences: (typeof dbProfile.image_preferences === 'string' ? dbProfile.image_preferences : undefined),
     toneModel: (dbProfile.tone_model as BrandProfileForAI['toneModel']) ?? null,
     contentPillars: contentPillars,
     socialStyle: (dbProfile.social_style as BrandProfileForAI['socialStyle']) ?? null,
@@ -206,14 +198,14 @@ export async function gatherEnhancedAIContext(
   // Process Brand Profile
   if (brandProfile) {
     context.brandVoice = {
-      essence: brandProfile.brand_essence,
+      // DEPRECATED: essence removed - use signature_themes from menu intelligence
+      essence: undefined,
       toneOfVoice: brandProfile.tone_of_voice,
       socialStyle: brandProfile.social_style,
       voiceExamples: brandProfile.voice_examples,
-      ctaStyle: brandProfile.cta_style,
       thingsToAvoid: brandProfile.things_to_avoid,
       toneModel: brandProfile.tone_model ?? null,
-      contentPillars: brandProfile.content_pillars_jsonb ?? null,
+      contentPillars: null,
     }
   }
   
@@ -262,7 +254,6 @@ function buildFormattedContext(context: EnhancedAIContext): string {
     
     if (bv.essence) brandLines.push(`- Brand Essence: ${bv.essence}`)
     if (bv.toneOfVoice) brandLines.push(`- Tone: ${bv.toneOfVoice}`)
-    if (bv.ctaStyle) brandLines.push(`- CTA Style: ${bv.ctaStyle}`)
     if (bv.thingsToAvoid) brandLines.push(`- Avoid: ${bv.thingsToAvoid}`)
     
     // Voice examples

@@ -155,3 +155,31 @@ export async function uploadImageToStorage(file: File, userId: string): Promise<
     throw error
   }
 }
+
+/**
+ * Upload a single video cover frame JPEG blob to Supabase Storage.
+ * Returns a public URL. Used by useVideoCover to persist extracted thumbnails.
+ */
+export async function uploadVideoCoverFrame(
+  blob: Blob,
+  userId: string,
+  index: number
+): Promise<string> {
+  const fileName = `${userId}/covers/${Date.now()}-${index}.jpg`
+
+  const { error } = await supabase.storage
+    .from('post-images')
+    .upload(fileName, blob, {
+      contentType: 'image/jpeg',
+      cacheControl: '31536000', // 1 year — cover frames are immutable once uploaded
+      upsert: false,
+    })
+
+  if (error) throw error
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('post-images')
+    .getPublicUrl(fileName)
+
+  return publicUrl
+}

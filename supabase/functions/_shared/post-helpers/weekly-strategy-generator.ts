@@ -21,6 +21,10 @@ import { generateStrategicBrief } from './strategy/phase1.ts';
 import { generateContentPlanSplit } from './strategy/phase2/index.ts';
 import { validateStrategyOutput } from './strategy/validation.ts';
 import { postProcessConsultantSpeak } from './strategy/post-processing.ts';
+import { assembleBusinessIntelligence } from './assemble-business-intelligence.ts';
+import { validateBusinessIntelligenceUsage, logValidationResults } from './strategy/validate-business-intelligence.ts';
+import { allocateTypesToPosts } from './strategy/phaseC.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // ============================================================
 // MAIN EXPORT
@@ -39,6 +43,14 @@ export async function generateWeeklyStrategy(
   const targetPostCount = calculateTargetPostCount(context);
   console.log(`[Layer 0] Target post count: ${targetPostCount}`);
 
+  // ── Fetch Business Intelligence (required for Phase 1 slot assignment) ──
+  console.log('[Layer 0] Assembling business intelligence...');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  const businessIntelligence = await assembleBusinessIntelligence(supabase, context.business_id);
+  console.log(`[Layer 0] Business intelligence loaded: ${businessIntelligence.dataCompleteness.overallScore}% complete`);
+
   // Phase 0: Contextual analysis
   console.log('[Layer 0] Starting Phase 0...');
   const { analysis: contextualAnalysis, rawOutput: contextualAnalysisRaw } =
@@ -47,20 +59,40 @@ export async function generateWeeklyStrategy(
     `[Layer 0] Phase 0 complete: ${contextualAnalysis.key_factors.length} factors`
   );
 
-  // Phase 1: Strategic brief
+  // Phase 1: Strategic brief (now receives business intelligence)
   console.log('[Layer 0] Starting Phase 1...');
   const { brief: strategicBrief, rawOutput: strategicBriefRaw } =
-    await generateStrategicBrief(context, targetPostCount, contextualAnalysis, isRegenerating);
+    await generateStrategicBrief(context, targetPostCount, contextualAnalysis, isRegenerating, businessIntelligence, null);
   console.log(`[Layer 0] Phase 1 complete: ${strategicBrief.angles.length} angles`);
 
-  // Phase 2: Content plan
+  // ===== PHASE C: TYPE ALLOCATION =====
+  // Assign content_type to each angle based on programme goals, drift correction, and staleness
+  const typeAllocations = await allocateTypesToPosts(
+    strategicBrief,
+    supabase,
+    context.business_id,
+    (context as any).business_programmes || [],
+    (context as any).brand_profile
+  );
+  // ===== END PHASE C =====
+
+  // Phase 2: Content plan (continues to receive business intelligence)
   console.log('[Layer 0] Starting Phase 2...');
   const rawContent = await generateContentPlanSplit(
-    context, strategicBrief, targetPostCount, contextualAnalysis
+    context, strategicBrief, targetPostCount, contextualAnalysis, businessIntelligence, typeAllocations
   );
   console.log(`[Layer 0] Phase 2 complete: ${rawContent.post_ideas?.length || 0} posts`);
 
-  // Validate
+  // Phase 3: Business Intelligence Validation
+  console.log('[Layer 0] Starting Phase 3: Business Intelligence Validation...');
+  const biValidation = validateBusinessIntelligenceUsage(
+    rawContent.post_ideas || [],
+    businessIntelligence
+  );
+  logValidationResults(biValidation);
+  console.log(`[Layer 0] Phase 3 complete: Score ${biValidation.score}/100, ${biValidation.issues.length} issues`);
+
+  // Validate (existing structural validation)
   const validation = validateStrategyOutput(rawContent, context, targetPostCount, strategicBrief);
   if (!validation.passed) {
     console.error('[Layer 0] Validation failed:', validation.critical_errors);

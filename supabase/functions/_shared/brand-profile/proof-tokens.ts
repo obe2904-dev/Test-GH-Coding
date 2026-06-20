@@ -74,6 +74,48 @@ export function buildAllowedProofTokens(analysis: any, dataSources?: DataSources
     .map((ct: any) => String(ct?.trigger || '').trim())
     .filter((name: string) => name.length > 3)
   
+  // v4.12.0: Add SIGNAL TYPE LABELS for proof citation
+  // AI can cite these in proofs: "price_register=mid", "tourist_strength=secondary", etc.
+  const signalLabels: string[] = []
+  
+  // Add price register signal
+  const priceRegister = (dataSources as any)?.menu?.[0]?.price_register || 
+                        analysis?.price_register || 
+                        locationData?.enrichment?.price_register
+  if (priceRegister) signalLabels.push(`price_register=${priceRegister}`)
+  
+  // Add tourist strength signal
+  const touristStrength = locationData?.enrichment?.micro?.tourist_strength
+  if (touristStrength) signalLabels.push(`tourist_strength=${touristStrength}`)
+  
+  // Add area type (already extracted above but also add as signal)
+  if (locationData?.enrichment?.micro?.area_type) {
+    signalLabels.push(`area_type=${locationData.enrichment.micro.area_type}`)
+  }
+  
+  // Add operational signals
+  const operational = (dataSources as any)?.operational || {}
+  if (operational.has_kids_menu) signalLabels.push('has_kids_menu=true')
+  if (operational.has_outdoor_seating) signalLabels.push('has_outdoor_seating=true')
+  if (operational.has_bar) signalLabels.push('has_bar=true')
+  if (operational.has_terrace) signalLabels.push('has_terrace=true')
+  
+  // Add venue type signal
+  const venueType = (dataSources as any)?.business?.category_primary || 
+                    analysis?.venue_type
+  if (venueType) signalLabels.push(`venue_type=${venueType}`)
+  
+  // Add opening hours signals (if late hours = content opportunity)
+  const openingHours = (dataSources as any)?.operational?.opening_hours
+  if (openingHours && typeof openingHours === 'object') {
+    // Check if open late (past 22:00)
+    const hasLateHours = Object.values(openingHours).some((hours: any) => {
+      const close = hours?.close || ''
+      return close && close >= '22:00'
+    })
+    if (hasLateHours) signalLabels.push('late_hours=true')
+  }
+  
   const finalTokens = [
     canonicalLocationHook,
     ...allCtaTexts, // All CTAs (including "BOOK DIT BORD", "BOOK BORD", etc.)
@@ -85,11 +127,12 @@ export function buildAllowedProofTokens(analysis: any, dataSources?: DataSources
     cityProof,
     ...hookLabels, // v4.11.1: Hook labels and evidence from Prompt A
     ...usageOccasionIds, // v4.11.1: Usage occasion IDs
-    ...contentTriggerNames // v4.11.2: Content trigger names
+    ...contentTriggerNames, // v4.11.2: Content trigger names
+    ...signalLabels // v4.12.0: Signal type labels for proof citation
   ].filter(Boolean).map(t => normalize(t))
   
-  // v4.11.2: Debug logging to verify all expansions are included
-  console.log(`🔧 v4.11.2 Proof tokens: ${finalTokens.length} total (${hookLabels.length} hooks, ${usageOccasionIds.length} occasions, ${contentTriggerNames.length} triggers)`)
+  // v4.12.0: Debug logging to verify all expansions are included
+  console.log(`🔧 v4.12.0 Proof tokens: ${finalTokens.length} total (${hookLabels.length} hooks, ${usageOccasionIds.length} occasions, ${contentTriggerNames.length} triggers, ${signalLabels.length} signals)`)
   
   // Ensure we return at least one token for downstream validators/tests
   if (finalTokens.length === 0) {

@@ -4,7 +4,7 @@
  */
 
 import type { DataSources } from './types.ts'
-import { detectWebsitePresence } from './website-presence.ts'
+import { detectWebsitePresence, logWebsitePresence } from './website-presence.ts'
 
 // Meta-text patterns that should NEVER appear in user-facing fields
 // These are allowed ONLY in clarifications_needed or internal_notes

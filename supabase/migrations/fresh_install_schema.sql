@@ -542,6 +542,59 @@ $$;
 
 ALTER FUNCTION "public"."classify_category_type"("category_name" "text") OWNER TO "postgres";
 
+CREATE OR REPLACE FUNCTION "public"."classify_media_category"("category_name" "text", "item_name" "text", "item_description" "text") RETURNS "text"
+        LANGUAGE "plpgsql" IMMUTABLE
+        AS $$
+DECLARE
+    v_text TEXT := LOWER(CONCAT_WS(' ', category_name, item_name, item_description));
+    v_category_lower TEXT := LOWER(COALESCE(category_name, ''));
+    v_normalized_text TEXT := ' ' || regexp_replace(v_text, '[^[:alnum:]]+', ' ', 'g') || ' ';
+    v_drink_categories TEXT[] := ARRAY[
+        'cocktail', 'mocktail', 'drink', 'beverage', 'apéritif', 'aperitif', 'bar', 'spirits'
+    ];
+    v_food_categories TEXT[] := ARRAY[
+        'brunch', 'lunch', 'dinner', 'breakfast', 'main', 'forretter', 'appetizer', 'starter',
+        'dessert', 'salad', 'classic', 'smørrebrød'
+    ];
+    v_drink_phrases TEXT[] := ARRAY[
+        'still water', 'sparkling water', 'mineral water', 'draft beer', 'draught beer',
+        'tap beer', 'cold brew', 'iced coffee', 'hot chocolate', 'non alcoholic'
+    ];
+    v_drink_keywords TEXT[] := ARRAY[
+        'beer', 'wine', 'cocktail', 'mocktail', 'spirits', 'liquor', 'gin', 'vodka', 'rum', 'whisky', 'whiskey',
+        'tequila', 'aperitif', 'aperitivo', 'prosecco', 'champagne', 'cider', 'ale', 'lager', 'stout', 'ipa', 'espresso',
+        'coffee', 'cappuccino', 'latte', 'americano', 'macchiato', 'tea', 'matcha', 'juice', 'smoothie', 'milkshake',
+        'shake', 'soda', 'cola', 'lemonade', 'tonic', 'kombucha', 'chai', 'spritz', 'martini', 'negroni', 'mojito',
+        'margarita', 'bloody mary'
+    ];
+BEGIN
+    IF v_text IS NULL OR TRIM(v_text) = '' THEN
+        RETURN NULL;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM unnest(v_drink_categories) AS cat WHERE v_category_lower LIKE '%' || cat || '%') THEN
+        RETURN 'DRINK';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM unnest(v_food_categories) AS cat WHERE v_category_lower LIKE '%' || cat || '%') THEN
+        RETURN 'FOOD';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM unnest(v_drink_phrases) AS phrase WHERE v_normalized_text LIKE '% ' || phrase || ' %') THEN
+        RETURN 'DRINK';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM unnest(v_drink_keywords) AS keyword WHERE v_normalized_text LIKE '% ' || keyword || ' %') THEN
+        RETURN 'DRINK';
+    END IF;
+
+    RETURN 'FOOD';
+END;
+$$;
+
+
+ALTER FUNCTION "public"."classify_media_category"("category_name" "text", "item_name" "text", "item_description" "text") OWNER TO "postgres";
+
 
 CREATE OR REPLACE FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_business_vertical" "text", "p_postal_code" "text", "p_city" "text", "p_country" "text", "p_selected_platforms" "text"[]) RETURNS "uuid"
     LANGUAGE "plpgsql" SECURITY DEFINER
@@ -3489,6 +3542,7 @@ CREATE TABLE IF NOT EXISTS "public"."menu_items_normalized" (
     "menu_result_id" "uuid" NOT NULL,
     "item_name" "text" NOT NULL,
     "item_description" "text",
+    "media_category" "text" CHECK (("media_category" IS NULL) OR ("media_category" = ANY (ARRAY['FOOD'::"text", 'DRINK'::"text"]))),
     "item_price" "text",
     "category_name" "text" NOT NULL,
     "category_type" "text" NOT NULL,
@@ -4631,6 +4685,10 @@ CREATE INDEX "idx_menu_extractions_source" ON "public"."menu_extractions" USING 
 
 
 CREATE INDEX "idx_menu_items_normalized_business" ON "public"."menu_items_normalized" USING "btree" ("business_id");
+
+
+
+CREATE INDEX "idx_menu_items_normalized_media_category" ON "public"."menu_items_normalized" USING "btree" ("media_category");
 
 
 

@@ -1,5 +1,6 @@
 // @ts-ignore - Deno import
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { loadLanguageConfig, compileTemplate, type Language } from '../_shared/prompts/utils/prompt-loader.ts'
 
 // @ts-ignore - Deno global
 declare const Deno: any;
@@ -38,9 +39,41 @@ serve(async (req: any) => {
       )
     }
 
-    const system = `You are a professional spelling and grammar assistant. Correct the user's text for spelling, grammar and punctuation while preserving meaning, intent and formatting. Do NOT return any code blocks or runnable code. Return ONLY the corrected text as plain text in the response message.`
+    // Load language-specific prompts using new multilingual system
+    const lang = language as Language
+    const result = await loadLanguageConfig(lang, 'spelling-system')
+    
+    let systemMessage: string
+    let userTemplate: string
+    let closer: string
+    
+    if (!result.success || !result.prompt) {
+      console.warn(`Failed to load ${lang} spelling prompt, using hardcoded fallback`)
+      // Fallback to original English (for backward compatibility)
+      systemMessage = `You are a professional spelling and grammar assistant. Correct the user's text for spelling, grammar and punctuation while preserving meaning, intent and formatting. 
 
-    const userPrompt = `Please correct the following text${language && language !== 'auto' ? ` (language: ${language})` : ''} and return only the corrected text.\n\n---INPUT START---\n${text}\n---INPUT END---\n\nDo not add commentary or analysis.`
+ADDITIONAL RULES:
+- Replace " - " or " – " used as stylistic connectors between sentence parts with natural sentence structure (this is an AI writing tell)
+- For Danish text: join compound words that are split with unnecessary hyphens (e.g. "menu-kort" → "menukort", "brunch-tilbud" → "brunchtilbud") unless it's a proper noun or requires hyphen by Danish orthography`
+      
+      userTemplate = `Please correct the following text{{language_note}} and return only the corrected text.\n\n---INPUT START---\n{{text}}\n---INPUT END---\n\nDo not add commentary or analysis.`
+      
+      closer = `Do NOT return any code blocks or runnable code. Return ONLY the corrected text as plain text in the response message.`
+    } else {
+      systemMessage = result.prompt.system
+      userTemplate = result.prompt.user || ''
+      closer = result.prompt.closer
+    }
+    
+    // Build user prompt with variables
+    const languageNote = (language && language !== 'auto') ? ` (sprog: ${language})` : ''
+    const userPrompt = compileTemplate(userTemplate, {
+      text: text,
+      language_note: languageNote
+    })
+    
+    // Combine system + closer
+    const system = systemMessage + '\n\n' + closer
 
     const openaiResp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

@@ -15,8 +15,8 @@ BEGIN
     VALUES
       ('DK', 'holiday', '1. Pinsedag', '2026-05-24', NULL, 'annual',
        ARRAY['outdoor', 'families'],
-       'Emphasis: Pentecost Sunday, long weekend begins',
-       'Promote: Spring menu, terrace dining, Pinsefrokost',
-       2);
+       'Vægt på: Pinsedag — start på lang weekend, ofte første pålidelige varme udeweekend.',
+       'Fremhæv: Udendørs spisning, forårsmenu, lette frokoster, frisk luft.',
+       3);
   END IF;
 END $$;

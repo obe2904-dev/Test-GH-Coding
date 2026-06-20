@@ -10,7 +10,7 @@
 
 import { supabase } from '../lib/supabase'
 import { TIER_FEATURES, type UserTier } from '../config/features'
-import { getVerticalConfig, verticalHasCapability, type BusinessVertical } from '../config/businessVerticals'
+import { getVerticalConfig, resolveEffectiveVertical, verticalHasCapability, type BusinessVertical } from '../config/businessVerticals'
 import { executeTrigger, CONTEXT_TRIGGERS } from './contextTriggers'
 import { globalContextCache } from './contextCache'
 
@@ -117,6 +117,27 @@ export class ContextBuilder {
         .eq('business_id', businessId)
         .single() as any
 
+      const { data: brandProfile } = await supabase
+        .from('business_brand_profile')
+        .select('business_character, business_identity_persona, identity_keywords, brand_profile_v5')
+        .eq('business_id', businessId)
+        .maybeSingle() as any
+
+      const businessCharacter =
+        brandProfile?.brand_profile_v5?.layer_0_intelligence?.business_identity?.system_persona ||
+        brandProfile?.business_identity_persona ||
+        brandProfile?.business_character ||
+        profile?.brand_voice ||
+        ''
+      const identityKeywords = Array.isArray(brandProfile?.identity_keywords)
+        ? brandProfile.identity_keywords
+        : []
+      const effectiveVertical = resolveEffectiveVertical(
+        business.vertical,
+        businessCharacter,
+        identityKeywords,
+      )
+
       // Get business location
       const { data: location } = await supabase
         .from('business_locations')
@@ -145,7 +166,7 @@ export class ContextBuilder {
       }
 
       if (allowedFields === 'all' || allowedFields.includes('type')) {
-        context.business.type = business.vertical
+        context.business.type = effectiveVertical
         context.metadata.sources.push('business.type')
       }
 
@@ -153,6 +174,9 @@ export class ContextBuilder {
         context.business.vertical = business.vertical
         context.metadata.sources.push('business.vertical')
       }
+
+      context.business.effectiveVertical = effectiveVertical
+      context.metadata.sources.push('business.effectiveVertical')
 
       if (allowedFields === 'all' || allowedFields.includes('website')) {
         context.business.website = business.website_url
@@ -226,7 +250,7 @@ export class ContextBuilder {
       }
 
       // Fetch vertical-specific data
-      await this.fetchVerticalSpecificData(business.vertical as BusinessVertical, businessId, context, allowedFields)
+      await this.fetchVerticalSpecificData(effectiveVertical as BusinessVertical, businessId, context, allowedFields)
 
     } catch (error) {
       console.error('Error fetching business data:', error)
@@ -260,7 +284,7 @@ export class ContextBuilder {
           .select('*')
           .eq('business_id', businessId)
           .eq('is_active', true)
-          .order('display_order') as any
+          .order('display_order')
 
         if (services && services.length > 0) {
           context.business.services = services
@@ -268,20 +292,8 @@ export class ContextBuilder {
         }
       }
 
-      // Fetch staff profiles (for salons, gyms, restaurants with chefs, etc.)
-      if (verticalHasCapability(vertical, 'hasStaffProfiles')) {
-        const { data: staff } = await supabase
-          .from('business_staff')
-          .select('*')
-          .eq('business_id', businessId)
-          .eq('is_active', true)
-          .order('display_order') as any
-
-        if (staff && staff.length > 0) {
-          context.business.staff = staff
-          context.metadata.sources.push('business.staff')
-        }
-      }
+      // NOTE: business_staff table was DROPPED April 2026 (migration 20260420000007).
+      // Staff data is no longer available. Do NOT restore this query.
 
       // Fetch product catalog (retail products)
       if (verticalHasCapability(vertical, 'hasProductCatalog') && (allowedFields === 'all')) {
@@ -290,7 +302,8 @@ export class ContextBuilder {
           .select('*')
           .eq('business_id', businessId)
           .eq('is_active', true)
-          .order('is_featured DESC, display_order') as any
+          .order('is_featured', { ascending: false })
+          .order('display_order', { ascending: true })
 
         if (products && products.length > 0) {
           context.business.products = products
@@ -305,7 +318,8 @@ export class ContextBuilder {
           .select('*')
           .eq('business_id', businessId)
           .eq('is_active', true)
-          .order('day_of_week, start_time') as any
+          .order('day_of_week', { ascending: true })
+          .order('start_time', { ascending: true })
 
         if (classes && classes.length > 0) {
           context.business.classes = classes

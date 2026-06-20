@@ -17,6 +17,7 @@ export interface BasicBusinessInfo {
   businessType: BusinessType | null  // Updated: Now supports both string and hybrid structure
   description: string | null
   logoUrl: string | null
+  localLocationReference?: string | null  // NEW: Extracted local place name (e.g., "ved åen")
 }
 
 // Language-specific system prompts for better output quality
@@ -24,26 +25,26 @@ const LANGUAGE_PROMPTS: Record<string, { system: string; descriptionInstruction:
   da: {
     system: `Du er en virksomhedsinformationsekstraktor. Returner KUN gyldig JSON.
 KRITISK: Skriv ALTID beskrivelsen på DANSK. Oversæt ALDRIG til engelsk. Bevar originale danske vendinger og udtryk.`,
-    descriptionInstruction: 'Skriv en kort beskrivelse på 1-2 sætninger på DANSK der fanger hvad der gør denne virksomhed unik. Bevar danske udtryk.'
+    descriptionInstruction: 'Skriv en kort beskrivelse på 2-4 sætninger på DANSK der opsummerer hele virksomheden: hvad stedet er, hvad det serverer, hvilken stemning/oplevelse det tilbyder, og hvor det ligger hvis det er tydeligt. Bevar danske udtryk.'
   },
   no: {
     system: `Du er en virksomhetsinformasjonsekstraktor. Returner KUN gyldig JSON.
 KRITISK: Skriv ALLTID beskrivelsen på NORSK. Oversett ALDRI til engelsk. Bevar originale norske vendinger og uttrykk.`,
-    descriptionInstruction: 'Skriv en kort beskrivelse på 1-2 setninger på NORSK som fanger hva som gjør denne virksomheten unik. Bevar norske uttrykk.'
+    descriptionInstruction: 'Skriv en kort beskrivelse på 2-4 setninger på NORSK som oppsummerer hele virksomheten: hva stedet er, hva det serverer, hvilken stemning/opplevelse det tilbyr, og hvor det ligger hvis det er tydelig. Bevar norske uttrykk.'
   },
   sv: {
     system: `Du är en företagsinformationsextraktor. Returnera ENDAST giltig JSON.
 KRITISKT: Skriv ALLTID beskrivningen på SVENSKA. Översätt ALDRIG till engelska. Bevara svenska uttryck och fraser.`,
-    descriptionInstruction: 'Skriv en kort beskrivning på 1-2 meningar på SVENSKA som fångar vad som gör detta företag unikt. Bevara svenska uttryck.'
+    descriptionInstruction: 'Skriv en kort beskrivning på 2-4 meningar på SVENSKA som sammanfattar hela verksamheten: vad platsen är, vad den serverar, vilken känsla/upplevelse den erbjuder, och var den ligger om det framgår tydligt. Bevara svenska uttryck.'
   },
   de: {
     system: `Sie sind ein Geschäftsinformationsextraktor. Geben Sie NUR gültiges JSON zurück.
 KRITISCH: Schreiben Sie die Beschreibung IMMER auf DEUTSCH. Übersetzen Sie NIEMALS ins Englische. Bewahren Sie deutsche Ausdrücke und Redewendungen.`,
-    descriptionInstruction: 'Schreiben Sie eine kurze Beschreibung in 1-2 Sätzen auf DEUTSCH, die erfasst, was dieses Unternehmen einzigartig macht. Bewahren Sie deutsche Ausdrücke.'
+    descriptionInstruction: 'Schreiben Sie eine kurze Beschreibung in 2-4 Sätzen auf DEUTSCH, die das gesamte Unternehmen zusammenfasst: was der Ort ist, was er serviert, welche Atmosphäre/Erfahrung er bietet und wo er liegt, falls das klar erkennbar ist. Bewahren Sie deutsche Ausdrücke.'
   },
   en: {
     system: `You are a business information extractor. Return only valid JSON.`,
-    descriptionInstruction: 'Write a concise 1-2 sentence description capturing what makes this business unique.'
+    descriptionInstruction: 'Write a concise 2-4 sentence description that summarizes the whole business: what the place is, what it serves, the vibe/experience it offers, and where it is located if that is clear.'
   }
 }
 
@@ -105,9 +106,9 @@ export async function extractBasicInfo(
   
   const langPrompts = LANGUAGE_PROMPTS[langCode] || LANGUAGE_PROMPTS.en
   
-  // Build the prompt with pre-extracted about text if available
+  // Build the prompt with pre-extracted homepage summary if available
   const aboutSection = hints.homepageAboutCandidate 
-    ? `\n\nPRE-EXTRACTED ABOUT TEXT (use this as the primary source for description - do not invent):\n"${hints.homepageAboutCandidate}"\n`
+    ? `\n\nPRE-EXTRACTED HOMEPAGE SUMMARY (summarize the facts below - do not invent):\n"${hints.homepageAboutCandidate}"\n`
     : ''
   
   const prompt = `Extract basic business information from this website content.
@@ -123,9 +124,10 @@ Extract:
    - If hybrid: { "primary": "cafe", "secondary": ["vinbar", "cocktailbar"], "hybridLabel": "Kaffebar & Vinbar", "cuisineType": "Dansk", "conceptTags": ["specialty-coffee"] }
    - Primary types: restaurant, cafe, bar, hotel, bakery, coffee_shop, retail, beauty, fitness, services, other
 3. description: ${hints.homepageAboutCandidate 
-    ? `${langPrompts.descriptionInstruction} Use the PRE-EXTRACTED ABOUT TEXT above. Do NOT invent details not in the source text.`
+  ? `${langPrompts.descriptionInstruction} Use ALL parts of the PRE-EXTRACTED HOMEPAGE SUMMARY above. The ABOUT BLOCK is only one signal, not the whole answer. Synthesize the business from the full homepage evidence. Prefer a fresh summary over copying the about sentence verbatim.`
     : langPrompts.descriptionInstruction}
 4. logoUrl: Include if an obvious logo image URL is visible in the content (or use the pre-extracted one)
+5. localLocationReference: Extract EXACT local place name phrase if business describes its location (e.g., "ved åen", "i Nyhavn", "ved stranden"). ONLY extract if explicitly mentioned. Return null if not found. Look for patterns: "ved [landmark]", "i [area]", "på [street/area]", "beliggende [where]".
 
 Return JSON:
 {
@@ -138,7 +140,8 @@ Return JSON:
     "conceptTags": ["relevant", "tags"]
   },
   "description": "brief description in ${langName}",
-  "logoUrl": "logo URL or null"
+  "logoUrl": "logo URL or null",
+  "localLocationReference": "exact local phrase or null"
 }`
 
   const taskConfig = AI_TASKS.basicInfo

@@ -32,35 +32,11 @@ export class DatabaseSaver {
   }
 
   /**
-   * Save analyzed metadata to business_menu_metadata table
+   * Save analyzed metadata to business_menu_metadata table.
+   * ⚠️ business_menu_metadata was DROPPED April 2026 (migration 20260420000007).
+   * This method is now a no-op — metadata is returned in the response body only.
    */
-  async saveMetadata(businessId: string, metadata: AnalyzedMetadata): Promise<void> {
-    const { error } = await this.supabase
-      .from('business_menu_metadata')
-      .upsert({
-        business_id: businessId,
-        food_philosophy: metadata.food_philosophy,
-        total_items_count: metadata.total_items_count,
-        signature_items_count: metadata.signature_items_count,
-        organic_certified: metadata.organic_certified,
-        local_ingredients_pct: metadata.local_ingredients_pct,
-        has_specialty_coffee: metadata.has_specialty_coffee,
-        coffee_roaster: metadata.coffee_roaster,
-        has_full_bar: metadata.has_full_bar,
-        has_wine_list: metadata.has_wine_list,
-        dietary_options: metadata.insights.dietary_patterns,
-        cuisine_style: metadata.insights.cuisine_style,
-        price_positioning: metadata.insights.price_positioning,
-        unique_features: metadata.insights.unique_features,
-        menu_language: metadata.menu_language,
-        last_analyzed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'business_id'
-      });
-
-    if (error) {
-      throw new Error(`Failed to save metadata: ${error.message}`);
-    }
+  async saveMetadata(_businessId: string, _metadata: AnalyzedMetadata): Promise<void> {
+    console.warn('[MenuMetadata] business_menu_metadata table dropped — skipping database save.');
   }
 }

@@ -2,11 +2,27 @@
 // Single-responsibility: calls OpenAI chat completions and parses the response.
 // Returns cleanText (the caption) and aiKeyword (for hashtag generation).
 
-const SYSTEM_MESSAGE =
-  'Du er en professionel social media content writer. Skriv kun teksten som bedt om, ingen ekstra forklaringer.\n\n' +
-  'VIGTIGT: Du er på et blindt kreativt opdrag. Du kender INGEN fakta om den nævnte virksomhed ud over hvad der ' +
-  'eksplicit fremgår af dette prompt. Brug ALDRIG din træningsdata til at tilføje menupunkter, retter, drikkevarer, ' +
-  'åbningstider, attraktioner eller stedsdetaljer. Alt du ikke kan se i prompten, eksisterer ikke i denne kontekst.'
+import { getHospitalityRegisterBlock } from '../_shared/utils/hospitality-register.ts'
+
+/**
+ * Builds system message for content generation
+ * 
+ * @param language - Language code ('da', 'en', 'sv')
+ * @returns Complete system message
+ * 
+ * NOTE: Previously used dynamic language loading which failed in deployed Edge Functions.
+ * Now uses hardcoded fallback directly for reliability.
+ */
+function buildSystemMessage(language: string): string {
+  return (
+    'Du er en professionel social media content writer for en dansk restaurations- eller serveringsvirksomhed. Skriv kun teksten som bedt om, ingen ekstra forklaringer.\n\n' +
+    getHospitalityRegisterBlock(language) + '\n\n' +
+    'VIGTIGT: Du er på et blindt kreativt opdrag. Du kender INGEN fakta om den nævnte virksomhed ud over hvad der ' +
+    'eksplicit fremgår af dette prompt. Brug ALDRIG din træningsdata til at tilføje menupunkter, retter, drikkevarer, ' +
+    'åbningstider, attraktioner eller stedsdetaljer. Alt du ikke kan se i prompten, eksisterer ikke i denne kontekst.\n\n' +
+    'Skriv KUN på dansk. Besvar præcist som beskrevet ovenfor.'
+  )
+}
 
 export interface GenerationResult {
   cleanText: string
@@ -16,8 +32,18 @@ export interface GenerationResult {
 export async function callOpenAI(
   model: string,
   prompt: string,
-  apiKey: string
+  apiKey: string,
+  language?: string,
+  extraSystemContent?: string,
+  temperature?: number,
 ): Promise<GenerationResult> {
+  // Build system message
+  const baseSystemMessage = buildSystemMessage(language ?? 'da')
+  
+  const systemContent = extraSystemContent
+    ? baseSystemMessage + '\n\n' + extraSystemContent
+    : baseSystemMessage
+
   const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -27,11 +53,11 @@ export async function callOpenAI(
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: SYSTEM_MESSAGE },
+        { role: 'system', content: systemContent },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.7,
-      max_tokens: 280,
+      temperature: temperature ?? 0.7,
+      max_tokens: 800,  // Increased from 650 to prevent truncation
       top_p: 0.9
     })
   })

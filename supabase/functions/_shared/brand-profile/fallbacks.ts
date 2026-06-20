@@ -325,7 +325,7 @@ export function buildContentFocusFallback(ctx: FallbackContext): FallbackResult<
     const foodArea = hasFood 
       ? '- MAD & SERVICE: Klassiske retter serveret i roligt tempo, hvor man kan nyde måltidet uden stress'
       : '- MAD & SERVICE: Kvalitetsmad serveret i afslappede omgivelser'
-      value = `${foodArea}\n- STEMNING & INTERIØR: Afslappet atmosfære i ${locationName}, perfekt når man har god tid\n- FOLK & ØJEBLIKKE: Lange måltider hvor man bliver siddende, overgange fra brunch til frokost til aften`
+      value = `${foodArea}\n- STEMNING & OPLEVELSE: Afslappet stemning og oplevelse i ${locationName}, perfekt når man har god tid\n- FOLK & ØJEBLIKKE: Lange måltider hvor man bliver siddende, overgange fra brunch til frokost til aften`
   } else if (locale.language === 'de') {
     const foodArea = hasFood
       ? '- ESSEN & SERVICE: Klassische Gerichte in entspanntem Tempo serviert, wo man die Mahlzeit ohne Stress genießen kann'
@@ -352,6 +352,247 @@ export function buildContentFocusFallback(ctx: FallbackContext): FallbackResult<
     confidence: 0.7,
     usedFallback: true,
     reason: 'AI did not include 3 required focus areas'
+  }
+}
+
+/**
+ * Fallback builder for content_strategy (goal_blend + content_category_weights)
+ * 
+ * Deterministic generation based on objective business signals:
+ * - Maturity (review count, founding date, social history)
+ * - Archetype (cafe_bar, fine_dining, bakery, etc.)
+ * - Service complexity (multi-programme vs single-focus)
+ * - Location type (waterfront, downtown, residential)
+ * 
+ * This ensures every business gets a content_strategy regardless of AI generation.
+ */
+export function buildContentStrategyFallback(ctx: FallbackContext): FallbackResult<any> {
+  const { dataSources, locale, errors } = ctx
+  const business = dataSources?.business
+  const operations = dataSources?.operations
+  const location = dataSources?.location
+  const locationIntel = dataSources?.locationIntelligenceRow
+  const profile = dataSources?.profile
+  
+  // ===== MATURITY CLASSIFICATION =====
+  // emerging (0-18mo), growing (18mo-5yr), established (5yr+)
+  const reviewCount = business?.review_count || 0
+  const foundingYear = business?.founding_date ? new Date(business.founding_date).getFullYear() : null
+  const currentYear = new Date().getFullYear()
+  const yearsOperating = foundingYear ? currentYear - foundingYear : null
+  
+  let maturity: 'emerging' | 'growing' | 'established' = 'growing'  // Default when evidence is sparse
+  if (yearsOperating !== null) {
+    if (yearsOperating < 1.5) maturity = 'emerging'
+    else if (yearsOperating >= 5) maturity = 'established'
+    else maturity = 'growing'
+  } else if (reviewCount > 0) {
+    // Fallback to review count when founding date unavailable
+    if (reviewCount < 50) maturity = 'emerging'
+    else if (reviewCount >= 200) maturity = 'established'
+    else maturity = 'growing'
+  }
+  
+  // ===== SERVICE COMPLEXITY =====
+  // Multi-programme businesses (brunch+lunch+dinner+bar) are always footfall-led
+  const menuSummaries = dataSources?.menuSummaries || []
+  const programmeTitles = menuSummaries.map((m: any) => m.title?.toLowerCase() || '')
+  const hasBrunch = programmeTitles.some((t: string) => /brunch/i.test(t))
+  const hasLunch = programmeTitles.some((t: string) => /frokost|lunch/i.test(t)) || operations?.service_breakfast_lunch
+  const hasDinner = programmeTitles.some((t: string) => /aftensmad|middag|dinner/i.test(t)) || operations?.service_dinner
+  const hasBar = programmeTitles.some((t: string) => /bar|drinks|cocktails/i.test(t))
+  const programmeCount = [hasBrunch, hasLunch, hasDinner, hasBar].filter(Boolean).length
+  const isMultiProgramme = programmeCount >= 3
+  
+  // ===== LOCATION TYPE =====
+  const areaType = location?.enrichment?.micro?.area_type || locationIntel?.area_type
+  const isWaterfront = areaType === 'waterfront' || /waterfront|water/i.test(String(locationIntel?.neighborhood || ''))
+  const isDestination = isWaterfront || areaType === 'tourist' || (locationIntel?.category_scores?.tourist || 0) >= 70
+  
+  // ===== ARCHETYPE =====
+  const businessType = operations?.establishment_type || business?.business_type || profile?.business_category || 'cafe'
+  const archetype = businessType.toLowerCase()
+  
+  // ===== CONCEPT DISTINCTIVENESS =====
+  // commodity (standard café/pizza/burger), distinctive_concept (strong narrative), destination_experience (location IS product)
+  let conceptType: 'commodity' | 'distinctive_concept' | 'destination_experience' = 'commodity'
+  if (isDestination || isMultiProgramme) {
+    conceptType = 'destination_experience'
+  } else if (archetype.includes('fine_dining') || archetype.includes('michelin') || (profile?.price_level >= 3)) {
+    conceptType = 'distinctive_concept'
+  }
+  
+  // ===== GOAL BLEND CALCULATION =====
+  let drive_footfall = 50
+  let build_brand = 30
+  let retain_loyalty = 20
+  
+  if (maturity === 'emerging') {
+    // Emerging: focus on awareness + brand building, minimal loyalty (no audience yet)
+    drive_footfall = 40
+    build_brand = 45
+    retain_loyalty = 15
+  } else if (maturity === 'growing') {
+    if (conceptType === 'destination_experience' || isMultiProgramme) {
+      // Growing + destination/multi-programme: footfall-led
+      drive_footfall = 55
+      build_brand = 25
+      retain_loyalty = 20
+    } else if (conceptType === 'distinctive_concept') {
+      // Growing + distinctive: brand-led
+      drive_footfall = 35
+      build_brand = 45
+      retain_loyalty = 20
+    } else {
+      // Growing + commodity: balanced
+      drive_footfall = 45
+      build_brand = 30
+      retain_loyalty = 25
+    }
+  } else {
+    // Established
+    if (conceptType === 'destination_experience' || isMultiProgramme) {
+      // Established + destination/multi: still footfall-led (different audiences per programme)
+      drive_footfall = 40
+      build_brand = 20
+      retain_loyalty = 40
+    } else if (archetype.includes('neighborhood') || archetype.includes('local')) {
+      // Established + neighborhood: loyalty-led
+      drive_footfall = 30
+      build_brand = 20
+      retain_loyalty = 50
+    } else {
+      // Established + other: balanced with loyalty emphasis
+      drive_footfall = 35
+      build_brand = 20
+      retain_loyalty = 45
+    }
+  }
+  
+  // Ensure sum to 100
+  const sum = drive_footfall + build_brand + retain_loyalty
+  if (sum !== 100) {
+    const diff = 100 - sum
+    drive_footfall += diff  // Adjust primary goal
+  }
+  
+  const primary_goal = drive_footfall >= build_brand && drive_footfall >= retain_loyalty
+    ? 'drive_footfall'
+    : build_brand >= retain_loyalty
+    ? 'build_brand'
+    : 'retain_loyalty'
+  
+  // ===== CONTENT CATEGORY WEIGHTS =====
+  // product_menu, craving_visual, behind_scenes, team_people
+  let product_menu = 35
+  let craving_visual = 30
+  let behind_scenes = 20
+  let team_people = 15
+  
+  if (conceptType === 'destination_experience') {
+    // Destination: atmosphere is the product
+    craving_visual += 10
+    product_menu -= 5
+    behind_scenes -= 5
+  } else if (conceptType === 'distinctive_concept') {
+    // Distinctive: narrative is differentiator
+    behind_scenes += 10
+    product_menu -= 5
+    craving_visual -= 5
+  }
+  
+  if (maturity === 'established') {
+    // Established: people are the loyalty anchor
+    team_people += 5
+    product_menu -= 5
+  }
+  
+  // Simple café/bakery adjustment: ONLY for single-focus commodity venues
+  // Exclude hybrids (café-bar, multi-programme) which are already handled by conceptType
+  if ((archetype.includes('bakery') || archetype.includes('cafe')) && conceptType === 'commodity' && !isMultiProgramme) {
+    // Pure bakery/café: product visuals matter more
+    product_menu += 5
+    craving_visual += 5
+    behind_scenes -= 5
+    team_people -= 5
+  }
+  
+  // Normalize to 100
+  const ccwSum = product_menu + craving_visual + behind_scenes + team_people
+  if (ccwSum !== 100) {
+    const factor = 100 / ccwSum
+    product_menu = Math.round(product_menu * factor)
+    craving_visual = Math.round(craving_visual * factor)
+    behind_scenes = Math.round(behind_scenes * factor)
+    team_people = Math.round(team_people * factor)
+    // Fix rounding error
+    const diff = 100 - (product_menu + craving_visual + behind_scenes + team_people)
+    product_menu += diff
+  }
+  
+  // ===== SIGNALS, ANCHORS, HOOKS =====
+  const cityName = location?.enrichment?.macro?.city || business?.city || 'byen'
+  const waterType = locale.preferredPhrasing?.['location_waterfront'] || 'ved vandet'
+  
+  const footfall_signals = []
+  if (hasBrunch) footfall_signals.push('weekend brunch service')
+  if (hasLunch) footfall_signals.push('weekday lunch crowd')
+  if (hasDinner) footfall_signals.push('evening dining service')
+  if (operations?.has_outdoor_seating) footfall_signals.push('outdoor seating')
+  if (isWaterfront) footfall_signals.push(waterType)
+  
+  const brand_anchors = []
+  if (isWaterfront) brand_anchors.push(`${waterType} i ${cityName}`)
+  if (operations?.has_takeaway) brand_anchors.push('takeaway service')
+  if (profile?.price_level >= 3) brand_anchors.push('premium offering')
+  if (conceptType === 'distinctive_concept') brand_anchors.push('distinctive concept')
+  
+  const loyalty_hooks = []
+  if (maturity === 'established') {
+    loyalty_hooks.push('stamgæster')
+    loyalty_hooks.push('kendt personale')
+    if (hasBrunch) loyalty_hooks.push('brunch-ritualet')
+  } else if (maturity === 'growing') {
+    loyalty_hooks.push('gentagende gæster')
+    if (operations?.weekly_programme) loyalty_hooks.push('recurring events')
+  } else {
+    // Emerging: forward-looking
+    loyalty_hooks.push('brunch-ritualet vi bygger')
+    loyalty_hooks.push('de første stamgæster')
+  }
+  
+  const value = {
+    primary_goal,
+    goal_blend: {
+      drive_footfall,
+      build_brand,
+      retain_loyalty
+    },
+    footfall_signals: footfall_signals.length > 0 ? footfall_signals : ['general service'],
+    brand_anchors: brand_anchors.length > 0 ? brand_anchors : ['quality offerings'],
+    loyalty_hooks: loyalty_hooks.length > 0 ? loyalty_hooks : ['repeat visits'],
+    content_category_weights: {
+      product_menu,
+      craving_visual,
+      behind_scenes,
+      team_people
+    }
+  }
+  
+  errors.add(
+    ErrorCategory.AI_INSTRUCTION_FAILURE,
+    ErrorSeverity.MEDIUM,
+    'Used deterministic fallback for content_strategy',
+    'generation',
+    { tier: FallbackTier.TEMPLATE_RICH, maturity, conceptType, archetype, value }
+  )
+  
+  return {
+    value,
+    tier: FallbackTier.TEMPLATE_RICH,
+    confidence: 0.8,
+    usedFallback: true,
+    reason: 'AI did not generate content_strategy field'
   }
 }
 
@@ -391,14 +632,45 @@ export function removeBannedWords(text: string, locale: LocaleConfig): string {
  * @param sections - Brand profile sections
  * @returns Sanitized sections
  */
+// Shared constant — used by both sanitizeString() and sanitizeBannedWords()
+const ALWAYS_BANNED_WORDS = [
+  // HARD list — hyperbolic/generic, never allowed
+  'uforglemmelig', 'uforglemmelige',
+  'magisk', 'magiske',
+  'gastronomisk', 'gastronomiske',
+  'udsøgt', 'udsøgte',
+  'forkæle', 'forkæler', 'forkælet',
+  'gode stunder',
+  // SOFT list — generic marketing words
+  'hyggelig', 'hyggeligt', 'lækker', 'lækkert', 'lækre',
+  'indbydende', 'afslappet', 'afslappede', 'afslappende',
+  'autentisk', 'autentiske', 'unik', 'unikke',
+  'fantastisk', 'fantastiske', 'vidunderlig', 'vidunderlige', 'charmerende'
+]
+
+/**
+ * Sanitizes a single string by removing always-banned words.
+ * Use for fields not covered by sanitizeBannedWords() sections loop (e.g., B3/B4 outputs).
+ */
+export function sanitizeString(text: string): string {
+  if (!text || typeof text !== 'string') return text
+  let cleaned = text
+  ALWAYS_BANNED_WORDS.forEach(word => {
+    const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`\\b${escapedWord}\\b`, 'gi')
+    cleaned = cleaned.replace(regex, '')
+  })
+  cleaned = cleaned.replace(/[^\S\n]+/g, ' ')
+  cleaned = cleaned.split('\n').map(line =>
+    line.replace(/\s+(og|men|eller)\s*$/i, '').replace(/^\s*(og|men|eller)\s+/i, '').trim()
+  ).join('\n').trim()
+  return cleaned
+}
+
 export function sanitizeBannedWords(sections: any): any {
   // Always-banned words (hard-coded — these must never appear regardless of AI output)
-  const DEFAULT_ALWAYS_BANNED = [
-    'hyggelig', 'hyggeligt', 'lækker', 'lækkert', 'lækre',
-    'indbydende', 'afslappet', 'afslappede', 'afslappende',
-    'autentisk', 'autentiske', 'unik', 'unikke',
-    'fantastisk', 'fantastiske', 'vidunderlig', 'vidunderlige', 'charmerende'
-  ]
+  // Keep in sync with HARD_BANNED_WORDS_DA in brand-word-lists.ts
+  const DEFAULT_ALWAYS_BANNED = ALWAYS_BANNED_WORDS
 
   // Also use AI-generated language_constraints if available
   const thingsToAvoid = sections?.things_to_avoid
@@ -489,6 +761,21 @@ export function sanitizeBannedWords(sections: any): any {
     sanitized.voice_examples = {
       ...sanitized.voice_examples,
       do_say: cleanedDoSay
+    }
+  }
+
+  // Handle tone_model.good_examples — these feed the caption AI directly as style examples.
+  // Banned words here will propagate into every generated caption.
+  if (sanitized.tone_model?.good_examples && Array.isArray(sanitized.tone_model.good_examples)) {
+    const cleanedExamples = sanitized.tone_model.good_examples
+      .map((ex: any) => (typeof ex === 'string' ? sanitizeText(ex) : ex))
+      .filter((ex: any) => typeof ex === 'string' && ex.trim().length > 5)
+    if (cleanedExamples.length !== sanitized.tone_model.good_examples.length) {
+      console.log(`🧹 tone_model.good_examples: removed ${sanitized.tone_model.good_examples.length - cleanedExamples.length} example(s) containing banned words`)
+    }
+    sanitized.tone_model = {
+      ...sanitized.tone_model,
+      good_examples: cleanedExamples
     }
   }
 

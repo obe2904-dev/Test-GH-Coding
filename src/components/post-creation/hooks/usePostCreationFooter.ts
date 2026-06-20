@@ -6,6 +6,7 @@ interface UsePostCreationFooterOptions {
   hasPersistedDraft: boolean
   onSaveDraft: () => boolean
   onNext: () => void
+  disabled?: boolean
 }
 
 export function usePostCreationFooter({
@@ -13,12 +14,14 @@ export function usePostCreationFooter({
   isEdited,
   hasPersistedDraft,
   onSaveDraft,
-  onNext
+  onNext,
+  disabled
 }: UsePostCreationFooterOptions) {
   return useMemo(() => ({
     hasUnsavedChanges: hasUnsavedChanges || isEdited,
     hasPersistedDraft,
     onSaveDraft,
-    onNext
-  }), [hasPersistedDraft, hasUnsavedChanges, isEdited, onNext, onSaveDraft])
+    onNext,
+    disabled
+  }), [hasPersistedDraft, hasUnsavedChanges, isEdited, onNext, onSaveDraft, disabled])
 }

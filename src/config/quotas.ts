@@ -56,6 +56,16 @@ export interface TierQuotas {
   // Photo Features
   photoUploadsPerPost: number
   photoAnalysisLevel: 'basic' | 'advanced' | 'premium'
+
+  // Carousel Features
+  carousel: {
+    enabled: boolean
+    aiOrganise: boolean
+    aiOrganisePerDay: number   // -1 = unlimited
+    dragAndDrop: boolean       // false = arrow buttons only (Smart); true = full drag (Pro)
+    slideCaption: boolean      // per-slide text field, Pro only
+    goalBased: boolean         // goal selector, Pro only
+  }
   
   // Advanced Features
   customBranding: boolean
@@ -71,15 +81,15 @@ export interface TierQuotas {
  */
 export const TIER_QUOTAS: Record<UserTier, TierQuotas> = {
   free: {
-    // AI Generation - Not available for Free tier (AI Ideas is paid-only)
+    // AI Generation - TESTING MODE (Production: daily: 3, monthly: 10)
     aiGenerations: {
-      daily: 100,
-      monthly: 100,
+      daily: 100,  // TESTING: 100 (Production: 3)
+      monthly: 100,  // TESTING: 100 (Production: 10)
     },
     
-    // Content Creation - Basic
-    postsPerDay: 5,
-    postsPerMonth: 50,
+    // Content Creation - Free tier production limits
+    postsPerDay: 3,
+    postsPerMonth: 30,
     scheduledPosts: 10,
     
     // Platform Features - Minimal
@@ -89,22 +99,32 @@ export const TIER_QUOTAS: Record<UserTier, TierQuotas> = {
     // Storage - Basic
     storageGB: 1,
     
-    // Document Processing - Limited
+    // Document Processing - Free tier production limits
     pdfUploads: {
-      daily: 2,
-      monthly: 10,
+      daily: 1,
+      monthly: 5,
       maxSizeMB: 10,
     },
     
-    // Website Analysis - Limited
+    // Website Analysis - Free tier production limits
     websiteAnalysis: {
-      daily: 2,
-      monthly: 10,
+      daily: 1,
+      monthly: 5,
     },
     
     // Photo Features - Basic
     photoUploadsPerPost: 1,
     photoAnalysisLevel: 'basic',
+
+    // Carousel Features - Disabled for Free
+    carousel: {
+      enabled: false,
+      aiOrganise: false,
+      aiOrganisePerDay: 0,
+      dragAndDrop: false,
+      slideCaption: false,
+      goalBased: false,
+    },
     
     // Advanced Features - None
     customBranding: false,
@@ -114,10 +134,10 @@ export const TIER_QUOTAS: Record<UserTier, TierQuotas> = {
   },
   
   standardplus: {
-    // AI Generation - High
+    // AI Generation - TESTING MODE (Production: daily: 3, monthly: 90)
     aiGenerations: {
-      daily: 100,
-      monthly: 1000,
+      daily: 100,  // TESTING: 100 (Production: 3)
+      monthly: 100,  // TESTING: 100 (Production: 90)
     },
     
     // Content Creation - High
@@ -148,6 +168,16 @@ export const TIER_QUOTAS: Record<UserTier, TierQuotas> = {
     // Photo Features - Advanced
     photoUploadsPerPost: 5,
     photoAnalysisLevel: 'advanced',
+
+    // Carousel Features - Smart (arrows only, no goal/slide caption)
+    carousel: {
+      enabled: true,
+      aiOrganise: true,
+      aiOrganisePerDay: 10,
+      dragAndDrop: false,
+      slideCaption: false,
+      goalBased: false,
+    },
     
     // Advanced Features - Some
     customBranding: true,
@@ -157,10 +187,10 @@ export const TIER_QUOTAS: Record<UserTier, TierQuotas> = {
   },
   
   premium: {
-    // AI Generation - Unlimited
+    // AI Generation - TESTING MODE (Production: daily: 5, monthly: 150)
     aiGenerations: {
-      daily: -1,
-      monthly: -1,
+      daily: 100,  // TESTING: 100 (Production: 5)
+      monthly: 100,  // TESTING: 100 (Production: 150)
     },
     
     // Content Creation - Unlimited
@@ -191,6 +221,16 @@ export const TIER_QUOTAS: Record<UserTier, TierQuotas> = {
     // Photo Features - Premium
     photoUploadsPerPost: 10,
     photoAnalysisLevel: 'premium',
+
+    // Carousel Features - Pro (full feature set)
+    carousel: {
+      enabled: true,
+      aiOrganise: true,
+      aiOrganisePerDay: -1,
+      dragAndDrop: true,
+      slideCaption: true,
+      goalBased: true,
+    },
     
     // Advanced Features - All
     customBranding: true,

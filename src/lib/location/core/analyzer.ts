@@ -16,6 +16,7 @@ interface AnalyzeOptions {
   businessId?: string;
   supabaseUrl?: string;
   accessToken?: string;
+  forceRefresh?: boolean;  // Task 4.5: Bypass 90-day cache
 }
 
 /**
@@ -56,7 +57,8 @@ async function analyzeViaSupabase(
     },
     body: JSON.stringify({ 
       business_id: options.businessId,
-      address_override: address 
+      address_override: address,
+      force_refresh: options.forceRefresh ?? false  // Task 4.5: Support cache bypass
     })
   });
 
@@ -195,7 +197,7 @@ function transformSupabaseResult(intel: any, address: string): LocationAnalysis 
     'residential': { residential: 25 },
     'commercial': { shopping_district: 20, city_centre: 10 },
     'entertainment_district': { city_centre: 20, tourist: 10 },
-    'waterfront': { waterfront: 25, tourist: 10 }
+    'waterfront': { waterfront: 25, tourist: 10, city_centre: 30 }
   };
   
   console.log('📊 Extracted POI counts:', { 
@@ -298,6 +300,7 @@ function transformSupabaseResult(intel: any, address: string): LocationAnalysis 
   const areaType = intel.area_type;
   if (areaType && areaTypeBoosts[areaType]) {
     const boosts = areaTypeBoosts[areaType];
+    // Boost existing matches
     matches.forEach(match => {
       if (boosts[match.categoryId]) {
         const boost = boosts[match.categoryId]!;
@@ -310,6 +313,25 @@ function transformSupabaseResult(intel: any, address: string): LocationAnalysis 
         });
       }
     });
+    // Also create entries for categories not yet in matches (when boost is significant)
+    for (const [categoryId, boost] of Object.entries(boosts)) {
+      if (!(boost as number)) continue;
+      const exists = matches.some(m => m.categoryId === categoryId);
+      if (!exists && (boost as number) >= 20) {
+        matches.push({
+          categoryId: categoryId as LocationCategoryId,
+          score: boost as number,
+          confidence: 'low',
+          reasoning: [`Klassificeret som ${areaType} område`],
+          signals: [{
+            type: 'area_classification',
+            name: `Klassificeret som ${areaType}`,
+            weight: 3,
+            metadata: { areaType, boost }
+          }]
+        });
+      }
+    }
   }
   
   // Apply keyword-based boosts from neighborhood_character
@@ -344,21 +366,25 @@ function transformSupabaseResult(intel: any, address: string): LocationAnalysis 
     { keywords: ['bolig', 'residential', 'kvarter'], categoryId: 'residential', boost: 15, signalName: 'Boligområde nævnt' },
     { keywords: ['station', 'metro', 'transport'], categoryId: 'transport_hub', boost: 15, signalName: 'Transportknudepunkt nævnt' },
     { keywords: ['universitet', 'studerende'], categoryId: 'student', boost: 15, signalName: 'Uddannelsesinstitution nævnt' },
-    { keywords: ['kontor', 'erhverv', 'forretning'], categoryId: 'office', boost: 12, signalName: 'Erhvervsområde nævnt' }
+    { keywords: ['kontor', 'erhverv', 'forretning'], categoryId: 'office', boost: 12, signalName: 'Erhvervsområde nævnt' },
+    { keywords: ['caféliv', 'restauranter', 'café', 'aftenliv', 'natliv', 'cocktail'], categoryId: 'city_centre', boost: 35, signalName: 'Café- og restaurantmiljø nævnt' },
+    { keywords: ['ikonisk', 'turistspot', 'seværdighed', 'turist'], categoryId: 'tourist', boost: 35, signalName: 'Ikonisk turistdestination nævnt' }
   ];
   
   characterBoosts.forEach(({ keywords, categoryId, boost, signalName }) => {
     if (keywords.some(kw => neighborhoodText.includes(kw))) {
-      const match = matches.find(m => m.categoryId === categoryId);
-      if (match) {
-        match.score = Math.min(100, match.score + boost);
-        match.signals.push({
-          type: 'neighborhood_description',
-          name: signalName,
-          weight: 2,
-          metadata: { keywords: keywords.filter(kw => neighborhoodText.includes(kw)) }
-        });
+      let match = matches.find(m => m.categoryId === categoryId);
+      if (!match) {
+        match = { categoryId, score: 0, confidence: 'low', reasoning: [], signals: [] };
+        matches.push(match);
       }
+      match.score = Math.min(100, match.score + boost);
+      match.signals.push({
+        type: 'neighborhood_description',
+        name: signalName,
+        weight: 2,
+        metadata: { keywords: keywords.filter(kw => neighborhoodText.includes(kw)) }
+      });
     }
   });
   

@@ -69,12 +69,15 @@ export function MyProfilePage() {
           .select('id, name')
           .eq('owner_id', user.id)
 
-        // Get businesses where user is a team member
+        // Team member feature not implemented (business_team_members table does not exist)
+        const teamMemberships: any[] = []
+        /*
         const { data: teamMemberships } = await supabase
           .from('business_team_members')
           .select('business_id, role, businesses(name)')
           .eq('user_id', user.id)
           .not('accepted_at', 'is', null)
+        */
 
         const roles: UserRole[] = []
 
@@ -89,8 +92,8 @@ export function MyProfilePage() {
           })
         }
 
-        // Add team memberships
-        if (teamMemberships) {
+        // Add team memberships (feature not implemented yet)
+        if (teamMemberships && Array.isArray(teamMemberships)) {
           teamMemberships.forEach((membership: any) => {
             if (membership.businesses) {
               roles.push({

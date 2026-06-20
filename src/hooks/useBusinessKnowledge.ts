@@ -18,15 +18,15 @@ import type {
   BusinessLocationIntelligence,
   CreateLocationIntelligence,
   UpdateLocationIntelligence,
-  BusinessMenuMetadata,
-  CreateMenuMetadata,
-  UpdateMenuMetadata,
-  BusinessVisualIdentity,
-  CreateVisualIdentity,
-  UpdateVisualIdentity,
-  BusinessAudienceProfile,
-  CreateAudienceProfile,
-  UpdateAudienceProfile
+  // BusinessMenuMetadata, // unused - table does not exist
+  // CreateMenuMetadata, // unused - table does not exist
+  // UpdateMenuMetadata, // unused - table does not exist
+  // BusinessVisualIdentity, // unused - table does not exist
+  // CreateVisualIdentity, // unused - table does not exist
+  // UpdateVisualIdentity, // unused - table does not exist
+  // BusinessAudienceProfile, // unused
+  // CreateAudienceProfile, // unused
+  // UpdateAudienceProfile // unused
 } from '@/types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -228,98 +228,21 @@ export function useLocationIntelligence(businessId: string | null) {
 }
 
 // ============================================================================
-// MENU METADATA HOOK
+// MENU METADATA HOOK — STUBBED
+// ⚠️ The `business_menu_metadata` table was DROPPED April 2026 (migration 20260420000007).
+// Menu data is now in `menu_results_v2` and `menu_items_normalized`.
+// This hook is retained to avoid breaking its one caller (MenuMetadataCard, which has no
+// active parent). Do NOT add new callsites. Do NOT query business_menu_metadata.
 // ============================================================================
 
-export function useMenuMetadata(businessId: string | null) {
-  const [data, setData] = useState<BusinessMenuMetadata | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
-  const fetchMenu = useCallback(async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data: menu, error: fetchError } = await supabase
-        .from('business_menu_metadata')
-        .select('*')
-        .eq('business_id', businessId)
-        .single();
-
-      if (fetchError) {
-        if (fetchError.code === 'PGRST116') {
-          setData(null);
-          return;
-        }
-        throw fetchError;
-      }
-
-      setData(menu as BusinessMenuMetadata);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to fetch menu metadata'));
-    } finally {
-      setLoading(false);
-    }
-  }, [businessId]);
-
-  useEffect(() => {
-    fetchMenu();
-  }, [fetchMenu]);
-
-  const create = async (menu: CreateMenuMetadata) => {
-    try {
-      const { data: newMenu, error: createError } = await supabase
-        .from('business_menu_metadata')
-        .insert(menu)
-        .select()
-        .single();
-
-      if (createError) throw createError;
-
-      setData(newMenu as BusinessMenuMetadata);
-      return newMenu;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error('Failed to create menu metadata');
-      setError(error);
-      throw error;
-    }
-  };
-
-  const update = async (updates: UpdateMenuMetadata) => {
-    if (!businessId) throw new Error('No business ID provided');
-
-    try {
-      const { data: updatedMenu, error: updateError } = await supabase
-        .from('business_menu_metadata')
-        .update(updates)
-        .eq('business_id', businessId)
-        .select()
-        .single();
-
-      if (updateError) throw updateError;
-
-      setData(updatedMenu as BusinessMenuMetadata);
-      return updatedMenu;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error('Failed to update menu metadata');
-      setError(error);
-      throw error;
-    }
-  };
-
+export function useMenuMetadata(_businessId: string | null) {
   return {
-    data,
-    loading,
-    error,
-    refetch: fetchMenu,
-    create,
-    update,
+    data: null,
+    loading: false,
+    error: null,
+    refetch: async () => {},
+    create: async () => null,
+    update: async () => null,
   };
 }
 
@@ -327,190 +250,34 @@ export function useMenuMetadata(businessId: string | null) {
 // VISUAL IDENTITY HOOK
 // ============================================================================
 
-export function useVisualIdentity(businessId: string | null) {
-  const [data, setData] = useState<BusinessVisualIdentity | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
-  const fetchVisual = useCallback(async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data: visual, error: fetchError } = await supabase
-        .from('business_visual_identity')
-        .select('*')
-        .eq('business_id', businessId)
-        .single();
-
-      if (fetchError) {
-        if (fetchError.code === 'PGRST116') {
-          setData(null);
-          return;
-        }
-        throw fetchError;
-      }
-
-      setData(visual as BusinessVisualIdentity);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to fetch visual identity'));
-    } finally {
-      setLoading(false);
-    }
-  }, [businessId]);
-
-  useEffect(() => {
-    fetchVisual();
-  }, [fetchVisual]);
-
-  const create = async (visual: CreateVisualIdentity) => {
-    try {
-      const { data: newVisual, error: createError } = await supabase
-        .from('business_visual_identity')
-        .insert(visual)
-        .select()
-        .single();
-
-      if (createError) throw createError;
-
-      setData(newVisual as BusinessVisualIdentity);
-      return newVisual;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error('Failed to create visual identity');
-      setError(error);
-      throw error;
-    }
-  };
-
-  const update = async (updates: UpdateVisualIdentity) => {
-    if (!businessId) throw new Error('No business ID provided');
-
-    try {
-      const { data: updatedVisual, error: updateError } = await supabase
-        .from('business_visual_identity')
-        .update(updates)
-        .eq('business_id', businessId)
-        .select()
-        .single();
-
-      if (updateError) throw updateError;
-
-      setData(updatedVisual as BusinessVisualIdentity);
-      return updatedVisual;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error('Failed to update visual identity');
-      setError(error);
-      throw error;
-    }
-  };
-
+// ⚠️ The `business_visual_identity` table was DROPPED April 2026 (migration 20260420000007).
+// Visual style data is now stored in business_brand_profile (visual_character, venue_scene).
+// This hook is stubbed to avoid import errors. Do NOT add new callsites.
+export function useVisualIdentity(_businessId: string | null) {
   return {
-    data,
-    loading,
-    error,
-    refetch: fetchVisual,
-    create,
-    update,
+    data: null,
+    loading: false,
+    error: null,
+    refetch: async () => {},
+    create: async () => null,
+    update: async () => null,
   };
 }
 
 // ============================================================================
-// AUDIENCE PROFILE HOOK
+// AUDIENCE PROFILE HOOK — STUBBED
+// ⚠️ The `business_audience_profile` table was DROPPED April 2026 (migration 20260420000007).
+// Table had 0 rows. Audience signals are in `business_brand_profile.target_audience`.
+// This hook is retained to avoid import errors. Do NOT add new callsites.
 // ============================================================================
 
-export function useAudienceProfile(businessId: string | null) {
-  const [data, setData] = useState<BusinessAudienceProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
-  const fetchAudience = useCallback(async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      const { data: audience, error: fetchError } = await supabase
-        .from('business_audience_profile')
-        .select('*')
-        .eq('business_id', businessId)
-        .single();
-
-      if (fetchError) {
-        if (fetchError.code === 'PGRST116') {
-          setData(null);
-          return;
-        }
-        throw fetchError;
-      }
-
-      setData(audience as BusinessAudienceProfile);
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to fetch audience profile'));
-    } finally {
-      setLoading(false);
-    }
-  }, [businessId]);
-
-  useEffect(() => {
-    fetchAudience();
-  }, [fetchAudience]);
-
-  const create = async (audience: CreateAudienceProfile) => {
-    try {
-      const { data: newAudience, error: createError } = await supabase
-        .from('business_audience_profile')
-        .insert(audience)
-        .select()
-        .single();
-
-      if (createError) throw createError;
-
-      setData(newAudience as BusinessAudienceProfile);
-      return newAudience;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error('Failed to create audience profile');
-      setError(error);
-      throw error;
-    }
-  };
-
-  const update = async (updates: UpdateAudienceProfile) => {
-    if (!businessId) throw new Error('No business ID provided');
-
-    try {
-      const { data: updatedAudience, error: updateError } = await supabase
-        .from('business_audience_profile')
-        .update(updates)
-        .eq('business_id', businessId)
-        .select()
-        .single();
-
-      if (updateError) throw updateError;
-
-      setData(updatedAudience as BusinessAudienceProfile);
-      return updatedAudience;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error('Failed to update audience profile');
-      setError(error);
-      throw error;
-    }
-  };
-
+export function useAudienceProfile(_businessId: string | null) {
   return {
-    data,
-    loading,
-    error,
-    refetch: fetchAudience,
-    create,
-    update,
+    data: null,
+    loading: false,
+    error: null,
+    refetch: async () => {},
+    create: async () => null,
+    update: async () => null,
   };
 }

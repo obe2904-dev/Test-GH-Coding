@@ -28,9 +28,12 @@ import {
   type BrandProfile,
   type DataSources,
   type LocaleConfig,
+  type ClassifyBusinessPromptParams,
+  type SegmentAudiencePromptParams,
   
   // Languages
   detectLanguageFromData,
+  LANGUAGES,
   
   // Error Management
   ErrorCollector,
@@ -42,12 +45,7 @@ import {
   getTranslation,
   
   // Fallback System
-  buildBrandEssenceFallback,
-  buildSignatureShotFallback,
-  buildTargetAudienceFallback,
-  buildToneOfVoiceFallback,
-  buildContentFocusFallback,
-  removeBannedWords,
+  buildContentStrategyFallback,
   sanitizeBannedWords,
   
   // OpenAI
@@ -57,18 +55,18 @@ import {
   
   // Data gathering
   gatherDataSources,
-  buildMenuSummary,
-  buildImagesSummary,
-  buildSocialSummary,
   
   // Signal extraction
-  extractStructuredWebsiteData,
   ensureMustUsePhrasesFallback,
   
   // Prompts
   buildPromptA,
   buildPromptB,
   buildSystemPromptB,
+  buildClassifyBusinessSystemPrompt,
+  buildClassifyBusinessUserPrompt,
+  buildSegmentAudienceSystemPrompt,
+  buildSegmentAudienceUserPrompt,
 
   // Validators
   validateBrandProfileOutput,
@@ -79,10 +77,7 @@ import {
   saveBrandProfile,
 
   // Location intelligence (deterministic)
-  buildLocationIntelligence,
-
-  // Voice Archetype Options Generator
-  generateVoiceOptions
+  buildLocationIntelligence
 } from '../_shared/brand-profile/index.ts'
 import type { SecondarySignals } from '../_shared/brand-profile/index.ts'
 import { filterAudienceLabels } from '../_shared/utils/audience-filter.ts'
@@ -100,6 +95,12 @@ import {
   shouldRegenerateProfile,
   saveSourceHashes
 } from '../_shared/brand-profile/hashing.ts'
+
+// Business archetype inference
+import { 
+  inferBusinessArchetype, 
+  getArchetypeDescription 
+} from '../_shared/brand-profile/archetype-inference.ts'
 
 // Validation utilities
 import {
@@ -125,7 +126,9 @@ import {
   buildFallbackContentFocus,
   buildFallbackCtaStyle,
   buildFallbackSignatureShot,
-  buildFallbackBrandEssence
+  buildFallbackBrandEssence,
+  buildBusinessCharacterFallback,
+  buildVoiceRationaleFallback
 } from '../_shared/brand-profile/repair/fallback-builders.ts'
 
 import {
@@ -210,7 +213,7 @@ async function runInternalAnalysis(
 
   console.log(`[${requestId}] 🔍 Running Prompt A...`)
   const prompt =
-    buildPromptA(dataSources, language, allowThirdParty) +
+    await buildPromptA(dataSources, language, allowThirdParty) +
     (extraUserInstruction ? `\n\n---\nREPAIR / STRICTNESS OVERRIDE:\n${extraUserInstruction}\n` : '') +
     `\n\n---\nJSON SAFETY (MANDATORY):\n- Output ONLY a single JSON object.\n- In JSON string fields, avoid raw double quotes (") inside values. If you need to reference a phrase, write it without surrounding double quotes.\n- Never add trailing text after the closing brace.`
 
@@ -260,7 +263,7 @@ async function runInternalAnalysis(
     },
     requestId,
     'Prompt A (Internal Analysis)',
-    { timeout: 45000, maxRetries: 1, retryDelayMs: 1000, retryStatusCodes: [429, 500, 502, 503, 504] } // Budget: A(45)+B(50)=95s << 150s wall-clock; reduced from 55s to give more room for B
+    { timeout: 30000, maxRetries: 0, retryDelayMs: 0, retryStatusCodes: [] } // Budget: A(30)+B(50)+Voice(46)=126s << 150s wall-clock. No retry: a second 30s attempt would kill the budget.
   )
 
   const content = data.choices[0]?.message?.content
@@ -326,12 +329,15 @@ async function generateBrandProfile(
     return parseOpenAIJson<any>(fixedContent)
   }
   
+  // Build system message (now async due to language file loading)
+  const systemMessage = await buildSystemPromptB(language)
+  
   const data = await fetchOpenAIWithRetry(
     apiKey,
     {
       model: AI_MODELS.generation,
       messages: [
-        { role: 'system', content: buildSystemPromptB(language) },
+        { role: 'system', content: systemMessage },
         {
           role: 'user',
           content: `${prompt}\n\n---\nJSON SAFETY (MANDATORY):\n- In JSON string fields, avoid raw double quotes (") inside values. If you need to reference a phrase, write it without surrounding double quotes.\n- Never add trailing text after the closing brace.`
@@ -359,6 +365,9 @@ async function generateBrandProfile(
   let sections: any
   try {
     sections = parseOpenAIJson<any>(content)
+    // v4.12.1: Log critical fields from AI output for debugging
+    console.log(`[${requestId}] 🔍 AI returned voice_rationale:`, sections.voice_rationale ? `YES (${sections.voice_rationale.length} chars)` : 'NO')
+    console.log(`[${requestId}] 🔍 AI returned business_character:`, sections.business_character ? `YES (${sections.business_character.length} chars)` : 'NO')
   } catch (e) {
     const errMsg = (e as Error)?.message || String(e)
     console.warn(`[${requestId}] ⚠️ Prompt B returned invalid JSON (${errMsg}). Falling back to deterministic defaults.`)
@@ -417,7 +426,18 @@ async function generateBrandProfile(
     if (validationErrors.some(e => String(e).includes('image_preferences.signature_shot'))) {
       sections = { ...(sections || {}), image_preferences: { ...((sections as any)?.image_preferences || {}), signature_shot: buildFallbackSignatureShot(dataSources, analysis, language) } }
     }
-    if (validationErrors.some(e => String(e).includes('brand_essence must include a location cue'))) {
+    // Trigger brand_essence fallback for structural errors (missing location/offering) OR quality errors (operational language, missing emotional positioning)
+    if (validationErrors.some(e => {
+      const err = String(e)
+      return err.includes('brand_essence must include a location cue') ||
+             err.includes('brand_essence must include an offering cue') ||
+             err.includes('brand_essence must include a venue type cue') ||
+             err.includes('Forbidden pattern detected') ||
+             err.includes('brand_essence lacks emotional positioning') ||
+             err.includes('brand_essence lacks sensory grounding') ||
+             err.includes('Unverified claim')
+    })) {
+      console.log(`[${requestId}] 🎭 brand_essence quality validation failed — using deterministic fallback for emotional positioning`)
       sections = { ...(sections || {}), brand_essence: { ...(sections as any)?.brand_essence, value: buildFallbackBrandEssence(dataSources, analysis, language), proof: Array.isArray((sections as any)?.brand_essence?.proof) ? (sections as any).brand_essence.proof : ['#1'] } }
     }
     if (validationErrors.some(e => String(e).includes('content_pillars') && String(e).includes('notes must reference'))) {
@@ -546,13 +566,13 @@ async function generateBrandProfile(
     checkAbstractDrift((sections as any)?.brand_essence_elaboration, 'brand_essence_elaboration')
   } catch { /* cosmetic — never block profile */ }
 
-  return parseBrandProfileResponse(sections, analysis, dataSources)
+  return parseBrandProfileResponse(sections, analysis, dataSources, language)
 }
 
 /**
  * Parses Prompt B JSON response into BrandProfile structure.
  */
-function parseBrandProfileResponse(sections: any, analysis: any, dataSources: DataSources): BrandProfile {
+function parseBrandProfileResponse(sections: any, analysis: any, dataSources: DataSources, language: LanguageConfig): BrandProfile {
   const evidence = analysis.evidence || {}
 
   const pickValue = (field: string): string => {
@@ -710,24 +730,28 @@ function parseBrandProfileResponse(sections: any, analysis: any, dataSources: Da
     },
 
     // Plain-text business descriptor — drives WeekContext.business_character for strategy prompts
-    // WP3: If Prompt B produced a valid new value, use it. Otherwise fall back to the previously
-    // confirmed existingBusinessCharacter to prevent regression (e.g. when data is sparse).
+    // WP3: If Prompt B produced a valid new value, use it. Otherwise fall back to deterministic builder.
     ...(() => {
       const newValue = sections.business_character ? pickValue('business_character') : ''
       const existingSeed = dataSources.existingBusinessCharacter || ''
+      
       // Quality gate: only re-inject existingSeed if it is substantive enough to be useful.
-      // Seeds shorter than 50 chars indicate a prior poor generation — let Prompt B derive fresh.
       const seedPassesQualityGate = existingSeed.length >= 50
-      const bestValue = newValue.length >= 30 ? newValue : (seedPassesQualityGate ? existingSeed : newValue)
-      if (bestValue) {
-        if (newValue.length < 30 && existingSeed && seedPassesQualityGate) {
-          console.warn('⚠️ WP3: Prompt B business_character too short — preserving existing:', existingSeed.slice(0, 60))
-        } else if (newValue.length < 30 && existingSeed && !seedPassesQualityGate) {
-          console.warn('⚠️ WP3: Existing business_character too short to re-inject — generating fresh from source data')
-        }
-        return { business_character: bestValue }
+      
+      // Priority: AI output > existing seed > deterministic fallback
+      let bestValue = ''
+      if (newValue.length >= 30) {
+        bestValue = newValue
+      } else if (seedPassesQualityGate) {
+        console.warn('⚠️ WP3: Prompt B business_character too short — preserving existing:', existingSeed.slice(0, 60))
+        bestValue = existingSeed
+      } else {
+        // v4.12.1: Generate deterministic fallback from source data when AI fails
+        console.warn('⚠️ WP3: Generating business_character from deterministic fallback (AI returned empty/short)')
+        bestValue = buildBusinessCharacterFallback(dataSources, analysis, language)
       }
-      return {}
+      
+      return { business_character: bestValue }
     })(),
 
     // V2 Brand Profile fields (Marts 2026)
@@ -751,15 +775,56 @@ function parseBrandProfileResponse(sections: any, analysis: any, dataSources: Da
     }),
 
     // Plain-text voice rationale — explains how Voice rules were derived (stored for transparency)
-    ...(sections.voice_rationale && {
-      voice_rationale: typeof sections.voice_rationale === 'string' ? sections.voice_rationale : ''
-    }),
+    // v4.12.1: Unconditional with deterministic fallback to ensure field is always populated
+    ...(() => {
+      const newValue = typeof sections.voice_rationale === 'string' ? sections.voice_rationale.trim() : ''
+      const existingSeed = dataSources.existingVoiceRationale || ''
+      
+      // Quality gate: only re-inject existingSeed if substantive
+      const seedPassesQualityGate = existingSeed.length >= 100
+      
+      // Priority: AI output > existing seed > deterministic fallback
+      let bestValue = ''
+      if (newValue.length >= 80) {
+        bestValue = newValue
+      } else if (seedPassesQualityGate) {
+        console.warn('⚠️ WP3: Prompt B voice_rationale too short — preserving existing:', existingSeed.slice(0, 60))
+        bestValue = existingSeed
+      } else {
+        console.warn('⚠️ WP3: Generating voice_rationale from deterministic fallback (AI returned empty/short)')
+        bestValue = buildVoiceRationaleFallback(dataSources, analysis, language)
+      }
+      
+      return { voice_rationale: bestValue }
+    })(),
+
+    // Audience framework REMOVED (Sprint 1 - Complexity Reduction)
+    // Consolidation: audience_segments (Stage B5) is kept (has timing_windows + content_angles).
+    // audience_framework was abstract multi-dimensional representation, unused in content generation.
+    // Both solved the same problem — picked the one with actionable data.
+    // ...(sections.audience_framework ? { audience_framework: sections.audience_framework } : {}),
+
+    // Voice system — context-adaptive voice guidance (programme-specific, time-based variations)
+    ...(sections.voice_system ? { voice_system: sections.voice_system } : {}),
 
     // Content strategy — drives Phase 1 slot assignment (goal_mode + content_category per post)
     ...((() => {
       const cs = sections.content_strategy;
       console.log('[bp] content_strategy parsed:', cs ? JSON.stringify(cs).slice(0, 120) : 'MISSING — Prompt B did not include it');
-      if (!cs) return {};
+      
+      // If AI didn't generate content_strategy, use deterministic fallback
+      if (!cs) {
+        const fallbackCtx = {
+          dataSources,
+          analysis,
+          locale,
+          errors: errorCollector
+        };
+        const fallbackResult = buildContentStrategyFallback(fallbackCtx);
+        console.log('[bp] content_strategy fallback applied:', JSON.stringify(fallbackResult.value).slice(0, 150));
+        return { content_strategy: fallbackResult.value };
+      }
+      
       // Deterministic normalizer: GPT-4o occasionally returns a string instead of an array for
       // footfall_signals, brand_anchors, loyalty_hooks. Split on comma/semicolon to recover array.
       const toArray = (v: any): string[] => {
@@ -937,6 +1002,272 @@ try {
 }
 
 // ============================================================================
+// STAGE B0 — BUSINESS MODEL CLASSIFICATION
+// ============================================================================
+
+/**
+ * Stage B0 — Business Model Classification (gpt-4o-mini, ~5s, non-blocking).
+ * Runs BEFORE Prompt A. Classifies the structural shape of the business using
+ * minimal signals directly from dataSources — no menu data, no full profile.
+ * Output is passed to segmentAudience() so B5 can skip TRIN 1 (~30% prompt reduction).
+ */
+async function classifyBusinessModel(
+  apiKey: string,
+  dataSources: DataSources,
+  requestId: string
+): Promise<{ business_model_type: string; primary_copy_hook: string; audience_breadth: string; classification_rationale: string } | null> {
+  const operations = dataSources.operations as any
+  const locationIntelRow = dataSources.locationIntelligenceRow as any
+
+  const establishmentType: string = operations?.establishment_type ?? (dataSources.business as any)?.vertical ?? ''
+  const dayArcProgrammes: string[] = (dataSources.menuSignalProgrammes as any[] | null)
+    ?.filter((p: any) => p?.brand_weight !== 'operational')
+    ?.map((p: any) => p?.label_da ?? p?.label ?? '')
+    ?.filter(Boolean) ?? []
+  const areaType: string = locationIntelRow?.area_type ?? ''
+  const touristFactor: string = locationIntelRow?.tourist_context ?? false ? 'year_round or seasonal' : 'none'
+
+  // Build prompts using extracted builders
+  const systemPrompt = buildClassifyBusinessSystemPrompt()
+  
+  const promptParams: ClassifyBusinessPromptParams = {
+    establishmentType,
+    dayArcProgrammes,
+    areaType,
+    touristFactor
+  }
+  
+  const userPrompt = buildClassifyBusinessUserPrompt(promptParams)
+
+  try {
+    const response = await fetchOpenAIWithRetry(
+      apiKey,
+      {
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.1,
+        max_tokens: 200,
+        response_format: { type: 'json_object' }
+      },
+      requestId,
+      'Stage B0 (Business Model Classification)',
+      { timeout: 10000, maxRetries: 1, retryDelayMs: 1000, retryStatusCodes: [429, 500, 502, 503, 504] }
+    )
+
+    const raw = response.choices[0]?.message?.content
+    if (!raw) throw new Error('Stage B0: no response')
+    const parsed = JSON.parse(raw)
+    
+    console.log(`[${requestId}] ✅ Stage B0: ${parsed.business_model_type} (${parsed.audience_breadth})`)
+    return parsed
+  } catch (err: any) {
+    console.warn(`[${requestId}] ⚠️ Stage B0 failed:`, err?.message ?? err)
+    return null
+  }
+}
+
+// ============================================================================
+// STAGE B5 — AUDIENCE SEGMENT INTELLIGENCE
+// ============================================================================
+
+/**
+ * Stage B5 — Audience Segment Intelligence (gpt-4o, non-blocking, non-fatal).
+ * Generates 3-6 named segments with timing windows + content angles + metadata.
+ * Saved to audience_segments JSONB column — consumed by get-quick-suggestions + owner UI.
+ */
+async function segmentAudience(
+  apiKey: string,
+  brandProfile: any,
+  secondarySignals: any,
+  locationIntelligence: any | null,
+  dataSources: DataSources,
+  ownerDocument: any | null,
+  languageCode: string,
+  requestId: string,
+  b0Classification?: { business_model_type: string; primary_copy_hook: string; audience_breadth: string; classification_rationale: string } | null
+): Promise<any | null> {
+  const operations = dataSources.operations as any
+  const locationIntelRow = dataSources.locationIntelligenceRow as any
+  const priceRange = secondarySignals.priceRange
+
+  // ── Extract context variables ────────────────────────────────────────────
+  const touristContext = locationIntelligence?.tourist_context ?? false
+  const locationMotivations: string[] = locationIntelligence?.matched_motivations ?? []
+  const businessCharacter: string = typeof brandProfile?.business_character === 'object'
+    ? (brandProfile.business_character?.value ?? '')
+    : (brandProfile?.business_character ?? '')
+  const identityKeywords: string[] = Array.isArray(brandProfile?.identity_keywords?.value)
+    ? brandProfile.identity_keywords.value
+    : (Array.isArray(brandProfile?.identity_keywords) ? brandProfile.identity_keywords : [])
+  const city: string = (dataSources.location as any)?.enrichment?.macro?.city ?? (dataSources.business as any)?.city ?? ''
+  const neighborhood: string = locationIntelRow?.neighborhood ?? ''
+  const areaType: string = locationIntelRow?.area_type ?? locationIntelligence?.primary_type ?? ''
+  const establishmentType: string = operations?.establishment_type ?? ''
+  const hasOutdoor: boolean = operations?.has_outdoor_seating ?? false
+  const hasTakeaway: boolean = operations?.has_takeaway ?? false
+  const reservationRequired: boolean = secondarySignals.acceptsReservations === true
+  const proximityAnchor: string = locationIntelligence?.marketing_focus ?? locationMotivations[0] ?? ''
+
+  // Price label
+  const priceLevelLabel = (() => {
+    if (priceRange.max === null && priceRange.min === null) return 'ukendt prisniveau'
+    const top = priceRange.max ?? priceRange.min ?? 0
+    if (top >= 300) return `premium (${priceRange.min ?? '?'}–${priceRange.max ?? '?'} kr)`
+    if (top >= 150) return `mid-range (${priceRange.min ?? '?'}–${priceRange.max ?? '?'} kr)`
+    return `budget-friendly (${priceRange.min ?? '?'}–${priceRange.max ?? '?'} kr)`
+  })()
+
+  // Menu anchors — AI summaries preferred (full helicopter view per service period)
+  const menuAnchors = (() => {
+    const summaries = dataSources.menuSummaries
+    if (Array.isArray(summaries) && summaries.length > 0) {
+      return summaries.slice(0, 5)
+        .map((m: any) => {
+          const header = `${m.title}`
+          return `${header}\n${String(m.summary ?? '').slice(0, 400)}`
+        })
+        .join('\n\n')
+    }
+    return secondarySignals.categoryLabels.slice(0, 6).join(', ') || ''
+  })()
+
+  // Owner USPs — owner's own words, highest-quality signal
+  const whatMakesUsDifferent = (ownerDocument?.usps ?? []).slice(0, 3).join('; ')
+  const ownerDocSummary = [ownerDocument?.brand_feel, ownerDocument?.tone_sentence]
+    .filter(Boolean).join(' — ').slice(0, 250)
+
+  // Google Maps review signals
+  const googleMapsSummary = (() => {
+    const thirdParty = dataSources.thirdPartyEvidence as any
+    const reviews = thirdParty?.googleMaps?.reviews
+    if (!Array.isArray(reviews) || reviews.length === 0) return ''
+    return reviews.slice(0, 3)
+      .map((r: any) => r?.summary ?? r?.text ?? '')
+      .filter(Boolean)
+      .join(' | ')
+      .slice(0, 400)
+  })()
+
+  // Language mapping for output instruction
+  const langLabels: Record<string, string> = {
+    da: 'dansk', sv: 'svensk', de: 'tysk', nb: 'norsk', fi: 'finsk', en: 'engelsk'
+  }
+  const outputLanguageLabel = langLabels[languageCode] ?? 'dansk'
+
+  // Build prompts using extracted builders
+  const systemPrompt = buildSegmentAudienceSystemPrompt(outputLanguageLabel)
+  
+  const promptParams: SegmentAudiencePromptParams = {
+    businessCharacter,
+    identityKeywords,
+    city,
+    neighborhood,
+    areaType,
+    establishmentType,
+    touristContext,
+    locationMotivations,
+    proximityAnchor,
+    menuAnchors,
+    hasOutdoor,
+    hasTakeaway,
+    reservationRequired,
+    priceLevelLabel,
+    priceRange,
+    whatMakesUsDifferent,
+    ownerDocSummary,
+    googleMapsSummary,
+    secondarySignals,
+    b0Classification,
+    languageCode
+  }
+  
+  const userPrompt = buildSegmentAudienceUserPrompt(promptParams)
+
+  try {
+    const response = await fetchOpenAIWithRetry(
+      apiKey,
+      {
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,  // structural output: lower temp = stable segment count/labels across re-runs
+        max_tokens: b0Classification ? 2400 : 3200,  // B0 pre-classification reduces output by ~30%
+        response_format: { type: 'json_object' }
+      },
+      requestId,
+      'Stage B5 (Audience Segment Intelligence)',
+      { timeout: 55000, maxRetries: 1, retryDelayMs: 1000, retryStatusCodes: [429, 500, 502, 503, 504] }
+    )
+
+    const raw = response.choices[0]?.message?.content
+    if (!raw) throw new Error('Stage B5: no response')
+    
+    const parsed = JSON.parse(raw)
+    const hasClassification = parsed.business_model_type || parsed.primary_copy_hook || parsed.audience_breadth
+    
+    if (!Array.isArray(parsed.segments) || parsed.segments.length === 0) {
+      console.warn(`[${requestId}] ⚠️ Stage B5: no segments array in response`)
+      if (!hasClassification) {
+        console.warn(`[${requestId}] ⚠️ Stage B5: no segments and no classification in response`)
+        return null
+      }
+    }
+
+    // Keep only structurally valid segments
+    const valid = parsed.segments.filter((s: any) =>
+      (typeof s.label === 'string' || typeof s.name === 'string') &&
+      typeof s.priority === 'string' &&
+      Array.isArray(s.timing) &&
+      typeof s.motivation === 'string' &&
+      Array.isArray(s.content_angles)
+    )
+    if (valid.length === 0 && !hasClassification) return null
+
+    // Normalize Danish day names → English so matchActiveSegment works in all consumers
+    const DA_TO_EN_DAY: Record<string, string> = {
+      'søndag': 'sunday', 'mandag': 'monday', 'tirsdag': 'tuesday',
+      'onsdag': 'wednesday', 'torsdag': 'thursday', 'fredag': 'friday', 'lørdag': 'saturday'
+    }
+    
+    // Ensure each segment has both `label` (new) and `name` (backwards-compat alias)
+    const enriched = valid.map((s: any) => ({
+      ...s,
+      label: s.label ?? s.name ?? 'Ukendt segment',
+      name: s.label ?? s.name ?? 'Ukendt segment',
+      timing: Array.isArray(s.timing)
+        ? s.timing.map((t: any) => ({ ...t, day: DA_TO_EN_DAY[String(t.day ?? '').toLowerCase()] ?? String(t.day ?? '').toLowerCase() }))
+        : s.timing,
+    }))
+
+    // Wrap segments in top-level metadata object (includes new classification fields)
+    // Use B0 pre-classification as fallback when B5 did not produce its own values
+    const result = {
+      business_model_type: parsed.business_model_type ?? b0Classification?.business_model_type ?? null,
+      primary_copy_hook: parsed.primary_copy_hook ?? b0Classification?.primary_copy_hook ?? null,
+      audience_breadth: parsed.audience_breadth ?? b0Classification?.audience_breadth ?? null,
+      segments_rationale: parsed.segments_rationale ?? null,
+      primary_mindset: parsed.primary_mindset ?? null,
+      primary_segment_id: parsed.primary_segment_id ?? null,
+      content_rotation_note: null,
+      tourist_factor: parsed.tourist_factor ?? null,
+      deduced_from: Array.isArray(parsed.deduced_from) ? parsed.deduced_from : [],
+      segments: enriched,
+    }
+
+    console.log(`[${requestId}] ✅ Stage B5: ${enriched.length} segments (${enriched.map((s: any) => s.label).join(', ')})`)
+    return result
+  } catch (err: any) {
+    console.warn(`[${requestId}] ⚠️ Stage B5 AI call failed:`, err?.message ?? err)
+    return null
+  }
+}
+
+// ============================================================================
 // MAIN HANDLER
 // ============================================================================
 
@@ -977,6 +1308,9 @@ serve(async (req: Request) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
+
+    // Initialize language early with fallback to prevent undefined reference errors
+    let language: LanguageConfig = LANGUAGES.da
 
     // Initialize Supabase client
     const supabaseClient = createClient(
@@ -1051,12 +1385,27 @@ serve(async (req: Request) => {
 
     // Step 1: Gather data sources
     console.log(`[${requestId}] 📊 Gathering data sources...`)
-    const dataSources = await gatherDataSources(supabaseClient, businessId, allowThirdParty)
+    let dataSources
+    try {
+      dataSources = await gatherDataSources(supabaseClient, businessId, allowThirdParty)
+      console.log(`[${requestId}] ✅ Data sources gathered successfully`)
+    } catch (gatherError) {
+      console.error(`[${requestId}] ❌ Error in gatherDataSources:`, gatherError)
+      throw gatherError
+    }
 
     // Step 1.5: Compute source hashes and check if regeneration needed
     console.log(`[${requestId}] 🔐 Computing content hashes...`)
-    const sourceHashes = await computeSourceHashes(dataSources)
-    const versionHash = await computeVersionHash(sourceHashes)
+    let sourceHashes, versionHash
+    try {
+      sourceHashes = await computeSourceHashes(dataSources)
+      console.log(`[${requestId}] ✅ Source hashes computed`)
+      versionHash = await computeVersionHash(sourceHashes)
+      console.log(`[${requestId}] ✅ Version hash computed`)
+    } catch (hashError) {
+      console.error(`[${requestId}] ❌ Error in hashing:`, hashError)
+      throw hashError
+    }
     
     // Skip version hash check if force regenerate
     console.log(`[${requestId}] 🔍 Checking if regeneration needed...`)
@@ -1137,7 +1486,20 @@ serve(async (req: Request) => {
     }
 
     // Detect language
-    const language = detectLanguageFromData(dataSources)
+    try {
+      language = detectLanguageFromData(dataSources)
+      console.log(`[${requestId}] 🌍 Language detected successfully: ${language.name} (${language.code})`)
+    } catch (langError) {
+      console.error(`[${requestId}] ❌ Language detection failed:`, langError)
+      // Keep fallback Danish
+      console.log(`[${requestId}] ⚠️ Using fallback language: ${language.name}`)
+    }
+    
+    // Verify language was initialized  
+    if (!language) {
+      console.error(`[${requestId}] ❌ Language still not initialized, forcing Danish fallback`)
+      language = LANGUAGES.da
+    }
     
     // Resolve locale (city-level granularity)
     // Extract city from location (either direct field or enrichment data)
@@ -1182,11 +1544,33 @@ serve(async (req: Request) => {
         { businessId }
       )
     }
-    console.log(`[${requestId}] 🌍 Detected language: ${language.name}`)
+
+    // Step 1.75: Stage B0 — fast business model pre-classification (gpt-4o-mini, ~5s)
+    // Runs before Prompt A with minimal data so B5 can skip TRIN 1 (~30% prompt reduction)
+    console.log(`[${requestId}] 🏷️ Stage B0: pre-classifying business model...`)
+    let b0Classification: { business_model_type: string; primary_copy_hook: string; audience_breadth: string; classification_rationale: string } | null = null
+    try {
+      b0Classification = await classifyBusinessModel(
+        Deno.env.get('OPENAI_API_KEY')!,
+        dataSources,
+        requestId
+      )
+    } catch (b0Err) {
+      console.warn(`[${requestId}] ⚠️ Stage B0 exception (non-fatal):`, String(b0Err))
+    }
 
     // Step 2: Run Prompt A
+    // Non-fatal: if Prompt A times out or fails, we continue with empty analysis.
+    // Deterministic repairs and fallbacks in Prompt B generate a valid profile regardless.
     console.log(`[${requestId}] 🔍 Running internal analysis...`)
-    let analysis = await runInternalAnalysis(dataSources, language, allowThirdParty, requestId)
+    let analysis: any = {}
+    let promptAFailed = false
+    try {
+      analysis = await runInternalAnalysis(dataSources, language, allowThirdParty, requestId)
+    } catch (promptAErr) {
+      promptAFailed = true
+      console.warn(`[${requestId}] ⚠️ Prompt A failed (non-fatal — continuing with empty analysis):`, String(promptAErr))
+    }
 
     // Step 2: Debug early-return — Prompt A only
     if (debug_mode === 'prompt_a_only') {
@@ -1229,7 +1613,8 @@ serve(async (req: Request) => {
     // generate (or save) a brand profile. Instead we return guidance for the user.
     // UNLESS ignoreDifferentiationGate is explicitly set to true
     const differentiation = computeDifferentiationConfidence(analysis)
-    const shouldSkipDifferentiationGate = ignoreDifferentiationGate || ignoreConfidenceCheck  // backwards compat
+    // Skip the gate when Prompt A failed (empty analysis would always trigger it, blocking generation)
+    const shouldSkipDifferentiationGate = promptAFailed || ignoreDifferentiationGate || ignoreConfidenceCheck  // backwards compat
     if (!shouldSkipDifferentiationGate && (Boolean(analysis?.evidence?.distinctive_hooks_missing) || differentiation.hooksCount < 1)) {
       const totalDuration = Date.now() - requestStartTime
       console.log(`[${requestId}] ⚠️ Skipping Prompt B (insufficient differentiators). Complete in ${totalDuration}ms`)
@@ -1268,6 +1653,16 @@ serve(async (req: Request) => {
     const finalValidation = validateFinalBrandProfile(brandProfile)
     if (!finalValidation.valid) {
       brandProfile = finalValidation.cleaned
+      // v4.12.1: Surface validation errors to user (especially voice_rationale, business_character requirements)
+      finalValidation.errors.forEach(err => {
+        const isHardError = err.includes('🚫 HARD ERROR')
+        requestErrors.add(
+          ErrorCategory.VALIDATION_STRUCTURAL,
+          isHardError ? ErrorSeverity.CRITICAL : ErrorSeverity.HIGH,
+          err,
+          'validation'
+        )
+      })
     }
 
     // SANITY CHECK: verify the exact values being written to DB match what prompts produced
@@ -1515,29 +1910,86 @@ serve(async (req: Request) => {
       console.log(`[${requestId}] 📌 content_anchors injected:`, contentAnchors.join(', '))
     }
 
-    const targetAudienceForVoice: string = (
-      (brandProfile as any).target_audience?.description ??
-      (brandProfile as any).target_audience?.primary_segment ??
-      ''
-    )
-    const brandAnchorsForVoice: string[] = (
-      (brandProfile as any).content_strategy?.brand_anchors ?? []
-    )
-    const voiceOptions = await generateVoiceOptions(
-      Deno.env.get('OPENAI_API_KEY')!,
-      businessName,
-      businessTypeForVoice,
-      locationForVoice,
-      menuItemsForVoice,
-      websiteTextForVoice,
-      targetAudienceForVoice,
-      brandAnchorsForVoice,
-      secondarySignals,
-      requestId
-    )
-    // generateVoiceOptions always returns a valid object (never null/undefined)
-    const voiceArchetype = voiceOptions.recommended
-    console.log(`[${requestId}] ✅ Voice options ready: website="${voiceOptions.options.website?.label}", ai_enriched="${voiceOptions.options.ai_enriched?.label}"`)
+    // ── INFER BUSINESS ARCHETYPE ─────────────────────────────────────────────
+    // Auto-detect business archetype from operational characteristics.
+    // This provides a validated, persistent classification that prevents 
+    // week-to-week inconsistency in content strategy.
+    // ──────────────────────────────────────────────────────────────────────────
+    
+    const businessArchetype = (() => {
+      // Extract service periods from dayArcProgrammes
+      const servicePeriods = secondarySignals.dayArcProgrammes
+        .filter(Boolean)
+        .map((p: string) => {
+          const pLower = p.toLowerCase()
+          if (/brunch/i.test(pLower)) return 'brunch'
+          if (/frokost|lunch/i.test(pLower)) return 'lunch'
+          if (/middag|dinner|aften/i.test(pLower)) return 'dinner'
+          if (/morgen|breakfast/i.test(pLower)) return 'morning'
+          return null
+        })
+        .filter(Boolean) as string[]
+      
+      // Detect late-night closing (after 1am)
+      const openingHoursRows = dataSources.openingHoursRows ?? []
+      const lateNightClosing = openingHoursRows.some((r: any) => {
+        const close = String(r?.close_time ?? '').substring(0, 5)
+        if (!close || !close.includes(':')) return false
+        const [h, m] = close.split(':').map(Number)
+        return h >= 1 && h < 6 // Between 1am and 6am = late-night
+      })
+      
+      // Compute earliest/latest hours for opening_hours field
+      const openingHours = (() => {
+        if (openingHoursRows.length === 0) return undefined
+        const opens = openingHoursRows
+          .map((r: any) => String(r?.open_time ?? '').substring(0, 5))
+          .filter(t => t && t.includes(':'))
+        const closes = openingHoursRows
+          .map((r: any) => String(r?.close_time ?? '').substring(0, 5))
+          .filter(t => t && t.includes(':'))
+        
+        return {
+          earliest_open: opens.length > 0 
+            ? opens.reduce((a, b) => a < b ? a : b) 
+            : undefined,
+          latest_close: closes.length > 0 
+            ? closes.reduce((a, b) => a > b ? a : b) 
+            : undefined
+        }
+      })()
+      
+      // Get business_character from brandProfile
+      const businessCharacter: string = typeof brandProfile?.business_character === 'object'
+        ? (brandProfile.business_character?.value ?? '')
+        : (brandProfile?.business_character ?? '')
+      
+      // Infer archetype
+      const archetype = inferBusinessArchetype({
+        service_periods: servicePeriods,
+        late_night_closing: lateNightClosing,
+        business_character: businessCharacter,
+        opening_hours: openingHours
+      })
+      
+      console.log(`[${requestId}] 🏛️ Business archetype inferred: ${archetype} (${getArchetypeDescription(archetype)})`)
+      console.log(`[${requestId}] 🔍 Archetype inputs:`, {
+        service_periods: servicePeriods,
+        late_night_closing: lateNightClosing,
+        opening_hours: openingHours
+      })
+      
+      return archetype
+    })()
+    
+    // Add archetype to brandProfile for database save
+    ;(brandProfile as any).business_archetype = businessArchetype
+
+    // ── STAGE B1 REMOVED (Sprint 1 - Complexity Reduction) ──────────────────
+    // Voice archetype generation removed: ~15s saved, 2 columns removed.
+    // Owner gets ONE voice (opinionated, not optional). If unsatisfied, they
+    // regenerate or manually edit. No choice paralysis.
+    // ──────────────────────────────────────────────────────────────────────────
 
 
     try {
@@ -1549,8 +2001,9 @@ serve(async (req: Request) => {
         requestErrors.toJSON().errors,  // Extract errors array from toJSON() result
         versionHash,  // Add version hash
         locationIntelligence,  // Deterministic location intelligence
-        voiceOptions,  // Both generated archetype options
-        voiceArchetype  // Active archetype (= recommended on first generation)
+        null,  // voice_options removed (Sprint 1)
+        null,  // voice_archetype removed (Sprint 1)
+        b0Classification  // Stage B0 classification (business model type, copy hook, audience breadth)
       )
     } catch (saveError: any) {
       // Detect DB constraint violations for tone_model
@@ -1574,7 +2027,8 @@ serve(async (req: Request) => {
           versionHash,
           locationIntelligence,
           voiceOptions,
-          voiceArchetype
+          voiceArchetype,
+          b0Classification  // Stage B0 classification
         )
         
         // Add error to collection
@@ -1599,6 +2053,324 @@ serve(async (req: Request) => {
       sourceHashes,
       versionHash
     )
+
+    // Stage B5 — Audience Segment Intelligence (non-blocking, non-fatal)
+    // Generates 3-6 named segments with timing windows + content angles + metadata.
+    // Saved to audience_segments JSONB column — consumed by get-quick-suggestions + owner UI.
+    console.log(`[${requestId}] 🧩 Stage B5: starting audience segment synthesis...`)
+    try {
+      const audienceSegments = await segmentAudience(
+        Deno.env.get('OPENAI_API_KEY')!,
+        brandProfile,
+        secondarySignals,
+        locationIntelligence,
+        dataSources,
+        null,  // ownerDocument not yet implemented
+        language.code,
+        requestId,
+        b0Classification
+      )
+      
+      // Sanitize banned words in B5 audience segments before save.
+      // B5 runs after sanitizeBannedWords on the main profile, so it needs its own pass.
+      if (audienceSegments) {
+        const SEGMENT_BANNED = [
+          'hyggelig', 'hyggeligt', 'hyggelige', 'lækker', 'lækkert', 'lækre',
+          'omgivelser', 'autentisk', 'autentiske', 'unik', 'unikke', 'fantastisk'
+        ]
+        let sanitizedSegments = JSON.stringify(audienceSegments)
+        SEGMENT_BANNED.forEach((word) => {
+          const regex = new RegExp(`\\b${word}\\b`, 'gi')
+          sanitizedSegments = sanitizedSegments.replace(regex, '')
+        })
+        const finalSegments = JSON.parse(sanitizedSegments)
+        
+        const { error: b5Err } = await supabaseClient
+          .from('business_brand_profile')
+          .update({ audience_segments: finalSegments })
+          .eq('business_id', businessId)
+        
+        if (b5Err) {
+          console.warn(`[${requestId}] ⚠️ Stage B5 save failed (non-fatal):`, b5Err.message)
+        } else {
+          console.log(`[${requestId}] ✅ Stage B5: saved ${finalSegments.segments?.length ?? 0} segments to audience_segments column`)
+        }
+      } else {
+        console.log(`[${requestId}] ℹ️ Stage B5: no segments produced (insufficient data or AI failure)`)
+      }
+    } catch (b5Err) {
+      console.warn(`[${requestId}] ⚠️ Stage B5 exception (non-fatal):`, String(b5Err))
+    }
+
+    // Stage CS (Commercial Strategy) — AI-Powered Commercial Strategy Analysis (non-blocking, non-fatal)
+    // Analyzes business characteristics, menu, location, and operational capabilities
+    // to recommend optimal commercial content strategy (baseline mode + trigger configuration).
+    // Saved to commercial_baseline_mode, trigger_configuration, commercial_strategy_reasoning columns.
+    console.log(`[${requestId}] 💰 Stage CS: starting commercial strategy analysis...`)
+    try {
+      const { analyzeCommercialStrategy } = await import('../_shared/brand-profile/commercial-strategy-analyzer.ts')
+      
+      const commercialStrategy = await analyzeCommercialStrategy(
+        supabaseClient,
+        businessId,
+        Deno.env.get('OPENAI_API_KEY')!
+      )
+      
+      const { error: csErr } = await supabaseClient
+        .from('business_brand_profile')
+        .update({
+          commercial_baseline_mode: commercialStrategy.commercial_baseline_mode,
+          trigger_configuration: commercialStrategy.trigger_configuration,
+          commercial_strategy_reasoning: commercialStrategy.summary_text,
+          trigger_updated_by: 'ai',
+          trigger_updated_at: new Date().toISOString()
+        })
+        .eq('business_id', businessId)
+      
+      if (csErr) {
+        console.warn(`[${requestId}] ⚠️ Stage CS save failed (non-fatal):`, csErr.message)
+      } else {
+        console.log(`[${requestId}] ✅ Stage CS: saved commercial strategy (mode=${commercialStrategy.commercial_baseline_mode}, confidence=${commercialStrategy.confidence_score})`)
+        console.log(`[${requestId}] 💡 Stage CS: ${commercialStrategy.summary_text}`)
+      }
+    } catch (csErr) {
+      console.warn(`[${requestId}] ⚠️ Stage CS exception (non-fatal):`, String(csErr))
+    }
+
+    // Stage PS — Posting Strategy + Busy Pattern (non-blocking, non-fatal)
+    // AI determines optimal weekly day distribution based on booking model, revenue moments, and business type.
+    // Also assesses typical busy/quiet patterns specific to this business.
+    // Saved to posting_strategy + busy_pattern columns in business_brand_profile.
+    console.log(`[${requestId}] 📅 Stage PS: generating posting strategy and busy pattern...`)
+    try {
+      const psOperations = dataSources.operations as any
+      const psLocationIntel = dataSources.locationIntelligenceRow as any
+      const psRevenueDrivers = brandProfile as any  // revenue_drivers not in brandProfile directly
+      
+      const bookingModelType = psOperations?.reservation_required === true && !psOperations?.accepts_walk_ins
+        ? 'booking_only'
+        : !psOperations?.reservation_required && psOperations?.accepts_walk_ins === true
+          ? 'walk_in'
+          : 'hybrid'
+
+      const psBusinessName = (dataSources.business as any)?.name ?? ''
+      const psEstablishmentType = psOperations?.establishment_type ?? (dataSources.business as any)?.vertical ?? 'restaurant'
+      const psCityName = (dataSources.location as any)?.enrichment?.macro?.city ?? (dataSources.business as any)?.city ?? ''
+      const psAreaType = psLocationIntel?.area_type ?? ''
+      const psNeighborhood = psLocationIntel?.neighborhood ?? ''
+      const psBusinessChar = typeof brandProfile.business_character === 'string'
+        ? brandProfile.business_character.slice(0, 200)
+        : ((brandProfile.business_character as any)?.value ?? '').slice(0, 200)
+
+      const psPrompt = `You are a hospitality social media strategy expert. Based on the business profile below, generate the optimal weekly posting strategy and typical busy/quiet pattern.
+
+BUSINESS:
+- Name: ${psBusinessName}
+- Type: ${psEstablishmentType}
+- City: ${psCityName}${psNeighborhood ? `, ${psNeighborhood}` : ''}${psAreaType ? ` (${psAreaType})` : ''}
+- Booking model: ${bookingModelType === 'booking_only' ? 'Reservation required (no walk-ins)' : bookingModelType === 'walk_in' ? 'Walk-in only' : 'Hybrid (accepts both reservations and walk-ins)'}
+- Character: ${psBusinessChar}
+
+RULES:
+- Use 3-letter English day abbreviations: Mon, Tue, Wed, Thu, Fri, Sat, Sun
+- Timing format: "Day-Day HH:MM" or "Day HH:MM" (24-hour)
+- booking_only: front-load to Sun-Tue (planners need days to decide). walk_in: back-load to Thu-Sat (impulse capture). hybrid: Thu-Fri conversion window + Mon brand builder.
+- busy/quiet pattern must reflect THIS specific business type and location — not generic hospitality.
+
+Respond ONLY with JSON (no markdown):
+{
+  "posting_strategy": {
+    "booking_model_type": "${bookingModelType}",
+    "slot_windows": {
+      "footfall_primary": "Day-Day HH:MM",
+      "footfall_secondary": "Day-Day HH:MM",
+      "brand_builder": "Day HH:MM",
+      "loyalty": "Day-Day HH:MM"
+    },
+    "cta_emphasis": "walk_in",
+    "rationale": "2-3 sentences explaining why these windows fit this specific business"
+  },
+  "busy_pattern": {
+    "weekly_pattern": {
+      "busiest_days": ["Fri", "Sat"],
+      "quietest_days": ["Mon", "Tue"]
+    },
+    "seasonal_peaks": ["Jun", "Jul", "Aug"],
+    "seasonal_valleys": ["Jan", "Feb"],
+    "monthly_pattern": "first_weekend_busiest",
+    "holiday_impact": "high",
+    "rationale": "2-3 sentences explaining this specific business's busy/quiet patterns"
+  }
+}`
+
+      const psResponse = await fetchOpenAIWithRetry(
+        Deno.env.get('OPENAI_API_KEY')!,
+        {
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: 'You are a social media strategy expert for hospitality businesses. Output ONLY valid JSON with no markdown.' },
+            { role: 'user', content: psPrompt }
+          ],
+          temperature: 0.2,
+          max_tokens: 600,
+          response_format: { type: 'json_object' }
+        },
+        requestId,
+        'Stage PS (Posting Strategy)',
+        { timeout: 15000, maxRetries: 1, retryDelayMs: 1000, retryStatusCodes: [429, 500, 502, 503, 504] }
+      )
+
+      const psRaw = psResponse.choices[0]?.message?.content
+      if (!psRaw) throw new Error('Stage PS: no response')
+      const psParsed = JSON.parse(psRaw)
+
+      // Build content_strategy from posting_strategy + busy_pattern
+      // This provides the baseline content distribution that strategy-modulator.ts expects
+      const ps = psParsed.posting_strategy
+      const bp = psParsed.busy_pattern
+      
+      // Derive goal_blend from business_programme_profiles (if available)
+      // This is a BASELINE that the weekly modulator can deviate from based on context.
+      // Over time, posts should trend toward this mix, but individual weeks can vary.
+      let goal_blend = { drive_footfall: 50, build_brand: 30, retain_loyalty: 20 }  // default fallback
+      let goal_blend_source = 'default'
+      
+      try {
+        const { data: programmes } = await supabaseClient
+          .from('business_programme_profiles')
+          .select('programme_type, baseline_goal_split')
+          .eq('business_id', businessId)
+        
+        if (programmes && programmes.length > 0) {
+          // Aggregate baseline_goal_split from all programmes
+          const agg = programmes.reduce((acc, p) => {
+            const split = p.baseline_goal_split || {}
+            acc.drive_footfall += split.drive_footfall || 0
+            acc.strengthen_brand += split.strengthen_brand || 0  // V5 field name
+            acc.retain_regulars += split.retain_regulars || 0    // V5 field name
+            return acc
+          }, { drive_footfall: 0, strengthen_brand: 0, retain_regulars: 0 })
+          
+          const total = agg.drive_footfall + agg.strengthen_brand + agg.retain_regulars
+          
+          if (total > 0) {
+            // Normalize to 100% and rename to weekly plan taxonomy
+            const normalized_total = agg.drive_footfall + agg.strengthen_brand + agg.retain_regulars
+            goal_blend = {
+              drive_footfall: Math.round((agg.drive_footfall / normalized_total) * 100),
+              build_brand: Math.round((agg.strengthen_brand / normalized_total) * 100),      // RENAME from strengthen_brand
+              retain_loyalty: Math.round((agg.retain_regulars / normalized_total) * 100)     // RENAME from retain_regulars
+            }
+            goal_blend_source = `${programmes.length} programmes`
+            console.log(`[${requestId}] Stage PS: goal_blend from programmes: ${JSON.stringify(goal_blend)} (${programmes.map(p => p.programme_type).join(', ')})`)
+          } else {
+            console.warn(`[${requestId}] Stage PS: programmes exist but baseline_goal_split totals 0 — using booking_model fallback`)
+          }
+        }
+      } catch (progErr) {
+        console.warn(`[${requestId}] Stage PS: failed to query programmes (non-fatal):`, String(progErr))
+      }
+      
+      // Fallback to booking_model_type template if no programmes or query failed
+      if (goal_blend_source === 'default') {
+        if (ps?.booking_model_type === 'booking_only') {
+          // Booking-only: customers already decided → focus on brand + loyalty
+          goal_blend = { drive_footfall: 30, build_brand: 45, retain_loyalty: 25 }
+          goal_blend_source = 'booking_only template'
+        } else if (ps?.booking_model_type === 'walk_in') {
+          // Walk-in: need to capture impulse → focus on footfall
+          goal_blend = { drive_footfall: 55, build_brand: 25, retain_loyalty: 20 }
+          goal_blend_source = 'walk_in template'
+        } else {
+          goal_blend_source = 'hybrid template'
+        }
+        console.log(`[${requestId}] Stage PS: No valid programmes — using ${goal_blend_source}`)
+      }
+
+      // Derive content_category_weights from establishment type
+      const isBarOriented = psEstablishmentType.toLowerCase().includes('bar') || psEstablishmentType.toLowerCase().includes('cocktail')
+      const content_category_weights = isBarOriented
+        ? { product_menu: 30, craving_visual: 35, behind_scenes: 20, team_people: 15 }  // Visual-heavy for bars
+        : { product_menu: 35, craving_visual: 25, behind_scenes: 25, team_people: 15 }  // Balanced for restaurants
+
+      const content_strategy = {
+        goal_blend,
+        posting_windows: ps?.slot_windows ?? null,
+        booking_model_type: ps?.booking_model_type ?? 'hybrid',
+        cta_emphasis: ps?.cta_emphasis ?? 'walk_in',
+        content_category_weights,
+        weekly_focus: {
+          busiest_days: bp?.weekly_pattern?.busiest_days ?? ['Fri', 'Sat'],
+          quietest_days: bp?.weekly_pattern?.quietest_days ?? ['Mon', 'Tue'],
+          monthly_pattern: bp?.monthly_pattern ?? 'even'
+        }
+      }
+
+      const { error: psErr } = await supabaseClient
+        .from('business_brand_profile')
+        .update({
+          posting_strategy: ps ?? null,
+          busy_pattern: bp ?? null,
+          content_strategy: content_strategy  // ADD: write content_strategy alongside posting_strategy
+        })
+        .eq('business_id', businessId)
+
+      if (psErr) {
+        console.warn(`[${requestId}] ⚠️ Stage PS save failed (non-fatal — columns may not exist yet):`, psErr.message)
+      } else {
+        const bmt = ps?.booking_model_type ?? 'unknown'
+        const footfall = ps?.slot_windows?.footfall_primary ?? '?'
+        console.log(`[${requestId}] ✅ Stage PS: saved posting_strategy (${bmt}, footfall=${footfall}) + busy_pattern + content_strategy`)
+        console.log(`[${requestId}] 📊 content_strategy baseline: ${JSON.stringify(goal_blend)} (source: ${goal_blend_source})`)
+        console.log(`[${requestId}] 📊 content_category_weights: ${JSON.stringify(content_category_weights)}`)
+        console.log(`[${requestId}] 💡 This is a baseline — weekly modulator can adjust based on context (weather, events, drift)`)
+      }
+    } catch (psErr) {
+      console.warn(`[${requestId}] ⚠️ Stage PS exception (non-fatal):`, String(psErr))
+    }
+
+    // Stage RD — Revenue Drivers Analysis (non-blocking, non-fatal)
+    // AI-powered revenue moment extraction from programmes or business description.
+    // Analyzes service types, decision windows, and optimal posting timing.
+    // Saved to revenue_drivers JSONB column — consumed by get-weekly-strategy BusinessRulesEngine.
+    console.log(`[${requestId}] 🎯 Stage RD: analyzing revenue drivers...`)
+    try {
+      const rdResponse = await fetch(
+        `${Deno.env.get('SUPABASE_URL')}/functions/v1/analyze-revenue-drivers`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+          },
+          body: JSON.stringify({
+            business_id: businessId,
+            force_refresh: true  // Always regenerate when brand profile is regenerated
+          })
+        }
+      )
+      
+      if (!rdResponse.ok) {
+        const rdErrorText = await rdResponse.text()
+        console.warn(`[${requestId}] ⚠️ Stage RD: HTTP ${rdResponse.status} - ${rdErrorText}`)
+      } else {
+        const rdData = await rdResponse.json()
+        
+        if (rdData.success) {
+          const rdMethod = rdData.analysis_method || 'unknown'
+          const rdPrimary = rdData.revenue_drivers?.primary_revenue_moment?.service_type || 'none'
+          const rdSecondaryCount = rdData.revenue_drivers?.secondary_revenue_moments?.length || 0
+          const rdPreferredDays = rdData.revenue_drivers?.preferred_day_pattern?.join(', ') || 'none'
+          
+          console.log(`[${requestId}] ✅ Stage RD: revenue drivers analyzed via ${rdMethod}`)
+          console.log(`[${requestId}] 🎯 Stage RD: primary=${rdPrimary}, secondary=${rdSecondaryCount}, preferred_days=[${rdPreferredDays}]`)
+        } else {
+          console.warn(`[${requestId}] ⚠️ Stage RD: analysis failed - ${rdData.error || 'unknown error'}`)
+        }
+      }
+    } catch (rdErr) {
+      console.warn(`[${requestId}] ⚠️ Stage RD exception (non-fatal):`, String(rdErr))
+    }
 
     const totalDuration = Date.now() - requestStartTime
     console.log(`[${requestId}] ✅ Complete in ${totalDuration}ms`)
@@ -1701,8 +2473,9 @@ serve(async (req: Request) => {
           identity_keywords: brandProfile.identity_keywords?.value ?? null,
           voice_constraints: brandProfile.voice_constraints?.value ?? null,
           voice_rationale: (brandProfile as any).voice_rationale ?? null,
-          voice_options: voiceOptions ?? null,
-          voice_archetype: voiceArchetype ?? null,
+          business_character: brandProfile.business_character ?? null,  // v4.12.1: Plain-text business descriptor
+          // voice_options: REMOVED (Sprint 1 - Complexity Reduction)
+          // voice_archetype: REMOVED (Sprint 1 - Complexity Reduction)
         },
         confidence: {
           brand_essence: brandProfile.brand_essence.confidence_level,
@@ -1725,8 +2498,18 @@ serve(async (req: Request) => {
   } catch (error) {
     const err = error as Error
     const totalDuration = Date.now() - requestStartTime
-    console.error(`[${requestId}] ❌ Error after ${totalDuration}ms:`, err.message)
-    console.error(`[${requestId}] 📚 Error stack:`, err.stack)
+    
+    // Special handling for ReferenceError to help debug "language is not defined"
+    if (err.name === 'ReferenceError') {
+      console.error(`[${requestId}] ❌ ReferenceError after ${totalDuration}ms:`, err.message)
+      console.error(`[${requestId}] 📚 Full stack trace:`, err.stack)
+      console.error(`[${requestId}] 📍 Error occurred at ~${totalDuration}ms - likely before language initialization`)
+    } else {
+      console.error(`[${requestId}] ❌ Error after ${totalDuration}ms:`, err.message)
+      console.error(`[${requestId}] 📚 Error stack:`, err.stack)
+    }
+    console.error(`[${requestId}] 📍 Error name:`, err.name)
+    console.error(`[${requestId}] 📍 Error details:`, JSON.stringify(err, null, 2))
     
     // Release lock on error (businessId is in scope because body was parsed before the main try)
     if (businessId) {

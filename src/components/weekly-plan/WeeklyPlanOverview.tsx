@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next'
 import type { WeeklyContentPlan, PostSpecification } from '../../types/weekly-plan'
 import { WeatherIcon } from './WeatherIcon'
 import { ContentTypeIcon } from '../post-creation/ContentTypeIcon'
+import { formatNudgeTargetDay } from '../../utils/formatNudgeTargetDay'
 
 interface WeeklyPlanOverviewProps {
   plan: WeeklyContentPlan
@@ -11,6 +12,8 @@ interface WeeklyPlanOverviewProps {
   onCreatePost?: (post: PostSpecification) => void
   // Indices (in plan.posts raw array) marked done in this session
   sessionDoneIndices?: number[]
+  // Weekly-plan idea ids that are already committed and therefore locked
+  lockedIdeaIds?: Set<number>
   // Hide 'Generer ny plan' button (e.g. when viewing current in-progress week)
   showGenerateButton?: boolean
   // Weather refresh callback + loading state
@@ -76,9 +79,73 @@ function stripWeekPrefix(headline: string): string {
   return headline.replace(/^Uge\s+\d+\s*[:\-–]\s*/i, '').trim()
 }
 
+function getContentIconType(post: PostSpecification): string {
+  const explicitType = (post.postType.type || '').toLowerCase()
+  const strategicCategory = (post.strategicContext?.content_category || '').toLowerCase()
+  const fallbackCategory = (post.postType.category || '').toLowerCase()
+  const title = `${post.contentSubject.dish || ''} ${post.caption.firstLine || ''} ${post.title || ''}`.toLowerCase()
+
+  const menuLike = ['menu_item', 'menu_highlight', 'product_menu', 'craving_visual']
+  if (/terrasse|udend|udeserv|udeplads|outdoor|ude|plads/.test(title)) {
+    return 'outdoor_seating'
+  }
+
+  if (/havne|åen|ved åen|udsigt|location/.test(title)) {
+    return 'location_story'
+  }
+
+  if (/køkken|bag kulissen|behind|åbner|åbent køkken|prep|forbered/.test(title)) {
+    return 'behind_scenes'
+  }
+
+  if (/stemning|hygge|atmosf|vibe/.test(title)) {
+    return 'atmosphere'
+  }
+
+  if (/event|fredag|happy hour|launch|åbning|special|fejr|fest/.test(title)) {
+    return 'event_promotion'
+  }
+
+  if (/drik|drink|vin|cocktail|øl|beverage/.test(title)) {
+    return 'drinks'
+  }
+
+  if (menuLike.includes(explicitType) || menuLike.includes(strategicCategory) || menuLike.includes(fallbackCategory)) {
+    return 'menu_item'
+  }
+
+  if (/menu|brunch|frokost|middag|scramble|æg|ret|salat|burger|suppe|dessert/.test(title)) {
+    return 'menu_item'
+  }
+
+  if (strategicCategory) {
+    return strategicCategory
+  }
+
+  return fallbackCategory || explicitType || 'menu_item'
+}
+
+function getContentIconClass(contentType: string): string {
+  if (contentType === 'outdoor_seating') {
+    return 'w-7 h-7 text-text flex-shrink-0 -ml-0.5'
+  }
+  return 'w-6 h-6 text-text flex-shrink-0'
+}
+
+// Convert wind speed (m/s) to descriptive Danish wind term based on Beaufort scale
+function getWindDescription(windSpeed: number, t: TFunction): string {
+  if (windSpeed < 2) return t('weeklyPlan.weather.windCalm', { defaultValue: 'stille' })
+  if (windSpeed < 4) return t('weeklyPlan.weather.windLight', { defaultValue: 'let vind' })
+  if (windSpeed < 6) return t('weeklyPlan.weather.windGentle', { defaultValue: 'svag vind' })
+  if (windSpeed < 8) return t('weeklyPlan.weather.windModerate', { defaultValue: 'jævn vind' })
+  if (windSpeed < 11) return t('weeklyPlan.weather.windFresh', { defaultValue: 'frisk vind' })
+  if (windSpeed < 14) return t('weeklyPlan.weather.windStrong', { defaultValue: 'hård vind' })
+  return t('weeklyPlan.weather.windGale', { defaultValue: 'stiv kuling' })
+}
+
 // Generate a short sentence summarising the full week's weather
 function weekWeatherSummary(
-  days: { date: string; temp_max: number; temp_min?: number; condition: string; precipitation_chance: number }[],
+  days: { date: string; temp_max: number; temp_min?: number; condition: string; precipitation_chance: number; wind_speed?: number }[],
   t: TFunction
 ): string {
   if (!days.length) return ''
@@ -91,6 +158,19 @@ function weekWeatherSummary(
   const rainDays = days.filter(d => d.condition === 'rain')
   const snowDays = days.filter(d => d.condition === 'snow')
   const sunnyDays = days.filter(d => d.condition === 'sunny' || d.condition === 'partly_cloudy')
+
+  // Wind analysis (wind_speed in m/s)
+  const daysWithWind = days.filter(d => d.wind_speed !== undefined)
+  const avgWind = daysWithWind.length > 0
+    ? Math.round(daysWithWind.reduce((s, d) => s + (d.wind_speed || 0), 0) / daysWithWind.length)
+    : 0
+  const maxWind = daysWithWind.length > 0 
+    ? Math.max(...daysWithWind.map(d => d.wind_speed || 0))
+    : 0
+  const windyDays = days.filter(d => (d.wind_speed || 0) > 7) // >7 m/s = ~25 km/h, affects outdoor seating
+  const windiestDay = daysWithWind.length > 0
+    ? daysWithWind.reduce((max, d) => (d.wind_speed || 0) > (max.wind_speed || 0) ? d : max, daysWithWind[0])
+    : null
 
   // Dominant condition
   const condCount: Record<string, number> = {}
@@ -147,6 +227,59 @@ function weekWeatherSummary(
   if (rainiestDay && rainiestDay.precipitation_chance >= 40) {
     highlights.push(t('weeklyPlan.weather.mostRain', { day: longDayName(rainiestDay.date), pct: rainiestDay.precipitation_chance }))
   }
+  
+  // Wind highlights (important for outdoor seating)
+  // Show ALL days with wind information, bundling consecutive days with same conditions
+  const allDaysWithWindDetails = daysWithWind.map(d => ({
+    date: d.date,
+    day: longDayName(d.date),
+    windDesc: getWindDescription(d.wind_speed || 0, t),
+    windSpeed: d.wind_speed || 0
+  }))
+  
+  if (allDaysWithWindDetails.length > 0) {
+    // Group consecutive days with the same wind description
+    const groupedWindDays: string[] = []
+    let i = 0
+    
+    while (i < allDaysWithWindDetails.length) {
+      const current = allDaysWithWindDetails[i]
+      let j = i + 1
+      
+      // Find consecutive days with same wind description
+      while (j < allDaysWithWindDetails.length && 
+             allDaysWithWindDetails[j].windDesc === current.windDesc) {
+        // Check if dates are consecutive (1 day apart)
+        const currentDate = new Date(allDaysWithWindDetails[j - 1].date)
+        const nextDate = new Date(allDaysWithWindDetails[j].date)
+        const daysDiff = (nextDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24)
+        
+        if (daysDiff <= 1.5) { // Allow for small time differences
+          j++
+        } else {
+          break
+        }
+      }
+      
+      // Format the group
+      if (j - i > 1) {
+        // Multiple consecutive days with same wind - show as range
+        groupedWindDays.push(`${current.day}-${allDaysWithWindDetails[j - 1].day} (${current.windDesc})`)
+      } else {
+        // Single day
+        groupedWindDays.push(`${current.day} (${current.windDesc})`)
+      }
+      
+      i = j
+    }
+    
+    const daysList = groupedWindDays.join(', ')
+    highlights.push(t('weeklyPlan.weather.windDays', { 
+      days: daysList,
+      defaultValue: `vind: ${daysList}`
+    }))
+  }
+  
   if (highlights.length) {
     parts.push(highlights.join(', ') + '.')
   }
@@ -157,28 +290,28 @@ function weekWeatherSummary(
     const condKeys = weekendDays.map(d => t(`weeklyPlan.weather.${condKey[d.condition] ?? 'condCloudy'}`))
     const wAvg = Math.round(weekendDays.reduce((s, d) => s + d.temp_max, 0) / weekendDays.length)
     const wRain = weekendDays.filter(d => d.condition === 'rain').length
+    const wWindy = weekendDays.filter(d => (d.wind_speed || 0) > 7).length // Windy weekend days
+    const wAvgWind = weekendDays.filter(d => d.wind_speed !== undefined).length > 0
+      ? weekendDays.reduce((s, d) => s + (d.wind_speed || 0), 0) / weekendDays.length
+      : 0
+    const wWindDesc = getWindDescription(wAvgWind, t)
     const conditions = wRain === weekendDays.length ? t('weeklyPlan.weather.weekendAllRain') : condKeys.join(' / ')
     let weekendLine = t('weeklyPlan.weather.weekendSummary', { conditions, avg: wAvg })
-    if (wRain === 0 && wAvg >= 10) weekendLine += t('weeklyPlan.weather.weekendGood')
-    else if (wRain >= 1) weekendLine += t('weeklyPlan.weather.weekendRain')
+    // Removed hardcoded "Good for outdoor" assessment - weather interpretation should be data-driven, not hardcoded
+    // Previous code unconditionally added assessment even during rainy weeks if weekend had no rain
+    if (wRain === 0 && wAvg >= 10 && wWindy >= 1) {
+      // Warm but windy
+      weekendLine += t('weeklyPlan.weather.weekendWindy', { 
+        wind: wWindDesc,
+        defaultValue: ` — ${wWindDesc} påvirker udendørsservering`
+      })
+    } else if (wRain >= 1) {
+      weekendLine += t('weeklyPlan.weather.weekendRain')
+    }
     parts.push(weekendLine)
   }
 
   return parts.join(' ')
-}
-
-// Translate optimizer's timing rationale to localised label
-function formatTimingRationale(rationale: string, t: TFunction): string {
-  if (!rationale) return ''
-  const r = rationale.toLowerCase()
-  if (r.includes('morning awareness')) return t('weeklyPlan.overview.timing.morning')
-  if (r.includes('lunch decision') || r.includes('immediate decision')) return t('weeklyPlan.overview.timing.lunch')
-  if (r.includes('dinner planning')) return t('weeklyPlan.overview.timing.dinner')
-  if (r.includes('evening fomo')) return t('weeklyPlan.overview.timing.eveningFomo')
-  if (r.includes('evening engagement')) return t('weeklyPlan.overview.timing.eveningEngagement')
-  if (r.includes('peak engagement')) return t('weeklyPlan.overview.timing.peak')
-  if (r.includes('weekend')) return t('weeklyPlan.overview.timing.weekend')
-  return t('weeklyPlan.overview.timing.optimal')
 }
 
 // Visual chip for CTA intent shown on card
@@ -209,6 +342,7 @@ export function WeeklyPlanOverview({
   onGenerateNew,
   onCreatePost,
   sessionDoneIndices = [],
+  lockedIdeaIds = new Set(),
   showGenerateButton = true,
   onRefreshWeather,
   refreshingWeather = false,
@@ -333,6 +467,27 @@ export function WeeklyPlanOverview({
             )}
           </div>
         ) : null}
+
+        {/* Strategic Rationale — WHY this content mix */}
+        {plan.strategicRationale && (
+          <div className="mt-4 bg-purple-50 border border-purple-200 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0 mt-0.5">
+                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-purple-900 mb-1.5 uppercase tracking-wide">
+                  {t('weeklyPlan.overview.strategicRationale.title', 'Ugens Strategi')}
+                </div>
+                <p className="text-sm text-purple-800 leading-relaxed">
+                  {plan.strategicRationale}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Strategy Narrative */}
         {plan.strategyNarrative ? (
@@ -513,7 +668,7 @@ export function WeeklyPlanOverview({
                             key={ev.name}
                             className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium leading-none ${EVENT_BADGE_COLORS[ev.type] ?? 'bg-slate-100 text-slate-600'}`}
                           >
-                            {ev.name}
+                            {t(`calendarEvent.${ev.name}`, ev.name)}
                           </span>
                         ))}
                       </div>
@@ -530,6 +685,7 @@ export function WeeklyPlanOverview({
                 p => p.timing.date === post.timing.date && p.timing.time === post.timing.time
               )
               const isSessionDone = rawIndex >= 0 && sessionDoneIndices.includes(rawIndex)
+              const isLocked = post.idea_id != null && lockedIdeaIds.has(Number(post.idea_id))
 
               return (
                 <div
@@ -539,7 +695,9 @@ export function WeeklyPlanOverview({
                   onClick={() => onPostClick(post)}
                   onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onPostClick(post)}
                   className={`bg-white rounded-lg border px-4 py-3 hover:shadow-sm transition-all text-left cursor-pointer ${
-                    isSessionDone
+                    isLocked
+                      ? 'border-slate-300 bg-slate-50/70'
+                      : isSessionDone
                       ? 'border-green-300 bg-green-50/30'
                       : isPast
                         ? 'border-orange-300 bg-orange-50/30'
@@ -563,25 +721,37 @@ export function WeeklyPlanOverview({
                   <div className="w-px self-stretch bg-slate-200 flex-shrink-0" />
 
                   {/* Content type icon */}
-                  <ContentTypeIcon contentType={post.postType.category} className="w-6 h-6 text-text flex-shrink-0" />
+                  {(() => {
+                    const iconType = getContentIconType(post)
+                    return (
+                      <ContentTypeIcon
+                        contentType={iconType}
+                        className={getContentIconClass(iconType)}
+                      />
+                    )
+                  })()}
 
                   {/* Title + meta */}
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-semibold text-slate-900 truncate">{post.contentSubject.dish?.replace(/\.+$/, '')}</div>
-                    {post.timing.rationale && (
-                      <div className="text-[10px] text-slate-400 mt-0.5 truncate">
-                        🕐 {formatTimingRationale(post.timing.rationale, t)}
-                      </div>
-                    )}
                   </div>
 
                   {/* Chips */}
                   <div className="flex-shrink-0 flex items-center gap-2">
-                    {isSessionDone && (
+                    {isLocked && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200 text-slate-700">{t('weeklyPlan.overview.lockedBadge', { defaultValue: 'Låst' })}</span>
+                    )}
+                    {!isLocked && isSessionDone && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-600 text-white">{t('weeklyPlan.overview.doneBadge')}</span>
                     )}
-                    {isPast && !isSessionDone && (
+                    {isPast && !isSessionDone && !isLocked && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-500 text-white">{t('weeklyPlan.overview.pastBadge')}</span>
+                    )}
+                    {post.strategicContext?.owner_note_applied && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">{t('weeklyPlan.overview.ownerNoteBadge')}</span>
+                    )}
+                    {post.strategicContext?.drink_pairing && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-700">🍸 {post.strategicContext.drink_pairing}</span>
                     )}
                     {post.caption.ctaType && (() => {
                       const chip = getCTAChip(post.caption.ctaType, t)
@@ -606,10 +776,15 @@ export function WeeklyPlanOverview({
                   {onCreatePost && (
                     <div className="flex-shrink-0">
                       <button
-                        onClick={(e) => { e.stopPropagation(); onCreatePost(post) }}
-                        className="text-xs font-semibold text-white bg-cta hover:bg-cta-hover px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+                        onClick={(e) => { e.stopPropagation(); if (!isLocked) onCreatePost(post) }}
+                        disabled={isLocked}
+                        className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
+                          isLocked
+                            ? 'text-slate-500 bg-slate-200 cursor-not-allowed'
+                            : 'text-white bg-cta hover:bg-cta-hover'
+                        }`}
                       >
-                        {t('weeklyPlan.overview.createPost')}
+                        {isLocked ? t('weeklyPlan.overview.lockedButton', { defaultValue: 'Låst' }) : t('weeklyPlan.overview.createPost')}
                       </button>
                     </div>
                   )}
@@ -621,11 +796,39 @@ export function WeeklyPlanOverview({
                           key={ev.name}
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-medium leading-none ${EVENT_BADGE_COLORS[ev.type] ?? 'bg-slate-100 text-slate-600'}`}
                         >
-                          {ev.name}
+                          {t(`calendarEvent.${ev.name}`, ev.name)}
                         </span>
                       ))}
                     </div>
                   )}
+                  
+                  {/* Booking Nudge Context Block (FIX B) */}
+                  {(() => {
+                    const isBookingNudge = 
+                      post.postType?.category === 'booking_nudge' || 
+                      (post.strategicContext?.cta_intent === 'booking' && post.strategicContext?.nudge_rationale)
+                    
+                    if (!isBookingNudge) return null
+                    
+                    return (
+                      <div className="mt-2 pl-3 py-2 bg-amber-50 border-l-2 border-teal-600 rounded-r-md">
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-teal-700 mb-1">
+                          <span>📅</span>
+                          <span>
+                            Booking nudge
+                            {post.strategicContext?.peak_day && (
+                              <> → {formatNudgeTargetDay(post.strategicContext.peak_day, post.strategicContext.lead_days_used)}</>
+                            )}
+                          </span>
+                        </div>
+                        {post.strategicContext?.nudge_rationale && (
+                          <p className="text-xs text-gray-500 m-0 leading-snug">
+                            {post.strategicContext.nudge_rationale}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               )
             })}

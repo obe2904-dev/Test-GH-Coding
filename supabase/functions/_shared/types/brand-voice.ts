@@ -36,9 +36,8 @@
  * - storytelling_style: minimal | some_context | detailed
  * 
  * LEGACY FIELDS (⚠️ DEPRECATED - Maintain for backward compatibility):
- * - do_not_say: JSONB {words: []} - replaced by never_say
+ * - do_not_say: ❌ DELETED May 8, 2026 (Phase 0) - Use never_say instead
  * - tone_keywords: Simple keywords ["friendly", "welcoming"]
- * - voice_style: Free-text description - replaced by structured traits
  * - values: Brand values (rarely used)
  * - certifications: Business certifications (rarely used)
  */
@@ -56,11 +55,9 @@ export interface BrandVoice {
   storytelling_style?: 'minimal' | 'some_context' | 'detailed'
   
   // ⚠️ LEGACY FIELDS - Deprecated but maintained for backward compatibility
-  do_not_say?: {                      // Replaced by never_say array
-    words: string[]
-  }
+  /** @deprecated DELETED May 8, 2026 - Field removed from database. Use never_say instead. */
+  do_not_say?: never                  // Deleted - do not use!
   tone_keywords?: string[]            // Replaced by personality traits
-  voice_style?: string                // Replaced by formality + humor_level
   values?: string[]                   // Rarely used
   certifications?: string[]           // Rarely used
 }
@@ -135,8 +132,7 @@ export function hasOnlyLegacyVoice(voice: BrandVoice | null | undefined): boolea
   
   const hasLegacy = 
     (voice.do_not_say && voice.do_not_say.words.length > 0) ||
-    (voice.tone_keywords && voice.tone_keywords.length > 0) ||
-    voice.voice_style !== undefined
+    (voice.tone_keywords && voice.tone_keywords.length > 0)
   
   const hasEnriched = hasEnrichedVoice(voice)
   
@@ -151,8 +147,8 @@ export function hasOnlyLegacyVoice(voice: BrandVoice | null | undefined): boolea
  * Migrate legacy brand voice fields to enriched format
  * 
  * Conversions:
- * - do_not_say.words → never_say
- * - tone_keywords + voice_style → approximate personality traits
+ * - do_not_say.words → REMOVED (field deleted May 8, 2026)
+ * - tone_keywords → approximate personality traits
  * 
  * Note: This is a best-effort migration. Manual review recommended.
  * 
@@ -162,24 +158,8 @@ export function hasOnlyLegacyVoice(voice: BrandVoice | null | undefined): boolea
 export function migrateLegacyVoice(voice: BrandVoice): BrandVoice {
   const enriched: BrandVoice = { ...voice }
   
-  // Migrate do_not_say.words → never_say
-  if (voice.do_not_say?.words && voice.do_not_say.words.length > 0) {
-    if (!enriched.never_say || enriched.never_say.length === 0) {
-      enriched.never_say = voice.do_not_say.words
-    }
-  }
-  
-  // Approximate formality from voice_style
-  if (voice.voice_style && !enriched.formality) {
-    const style = voice.voice_style.toLowerCase()
-    if (style.includes('formal') || style.includes('professional')) {
-      enriched.formality = 'formal'
-    } else if (style.includes('casual') || style.includes('friendly')) {
-      enriched.formality = 'casual'
-    } else {
-      enriched.formality = 'professional' // default
-    }
-  }
+  // Note: do_not_say.words migration removed - field deleted from database
+  // All data was NULL, never_say is the only source of banned words
   
   // Approximate humor_level from tone_keywords
   if (voice.tone_keywords && !enriched.humor_level) {
@@ -213,12 +193,10 @@ export function migrateLegacyVoice(voice: BrandVoice): BrandVoice {
 }
 
 /**
- * Get banned words from brand voice (prioritize enriched fields)
+ * Get banned words from brand voice
  * 
- * Priority:
- * 1. never_say array (enriched field)
- * 2. do_not_say.words (legacy field)
- * 3. Empty array
+ * Note: do_not_say.words removed May 8, 2026 (Phase 0 migration)
+ * Only never_say array is used now.
  * 
  * @param voice - Brand voice object
  * @returns Array of banned words
@@ -226,14 +204,9 @@ export function migrateLegacyVoice(voice: BrandVoice): BrandVoice {
 export function getBannedWords(voice: BrandVoice | null | undefined): string[] {
   if (!voice) return []
   
-  // Priority 1: never_say array
+  // never_say is the only source (do_not_say deleted from database)
   if (Array.isArray(voice.never_say) && voice.never_say.length > 0) {
     return voice.never_say
-  }
-  
-  // Priority 2: do_not_say.words (legacy)
-  if (voice.do_not_say?.words && voice.do_not_say.words.length > 0) {
-    return voice.do_not_say.words
   }
   
   return []
@@ -244,8 +217,7 @@ export function getBannedWords(voice: BrandVoice | null | undefined): string[] {
  * 
  * Priority:
  * 1. formality field (enriched)
- * 2. voice_style field (legacy - approximate)
- * 3. Default: 'casual'
+ * 2. Default: 'casual'
  * 
  * @param voice - Brand voice object
  * @returns Formality level
@@ -256,18 +228,6 @@ export function getFormality(voice: BrandVoice | null | undefined): 'casual' | '
   // Priority 1: formality field
   if (voice.formality) {
     return voice.formality
-  }
-  
-  // Priority 2: voice_style (legacy approximation)
-  if (voice.voice_style) {
-    const style = voice.voice_style.toLowerCase()
-    if (style.includes('formal') || style.includes('professional')) {
-      return 'formal'
-    }
-    if (style.includes('casual') || style.includes('friendly')) {
-      return 'casual'
-    }
-    return 'professional'
   }
   
   return 'casual'

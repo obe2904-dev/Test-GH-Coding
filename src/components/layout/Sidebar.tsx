@@ -4,6 +4,10 @@ import { useTranslation } from 'react-i18next'
 import { useSubscriptionTier } from '@/hooks/useSubscriptionTier'
 import { useTierStore } from '../../stores/tierStore'
 import { usePostCreationStore } from '../../stores/postCreationStore'
+import { useSetupCompletion } from '@/hooks/useSetupCompletion'
+import { useBusinessData } from '../../hooks/useBusinessData'
+import { MediaGalleryModal } from '../media/media-gallery'
+import { useDashboardNavigationStore } from '../../stores/dashboardNavigationStore'
 
 interface SidebarProps {
   className?: string
@@ -95,15 +99,15 @@ const LightBulbIcon = ({ className }: { className?: string }) => (
   </svg>
 )
 
-const CalendarDaysIcon = ({ className }: { className?: string }) => (
+const WeeklyPlanIcon = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
     <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
     <line x1="16" y1="2" x2="16" y2="6"/>
     <line x1="8" y1="2" x2="8" y2="6"/>
     <line x1="3" y1="10" x2="21" y2="10"/>
-    <line x1="8" y1="14" x2="8" y2="14"/>
-    <line x1="12" y1="14" x2="12" y2="14"/>
-    <line x1="16" y1="14" x2="16" y2="14"/>
+    <line x1="7" y1="14" x2="17" y2="14"/>
+    <line x1="7" y1="17" x2="14" y2="17"/>
+    <line x1="7" y1="20" x2="12" y2="20"/>
   </svg>
 )
 
@@ -119,6 +123,20 @@ const ChevronRightIcon = ({ className }: { className?: string }) => (
   </svg>
 )
 
+const CheckCircleIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="currentColor" viewBox="0 0 20 20">
+    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+  </svg>
+)
+
+const PhotoIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+    <circle cx="8.5" cy="8.5" r="1.5"/>
+    <polyline points="21 15 16 10 5 21"/>
+  </svg>
+)
+
 export function Sidebar({ className = '' }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -126,17 +144,24 @@ export function Sidebar({ className = '' }: SidebarProps) {
   const { isPro } = useSubscriptionTier()
   const { activePath, setActivePath, setWriteSelfStep, setAiIdeerStep, setWeeklyPlanStep } = usePostCreationStore()
   const { pathname } = useLocation()
+  const completion = useSetupCompletion()
+  const { business } = useBusinessData()
+  const hoveredSidebarItem = useDashboardNavigationStore((state) => state.hoveredSidebarItem)
   
   const [setupOpen, setSetupOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [mediaGalleryModalOpen, setMediaGalleryModalOpen] = useState(false)
 
   // Check if user is on free tier
   const isFree = currentTier === 'free'
+  const isWeeklyPlanLocked = isFree
 
   // Helper to render nav item
-  const renderNavItem = (item: { id: string; label: string; icon: any; path: string; locked?: boolean; badge?: string }) => {
+  const renderNavItem = (item: { id: string; label: string; icon: any; path: string; locked?: boolean; badge?: string; completed?: boolean }) => {
     const Icon = item.icon
     const isLocked = item.locked
+    const isCompleted = item.completed
+    const isHovered = hoveredSidebarItem === item.id
     
     if (isLocked) {
       return (
@@ -146,7 +171,7 @@ export function Sidebar({ className = '' }: SidebarProps) {
           className="group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium text-text-muted hover:bg-surface-alt hover:text-text opacity-60"
         >
           <Icon className="w-5 h-5 flex-shrink-0" />
-          <span className="truncate">{item.label}</span>
+          <span className={`truncate ${isHovered ? 'font-semibold text-text' : ''}`}>{item.label}</span>
           <span className="ml-auto text-xs">🔒</span>
         </button>
       )
@@ -159,14 +184,20 @@ export function Sidebar({ className = '' }: SidebarProps) {
         className={({ isActive }) =>
           `group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium ${
             isActive
-              ? 'bg-cta-surface text-cta-text border-l-[3px] border-cta'
+              ? 'bg-[#E6F4F1] text-[#076B4E] font-semibold border border-[#0A7D5F] shadow-sm'
               : 'text-text-muted hover:bg-surface-alt hover:text-text'
           }`
         }
       >
-        <Icon className="w-5 h-5 flex-shrink-0" />
-        <span className="truncate">{item.label}</span>
-
+        {({ isActive }) => (
+          <>
+            <Icon className={`w-5 h-5 flex-shrink-0 ${isActive || isHovered ? 'text-[#0A7D5F]' : ''}`} />
+            <span className={`truncate flex-1 ${isActive || isHovered ? 'font-semibold text-text' : ''}`}>{item.label}</span>
+            {isCompleted && !completion.loading && (
+              <CheckCircleIcon className="w-4 h-4 text-[#0A7D5F] flex-shrink-0" />
+            )}
+          </>
+        )}
       </NavLink>
     )
   }
@@ -186,7 +217,7 @@ export function Sidebar({ className = '' }: SidebarProps) {
         <div className="space-y-1.5">
           <button
             onClick={() => setSetupOpen(!setupOpen)}
-            className="group w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 text-xs font-semibold text-text-muted hover:bg-surface-alt uppercase tracking-wide"
+            className="group w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 text-[11px] font-medium text-[#A09A91] hover:bg-surface-alt uppercase tracking-[0.07em]"
           >
             {setupOpen ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
             <span>{t('navigation.yourBusiness')}</span>
@@ -195,32 +226,21 @@ export function Sidebar({ className = '' }: SidebarProps) {
           {setupOpen && (
             <div className="relative pl-3 space-y-0">
               <div className="absolute left-0 top-3 bottom-3 w-px bg-border"></div>
-              <div className="relative">
-                <div className="absolute left-[-12px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-border-strong ring-2 ring-surface"></div>
-                {renderNavItem({ id: 'profile', label: t('navigation.setup.profile'), icon: GlobeIcon, path: '/dashboard/profile' })}
-              </div>
-              <div className="relative">
-                <div className="absolute left-[-12px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-border-strong ring-2 ring-surface"></div>
-                {renderNavItem({ id: 'menu', label: t('navigation.setup.menu'), icon: MenuIcon, path: '/dashboard/menu', locked: isFree })}
-              </div>
-              <div className="relative">
-                <div className="absolute left-[-12px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-border-strong ring-2 ring-surface"></div>
-                {renderNavItem({ id: 'location', label: t('navigation.setup.location'), icon: MapPinIcon, path: '/dashboard/location', locked: isFree })}
-              </div>
-              <div className="relative">
-                <div className="absolute left-[-12px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-border-strong ring-2 ring-surface"></div>
-                {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand' })}
-              </div>
+              
+              {renderNavItem({ id: 'profile', label: t('navigation.setup.profile'), icon: GlobeIcon, path: '/dashboard/profile', completed: completion.profile })}
+              {renderNavItem({ id: 'menu', label: t('navigation.setup.menu'), icon: MenuIcon, path: '/dashboard/menu', locked: isFree, completed: completion.menu })}
+              {renderNavItem({ id: 'location', label: t('navigation.setup.location'), icon: MapPinIcon, path: '/dashboard/location', locked: isFree, completed: completion.location })}
+              {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand', locked: isFree, completed: completion.brandProfile })}
             </div>
           )}
         </div>
 
         {/* INDHOLD Section */}
         <div className="space-y-1.5 mt-4 pt-4 border-t border-border-subtle">
-          <div className="px-2 py-1.5 text-xs font-semibold text-text-muted uppercase tracking-wide">
+          <div className="px-2 py-1.5 text-[11px] font-medium text-[#A09A91] uppercase tracking-[0.07em]">
             {t('navigation.sectionContent')}
           </div>
-          <div className="space-y-1">
+          <div className="bg-cta-surface rounded-xl p-2 space-y-1">
             {/* Skriv Selv */}
             <button
               onClick={() => {
@@ -228,13 +248,13 @@ export function Sidebar({ className = '' }: SidebarProps) {
                 setWriteSelfStep('generate')
                 navigate('/dashboard/create?mode=write')
               }}
-              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium ${
+              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm ${
                 pathname === '/dashboard/create' && activePath === 'write'
-                  ? 'bg-cta-surface text-cta-text border-l-[3px] border-cta'
-                  : 'text-text hover:bg-surface-alt'
+                  ? 'bg-[#E6F4F1] text-[#076B4E] font-semibold border border-[#0A7D5F] shadow-sm'
+                  : 'text-text font-medium hover:bg-surface-alt'
               }`}
             >
-              <PencilIcon className="w-5 h-5 flex-shrink-0" />
+              <PencilIcon className={`w-5 h-5 flex-shrink-0 ${pathname === '/dashboard/create' && activePath === 'write' ? 'text-[#0A7D5F]' : 'text-[#5C5650]'}`} />
               <span className="truncate">{t('navigation.writeSelf')}</span>
             </button>
 
@@ -245,49 +265,66 @@ export function Sidebar({ className = '' }: SidebarProps) {
                 setAiIdeerStep('generate')
                 navigate('/dashboard/create?mode=ai')
               }}
-              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium ${
+              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm ${
                 pathname === '/dashboard/create' && activePath === 'ai-ideas'
-                  ? 'bg-cta-surface text-cta-text border-l-[3px] border-cta'
-                  : 'text-text hover:bg-surface-alt'
+                  ? 'bg-[#E6F4F1] text-[#076B4E] font-semibold border border-[#0A7D5F] shadow-sm'
+                  : 'text-text font-medium hover:bg-surface-alt'
               }`}
             >
-              <LightBulbIcon className="w-5 h-5 flex-shrink-0" />
+              <LightBulbIcon className={`w-5 h-5 flex-shrink-0 ${pathname === '/dashboard/create' && activePath === 'ai-ideas' ? 'text-[#0A7D5F]' : 'text-[#5C5650]'}`} />
               <span className="truncate">{t('navigation.dailySuggestion')}</span>
             </button>
 
             {/* AI Ugentlig Plan */}
             <button
               onClick={() => {
+                if (isWeeklyPlanLocked) {
+                  navigate('/dashboard/plans')
+                  return
+                }
+
                 setActivePath('weekly-plan')
                 setWeeklyPlanStep('generate')
                 navigate('/dashboard/ai-weekly-plan')
               }}
-              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium ${
-                pathname === '/dashboard/ai-weekly-plan'
-                  ? 'bg-cta-surface text-cta-text border-l-[3px] border-cta'
-                  : 'text-text hover:bg-surface-alt'
+              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm ${
+                isWeeklyPlanLocked
+                  ? 'text-text-muted font-medium hover:bg-surface-alt hover:text-text opacity-60'
+                  : pathname === '/dashboard/ai-weekly-plan'
+                    ? 'bg-[#E6F4F1] text-[#076B4E] font-semibold border border-[#0A7D5F] shadow-sm'
+                    : 'text-text font-medium hover:bg-surface-alt'
               }`}
             >
-              <CalendarDaysIcon className="w-5 h-5 flex-shrink-0" />
+              <WeeklyPlanIcon className={`w-5 h-5 flex-shrink-0 ${isWeeklyPlanLocked ? 'text-[#5C5650]' : pathname === '/dashboard/ai-weekly-plan' ? 'text-[#0A7D5F]' : 'text-[#5C5650]'}`} />
               <span className="truncate">{t('navigation.weeklyPlan')}</span>
+              {isWeeklyPlanLocked && <span className="ml-auto text-xs">🔒</span>}
             </button>
+          </div>
+          
+          {/* Subtle dotted separator */}
+          <div className="border-t border-dashed border-border-subtle my-2"></div>
+          
+          {/* Calendar - grouped with planning tools */}
+          <div className="space-y-1">
+            {renderNavItem({ id: 'calendar', label: t('navigation.calendar'), icon: CalendarIcon, path: '/dashboard/calendar' })}
           </div>
         </div>
 
         {/* PUBLICERING Section */}
         <div className="space-y-1.5 mt-4 pt-4 border-t border-border-subtle">
-          <div className="px-2 py-1.5 text-xs font-semibold text-text-muted uppercase tracking-wide">
+          <div className="px-2 py-1.5 text-[11px] font-medium text-[#A09A91] uppercase tracking-[0.07em]">
             {t('navigation.sectionPublishing')}
           </div>
           <div className="space-y-1">
-            {renderNavItem({ id: 'calendar', label: t('navigation.calendar'), icon: CalendarIcon, path: '/dashboard/calendar' })}
             {renderNavItem({ id: 'social', label: t('navigation.socialMedia'), icon: ShareIcon, path: '/dashboard/social-media' })}
+            <button
+              onClick={() => setMediaGalleryModalOpen(true)}
+              className="group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium text-text-muted hover:bg-surface-alt hover:text-text"
+            >
+              <PhotoIcon className={`w-5 h-5 flex-shrink-0 ${hoveredSidebarItem === 'media-gallery' ? 'text-[#0A7D5F]' : 'text-[#5C5650]'}`} />
+              <span className={`truncate ${hoveredSidebarItem === 'media-gallery' ? 'font-semibold text-text' : ''}`}>{t('navigation.mediaGallery')}</span>
+            </button>
           </div>
-        </div>
-
-        {/* Performance (single item) */}
-        <div className="space-y-1">
-          {renderNavItem({ id: 'analytics', label: t('navigation.analytics'), icon: ChartBarIcon, path: '/dashboard/analytics' })}
         </div>
 
         {/* Divider */}
@@ -297,7 +334,7 @@ export function Sidebar({ className = '' }: SidebarProps) {
         <div className="space-y-1.5">
           <button
             onClick={() => setSettingsOpen(!settingsOpen)}
-            className="group w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 text-xs font-semibold text-text-muted hover:bg-surface-alt uppercase tracking-wide"
+            className="group w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-200 text-[11px] font-medium text-[#A09A91] hover:bg-surface-alt uppercase tracking-[0.07em]"
           >
             {settingsOpen ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
             <span>{t('navigation.settings')}</span>
@@ -371,25 +408,21 @@ export function Sidebar({ className = '' }: SidebarProps) {
       <div className="px-3 py-3 border-t border-border">
         <button
           onClick={() => navigate('/dashboard/plans')}
-          className="w-full px-3 py-2 rounded-lg bg-cta-surface border border-cta-surface hover:border-cta transition-all"
+          className="w-full px-3 py-2.5 rounded-lg bg-[#E6F4F1] hover:bg-[#D9EDE9] transition-all"
         >
           <div className="flex items-center justify-between">
             <div className="text-left">
-              <div className="text-xs font-semibold text-brand">
+              <div className="text-xs font-medium text-[#076B4E]">
                 {currentTier === 'free' && t('navigation.tier.free')}
                 {currentTier === 'standardplus' && t('navigation.tier.standard')}
                 {currentTier === 'premium' && t('navigation.tier.premium')}
               </div>
-              <div className="text-xs text-cta">
+              <div className="text-xs text-[#076B4E]">
                 {currentTier !== 'premium' && t('navigation.tier.upgrade')}
                 {currentTier === 'premium' && t('navigation.tier.unlocked')}
               </div>
             </div>
-            <span className="text-lg">
-              {currentTier === 'free' && '🆓'}
-              {currentTier === 'standardplus' && '⭐'}
-              {currentTier === 'premium' && '💎'}
-            </span>
+            <SparklesIcon className="w-4 h-4 text-[#0A7D5F]" />
           </div>
         </button>
         
@@ -397,6 +430,22 @@ export function Sidebar({ className = '' }: SidebarProps) {
           Post2Grow © {new Date().getFullYear()}
         </div>
       </div>
+
+      {/* Media Gallery Modal */}
+      {business?.id && (
+        <MediaGalleryModal
+          businessId={business.id}
+          isOpen={mediaGalleryModalOpen}
+          onClose={() => setMediaGalleryModalOpen(false)}
+          onSelectMedia={(media: MediaItem) => {
+            console.log('Selected media from modal:', media)
+            setMediaGalleryModalOpen(false)
+            // Future: Navigate to create post with selected media
+            navigate('/dashboard/create-post')
+          }}
+          selectionMode={false}
+        />
+      )}
     </div>
   )
 }

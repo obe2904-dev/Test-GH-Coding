@@ -420,11 +420,14 @@ export function ensureMustUsePhrasesFallback(
   // 2) Concrete physical features
   const physicalPhrases = [
     'ved åen',
-    'ved vandet',
+    'ved fjorden',
+    'ved søen',
+    'ved havnen',
+    'ved bugten',
+    'ved vandet',  // Generic fallback - specific terms above are preferred
     'river view',
     'by the river',
     'waterfront',
-    'ved havnen',
     'gårdhave',
     'courtyard',
     'terrasse',

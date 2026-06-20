@@ -6,15 +6,17 @@ interface ProgressStepperProps {
   stepLabels?: string[]
   onStepClick?: (step: number) => void
   compact?: boolean
+  canAdvance?: boolean  // If false, future steps are disabled (validation failed)
 }
 
 const Check = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="3">
-    <polyline points="20 6 9 17 4 12" />
+  <svg className={className} fill="currentColor" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="12" />
+    <polyline points="8 12 11 15 16 9" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
 
-export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onStepClick, compact = false }: ProgressStepperProps) {
+export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onStepClick, compact = false, canAdvance = true }: ProgressStepperProps) {
   const { t } = useTranslation()
 
   const defaultLabels = [
@@ -88,6 +90,7 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
           const isActive = stepNumber === currentStep
           const isCompleted = stepNumber < currentStep
           const isFuture = stepNumber > currentStep
+          const isDisabled = isFuture && !canAdvance  // Disable future steps if validation fails
 
           const baseLeftPercent = totalSteps <= 1 ? 50 : (index / denominator) * 100
           const rightSafePercent = 92
@@ -101,35 +104,44 @@ export function ProgressStepper({ currentStep, totalSteps = 3, stepLabels, onSte
 
           const circleAlignClass = 'justify-center'
 
-          const labelColor = isActive || isCompleted ? 'text-[#1F2937]' : 'text-[#4B5563]'
-          const subtitleColor = isActive || isCompleted ? 'text-[#6B7280]' : 'text-[#9CA3AF]'
+          const labelColor = isActive || isCompleted ? 'text-[#3C3830]' : 'text-[#A09A91]'
+          const subtitleColor = 'text-[#A09A91]'
 
           return (
             <button
               key={stepNumber}
-              onClick={() => onStepClick?.(stepNumber)}
-              className={`absolute top-0 grid h-full min-w-[9rem] max-w-[16rem] grid-cols-[2.5rem_auto] grid-rows-2 gap-x-3 px-2 text-left ${isLast ? 'pr-4' : ''}`}
+              onClick={() => isDisabled ? null : onStepClick?.(stepNumber)}
+              disabled={isDisabled}
+              className={`absolute top-0 grid h-full min-w-[9rem] max-w-[16rem] grid-cols-[2.5rem_auto] grid-rows-2 gap-x-3 px-2 text-left ${isLast ? 'pr-4' : ''} ${isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
               style={isLast ? { right: 0, left: 'auto', transform: 'none', zIndex: 2 } : { left: `${leftPercent}%`, transform: translateX, zIndex: 2 }}
               type="button"
             >
               <div className={`row-span-2 flex items-center ${circleAlignClass}`}>
                 <div
                   className={`
-                    w-10 h-10 rounded-full flex items-center justify-center border-2 font-bold text-lg transition-all
-                    ${isActive ? 'bg-[#F4F1FE] text-accent border-accent shadow-lg ring-4 ring-purple-50' : ''}
-                    ${isCompleted ? 'bg-[#FAFAFA] text-accent border-accent shadow-md' : ''}
-                    ${isFuture ? 'bg-white text-accent border-[#D1D5DB] hover:border-accent' : ''}
+                    w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg transition-all
+                    ${isActive ? 'bg-[#E6F4F1] border border-[#0A7D5F] shadow-sm' : ''}
+                    ${isCompleted ? 'bg-[#E6F4F1] border border-[#0A7D5F]' : ''}
+                    ${isFuture ? 'bg-[#FAFAF8] border-[0.5px] border-[#E2DDD6]' : ''}
                   `}
                 >
-                  {isCompleted ? <Check className="w-5 h-5" /> : stepNumber}
+                  {isCompleted ? (
+                    <Check className="w-5 h-5 text-[#0A7D5F]" />
+                  ) : isActive ? (
+                    <span className="flex items-center justify-center w-[22px] h-[22px] rounded-full bg-[#0A7D5F] text-white text-sm">
+                      {stepNumber}
+                    </span>
+                  ) : (
+                    <span className="text-[#A09A91]">{stepNumber}</span>
+                  )}
                 </div>
               </div>
 
-              <div className={`col-start-2 row-start-1 self-end mb-2 text-base font-bold ${labelColor}`}>
+              <div className={`col-start-2 row-start-1 self-end mb-2 text-[13px] font-medium ${labelColor}`}>
                 {labels[index]}
               </div>
 
-              <div className={`col-start-2 row-start-2 self-start mt-2 text-sm font-medium leading-tight ${subtitleColor}`}>
+              <div className={`col-start-2 row-start-2 self-start mt-2 text-[12px] font-normal leading-tight ${subtitleColor}`}>
                 {defaultSubtitles[index]}
               </div>
             </button>

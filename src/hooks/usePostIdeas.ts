@@ -6,7 +6,7 @@ interface PostIdea {
   caption: string;
   hashtags: string[];
   platform: string;
-  suggested_post_time: string;
+  suggested_time: string;
   content_type: string;
   visual_suggestions: any;
   aligned_goal_id: string | null;
@@ -43,7 +43,7 @@ export function usePostIdeas(businessId: string | undefined): UsePostIdeasResult
         .from('post_ideas')
         .select('*')
         .eq('business_id', businessId)
-        .order('suggested_post_time', { ascending: true });
+        .order('suggested_time', { ascending: true });
 
       if (fetchError) throw fetchError;
 

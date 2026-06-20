@@ -8,7 +8,7 @@
     "analyzeButton": "Analyser fotos automatisk",
     "analyzing": "Analyserer fotos...",
     "uploadPhotos": "Upload fotos",
-    "uploadHint": "Upload 3-10 fotos af dit sted (mad, interiør, eksteriør)",
+    "uploadHint": "Upload 1–2 fotos af lokalet + 1–2 med gæster eller aktivitet — jo mere der sker på billedet, jo bedre fungerer AI-analysen.",
     "noPhotos": "Upload fotos af din forretning, så kan AI udtrække din visuelle stil, farvepalette, og fotografiske retningslinjer.",
     "photosUploaded": "{{count}} fotos uploadet",
     "aesthetic": "Æstetik",

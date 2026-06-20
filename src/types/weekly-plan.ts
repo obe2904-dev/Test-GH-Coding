@@ -34,6 +34,7 @@ export interface PostSpecification {
   contentSubject: {
     dish: string
     whyThisDish: string[]
+    menuItemId?: string           // UUID for menu_items_normalized (ID-based lookup)
     menuItemName?: string
     menuItemDescription?: string
   }
@@ -133,6 +134,17 @@ export interface PostSpecification {
     content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people'
     slot_id?: string
     rationale?: string
+    owner_note_applied?: boolean
+    drink_pairing?: string | null
+    strategy_brief?: string | null
+    media_direction?: string | null
+    scene_spec?: string | null
+    strategic_intent?: string | null
+    // Booking nudge display metadata (optional — only present on booking nudge posts)
+    nudge_rationale?: string | null
+    peak_day?: string | null                    // ISO date of targeted visit day
+    lead_days_used?: number | null              // 1-5: actual lead time chosen by AI
+    booking_nudge_warranted?: boolean | null    // AI decision this week
   }
 
   // Frontend compatibility fields
@@ -141,7 +153,7 @@ export interface PostSpecification {
   cta_text?: string
   visual_direction?: string
   suggested_day?: string
-  suggested_post_time?: string
+  suggested_time?: string
 
   // Holiday context (present when post falls on a public holiday)
   holiday_context?: {
@@ -183,6 +195,9 @@ export interface WeeklyContentPlan {
     }
   }
   strategyId?: string
+
+  // Strategic rationale — why this week's content mix was chosen
+  strategicRationale?: string | null
 
   // Weather forecast for the week (from week_context_snapshot in weekly_strategies)
   weatherDays?: {

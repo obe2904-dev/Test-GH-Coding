@@ -86,7 +86,7 @@ export function buildWeeklyPlanContext(s: Suggestion, captionFirstLineUsedAsHook
 function buildSharedToneCore(opts: PromptOptions): SharedToneCore {
   const { menuItemName, menuItemDescription, contentType, isPaid,
           brandWritingRules, brandGoodExamples, brandAvoidExamples,
-          brandPreferVocab, brandAvoidVocab, contentAnchors } = opts
+          brandPreferVocab, brandAvoidVocab, locationVocabulary, contentAnchors } = opts
 
   // ── Dish rules ─────────────────────────────────────────────────────────
   const dishRules: Record<string, string> = {
@@ -133,19 +133,21 @@ function buildSharedToneCore(opts: PromptOptions): SharedToneCore {
   const faktaforbud: Record<string, string> = {
     da: `\n🚫 KILDEKRAV — gælder for ENHVER detalje i teksten
 Denne tekst er journalistik, ikke kreativ fiktion. Du må KUN skrive om det der er dokumenteret i denne prompt.
-- Hvert konkret substantiv, rekvisit, sansedetalje og lokationselement i din tekst skal kunne peges direkte tilbage til en linje i INDHOLD eller 📸 PRIMÆR FAKTAKILDE.
+- Hvert konkret substantiv, rekvisit, sansedetalje og lokationselement i din tekst skal kunne peges direkte tilbage til en linje i INDHOLD, 📍 FAKTISKE LOKATIONSREFERENCER eller 📸 PRIMÆR FAKTAKILDE.
 - Kan du IKKE pege på kilden → slet elementet.
 - Stednavne i INDHOLD angiver lokation — de er IKKE tilladelse til at opfinde udsigt, natur, vejr eller interiør fra din generelle viden om det sted.
-- BRANDSTEMME-blokken er en TONEKILDE, ikke en faktakilde. Konkrete omgivelser, rekvisitter og lokaliteter nævnt i brandeksempler (fx "ved åen", "udsigt", "vandet", "havnen") er scenedetaljer fra de eksempler — de er IKKE facts om det aktuelle opslag og må IKKE overføres.
+- BRANDSTEMME-blokken er en TONEKILDE, ikke en faktakilde. Konkrete omgivelser, rekvisitter og lokaliteter nævnt i brandeksempler er scenedetaljer fra de eksempler — de er IKKE facts om det aktuelle opslag og må IKKE overføres.
+- 📍 FAKTISKE LOKATIONSREFERENCER er gyldige facts om DENNE virksomheds placering — brug disse når relevant.
 - Hvis 📸 PRIMÆR FAKTAKILDE beskriver rummet som lyst, kan du IKKE skrive dæmpet lys. Faktakilden er autoritativ og tilsidesætter enhver stemningsimpression fra andre steder.
 - Din træningsdata om virksomheden er IKKE en gyldig kilde — brug KUN det der fremgår af denne prompt.\n`,
 
     sv: `\n🚫 KÄLLKRAV — gäller för VARJE detalj i texten
 Den här texten är journalistik, inte kreativ fiktion. Du får BARA skriva om det som är dokumenterat i den här prompten.
-- Varje konkret substantiv, rekvisita, sinnesdetalj och platselement i din text måste kunna spåras direkt till en rad i INNEHÅLL eller 📸 PRIMÄR FAKTAKÄLLA.
+- Varje konkret substantiv, rekvisita, sinnesdetalj och platselement i din text måste kunna spåras direkt till en rad i INNEHÅLL, 📍 FAKTISKA PLATSREFERENSER eller 📸 PRIMÄR FAKTAKÄLLA.
 - Kan du INTE peka på källan → ta bort elementet.
 - Platsnamn i INNEHÅLL anger lokation — de är INTE tillstånd att uppfinna utsikt, natur, väder eller interiör från din allmänna kunskap om platsen.
-- VARUMÄRKESRÖST-blocket är en TONKÄLLA, inte en faktakälla. Konkreta miljöer, rekvisita och platser nämnda i varumärkesexempel (t.ex. "vid ån", "utsikt", "vattnet") är scenedetaljer från dessa exempel — de är INTE fakta om det aktuella inlägget och får INTE överföras.
+- VARUMÄRKESRÖST-blocket är en TONKÄLLA, inte en faktakälla. Konkreta miljöer, rekvisita och platser nämnda i varumärkesexempel är scenedetaljer från dessa exempel — de är INTE fakta om det aktuella inlägget och får INTE överföras.
+- 📍 FAKTISKA PLATSREFERENSER är giltiga fakta om DETTA företags plats — använd dessa när relevant.
 - Om 📸 PRIMÄR FAKTAKÄLLA beskriver lokalen som ljus kan du INTE skriva dämpad belysning. Faktakällan är auktoritativ.
 - Din träningsdata om företaget är INTE en giltig källa — använd KUN det som framgår av den här prompten.\n`,
 
@@ -160,11 +162,12 @@ Dieser Text ist Journalismus, keine kreative Fiktion. Du darfst NUR über das sc
 
     en: `\n🚫 SOURCE REQUIREMENT — applies to EVERY detail in the text
 This text is journalism, not creative fiction. You may ONLY write about what is documented in this prompt.
-- Every concrete noun, prop, sensory detail and location element in your text must be traceable directly to a line in CONTENT or 📸 PRIMARY FACT SOURCE.
+- Every concrete noun, prop, sensory detail and location element in your text must be traceable directly to a line in CONTENT, 📍 FACTUAL LOCATION REFERENCES or 📸 PRIMARY FACT SOURCE.
 - Cannot point to the source → remove the element.
 - Location names in CONTENT indicate location — they are NOT permission to invent views, nature, weather or interior from your general knowledge of that place.
-- The BRAND VOICE block is a TONE source, not a fact source. Concrete settings, props and locations mentioned in brand examples (e.g. "by the river", "view", "the water") are scene details of those examples — they are NOT facts about the current post and MUST NOT be transferred.
-- If 📸 PRIMARY FACT SOURCE describes the space as bright, you CANNOT write dim lighting. The fact source is authoritative.
+- The BRAND VOICE block is a TONE SOURCE, not a fact source. Concrete settings, props and locations mentioned in brand examples are scene details from those examples — they are NOT facts about the current post and must NOT be transferred.
+- 📍 FACTUAL LOCATION REFERENCES are valid facts about THIS business's location — use these when relevant.
+- If 📸 PRIMARY FACT SOURCE describes the space as bright, you cannot write dim lighting. The fact source is authoritative.
 - Your training data about the business is NOT a valid source — use ONLY what appears in this prompt.\n`,
 
   }
@@ -220,7 +223,7 @@ const GOAL_DIRECTIVE_MAP: Record<string, Record<string, string>> = {
 // buildBrandBlock — shared across all language templates
 // ══════════════════════════════════════════════════════════════════════════
 function buildBrandBlock(o: BrandBlockOptions): string {
-  if (!o.brandTone && o.brandWritingRules.length === 0 && o.contentAnchors.length === 0) return ''
+  if (!o.brandTone && o.brandWritingRules.length === 0 && o.contentAnchors.length === 0 && !o.keyOfferings) return ''
   const brandBlockHeader = o.goalMode === 'build_brand'
     ? 'BRANDSTEMME (dette er ikke bare skrivestil — brandstemmen ER pointen med dette opslag):'
     : o.goalMode === 'drive_footfall'
@@ -241,10 +244,26 @@ function buildBrandBlock(o: BrandBlockOptions): string {
   }
 
   if (o.contentAnchors.length)      b += `\nKonceptankre (hvad dette sted faktisk tilbyder): ${o.contentAnchors.join(', ')}`
+  if (o.keyOfferings) {
+    const offeringLines = o.keyOfferings
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .slice(0, 10)
+    if (offeringLines.length) {
+      b += `\nHusets navne (kun navne, især vigtigt for free-tier): ${offeringLines.join(', ')}`
+    }
+  }
   if (o.businessCharacter)          b += `\nHvad dette sted er: ${o.businessCharacter}`
-  if (o.identityKeywords?.length)   b += `\nStedsidentitet: ${o.identityKeywords.join(', ')}`
+  
+  // Location vocabulary BEFORE tone/examples — establishes these as PRIMARY FACTS
+  if (o.locationVocabulary.length)  {
+    b += `\n📍 FAKTISKE LOKATIONSREFERENCER — dokumenterede stedsbeskrivelser for DENNE virksomhed:\n${o.locationVocabulary.map(term => `  • ${term}`).join('\n')}`
+    b += `\nNår du refererer til lokation: brug PRÆCIST disse termer (ikke generiske alternativer).`
+  }
+  
   if (o.brandTone)                  b += `\n${o.brandTone}`
-  if (o.voiceConstraints)           b += `\nPrincip: ${o.voiceConstraints}`
+
   if (o.brandWritingRules.length)   b += `\nSkriveregler:\n${o.brandWritingRules.map(r => `- ${r}`).join('\n')}`
   if (o.brandGoodExamples.length) {
     const exLabel = o.isSceneMoodPost
@@ -399,6 +418,7 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     brandAvoidExamples: [],
     brandPreferVocab: aiPreferVocab,
     brandAvoidVocab: aiAvoidVocab,
+    locationVocabulary: opts.locationVocabulary,
     brandSignaturePhrases: aiSigPhrases,
     contentAnchors: aiContentAnchors,
     thingsToAvoid: opts.thingsToAvoid,
@@ -408,6 +428,8 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     venueIdentity,
     businessCharacter,
     identityKeywords,
+    formalityLevel: opts.formalityLevel,
+    humorLevel: opts.humorLevel,
   })
 
   const ctaHeader = {
@@ -516,6 +538,9 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     todayOpenTime, selectedCta, businessName, city, language, ctaStyle,
     weeklyPlanContext, goalMode,
     voiceRationale, venueIdentity, businessCharacter, identityKeywords,
+    tone_dna_summary, tone_do_list, tone_dont_list,
+    location_natural_vocab, location_avoid_vocab, humor_style,
+    locationIntelligenceNarrative, contentType,
   } = opts
 
   const core = buildSharedToneCore(opts)
@@ -602,6 +627,12 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
   const wpAvoidVocab     = cappedAvoidVocab.slice(0, 6)
   const wpContentAnchors = cappedContentAnchors.slice(0, 7)
 
+  // FORBIDDEN WORDS enforcement (extracted from voice_guardrails)
+  const forbiddenWords = opts.forbidden_phrases || [];
+  const forbiddenWordsBlock = forbiddenWords.length > 0
+    ? `\n⛔ FORBUDTE ORD (brug ALDRIG disse — brug alternativer fra skrivereglerne):\n${forbiddenWords.slice(0, 8).map(w => `  • "${w}"`).join('\n')}\n`
+    : '';
+
   const brandBlock = buildBrandBlock({
     brandTone, voiceConstraints,
     brandWritingRules: cappedWritingRules,
@@ -609,6 +640,7 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     brandAvoidExamples: wpAvoidExamples,
     brandPreferVocab: wpPreferVocab,
     brandAvoidVocab: wpAvoidVocab,
+    locationVocabulary: opts.locationVocabulary,
     brandSignaturePhrases: brandSignaturePhrases.slice(0, 3),
     contentAnchors: wpContentAnchors,
     thingsToAvoid: opts.thingsToAvoid,
@@ -618,7 +650,58 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     venueIdentity,
     businessCharacter,
     identityKeywords,
+    formalityLevel: opts.formalityLevel,
+    humorLevel: opts.humorLevel,
   })
+
+  // ═══ TONE DNA BLOCK ═══
+  const toneDNABlock: string[] = []
+
+  if (tone_dna_summary) {
+    toneDNABlock.push(`STRATEGISK TONE:\n${tone_dna_summary}`)
+  }
+
+  if (tone_do_list && tone_do_list.length > 0) {
+    toneDNABlock.push(`TONE — GØR DETTE:\n${tone_do_list.map(r => `- ${r}`).join('\n')}`)
+  }
+
+  if (tone_dont_list && tone_dont_list.length > 0) {
+    toneDNABlock.push(`TONE — UNDGÅ DETTE:\n${tone_dont_list.map(r => `- ${r}`).join('\n')}`)
+  }
+
+  if (location_natural_vocab && location_natural_vocab.length > 0) {
+    toneDNABlock.push(`FORETRUKKET LOKATIONS-VOKABULAR: ${location_natural_vocab.join(', ')}`)
+  }
+
+  if (location_avoid_vocab && location_avoid_vocab.length > 0) {
+    toneDNABlock.push(`UNDGÅ DISSE ORD (clasher med lokation): ${location_avoid_vocab.join(', ')}`)
+  }
+
+  if (humor_style && humor_style !== 'none') {
+    const humorMap: Record<string, string> = {
+      playful: 'Let og lidt selvironisk — aldrig på bekostning af maden eller stedet',
+      dry: 'Tør og afdæmpet — brug sparsomt',
+      warm: 'Varm og inkluderende — ingen jokes',
+      none: ''
+    }
+    const humorInstruction = humorMap[humor_style] || humor_style
+    if (humorInstruction) {
+      toneDNABlock.push(`HUMOR: ${humorInstruction}`)
+    }
+  }
+
+  const toneDNASection = toneDNABlock.length > 0
+    ? `\n\n${toneDNABlock.join('\n\n')}`
+    : ''
+
+  // Fix 4: Geographic narrative — ONLY for atmosphere/location posts
+  // For food posts, menu item is the anchor. For atmosphere posts, location IS the content.
+  const isAtmospherePost = ['atmosphere', 'behind_scenes', 'team_people', 'general_invitation']
+    .includes(contentType || '')
+  
+  const geoNarrativeBlock = locationIntelligenceNarrative && isAtmospherePost
+    ? `\n\nLOKATIONSKONTEKST (gælder især for stemnings- og stedsposter):\n${locationIntelligenceNarrative}`
+    : ''
 
   const ctaHeader = {
     da: ctaStyle === 'strict' ? 'FAST CTA (skal stå til sidst, ordret):' : 'AFSLUTNING — integrer naturligt i teksten:',
@@ -650,7 +733,7 @@ Skriv ÉN social media-tekst til ${businessName} i ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INDHOLD (skriv om KUN dette):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.da}${wpSceneMoodOpeningHint}
+${brandBlock}${toneDNASection}${geoNarrativeBlock}${forbiddenWordsBlock}${hoursBlock}${faktaforbud.da}${wpSceneMoodOpeningHint}
 ${ctaHeader.da}
 "${selectedCta}"
 KRAV TIL TEKSTEN
@@ -658,7 +741,12 @@ KRAV TIL TEKSTEN
 ${startRules.da}
 ${sensoryRules.da}
 ${dishRules.da}
-5) Naturligt dansk — skriv som en dansker skriver. Undgå: "lækker", "hyggelig", "autentisk", "unik", "svip" (dateret), "nyd" som imperativ åbning
+5) SKRIVEREGLER — følg disse STRENGT:
+   a) ÉN TANKE PR. SÆTNING — stop før du forklarer. Undgå sammensatte konstruktioner.
+   b) TILBEREDNING & RÅVARER FØRST — beskriv hvordan maden er lavet (langsomt ovnbagt, præcist grillet, hjemmelavet), ikke bare hvordan den smager
+   c) KONKRETE DETALJER — ingen vage metaforer ("som en varm omfavnelse", "en symfoni af")
+   d) NATURLIGT DANSK — skriv som en dansker skriver. Undgå: "lækker", "hyggelig", "autentisk", "unik", "svip" (dateret), "nyd" som imperativ åbning
+   e) VÆRDI-DEMONSTRATION (kun for all-inclusive menuer/set menus): Vis bredden af tilbudet — hvor mange retter/elementer er inkluderet? Hvad får gæsten for prisen?
 6) Aldrig " - " eller " – " som bindeled mellem sætningsled ("god mad – hyggelig stemning – book nu").
 7) ${emojiInstruction}
    ☕ MÅ KUN bruges, hvis kaffe, espresso, latte eller cappuccino er eksplicit nævnt som en drik i selve teksten — "Café" i virksomhedsnavnet tæller IKKE.

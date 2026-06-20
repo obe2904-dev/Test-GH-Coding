@@ -1,5 +1,5 @@
 interface BrandSectionIconProps {
-  id: 'voice' | 'pillars' | 'limits' | 'strategy' | 'sparkles' | 'palette' | 'businessType';
+  id: 'voice' | 'pillars' | 'limits' | 'strategy' | 'sparkles' | 'palette' | 'businessType' | 'positioning' | 'values' | 'unique';
   className?: string;
 }
 
@@ -61,8 +61,24 @@ export function BrandSectionIcon({ id, className = 'w-6 h-6 text-text' }: BrandS
         <svg {...shared}>
           <path d="M12 2C6.48 2 2 6.48 2 12c0 5.52 4.48 10 10 10 1.1 0 2-.9 2-2v-.5c0-.28-.11-.53-.29-.71a.99.99 0 010-1.58A1 1 0 0116 18h1c2.76 0 5-2.24 5-5 0-6.07-4.47-11-10-11zm-5 11a2 2 0 110-4 2 2 0 010 4zm2-5a2 2 0 110-4 2 2 0 010 4zm6 0a2 2 0 110-4 2 2 0 010 4zm3 5a2 2 0 110-4 2 2 0 010 4z" />
         </svg>
+      );    case 'positioning':
+      return (
+        <svg {...shared}>
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+        </svg>
       );
-    default:
+    case 'values':
+      return (
+        <svg {...shared}>
+          <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+        </svg>
+      );
+    case 'unique':
+      return (
+        <svg {...shared}>
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+      );    default:
       return null;
   }
 }

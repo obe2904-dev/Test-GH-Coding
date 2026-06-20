@@ -62,12 +62,9 @@ export async function collectStrategyInputs(businessId: string): Promise<Strateg
       return null;
     }
     
-    // 2. Fetch menu metadata
-    const { data: menuMeta } = await untypedSupabase
-      .from('business_menu_metadata')
-      .select('*')
-      .eq('business_id', businessId)
-      .maybeSingle();
+    // NOTE: business_menu_metadata table was DROPPED April 2026 (migration 20260420000007).
+    // Menu intelligence is now in menu_results_v2 and menu_items_normalized.
+    const menuMeta = null;
     
     // 3. Fetch latest structured menu result (used for category + price signals)
     const { data: menuResult } = await supabase
@@ -315,7 +312,7 @@ export async function saveBrandStrategy(strategy: BrandStrategy): Promise<boolea
       offerings_reasoning: strategy.core_offerings.reasoning,
       offerings_confidence: strategy.core_offerings.confidence,
       // NEW: Save all candidates for explainability
-      offerings_full: strategy.core_offerings.offeringsFull || null,
+      offerings_full: null, // offerings_full column dropped from business_brand_profile April 2026
       // Target audience
       target_audience_primary: strategy.target_audience.primary,
       target_audience_seasonal: strategy.target_audience.seasonal,

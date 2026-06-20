@@ -1,6 +1,5 @@
 import { describe, expect, beforeEach, afterEach, vi, it } from 'vitest'
-import { render, screen, within, act } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen } from '@testing-library/react'
 import { PublishStep } from '../PublishStep'
 import type { PhotoContent, PostContent, TextAdjustments } from '../../../stores/postCreationStore'
 
@@ -79,7 +78,8 @@ const basePhotoContent: PhotoContent = {
   uploadedMedia: [],
   selectedMedia: null,
   isOriginal: true,
-  photoAdjustments: null
+  photoAdjustments: null,
+  carouselMode: false,
 }
 
 const createProps = () => ({
@@ -119,38 +119,26 @@ describe('PublishStep', () => {
     render(<PublishStep {...createProps()} />)
 
     expect(
-      screen.getByText('Manual Posting')
+      screen.getByText(/Kopiér manuelt til/i)
     ).toBeInTheDocument()
   })
 
-  it('switches to schedule mode when schedule button is clicked', async () => {
-    const user = userEvent.setup()
+  it('shows the selected timeline row by default', () => {
     render(<PublishStep {...createProps()} />)
 
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: /Schedule manual/ }))
-    })
-
-    expect(screen.getByText('AI-Suggested Times')).toBeInTheDocument()
+    expect(screen.getByText('selected')).toBeInTheDocument()
+    expect(screen.getByText('Hello World')).toBeInTheDocument()
+    expect(screen.getByText('Post body')).toBeInTheDocument()
   })
 
-  it('marks the selected schedule suggestion in the timeline', async () => {
-    const user = userEvent.setup()
-    render(<PublishStep {...createProps()} />)
+  it('shows the fallback label for a restored draft without a suggested time', () => {
+    render(
+      <PublishStep
+        {...createProps()}
+        restoredDbDraft={{ suggestedPostDatetime: null }}
+      />
+    )
 
-    await act(async () => {
-      await user.click(screen.getByRole('button', { name: /Schedule manual/ }))
-    })
-
-    const suggestionButton = screen.getByRole('button', { name: /Peak evening engagement/ })
-    await act(async () => {
-      await user.click(suggestionButton)
-    })
-
-    const timelineHeading = screen.getByText('Posts Timeline')
-    const timelineContainer = timelineHeading.closest('div')?.parentElement
-    expect(timelineContainer).not.toBeNull()
-    const selectedBadge = await within(timelineContainer as HTMLElement).findByText('selected')
-    expect(selectedBadge).toBeInTheDocument()
+    expect(screen.getByText('Intet tidspunkt valgt')).toBeInTheDocument()
   })
 })

@@ -105,10 +105,10 @@ export function PlatformConnectionsCard({
                     <div className="w-3 h-3 border-2 border-brand border-t-transparent rounded-full animate-spin" />
                   )}
                   {wasJustSaved && (
-                    <span className="text-xs font-medium text-green-600">Gemt</span>
+                    <span className="text-xs font-medium text-green-600">Aktiveret</span>
                   )}
                   {!isSaving && !wasJustSaved && !connected && (
-                    <span className="text-xs font-medium text-gray-400">Ikke gemt</span>
+                    <span className="text-xs font-medium text-gray-400">Ikke aktiveret</span>
                   )}
                   <div className={`w-4 h-4 rounded flex items-center justify-center ${
                     connected ? 'bg-mint' : 'bg-white border border-[#D1D5DB]'
@@ -137,13 +137,13 @@ export function PlatformConnectionsCard({
         </div>
         <button
           disabled={!isConnected('facebook') && !isConnected('instagram')}
-          className="w-full px-6 py-2 bg-brand text-mint rounded-lg text-sm font-semibold shadow-md hover:bg-[#12393D] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full px-6 py-2 bg-cta text-text-inverse rounded-lg text-sm font-medium shadow-md hover:bg-cta-hover transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Forbind dine profiler til automatisk posting
+          Aktivér dine platforme til automatisk posting
         </button>
         <div className="text-center">
           <p className="text-xs text-gray-500">
-            Du har fuld kontrol —der postes kun det, du vil have
+            Du har fuld kontrol - der postes kun det, du vil have
           </p>
         </div>
       </div>

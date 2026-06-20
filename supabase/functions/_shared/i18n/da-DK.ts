@@ -6,8 +6,9 @@ export const DA_DK_PHRASES: Record<string, any> = {
       canonical: 'ved åen',
       short: 'åen',
       preposition: 'ved',
-      alternatives: ['ved vandet', 'langs åen'],
-      cultural_context: 'Især vigtig i byer med å-restaurering (Aarhus Å, Odense Å)',
+      alternatives: ['langs åen', 'ved fjorden', 'ved søen', 'ved havnen', 'ved bugten'],
+      fallback: 'ved vandet',  // Only for sea/ocean - not for rivers, lakes, fjords, bays
+      cultural_context: 'Især vigtig i byer med å-restaurering (Aarhus Å, Odense Å). Brug specifik term: åen (streams/rivers), fjorden, søen, havnen, bugten.',
     },
     city_centre: {
       canonical: 'i bymidten',
@@ -53,7 +54,38 @@ export const DA_DK_PHRASES: Record<string, any> = {
       canonical: 'vennegrupper',
       short: 'venner',
     }
-  }
+  },
+
+  // ─── Time-of-day cultural rules (Denmark) ─────────────────────────────────
+  // These rules are country-specific. Add a parallel block in other locale files
+  // (e.g. en-GB.ts, de-DE.ts) with the culturally appropriate boundaries.
+  timeOfDay: {
+    // Opening label rules — evaluated in ascending order, first match wins.
+    // maxHour is an exclusive upper bound as a decimal (e.g. 11.5 = 11:30).
+    // Rule: use the term whose maxHour is the first one GREATER than earliestOpen.
+    openingLabels: [
+      { maxHour: 9,    term: 'morgenkaffe' },  // opens before 09:00           → morgen
+      { maxHour: 11.5, term: 'brunch' },        // opens 09:00–11:29 (incl.)    → brunch
+      { maxHour: 15,   term: 'frokost' },       // opens 11:30–14:59 (incl.)    → frokost
+      { maxHour: 24,   term: 'aftensmad' },     // opens 15:00+                 → aften
+    ],
+
+    // Closing drink label: keys are lowercased substrings checked against programme
+    // role names and menu category names. First match wins — order by specificity.
+    closingDrinkTerms: {
+      cocktail:  'cocktails',
+      cocktails: 'cocktails',
+      vin:       'vin',
+      wine:      'vin',
+      øl:        'øl',
+      beer:      'øl',
+      drinks:    'drinks',
+      bar:       'drinks',
+    } as Record<string, string>,
+
+    // Used when hasBarSignals is true but no specific drink category matched above.
+    closingDrinkFallback: 'drinks',
+  },
 }
 
 export function getDaPhrases() {

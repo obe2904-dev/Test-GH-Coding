@@ -71,9 +71,11 @@ const INITIAL_FORM: BrandProfileForm = {
   content_focus: '',
   image_preferences: '',
   things_to_avoid: '',
-  cta_style: '',
+  // cta_style: '', // field removed from BrandProfileForm type
   communication_goal: '',
-  recognizable_interior_identity: ''
+  recognizable_interior_identity: '',
+  visual_character: '',
+  venue_scene: ''
 }
 
 const INITIAL_STATE: BrandProfileState = {

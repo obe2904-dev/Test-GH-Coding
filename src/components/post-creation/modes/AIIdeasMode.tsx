@@ -47,7 +47,7 @@ export const AIIdeasMode: React.FC<AIIdeasModeProps> = ({
             <button
               onClick={onGenerateIdeas}
               disabled={isGenerating}
-              className="px-4 py-2 bg-brand text-mint rounded-lg hover:bg-[#12393D] disabled:opacity-50 transition-all text-sm font-bold shadow-md flex items-center gap-1.5"
+              className="px-4 py-2 bg-cta text-text-inverse rounded-lg hover:bg-cta-hover disabled:opacity-40 transition-all text-sm font-medium shadow-md flex items-center gap-1.5"
             >
               {isGenerating ? (
                 <>

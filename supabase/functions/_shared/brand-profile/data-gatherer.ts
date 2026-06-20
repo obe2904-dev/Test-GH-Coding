@@ -48,6 +48,68 @@ function parseMenuStructure(menuStructure: unknown): any[] {
 }
 
 /**
+ * Detect if a menu is drinks-only (cocktails, wine, bar menu)
+ * Returns true if menu should be excluded from gastronomic profile
+ * 
+ * Priority:
+ * 1. menu_sources.label (most reliable - user-defined or system-labeled)
+ * 2. service_period_name keywords
+ * 3. URL keywords
+ * 4. Content analysis (ai_summary)
+ * 
+ * @exported for use in V5 generator and other modules
+ */
+export function isDrinksOnlyMenu(
+  servicePeriodName: string | null, 
+  aiSummary: string | null, 
+  sourceUrl: string | null,
+  menuSourceLabel: string | null,
+  menuSourceType: string | null
+): boolean {
+  // PRIORITY 1: Check menu_sources.label (most reliable)
+  if (menuSourceLabel) {
+    const labelLower = menuSourceLabel.toLowerCase()
+    const drinksLabels = ['cocktail', 'cocktails', 'drink', 'drinks', 'bar', 'wine', 'vin', 'vinbar', 'spiritus', 'drikke', 'beverage', 'beverages']
+    if (drinksLabels.some(drinkLabel => labelLower.includes(drinkLabel))) {
+      console.log(`[Drinks Filter] ✅ Detected via menu_sources.label: "${menuSourceLabel}"`)
+      return true
+    }
+  }
+  
+  // PRIORITY 2: Check service period name
+  const periodLower = (servicePeriodName || '').toLowerCase()
+  const drinksKeywords = ['cocktail', 'drink', 'bar', 'wine', 'vin', 'spiritus', 'beverage', 'drikke']
+  if (drinksKeywords.some(keyword => periodLower.includes(keyword))) {
+    console.log(`[Drinks Filter] ✅ Detected via service_period_name: "${servicePeriodName}"`)
+    return true
+  }
+  
+  // PRIORITY 3: Check URL
+  const urlLower = (sourceUrl || '').toLowerCase()
+  if (drinksKeywords.some(keyword => urlLower.includes(keyword))) {
+    console.log(`[Drinks Filter] ✅ Detected via source_url: "${sourceUrl}"`)
+    return true
+  }
+  
+  // PRIORITY 4: Analyze ai_summary content (least reliable - fallback)
+  if (aiSummary && aiSummary.length > 20) {
+    const summaryLower = aiSummary.toLowerCase()
+    // NO word boundaries for drinks - catches "cocktailkulturer", "ginbaserede", etc.
+    const hasDrinksMentions = /(cocktail|drink|gin|vodka|rom|whisky|wine|spiritus|aperitif|spritz|mojito|martini|beer|øl|vino?|alkohol)/i.test(summaryLower)
+    // Keep word boundaries for food to avoid false positives (removed 'menu' - too generic)
+    const hasFoodMentions = /\b(ret|dish|mad|frokost|middag|brunch|lunch|dinner|appetizer|forretter?|hovedretter?|dessert|salat|pasta|burger|sandwich|kød|fisk|vegetar|tapas)\b/i.test(summaryLower)
+    
+    // If drinks mentioned but NO food mentioned, it's drinks-only
+    if (hasDrinksMentions && !hasFoodMentions) {
+      console.log(`[Drinks Filter] ✅ Detected via ai_summary content analysis: drinks=true, food=false`)
+      return true
+    }
+  }
+  
+  return false
+}
+
+/**
  * Compute location enrichment and persist if changed.
  * Uses hash comparison to avoid unnecessary database writes.
  * 
@@ -57,7 +119,8 @@ function parseMenuStructure(menuStructure: unknown): any[] {
  */
 async function computeAndPersistEnrichment(
   supabase: any,
-  location: any
+  location: any,
+  businessName?: string
 ): Promise<any> {
   if (!location) {
     console.log('⚠️  No primary location found, skipping enrichment')
@@ -71,7 +134,8 @@ async function computeAndPersistEnrichment(
     city: location.city || 'Unknown',
     country: location.country || 'Denmark',
     latitude: location.latitude,
-    longitude: location.longitude
+    longitude: location.longitude,
+    business_name: businessName
   })
 
   // Compare with existing enrichment using stable JSON comparison
@@ -86,6 +150,9 @@ async function computeAndPersistEnrichment(
   console.log('📝 Location enrichment changed, updating database...')
   console.log(`   - City: ${newEnrichment.macro.city} (${newEnrichment.macro.city_tier})`)
   console.log(`   - Area type: ${newEnrichment.micro.area_type}`)
+  if (newEnrichment.micro.waterfront_term) {
+    console.log(`   - Waterfront term: ${newEnrichment.micro.waterfront_term}`)
+  }
   console.log(`   - Confidence: ${newEnrichment.micro.confidence}`)
   console.log(`   - Signals: ${newEnrichment.micro.nearby_signals.slice(0, 3).join(', ')}${newEnrichment.micro.nearby_signals.length > 3 ? '...' : ''}`)
 
@@ -118,12 +185,14 @@ async function computeAndPersistEnrichment(
  * @param supabase - Supabase client instance
  * @param businessId - UUID of the business
  * @param allowThirdParty - Whether to fetch third-party evidence
+ * @param language - Language code to filter menu results (default: 'da')
  * @returns Promise<DataSources> - All gathered data
  */
 export async function gatherDataSources(
   supabase: any, 
   businessId: string,
-  allowThirdParty: boolean = false
+  allowThirdParty: boolean = false,
+  language: string = 'da'
 ): Promise<DataSources> {
   // Fetch all data in parallel for performance
   const [
@@ -154,11 +223,20 @@ export async function gatherDataSources(
     // Operations: establishment type + physical features that affect audience occasions
     supabase.from('business_operations').select('establishment_type, has_outdoor_seating, has_takeaway, has_table_service, has_english_menu, has_kids_menu').eq('business_id', businessId).maybeSingle(),
     // Rich location intelligence: category_scores, neighborhood, location_marketing_hooks, concept_fit_by_category
-    supabase.from('business_location_intelligence').select('neighborhood, area_type, category_scores, location_marketing_hooks, concept_fit_by_category').eq('business_id', businessId).maybeSingle(),
+    supabase.from('business_location_intelligence').select('neighborhood, area_type, category_scores, location_marketing_hooks, concept_fit_by_category, local_location_reference').eq('business_id', businessId).maybeSingle(),
     // menu_results_v2: AI helicopter summaries + structured data (always fetched in parallel)
-    supabase.from('menu_results_v2').select('ai_summary, source_url, service_period_name, structured_data').eq('business_id', businessId).eq('status', 'done').order('created_at', { ascending: false }),
-    // Existing brand profile — fetch sample_posts (Tier 1 tone signal) + business_character (WP2: seed for Prompt B)
-    supabase.from('business_brand_profile').select('sample_posts, business_character').eq('business_id', businessId).maybeSingle(),
+    // JOIN with menu_sources to get label (e.g., "Cocktails") for reliable drinks detection
+    // Filter by language to exclude English tourist menus
+    supabase.from('menu_results_v2').select(`
+      ai_summary, 
+      source_url, 
+      service_period_name, 
+      structured_data, 
+      language_code,
+      menu_sources!menu_results_v2_source_id_fkey(label, menu_type)
+    `).eq('business_id', businessId).eq('status', 'done').eq('language_code', language).order('created_at', { ascending: false }),
+    // Existing brand profile — fetch business_character (WP2: seed for Prompt B)
+    supabase.from('business_brand_profile').select('business_character').eq('business_id', businessId).maybeSingle(),
     // Opening hours — late-night closing is a critical bar/nightlife signal for Prompt A
     supabase.from('opening_hours').select('weekday, open_time, close_time').eq('business_id', businessId),
     // Physical location count (number of distinct branches)
@@ -197,14 +275,18 @@ export async function gatherDataSources(
     console.warn('⚠️ Failed to fetch menu_results_v2 (non-fatal):', menuResultsV2Result.error.message)
   }
   if (existingBrandProfileResult.error) {
-    console.warn('⚠️ Failed to fetch existing brand profile sample_posts (non-fatal):', existingBrandProfileResult.error.message)
+    console.warn('⚠️ Failed to fetch existing brand profile business_character (non-fatal):', existingBrandProfileResult.error.message)
   }
   if (openingHoursResult.error) {
     console.warn('⚠️ Failed to fetch opening_hours (non-fatal):', openingHoursResult.error.message)
   }
 
   // Compute and persist location enrichment
-  const location = await computeAndPersistEnrichment(supabase, locationResult.data)
+  const location = await computeAndPersistEnrichment(
+    supabase, 
+    locationResult.data,
+    businessResult.data?.name
+  )
 
   // Extract menu data from business_profile.menu_structure
   let menuItems = parseMenuStructure(profileResult.data?.menu_structure)
@@ -290,7 +372,10 @@ export async function gatherDataSources(
   // menu_results_v2: Single loop — ai_summary first (summaries + proof tokens), structured_data second (raw items if still needed)
   // ai_summary is always collected regardless of whether fallbacks 1-3 found raw items.
   // structured_data fills menuItems only if they are still empty after fallbacks 1-3.
+  // FILTER OUT drinks-only menus (cocktails, wine cards) from gastronomic profile
   const menuSummaries: { title: string; summary: string }[] = []
+  const drinksSummaries: { title: string; summary: string }[] = [] // Track drinks menus separately
+  const drinksOnlyServicePeriods: Set<string> = new Set() // Track drinks-only service period names
   const aiSummaryItems: string[] = []
   let menuSource: 'ai_summary' | 'structured_data' | 'fallback' | 'none' =
     menuItems.length > 0 ? 'fallback' : 'none'
@@ -298,12 +383,46 @@ export async function gatherDataSources(
   const menuResultsV2Rows = menuResultsV2Result.data || []
   if (menuResultsV2Rows.length > 0) {
     for (const result of menuResultsV2Rows) {
-      // --- ai_summary: helicopter view (always collect when present) ---
+      // Extract menu_sources data (joined via foreign key)
+      const menuSource = (result as any).menu_sources
+      const menuSourceLabel = menuSource?.label ?? null
+      const menuSourceType = menuSource?.menu_type ?? null
+      
+      // Check if this is a drinks-only menu (cocktails, wine cards, bar menus)
+      // Priority: menu_sources.label > service_period_name > url > content analysis
+      const isDrinksMenu = isDrinksOnlyMenu(
+        result.service_period_name, 
+        result.ai_summary, 
+        result.source_url,
+        menuSourceLabel,
+        menuSourceType
+      )
+      
+      // Skip drinks-only menus entirely - don't add to gastronomic profile
+      if (isDrinksMenu) {
+        if (result.ai_summary && typeof result.ai_summary === 'string' && result.ai_summary.trim().length > 0) {
+          const rawPath = result.source_url
+            ? (() => { try { return new URL(result.source_url).pathname.split('/').filter(Boolean).pop() || 'Menu' } catch { return 'Menu' } })()
+            : 'Menu'
+          const title = result.service_period_name || rawPath
+          drinksSummaries.push({ title, summary: result.ai_summary.trim() })
+          // Track service period name for cross-referencing with menu_signal programmes
+          if (result.service_period_name) {
+            drinksOnlyServicePeriods.add(result.service_period_name.toUpperCase())
+          }
+          console.log(`🍸 Excluded drinks menu: "${title}" (label="${menuSourceLabel || 'none'}")`)
+        }
+        continue // Skip to next menu
+      }
+      
+      // --- ai_summary: helicopter view (FOOD MENUS ONLY) ---
       if (result.ai_summary && typeof result.ai_summary === 'string' && result.ai_summary.trim().length > 0) {
         const rawPath = result.source_url
           ? (() => { try { return new URL(result.source_url).pathname.split('/').filter(Boolean).pop() || 'Menu' } catch { return 'Menu' } })()
           : 'Menu'
         const title = result.service_period_name || rawPath
+        
+        // Food menus: add to gastronomic profile
         menuSummaries.push({ title, summary: result.ai_summary.trim() })
 
         // Extract bullet lines (strip • / – / - prefix) for proof tokens
@@ -342,7 +461,10 @@ export async function gatherDataSources(
 
     if (menuSummaries.length > 0) {
       menuSource = 'ai_summary'
-      console.log(`✅ Loaded ${menuSummaries.length} menu AI summaries from menu_results_v2 (${aiSummaryItems.length} bullet lines)`)
+      console.log(`✅ Loaded ${menuSummaries.length} FOOD menu AI summaries from menu_results_v2 (${aiSummaryItems.length} bullet lines)`)
+      if (drinksSummaries.length > 0) {
+        console.log(`🍸 Filtered out ${drinksSummaries.length} drinks-only menu(s): ${drinksSummaries.map(d => d.title).join(', ')}`)
+      }
     }
     if (menuItems.length > 0 && menuSource === 'none') {
       menuSource = 'structured_data'
@@ -371,22 +493,49 @@ export async function gatherDataSources(
     console.log(`✅ Loaded location_intelligence: area_type=${locationIntelResult.data.area_type}, neighborhood=${locationIntelResult.data.neighborhood || '—'}, category_scores_keys=${Object.keys(locationIntelResult.data.category_scores || {}).join(', ') || 'none'}, marketing_hooks=${(locationIntelResult.data.location_marketing_hooks || []).length}`)
   }
 
-  // Parse sample_posts from existing brand profile (Tier 1 tone signal, V2)
-  let existingSamplePosts: Array<{ post_text: string; why_this_works?: string }> | null = null
-  if (existingBrandProfileResult.data?.sample_posts) {
-    const raw = existingBrandProfileResult.data.sample_posts
-    const parsed = typeof raw === 'string' ? (() => { try { return JSON.parse(raw) } catch { return null } })() : raw
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      existingSamplePosts = parsed.slice(0, 10) // Cap at 10 posts to control token usage
-      console.log(`✅ Loaded ${existingSamplePosts.length} existing sample_posts as Tier 1 tone signal`)
-    }
-  }
-
   // Extract menu_signal.programmes from business_profile (WP1: operational programme signals)
-  const menuSignalProgrammes: Array<{ role: string; timeContext: string | null; items: string[] }> | null =
+  // brand_weight: 'primary' = drives brand voice and content anchors
+  //               'operational' = factual only — never drives tone, caption examples, or brand_essence
+  const OPERATIONAL_PROGRAMME_ROLES = ['BØRNEMENU', 'KIDS', 'BØRN']
+  const DRINKS_ONLY_PROGRAMME_ROLES = ['COCKTAIL', 'COCKTAILS', 'DRINK', 'DRINKS', 'BAR', 'WINE', 'VIN', 'VINBAR', 'SPIRITUS', 'DRIKKE', 'BEVERAGE', 'BEVERAGES']
+  const rawMenuSignalProgrammes: Array<{ role: string; timeContext: string | null; items: string[] }> | null =
     profileResult.data?.menu_signal?.programmes ?? null
+  
+  // Debug: Log raw programmes and detected drinks periods
+  if (rawMenuSignalProgrammes && rawMenuSignalProgrammes.length > 0) {
+    console.log(`[Drinks Filter Debug] Raw menu_signal programmes: ${rawMenuSignalProgrammes.map(p => p.role).join(', ')}`)
+    console.log(`[Drinks Filter Debug] Detected drinks-only periods: ${Array.from(drinksOnlyServicePeriods).join(', ') || 'none'}`)
+  }
+  
+  // Filter out drinks-only programmes AND add brand_weight classification
+  const menuSignalProgrammes: Array<{ role: string; timeContext: string | null; items: string[]; brand_weight: 'primary' | 'operational' }> | null =
+    rawMenuSignalProgrammes
+      ? rawMenuSignalProgrammes
+          .filter(p => {
+            // Remove drinks-only programmes from brand profile generation
+            const roleUpper = p.role.toUpperCase()
+            
+            // Method 1: Check if role name matches drinks keywords
+            const matchesDrinksKeyword = DRINKS_ONLY_PROGRAMME_ROLES.some(drinkRole => roleUpper.includes(drinkRole))
+            
+            // Method 2: Cross-reference with drinks-only service periods detected from menu_results_v2
+            const matchesDetectedDrinksMenu = drinksOnlyServicePeriods.has(roleUpper)
+            
+            if (matchesDrinksKeyword || matchesDetectedDrinksMenu) {
+              console.log(`🍸 Filtered out drinks-only programme from menu_signal: "${p.role}" (keyword=${matchesDrinksKeyword}, detected=${matchesDetectedDrinksMenu})`)
+              return false
+            }
+            return true
+          })
+          .map(p => ({
+            ...p,
+            brand_weight: OPERATIONAL_PROGRAMME_ROLES.includes(p.role.toUpperCase()) ? 'operational' : 'primary'
+          }))
+      : null
   if (menuSignalProgrammes && menuSignalProgrammes.length > 0) {
-    console.log(`✅ Loaded ${menuSignalProgrammes.length} menu_signal programmes:`, menuSignalProgrammes.map(p => p.role).join(', '))
+    const brandOnes = menuSignalProgrammes.filter(p => p.brand_weight === 'primary').map(p => p.role)
+    const opOnes = menuSignalProgrammes.filter(p => p.brand_weight === 'operational').map(p => p.role)
+    console.log(`✅ Loaded ${menuSignalProgrammes.length} FOOD menu_signal programmes — brand: [${brandOnes.join(', ')}] operational: [${opOnes.join(', ')}]`)
   }
 
   // Extract existing business_character from brand profile (WP2: seed for Prompt A + B)
@@ -394,6 +543,13 @@ export async function gatherDataSources(
     existingBrandProfileResult.data?.business_character || null
   if (existingBusinessCharacter) {
     console.log(`✅ Loaded existing business_character (${existingBusinessCharacter.length} chars) as Prompt A seed`)
+  }
+
+  // Extract existing voice_rationale from brand profile (v4.12.1: seed for fallback)
+  const existingVoiceRationale: string | null =
+    existingBrandProfileResult.data?.voice_rationale || null
+  if (existingVoiceRationale) {
+    console.log(`✅ Loaded existing voice_rationale (${existingVoiceRationale.length} chars) as fallback seed`)
   }
 
   // Process opening hours rows (WP1: late-night signal for Prompt A)
@@ -417,9 +573,9 @@ export async function gatherDataSources(
     menuSummaries: menuSummaries.length > 0 ? menuSummaries : null,
     aiSummaryItems: aiSummaryItems.length > 0 ? aiSummaryItems : null,
     menuSource,
-    existingSamplePosts,
     menuSignalProgrammes,
     existingBusinessCharacter,
+    existingVoiceRationale,
     openingHoursRows,
     locationsCount: locationsCountResult.count ?? 1
   }

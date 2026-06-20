@@ -128,6 +128,8 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
       .maybeSingle()
 
     if (menuSource) {
+      // menu_extractions table does not exist - skip deletion
+      /*
       // Delete menu_extractions linked to this source
       const { error: extractionsError } = await supabase
         .from('menu_extractions')
@@ -139,6 +141,7 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
       } else {
         console.log('✅ Deleted related menu extractions')
       }
+      */
     }
 
     // Delete the menu source

@@ -6,6 +6,65 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3'
 // Purpose: Parse menu_results_v2.structured_data and populate menu_items_normalized
 // Trigger: Call after menu extraction or via cron job
 
+const drinkCategories = [
+  'cocktail', 'mocktail', 'drink', 'beverage', 'apéritif', 'aperitif', 'bar', 'spirits'
+]
+
+const foodCategories = [
+  'brunch', 'lunch', 'dinner', 'breakfast', 'main', 'forretter', 'appetizer', 'starter',
+  'dessert', 'salad', 'classic', 'smørrebrød'
+]
+
+const drinkKeywords = [
+  'beer', 'wine', 'cocktail', 'mocktail', 'spirits', 'liquor', 'gin', 'vodka', 'rum', 'whisky', 'whiskey',
+  'tequila', 'aperitif', 'aperitivo', 'prosecco', 'champagne', 'cider', 'ale', 'lager', 'stout', 'ipa', 'espresso',
+  'coffee', 'cappuccino', 'latte', 'americano', 'macchiato', 'tea', 'matcha', 'juice', 'smoothie', 'milkshake',
+  'shake', 'soda', 'cola', 'lemonade', 'tonic', 'kombucha', 'chai', 'spritz', 'martini', 'negroni', 'mojito',
+  'margarita', 'bloody mary'
+]
+
+const drinkPhrases = [
+  'still water', 'sparkling water', 'mineral water', 'draft beer', 'draught beer',
+  'tap beer', 'cold brew', 'iced coffee', 'hot chocolate', 'non alcoholic'
+]
+
+function classifyMediaCategory(
+  categoryName: string | null | undefined,
+  itemName: string | null | undefined,
+  itemDescription: string | null | undefined,
+): 'FOOD' | 'DRINK' | null {
+  const text = [categoryName, itemName, itemDescription]
+    .filter((value): value is string => Boolean(value && value.trim().length > 0))
+    .join(' ')
+    .toLowerCase()
+  const categoryLower = (categoryName || '').toLowerCase()
+  const normalizedText = ` ${text.replace(/[^a-z0-9]+/g, ' ')} `
+
+  if (!text.trim()) {
+    return null
+  }
+
+  // Check if category is a drink category
+  if (drinkCategories.some(cat => categoryLower.includes(cat))) {
+    return 'DRINK'
+  }
+
+  // Check if category is a food category
+  if (foodCategories.some(cat => categoryLower.includes(cat))) {
+    return 'FOOD'
+  }
+
+  // Fall back to keyword matching
+  const hasDrinkPhrase = drinkPhrases.some(phrase => normalizedText.includes(` ${phrase} `))
+  const hasDrinkKeyword = drinkKeywords.some(keyword => normalizedText.includes(` ${keyword} `))
+
+  if (hasDrinkPhrase || hasDrinkKeyword) {
+    return 'DRINK'
+  }
+
+  return 'FOOD'
+}
+
 Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
@@ -86,11 +145,22 @@ Deno.serve(async (req) => {
           continue
         }
 
-        // Delete existing items for this menu (for resync)
-        await supabase
-          .from('menu_items_normalized')
-          .delete()
-          .eq('menu_result_id', menuResult.id)
+        // Soft-delete pattern: Mark old items for this menu result as obsolete instead of hard deleting.
+        // This preserves menu history and prevents orphaned menu_item_id references.
+        if (menuResult.id) {
+          // Only deactivate rows created from the same source menu result.
+          const { error: updateError } = await supabase
+            .from('menu_items_normalized')
+            .update({ is_active: false })
+            .eq('business_id', menuResult.business_id)
+            .eq('menu_result_id', menuResult.id)
+          
+          if (updateError) {
+            console.warn(`[MenuSync] Update warning:`, updateError)
+          } else {
+            console.log(`[MenuSync] Marked menu result ${menuResult.id} items as obsolete for business ${menuResult.business_id}`)
+          }
+        }
 
         // Extract items
         const itemsToInsert = []
@@ -125,6 +195,7 @@ Deno.serve(async (req) => {
               menu_result_id: menuResult.id,
               item_name: item.name,
               item_description: item.description || null,
+              media_category: classifyMediaCategory(category.name, item.name, item.description || null),
               item_price: item.price || null,
               category_name: category.name,
               category_type: categoryType,
@@ -138,9 +209,8 @@ Deno.serve(async (req) => {
               dish_temp_category: dishTempCategory,
               seasonal_ingredients: seasonalIngredients,
               location_tags: locationTags,
-              total_times_posted: metadata?.total_times_posted || 0,
-              avg_engagement_rate: metadata?.avg_engagement_rate || 0,
-              last_posted_date: metadata?.last_posted_date || null,
+              category_availability_days: category.availabilityDays || null,
+              category_time_range: category.timeRange || null,
               source_sha256: menuResult.sha256,
               synced_at: new Date().toISOString()
             })
@@ -204,6 +274,22 @@ function classifyCategoryType(categoryName: string): string {
   // Kids menu
   if (lower.includes('børnemenu') || lower.includes('kids') || lower.includes('children')) {
     return 'kids_menu'
+  }
+  
+  // Drinks (cocktails, wine, beer, spirits)
+  if (lower.includes('cocktail') || lower.includes('apéritif') || lower.includes('aperitif') ||
+      lower.includes('drinks') || lower.includes('drikke') || 
+      lower.includes('vin') || lower.includes('wine') || 
+      lower.includes('øl') || lower.includes('beer') || lower.includes('beer') ||
+      lower.includes('spiritus') || lower.includes('spirits')) {
+    return 'drinks'
+  }
+  
+  // Coffee & Tea
+  if (lower.includes('kaffe') || lower.includes('coffee') || 
+      lower.includes('espresso') || lower.includes('cappuccino') ||
+      lower.includes('the') || lower.includes('tea')) {
+    return 'coffee'
   }
   
   // Desserts

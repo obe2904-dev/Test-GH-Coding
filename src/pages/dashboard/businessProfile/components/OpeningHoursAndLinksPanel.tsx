@@ -1,5 +1,6 @@
 import type { TFunction } from 'i18next'
 import type { WeekSchedule } from '../../../../types/businessProfile'
+import { QuarterHourTimePicker } from '../../../../components/ui/QuarterHourTimePicker'
 
 interface OpeningHoursAndLinksPanelProps {
   t?: TFunction
@@ -55,22 +56,14 @@ export function OpeningHoursAndLinksPanel({
             {DAYS.map(({ key, label }) => (
               <div key={key} className="grid grid-cols-[50px_1fr_1fr] gap-2 items-center">
                 <label className="text-xs font-medium text-gray-700">{label}</label>
-                <input
-                  type="time"
-                  value={openingHours[key]?.open || ''}
-                  onChange={(e) => onOpeningHoursChange(key, 'open', e.target.value)}
-                  className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-mint"
-                />
-                <input
-                  type="time"
-                  value={openingHours[key]?.close || ''}
-                  onChange={(e) => onOpeningHoursChange(key, 'close', e.target.value)}
-                  className="px-2 py-1.5 border border-gray-300 rounded text-xs focus:ring-2 focus:ring-mint"
-                />
+                <QuarterHourTimePicker className="w-full" value={openingHours[key]?.open || ''} onChange={(value) => onOpeningHoursChange(key, 'open', value)} />
+                <QuarterHourTimePicker className="w-full" value={openingHours[key]?.close || ''} onChange={(value) => onOpeningHoursChange(key, 'close', value)} />
               </div>
             ))}
           </div>
           
+          <p className="text-[11px] text-gray-500">Tid vælges i 15-minutters intervaller: 00, 15, 30 og 45.</p>
+
           <p className="text-[11px] text-gray-500">
             Lad feltet stå tomt for lukkede dage
           </p>

@@ -1,6 +1,7 @@
 import type { TFunction } from 'i18next'
 import type { BusinessSector } from '../../../../types/businessSector'
 import { AnalyzeIcon } from '../../BusinessProfileIcons'
+import { QuarterHourTimePicker } from '../../../../components/ui/QuarterHourTimePicker'
 
 interface BusinessDetailsPanelProps {
   t: TFunction
@@ -346,22 +347,11 @@ export function BusinessDetailsPanel({
             ] as const).map(({ key, label }) => (
               <div key={key} className="flex items-center gap-2">
                 <span className="text-xs text-text-secondary font-medium w-12">{label}</span>
-                <input
-                  type="time"
-                  value={openingHours[key].open}
-                  onChange={(event) => onOpeningHoursChange(key, 'open', event.target.value)}
-                  className="w-24 px-2 py-1.5 border border-border rounded text-xs focus:ring-2 focus:ring-cta"
-                  placeholder="Åbner"
-                />
-                <input
-                  type="time"
-                  value={openingHours[key].close}
-                  onChange={(event) => onOpeningHoursChange(key, 'close', event.target.value)}
-                  className="w-24 px-2 py-1.5 border border-border rounded text-xs focus:ring-2 focus:ring-cta"
-                  placeholder="Lukker"
-                />
+                <QuarterHourTimePicker className="w-32" value={openingHours[key].open} onChange={(value) => onOpeningHoursChange(key, 'open', value)} />
+                <QuarterHourTimePicker className="w-32" value={openingHours[key].close} onChange={(value) => onOpeningHoursChange(key, 'close', value)} />
               </div>
             ))}
+            <p className="mt-1 text-[11px] text-text-muted">Tid vælges i 15-minutters intervaller: 00, 15, 30 og 45.</p>
         </div>
       </div>
 

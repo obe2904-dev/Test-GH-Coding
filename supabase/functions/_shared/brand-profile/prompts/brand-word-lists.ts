@@ -7,9 +7,28 @@ import type { DataSources, LanguageConfig } from '../types.ts'
 import { detectWebsitePresence } from '../website-presence.ts'
 
 /**
- * Default banned words for Danish content.
- * These are generic marketing words that make AI output sound inauthentic.
- * Words may be ALLOWED if the business uses them 2+ times on their website (v4.8.9).
+ * Hard blacklist — never whitelisted regardless of website usage frequency.
+ * These words are too generic/hyperbolic to ever be authentic brand voice.
+ */
+export const HARD_BANNED_WORDS_DA: string[] = [
+  'uforglemmelig',
+  'uforglemmelige',
+  'magisk',
+  'magiske',
+  'gastronomisk',
+  'gastronomiske',
+  'udsøgt',
+  'udsøgte',
+  'forkæle',
+  'forkæler',
+  'forkælet',
+  'gode stunder',
+]
+
+/**
+ * Soft banned words for Danish content — whitelisted at 4+ occurrences on the business's website.
+ * These are generic marketing words that make AI output sound inauthentic,
+ * but may be part of a business's authentic voice if used consistently.
  */
 export const DEFAULT_BANNED_WORDS_DA: string[] = [
   'hyggelig',
@@ -28,7 +47,11 @@ export const DEFAULT_BANNED_WORDS_DA: string[] = [
   'fantastiske',
   'vidunderlig',
   'vidunderlige',
-  'charmerende'
+  'charmerende',
+  'oplev',
+  'nyd en',
+  'byde velkommen',
+  'tag plads hos',
 ]
 
 /**
@@ -143,12 +166,17 @@ export function filterBannedWordsByBusinessUsage(
   businessName: string
 ): { finalBannedWords: string[]; allowedWords: { word: string; count: number }[] } {
   const allowedWords: { word: string; count: number }[] = []
-  const MINIMUM_OCCURRENCES = 2
-  
+  const MINIMUM_OCCURRENCES = 4  // Raised from 2: words must appear 4+ times to be considered authentic voice
+
   // Normalize website text for matching
   const normalizedText = websiteText.toLowerCase()
-  
-  const finalBannedWords = defaultBannedWords.filter(word => {
+
+  // Hard banned words are always banned — never whitelisted regardless of usage count
+  const hardBannedWords = HARD_BANNED_WORDS_DA
+
+  const finalBannedWords = [
+    ...hardBannedWords,
+    ...defaultBannedWords.filter(word => {
     // Create regex for word boundary matching
     const regex = new RegExp(`\\b${word.toLowerCase()}\\b`, 'gi')
     const matches = normalizedText.match(regex)
@@ -159,8 +187,9 @@ export function filterBannedWordsByBusinessUsage(
       return false // Remove from banned list
     }
     return true // Keep in banned list
-  })
-  
+  }),
+  ]
+
   if (allowedWords.length > 0) {
     console.log(`🔓 Smart Banned Words [${businessName}]: ${allowedWords.length} allowed, ${finalBannedWords.length} banned`)
   }

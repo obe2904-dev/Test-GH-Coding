@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePostCreationStore, MediaItem, type PlatformContent, type PhotoContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
@@ -6,8 +6,12 @@ import { useAuthStore } from '../../stores/authStore'
 import { useTierStore } from '../../stores/tierStore'
 import { TIER_QUOTAS } from '../../config/quotas'
 import { uploadImageToStorage, uploadAdjustedImageToStorage } from '../../api/image-processing'
+import { useVideoCover } from '../../hooks/useVideoCover'
+import { VideoCoverSelector } from '../media/VideoCoverSelector'
 import { UpgradeModal } from '../ui/UpgradeModal'
-import { PlatformPreview, CaptionEditModal } from './design'
+import { PlatformSelector } from './shared/PlatformSelector'
+import { PlatformPreview, CaptionEditModal, PhotoUploadManager, CarouselActivationBanner, CarouselSetup } from './design'
+import { useCarouselOrganise } from '../../hooks/useCarouselOrganise'
 import { buildPlatformPreviewContent } from './publish/utils'
 import { PostCreationFooter } from './shared/PostCreationFooter'
 import { usePhotoAnalysis } from '../../hooks/usePhotoAnalysis'
@@ -15,8 +19,12 @@ import { usePhotoEdit } from '../../hooks/usePhotoEdit'
 import { useBusinessData } from '../../hooks/useBusinessData'
 import { MediaAnalysisPanel } from '../media/MediaAnalysisPanel'
 import { CropOverlay } from '../media/CropOverlay'
+import { MediaGalleryModal } from '../media/media-gallery'
+import { recordMediaUsage, getStorageQuota, type StorageQuota } from '../../api/mediaLibrary'
+import type { MediaItem as GalleryMediaItem } from '../../api/mediaLibrary'
 import type { Suggestion } from '../media/types'
 import { supabase } from '../../lib/supabase'
+import { buildZeroRowAuditMessage, getAffectedRowCount } from '../../lib/dailySuggestionIntegrity'
 
 interface CreateStepProps {
   onNext: () => void
@@ -56,6 +64,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
   const { user } = useAuthStore()
   const { currentTier } = useTierStore()
   const businessData = useBusinessData()
+  const currentBusinessId = businessData.business?.id
 
   const [previewPlatform, setPreviewPlatform] = useState<'facebook' | 'instagram'>(
     selectedPlatforms[0] === 'instagram' ? 'instagram' : 'facebook'
@@ -79,6 +88,12 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
     }
   }, [selectedPlatforms, currentTier])
 
+  useEffect(() => {
+    if (selectedPlatforms.length > 0 && !selectedPlatforms.includes(previewPlatform)) {
+      setPreviewPlatform(selectedPlatforms[0] as 'facebook' | 'instagram')
+    }
+  }, [previewPlatform, selectedPlatforms])
+
   // Note: FREE tier users can now preview both platforms if they have both enabled
   // The publishing step will handle tier-based restrictions
 
@@ -90,19 +105,54 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
   // Upgrade modal state
   const [showUpgradeModal, setShowUpgradeModal] = useState<'variations' | 'photo-picker' | 'scheduling' | 'tone-length' | null>(null)
   
+  // Media Gallery modal state
+  const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
+  
+  // Storage quota state
+  const [storageQuota, setStorageQuota] = useState<StorageQuota | null>(null)
+  
   // Photo analysis state
   const { analyzePhoto, isAnalyzing, error: analysisError } = usePhotoAnalysis()
   const { editPhoto, isEditing } = usePhotoEdit()
+  const { extractCoverCandidates, isExtracting: isExtractingCover } = useVideoCover()
 
   const [showCropOverlay, setShowCropOverlay] = useState(false)
 
   // Photo suggestion collapsed state
   const [photoIdeaOpen, setPhotoIdeaOpen] = useState(false)
 
+  // Carousel state
+  const [carouselBannerDismissed, setCarouselBannerDismissed] = useState(false)
+
+  // Hidden file input for "Skift foto" from the analysis panel
+  const changePhotoInputRef = useRef<HTMLInputElement>(null)
+  const { organise, isOrganising, result: organiseResult, clearResult: clearOrganiseResult } = useCarouselOrganise()
+
   // Caption edit modal state
   const [captionEditOpen, setCaptionEditOpen] = useState(false)
 
-  const handleCaptionSave = useCallback((newText: string) => {
+  // Load storage quota on mount
+  useEffect(() => {
+    if (currentBusinessId) {
+      getStorageQuota(currentBusinessId)
+        .then(setStorageQuota)
+        .catch(err => console.warn('Failed to load storage quota:', err))
+    }
+  }, [currentBusinessId])
+
+  // Helper to reload quota after uploads/deletions
+  const reloadQuota = useCallback(async () => {
+    if (currentBusinessId) {
+      try {
+        const quota = await getStorageQuota(currentBusinessId)
+        setStorageQuota(quota)
+      } catch (err) {
+        console.warn('Failed to reload quota:', err)
+      }
+    }
+  }, [currentBusinessId])
+
+  const handleCaptionSave = useCallback(async (newText: string, saveAsExample?: boolean) => {
     if (!postContent) return
     // When the user has per-platform text, update only the active platform's text
     if (postContent.platformSpecific && postContent.platformContent?.[previewPlatform]) {
@@ -120,27 +170,48 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       setPostContent({ ...postContent, text: newText })
     }
     markAsChanged?.()
-  }, [postContent, setPostContent, markAsChanged, previewPlatform])
+
+    // Optionally save as a voice example in the brand profile
+    if (saveAsExample && businessData.business?.id) {
+      try {
+        const { data: profileRow } = await supabase
+          .from('business_brand_profile')
+          .select('voice_examples')
+          .eq('business_id', businessData.business.id)
+          .single()
+        const existing = (profileRow?.voice_examples as Record<string, unknown>) ?? {}
+        const doSay: string[] = Array.isArray(existing.do_say) ? (existing.do_say as string[]) : []
+        // Cap at 10 examples to avoid unbounded growth; newest last, deduplicated
+        const deduplicated = [...new Set([...doSay, newText])].slice(-10)
+        await supabase
+          .from('business_brand_profile')
+          .update({ voice_examples: { ...existing, do_say: deduplicated } })
+          .eq('business_id', businessData.business.id)
+        console.log('[CreateStep] Saved edited caption as voice example')
+      } catch (err) {
+        console.warn('[CreateStep] Failed to save voice example:', err)
+      }
+    }
+  }, [postContent, setPostContent, markAsChanged, previewPlatform, businessData.business?.id])
   
   // Load saved photo analysis and media when editing an existing suggestion
   useEffect(() => {
-    if (suggestionId) {
+    if (suggestionId && currentBusinessId) {
       console.log('🔍 Loading saved data for suggestion:', suggestionId)
       ;(supabase as any)
         .from('daily_suggestions')
         .select('uploaded_photo_url, photo_analysis, media_items')
         .eq('id', suggestionId)
+        .eq('business_id', currentBusinessId)
         .single()
         .then(({ data, error }: { data: any; error: any }) => {
           if (error) {
             console.error('❌ Failed to load saved data:', error)
             return
           }
-          
+
           // Load photo analysis + media items together so analysis sits on the right MediaItem
           if (data?.media_items && Array.isArray(data.media_items)) {
-            console.log('📥 Loading saved media items:', data.media_items.length)
-
             // Read current store state inside the async callback — avoids stale closure
             // values for activePath/selectedIdea/weeklyPlanPostIndex which are NOT in the
             // effect's dependency array.
@@ -166,7 +237,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
 
               return {
                 id: item.id,
-                file: new File([], 'restored'), // Placeholder file object
+                file: null as any, // No File object when restoring from DB - will use URL instead
                 url: item.originalUrl || item.url, // Use storage URL as display URL
                 originalUrl: item.originalUrl,
                 adjustedUrl: item.adjustedUrl,
@@ -180,14 +251,17 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
                       ? { [contextKey]: data.photo_analysis }
                       : existingCache)
                   : undefined,
+                coverCandidates: item.coverCandidates,
+                selectedCoverUrl: item.selectedCoverUrl,
               }
             })
-            
+
             setPhotoContent({
               uploadedMedia: restoredMedia,
               selectedMedia: null,
               isOriginal: true,
-              photoAdjustments: null
+              photoAdjustments: null,
+              carouselMode: false,
             })
             console.log('✅ Restored', restoredMedia.length, 'media items')
           } else if (data?.photo_analysis) {
@@ -195,8 +269,11 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
             console.log('📥 Loaded saved analysis (no media items):', data.photo_analysis)
           }
         })
+      return
     }
-  }, [suggestionId, setPhotoContent])
+
+    // No warning needed: currentBusinessId loads asynchronously, effect will re-run when ready
+  }, [suggestionId, currentBusinessId, setPhotoContent])
   
   const maxPhotos = TIER_QUOTAS[currentTier].photoUploadsPerPost
 
@@ -313,8 +390,8 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
 
   // Helper function to save media items to database
   const saveMediaToDatabase = useCallback(async (mediaItems: MediaItem[]) => {
-    if (!suggestionId) {
-      console.log('ℹ️ No suggestionId - skipping media save')
+    if (!suggestionId || !currentBusinessId) {
+      console.log('ℹ️ Missing suggestion/business id - skipping media save')
       return
     }
 
@@ -326,27 +403,35 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       adjustedUrl: item.adjustedUrl,
       type: item.type,
       adjustments: item.adjustments,
-      selectedVersionForPost: item.selectedVersionForPost
+      selectedVersionForPost: item.selectedVersionForPost,
+      slideCaption: item.slideCaption,
+      aiSkipSuggested: item.aiSkipSuggested,
+      coverCandidates: item.coverCandidates,
+      selectedCoverUrl: item.selectedCoverUrl,
     }))
 
     console.log('💾 Saving media items to suggestion:', suggestionId)
     console.log('📸 Media count:', serializableMedia.length)
 
     try {
-      const { error } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from('daily_suggestions')
         .update({ media_items: serializableMedia })
         .eq('id', suggestionId)
+        .eq('business_id', currentBusinessId)
+        .select('id')
 
       if (error) {
         console.error('❌ Failed to save media items:', error)
+      } else if (getAffectedRowCount(data) === 0) {
+        console.warn(buildZeroRowAuditMessage('media_items', currentBusinessId, Number(suggestionId)))
       } else {
         console.log('✅ Media items saved to suggestion:', suggestionId)
       }
     } catch (err) {
       console.error('❌ Exception while saving media items:', err)
     }
-  }, [suggestionId])
+  }, [suggestionId, currentBusinessId])
 
   // Helper to get video duration
   const getVideoDuration = (file: File): Promise<number> => {
@@ -370,6 +455,23 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
   const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
     if (!files || files.length === 0) return
+
+    // Check storage quota before upload
+    if (storageQuota?.isOverLimit) {
+      alert(
+        currentTier === 'free'
+          ? 'Storage full! You\'ve used all 100MB. Upgrade to Standard Plus for 1GB storage.'
+          : 'Storage full! Delete old media or contact support to increase your quota.'
+      )
+      return
+    }
+
+    if (storageQuota?.isNearLimit) {
+      const proceed = confirm(
+        `Warning: You're using ${storageQuota.percentUsed.toFixed(0)}% of your storage (${storageQuota.usedMB}MB / ${storageQuota.limitMB}MB). Continue uploading?`
+      )
+      if (!proceed) return
+    }
 
     const currentPhotoCount = photoContent?.uploadedMedia?.length || 0
     const availableSlots = maxPhotos - currentPhotoCount
@@ -453,7 +555,12 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         uploadedMedia: updatedMedia,
         selectedMedia: null,
         isOriginal: true,
-        photoAdjustments: null
+        photoAdjustments: null,
+        // Preserve existing carousel state when adding more photos
+        carouselMode: photoContent?.carouselMode ?? false,
+        carouselTheme: photoContent?.carouselTheme,
+        carouselCoverIndex: photoContent?.carouselCoverIndex,
+        carouselGoal: photoContent?.carouselGoal,
       })
       
       markAsChanged?.() // Mark draft as changed when photo is uploaded
@@ -461,9 +568,34 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       // Save media to database if editing a suggestion
       await saveMediaToDatabase(updatedMedia)
 
+      // NOTE: Media is NOT saved to media_library here - it will be saved
+      // in PublishStep when the post is actually published/scheduled.
+      // This prevents wasting storage quota on test uploads and abandoned posts.
+
       // Select the first newly uploaded photo
       if (newPhotos.length > 0) {
         setSelectedMediaIndex(currentPhotoCount)
+      }
+
+      // For video uploads (Smart / Pro): extract cover candidates in the background.
+      // We update the specific MediaItem in the store once candidates are ready.
+      if (currentTier !== 'free' && user) {
+        for (const photo of newPhotos) {
+          if (photo.type === 'video') {
+            extractCoverCandidates(photo.file, user.id).then((candidates) => {
+              if (candidates.length === 0) return
+              const { photoContent: current } = usePostCreationStore.getState()
+              if (!current) return
+              const updated = current.uploadedMedia.map((m) =>
+                m.id === photo.id ? { ...m, coverCandidates: candidates } : m
+              )
+              usePostCreationStore.getState().setPhotoContent({
+                ...current,
+                uploadedMedia: updated,
+              })
+            })
+          }
+        }
       }
 
     } catch (error) {
@@ -473,8 +605,72 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       setProcessingImage(false)
     }
   }
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // @ts-ignore - Kept for future use
+
+  // Handler for selecting media from gallery
+  const handleSelectFromGallery = async (galleryMedia: GalleryMediaItem) => {
+    try {
+      console.log('📷 Selected media from gallery:', galleryMedia)
+      
+      // Check photo limit
+      const currentPhotoCount = photoContent?.uploadedMedia?.length || 0
+      if (currentPhotoCount >= maxPhotos) {
+        alert(t('create.photoLimitReached', { max: maxPhotos }) || `Maximum ${maxPhotos} photos reached`)
+        return
+      }
+
+      // Convert gallery media to MediaItem format
+      const newMediaItem: MediaItem = {
+        id: galleryMedia.id,
+        file: null as any, // No File object when selecting from gallery
+        url: galleryMedia.storage_path,
+        originalUrl: galleryMedia.storage_path,
+        adjustedUrl: null,
+        type: galleryMedia.media_type as 'image' | 'video',
+        adjustments: null,
+        selectedVersionForPost: 'original',
+        analysisCache: undefined,
+        coverCandidates: galleryMedia.media_type === 'video' && galleryMedia.video_thumbnail_path 
+          ? [galleryMedia.video_thumbnail_path] 
+          : undefined,
+        selectedCoverUrl: galleryMedia.media_type === 'video' ? galleryMedia.video_thumbnail_path : undefined,
+        duration: galleryMedia.duration || undefined,
+      }
+
+      // Add to uploaded media
+      const updatedMedia = [...(photoContent?.uploadedMedia || []), newMediaItem]
+      
+      setPhotoContent({
+        uploadedMedia: updatedMedia,
+        selectedMedia: null,
+        isOriginal: true,
+        photoAdjustments: null,
+        carouselMode: photoContent?.carouselMode ?? false,
+        carouselTheme: photoContent?.carouselTheme,
+        carouselCoverIndex: photoContent?.carouselCoverIndex,
+        carouselGoal: photoContent?.carouselGoal,
+      })
+      
+      markAsChanged?.() // Mark draft as changed
+
+      // Track media reuse
+      await recordMediaUsage(galleryMedia.id)
+      
+      // Save to database if editing a suggestion
+      await saveMediaToDatabase(updatedMedia)
+
+      // Select the newly added media
+      setSelectedMediaIndex(currentPhotoCount)
+      
+      // Close modal
+      setMediaGalleryOpen(false)
+      
+      console.log('✅ Media added from gallery successfully')
+    } catch (error) {
+      console.error('Error adding media from gallery:', error)
+      alert('Failed to add media from gallery. Please try again.')
+    }
+  }
+
   const _handleReplacePhoto = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
     if (!files || files.length === 0) return
@@ -515,7 +711,8 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         uploadedMedia: updatedMedia,
         selectedMedia: null,
         isOriginal: true,
-        photoAdjustments: null
+        photoAdjustments: null,
+        carouselMode: false,
       })
 
       markAsChanged?.()
@@ -558,7 +755,14 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       uploadedMedia: updatedMedia,
       selectedMedia: null,
       isOriginal: true,
-      photoAdjustments: null
+      photoAdjustments: null,
+      // Keep carousel state; cover index may shift — clamp it
+      carouselMode: updatedMedia.length >= 2 ? (photoContent?.carouselMode ?? false) : false,
+      carouselTheme: photoContent?.carouselTheme,
+      carouselGoal: photoContent?.carouselGoal,
+      carouselCoverIndex: photoContent?.carouselCoverIndex !== undefined
+        ? Math.min(photoContent.carouselCoverIndex, Math.max(0, updatedMedia.length - 1))
+        : undefined,
     })
 
     markAsChanged?.()
@@ -570,6 +774,87 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
     if (selectedMediaIndex >= updatedMedia.length) {
       setSelectedMediaIndex(Math.max(0, updatedMedia.length - 1))
     }
+  }
+
+  // ── Carousel handlers ───────────────────────────────────────────────────────
+
+  const handleActivateCarousel = () => {
+    setPhotoContent({ ...(photoContent as PhotoContent), carouselMode: true, carouselCoverIndex: 0 })
+    setCarouselBannerDismissed(false)
+  }
+
+  const handleReorderMedia = (newOrder: MediaItem[]) => {
+    setPhotoContent({
+      ...(photoContent as PhotoContent),
+      uploadedMedia: newOrder,
+      carouselCoverIndex: 0,
+    })
+    markAsChanged?.()
+  }
+
+  const handleSetCover = (index: number) => {
+    setPhotoContent({ ...(photoContent as PhotoContent), carouselCoverIndex: index })
+    markAsChanged?.()
+  }
+
+  const handleCoverSelect = useCallback((coverUrl: string) => {
+    const updatedMedia = (photoContent?.uploadedMedia || []).map((m, i) =>
+      i === selectedMediaIndex ? { ...m, selectedCoverUrl: coverUrl } : m
+    )
+    setPhotoContent({ ...(photoContent as PhotoContent), uploadedMedia: updatedMedia })
+    markAsChanged?.()
+    saveMediaToDatabase(updatedMedia)
+    // Persist to dedicated column for easy reading by the Graph API publishing Edge Function
+    if (suggestionId && currentBusinessId) {
+      void (async () => {
+        const { data, error } = await (supabase as any)
+          .from('daily_suggestions')
+          .update({ cover_url: coverUrl })
+          .eq('id', suggestionId)
+          .eq('business_id', currentBusinessId)
+          .select('id')
+
+        if (error) {
+          console.error('❌ Failed to save cover_url:', error)
+          return
+        }
+
+        if (getAffectedRowCount(data) === 0) {
+          console.warn(buildZeroRowAuditMessage('cover_url', currentBusinessId, Number(suggestionId)))
+        }
+      })()
+    }
+    // No warning needed: currentBusinessId loads asynchronously, save will happen when ready
+  }, [photoContent, selectedMediaIndex, setPhotoContent, markAsChanged, saveMediaToDatabase, suggestionId, currentBusinessId])
+
+  const handleClearAiSkip = (index: number) => {
+    const updatedMedia = [...(photoContent?.uploadedMedia || [])]
+    updatedMedia[index] = { ...updatedMedia[index], aiSkipSuggested: false }
+    setPhotoContent({ ...(photoContent as PhotoContent), uploadedMedia: updatedMedia })
+  }
+
+  const handleSlideCaptionChange = (index: number, caption: string) => {
+    const updatedMedia = [...(photoContent?.uploadedMedia || [])]
+    updatedMedia[index] = { ...updatedMedia[index], slideCaption: caption }
+    setPhotoContent({ ...(photoContent as PhotoContent), uploadedMedia: updatedMedia })
+    markAsChanged?.()
+  }
+
+  const handleApplyOrganise = () => {
+    if (!organiseResult || !photoContent) return
+    const original = photoContent.uploadedMedia
+    const reordered = organiseResult.suggestedOrder.map(i => original[i])
+    const withFlags = reordered.map((m, i) => ({
+      ...m,
+      aiSkipSuggested: organiseResult.flaggedSkipIndices.includes(organiseResult.suggestedOrder[i]),
+    }))
+    setPhotoContent({
+      ...(photoContent as PhotoContent),
+      uploadedMedia: withFlags,
+      carouselCoverIndex: organiseResult.coverIndex,
+    })
+    clearOrganiseResult()
+    markAsChanged?.()
   }
 
   // Helper function to generate contextual upgrade text based on analysis
@@ -663,6 +948,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       currentMedia.duration, // duration in seconds (for videos)
       imageWidth,
       imageHeight,
+      businessData.business?.id, // enables silent atmosphere extraction
     )
 
     if (result) {
@@ -692,7 +978,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       }
       
       // Save photo and analysis to daily_suggestions if we have a suggestion ID
-      if (suggestionId) {
+      if (suggestionId && currentBusinessId) {
         console.log('💾 Attempting to save photo analysis for suggestion:', suggestionId)
         console.log('📸 Photo URL:', currentMedia.originalUrl)
         console.log('📊 Analysis data:', JSON.stringify(result, null, 2))
@@ -705,11 +991,14 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
               photo_analysis: result
             })
             .eq('id', suggestionId)
+            .eq('business_id', currentBusinessId)
             .select()
           
           if (error) {
             console.error('❌ Failed to save photo analysis:', error)
             console.error('Error details:', JSON.stringify(error, null, 2))
+          } else if (getAffectedRowCount(data) === 0) {
+            console.warn(buildZeroRowAuditMessage('photo_analysis', currentBusinessId, Number(suggestionId)))
           } else {
             console.log('✅ Photo analysis saved to suggestion:', suggestionId)
             console.log('✅ Updated data:', data)
@@ -1080,7 +1369,15 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
                     mediaType={currentPhoto?.type}
                     onUndo={handleUndoEdit}
                     canUndo={!!(currentPhoto?.adjustedUrlHistory?.length) || !!(currentPhoto?.adjustedUrl)}
-                    onEditText={currentTier !== 'free' ? () => setCaptionEditOpen(true) : undefined}
+                    onEditText={() => setCaptionEditOpen(true)}
+                    onChangePhoto={() => changePhotoInputRef.current?.click()}
+                  />
+                  <input
+                    ref={changePhotoInputRef}
+                    type="file"
+                    accept="image/*,video/mp4,video/quicktime,video/x-m4v"
+                    className="hidden"
+                    onChange={_handleReplacePhoto}
                   />
                 </div>
               )}
@@ -1108,45 +1405,130 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
             </div>
           )}
 
+          {/* Video Cover Selector — Smart / Pro only, video only */}
+          {hasPhoto && currentPhoto?.type === 'video' && currentTier !== 'free' && (
+            <VideoCoverSelector
+              candidates={currentPhoto.coverCandidates || []}
+              selectedUrl={currentPhoto.selectedCoverUrl}
+              isExtracting={isExtractingCover}
+              onSelect={handleCoverSelect}
+            />
+          )}
+
+          {/* Photo Upload Manager */}
+          <PhotoUploadManager
+            uploadedMedia={photoContent?.uploadedMedia || []}
+            selectedMediaIndex={selectedMediaIndex}
+            onPhotoUpload={handlePhotoUpload}
+            onReplacePhoto={_handleReplacePhoto}
+            onRemovePhoto={handleRemovePhoto}
+            onSelectMedia={setSelectedMediaIndex}
+            processingImage={_processingImage}
+            carouselMode={photoContent?.carouselMode ?? false}
+            carouselCoverIndex={photoContent?.carouselCoverIndex ?? 0}
+            onReorderMedia={handleReorderMedia}
+            onSetCover={handleSetCover}
+            onClearAiSkip={handleClearAiSkip}
+            onSlideCaptionChange={handleSlideCaptionChange}
+          />
+
+          {/* Select from Media Gallery Button */}
+          {currentBusinessId && (photoContent?.uploadedMedia?.length || 0) < maxPhotos && (
+            <div className="mt-3">
+              <button
+                onClick={() => setMediaGalleryOpen(true)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-colors text-sm font-medium text-gray-700 hover:text-blue-700"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>Select from Media Gallery</span>
+              </button>
+            </div>
+          )}
+
+          {/* Carousel Activation Banner */}
+          {TIER_QUOTAS[currentTier].carousel.enabled &&
+            !photoContent?.carouselMode &&
+            !carouselBannerDismissed &&
+            (photoContent?.uploadedMedia?.length ?? 0) >= 2 && (
+            <CarouselActivationBanner
+              onActivate={handleActivateCarousel}
+              onDismiss={() => setCarouselBannerDismissed(true)}
+            />
+          )}
+
+          {/* Carousel Setup (theme, goal, AI organise) */}
+          {TIER_QUOTAS[currentTier].carousel.enabled && photoContent?.carouselMode && photoContent && (
+            <CarouselSetup
+              photoContent={photoContent}
+              onThemeSelect={(theme) => setPhotoContent({ ...(photoContent as PhotoContent), carouselTheme: theme })}
+              onGoalSelect={(goal) => setPhotoContent({ ...(photoContent as PhotoContent), carouselGoal: goal })}
+              onOrganise={() => organise({
+                mediaItems: photoContent.uploadedMedia,
+                theme: photoContent.carouselTheme,
+                goal: photoContent.carouselGoal,
+                language: i18n.language,
+              })}
+              isOrganising={isOrganising}
+              organiseResult={organiseResult}
+              onApplyOrganise={handleApplyOrganise}
+              onDismissOrganise={clearOrganiseResult}
+              dragAndDropEnabled={TIER_QUOTAS[currentTier].carousel.dragAndDrop}
+              goalEnabled={TIER_QUOTAS[currentTier].carousel.goalBased}
+            />
+          )}
+
         </div>
 
         {/* RIGHT: Platform Preview */}
         <div className="space-y-3 sticky top-4 self-start">
-
-          {/* Crop button — positioned in top-right corner of the preview frame */}
-          <div className="relative">
-            {hasPhoto && currentPhoto && (
-              <button
-                onClick={() => setShowCropOverlay(true)}
-                className="absolute top-2 right-2 z-10 px-2.5 py-1.5 bg-white/90 backdrop-blur-sm border border-slate-300 text-slate-700 rounded-lg text-xs font-medium hover:bg-white transition-all flex items-center gap-1.5 shadow-sm"
-              >
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                  <path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/>
-                </svg>
-                <span>{t('create.crop')}</span>
-              </button>
-            )}
-
-          <PlatformPreview
-            selectedPlatforms={selectedPlatforms}
-            previewPlatform={previewPlatform}
-            onPreviewPlatformChange={setPreviewPlatform}
-            content={{
-              ...platformPreviewContent,
-              hashtags: platformPreviewContent.hashtags || []
-            }}
-            uploadedMedia={photoContent?.uploadedMedia || []}
-            selectedMediaIndex={selectedMediaIndex}
-            onMediaIndexChange={setSelectedMediaIndex}
-            onPhotoUpload={handlePhotoUpload}
-            onRemovePhoto={handleRemovePhoto}
-            onSelectVersionForPost={handleSelectVersionForPost}
+          <PlatformSelector
             currentTier={currentTier}
-            businessName={businessData.business?.name || undefined}
-            onEditCaption={currentTier !== 'free' ? () => setCaptionEditOpen(true) : undefined}
-            platformFormat={strategicIdea?.platformFormat}
+            selectedPlatforms={selectedPlatforms}
+            onSelectPlatforms={setSelectedPlatforms}
+            activePlatform={previewPlatform}
+            onActivePlatformChange={setPreviewPlatform}
+            availablePlatforms={enabledPlatforms}
           />
-          </div>
+
+            <div className="relative">
+              {hasPhoto && currentPhoto && currentPhoto.type !== 'video' && (
+                <button
+                  onClick={() => setShowCropOverlay(true)}
+                  className="absolute top-2 right-2 z-10 px-2.5 py-1.5 bg-white/90 backdrop-blur-sm border border-slate-300 text-slate-700 rounded-lg text-xs font-medium hover:bg-white transition-all flex items-center gap-1.5 shadow-sm"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                    <path d="M6 2v14a2 2 0 002 2h14"/><path d="M18 22V8a2 2 0 00-2-2H2"/>
+                  </svg>
+                  <span>{t('create.crop')}</span>
+                </button>
+              )}
+
+              <PlatformPreview
+                selectedPlatforms={selectedPlatforms}
+                previewPlatform={previewPlatform}
+                onPreviewPlatformChange={setPreviewPlatform}
+                content={{
+                  ...platformPreviewContent,
+                  hashtags: platformPreviewContent.hashtags || [],
+                  includeHashtags: platformPreviewContent.includeHashtags,
+                  adjustments: {
+                    ...content.adjustments,
+                    includeHashtags: platformPreviewContent.includeHashtags
+                  }
+                }}
+                uploadedMedia={photoContent?.uploadedMedia || []}
+                selectedMediaIndex={selectedMediaIndex}
+                onMediaIndexChange={setSelectedMediaIndex}
+                onSelectVersionForPost={handleSelectVersionForPost}
+                currentTier={currentTier}
+                businessName={businessData.business?.name || undefined}
+                onEditCaption={() => setCaptionEditOpen(true)}
+                platformFormat={strategicIdea?.platformFormat}
+                carouselMode={photoContent?.carouselMode ?? false}
+              />
+            </div>
         </div>
       </div>
 
@@ -1197,6 +1579,17 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         language={i18n.language}
         businessId={businessData.business?.id || undefined}
       />
+
+      {/* Media Gallery Modal */}
+      {currentBusinessId && (
+        <MediaGalleryModal
+          businessId={currentBusinessId}
+          isOpen={mediaGalleryOpen}
+          onClose={() => setMediaGalleryOpen(false)}
+          onSelectMedia={handleSelectFromGallery}
+          selectionMode={true}
+        />
+      )}
 
     </div>
   )

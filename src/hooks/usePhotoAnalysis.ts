@@ -42,7 +42,8 @@ interface UsePhotoAnalysisReturn {
     mediaType?: 'image' | 'video',
     duration?: number,
     imageWidth?: number,
-    imageHeight?: number
+    imageHeight?: number,
+    businessId?: string
   ) => Promise<PhotoAnalysisResult | null>
   isAnalyzing: boolean
   error: string | null
@@ -61,7 +62,8 @@ export function usePhotoAnalysis(): UsePhotoAnalysisReturn {
     mediaType: 'image' | 'video' = 'image',
     duration?: number,
     imageWidth?: number,
-    imageHeight?: number
+    imageHeight?: number,
+    businessId?: string
   ): Promise<PhotoAnalysisResult | null> => {
     setIsAnalyzing(true)
     setError(null)
@@ -77,7 +79,8 @@ export function usePhotoAnalysis(): UsePhotoAnalysisReturn {
           mediaType,
           duration,
           imageWidth,
-          imageHeight
+          imageHeight,
+          businessId,
         }
       })
 

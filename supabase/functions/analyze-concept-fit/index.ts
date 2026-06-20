@@ -61,6 +61,8 @@ import { callAI } from '../_shared/ai-caption-generator/ai-provider.ts';
 
     const primaryLocationType = locationData.area_type;
     const categoryScores = locationData.category_scores || {};
+    const categoryModifiers = locationData.category_modifiers || {};
+    
     // Use the requested locationType from the body (set by the page per card),
     // falling back to the stored area_type so all cards get the right expectations.
     const requestedLocationType = body.locationType || primaryLocationType;
@@ -68,6 +70,12 @@ import { callAI } from '../_shared/ai-caption-generator/ai-provider.ts';
     const language: 'da' | 'en' = body.language === 'en' ? 'en' : 'da';
 
     console.log(`[Concept Fit] Requested location type: ${requestedLocationType} (stored area_type: ${primaryLocationType}, score: ${primaryScore}%)`);
+    
+    // Check for category modifiers (e.g., city_centre + shopping)
+    const modifiers = categoryModifiers[requestedLocationType] || [];
+    if (modifiers.length > 0) {
+      console.log(`[Concept Fit] Category modifiers detected for ${requestedLocationType}:`, modifiers);
+    }
 
     // =====================================================
     // STEP 2: Load Location Expectations
@@ -133,6 +141,8 @@ import { callAI } from '../_shared/ai-caption-generator/ai-provider.ts';
       locationTypeId: requestedLocationType,
       locationScore: primaryScore,
       locationExpectations,
+      categoryModifiers: modifiers,
+      locationData: locationData,  // Pass full location intelligence
       businessData: {
         operations,
         profile,
@@ -147,7 +157,10 @@ import { callAI } from '../_shared/ai-caption-generator/ai-provider.ts';
     // =====================================================
     // STEP 5: Save Results to Database
     // =====================================================
-    const { error: insertError } = await supabaseClient
+    // NOTE: business_concept_fit table was DROPPED April 2026 (migration 20260420000007).
+    // This upsert will fail — wrapped in try/catch so the function still returns success.
+    // LocationIntelligencePage reads conceptFit from the response body, not from this table.
+    try { await supabaseClient
       .from('business_concept_fit')
       .upsert({
         business_id: businessId,
@@ -173,29 +186,17 @@ import { callAI } from '../_shared/ai-caption-generator/ai-provider.ts';
         
         // Strategy
         strategy_approach: conceptFit.strategy_approach,
-        strategy_positioning: conceptFit.strategy_positioning,
         emphasis: conceptFit.emphasis,
         avoid: conceptFit.avoid,
-        cta_style: conceptFit.cta_style,
-        
-        // Detected motivations
-        detected_motivations: conceptFit.detected_motivations,
-        
-        // External factors (from location expectations)
-        weather_sensitivity: locationExpectations.weather_sensitivity,
-        seasonality_pattern: locationExpectations.seasonality.pattern,
-        seasonal_weights: locationExpectations.seasonality.seasonal_weights,
         
         analyzed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
 
-    if (insertError) {
-      console.error('[Concept Fit] Database insert error:', insertError);
-      throw insertError;
-    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) { console.warn('[Concept Fit] Could not save to business_concept_fit (table dropped):', e?.message); }
 
-    console.log(`[Concept Fit] Results saved to database`);
+    console.log(`[Concept Fit] Analysis complete (results in response body)`);
 
     // =====================================================
     // STEP 6: Return Results
@@ -309,6 +310,8 @@ interface AnalysisInput {
   locationTypeId: string;
   locationScore: number;
   locationExpectations: any;
+  categoryModifiers: string[];
+  locationData: any;  // Full location intelligence data
   businessData: {
     operations: any;
     profile: any;
@@ -319,7 +322,7 @@ interface AnalysisInput {
 }
 
 async function analyzeConceptFit(input: AnalysisInput): Promise<ConceptFitOutput> {
-  const { locationExpectations, businessData, language } = input;
+  const { locationExpectations, businessData, categoryModifiers, locationData, language } = input;
 
   // =====================================================
   // Factor 1: Customer Match
@@ -336,6 +339,7 @@ async function analyzeConceptFit(input: AnalysisInput): Promise<ConceptFitOutput
   const { motivationFit, detectedMotivations } = await evaluateMotivationFit(
     locationExpectations.typical_motivations,
     businessData,
+    categoryModifiers,
     language
   );
 
@@ -399,6 +403,8 @@ async function analyzeConceptFit(input: AnalysisInput): Promise<ConceptFitOutput
     fitLevel: overallFitLevel,
     approach: strategyApproach,
     locationExpectations,
+    locationData,  // Pass location intelligence
+    categoryModifiers,  // Pass modifiers (e.g., shopping)
     businessData,
     factorResults: {
       customerFit,
@@ -888,10 +894,10 @@ function evaluateWinningAnglesFit(expectedAngles: string[], businessData: any, l
 // AI-POWERED FUNCTIONS
 // =====================================================
 
-async function evaluateMotivationFit(expectedMotivations: any[], businessData: any, language: 'da' | 'en') {
+async function evaluateMotivationFit(expectedMotivations: any[], businessData: any, categoryModifiers: string[], language: 'da' | 'en') {
   console.log('[Concept Fit] Detecting business motivations with GPT-4o...');
 
-  const prompt = buildMotivationDetectionPrompt(expectedMotivations, businessData, language);
+  const prompt = buildMotivationDetectionPrompt(expectedMotivations, businessData, categoryModifiers, language);
   
   interface MotivationAnalysis {
     detected_motivations: Array<{
@@ -966,8 +972,21 @@ async function evaluateMotivationFit(expectedMotivations: any[], businessData: a
   }
 }
 
-function buildMotivationDetectionPrompt(expectedMotivations: any[], businessData: any, language: 'da' | 'en'): string {
+function buildMotivationDetectionPrompt(expectedMotivations: any[], businessData: any, categoryModifiers: string[], language: 'da' | 'en'): string {
   const { operations, profile, brandProfile, menuMetadata } = businessData;
+  
+  // Build shopping context if applicable
+  const hasShoppingModifier = categoryModifiers.includes('shopping');
+  const shoppingContext = hasShoppingModifier ? `
+
+🛍️ SHOPPING KONTEKST:
+Denne lokation har stærk shopping-karakter (tæt på store stormagasiner/indkøbscentre).
+Tænk på shopping-relaterede motivationer som:
+- Shopping-pause / hvile
+- Post-shopping måltid
+- Mødestedet mellem butikker
+- Energi-boost under shopping-tur
+- Belønning efter shopping` : '';
 
   return `Du er ekspert i dansk restaurantbranchen og skal analysere hvilke kundemotivationer denne forretning primært serverer.
 
@@ -983,7 +1002,7 @@ Service:
 - Bordservice: ${operations?.has_table_service ? 'Ja' : 'Nej'}
 - Takeaway: ${operations?.has_takeaway ? 'Ja' : 'Nej'}
 - Levering: ${operations?.has_delivery ? 'Ja' : 'Nej'}
-- Udeservering: ${operations?.has_outdoor_seating ? 'Ja' : 'Nej'}
+- Udeservering: ${operations?.has_outdoor_seating ? 'Ja' : 'Nej'}${shoppingContext}
 
 Kapacitet:
 - Indendørs pladser: ${operations?.seating_capacity_indoor || 'Ukendt'}
@@ -1144,6 +1163,8 @@ function buildStrategyPrompt(input: any): string {
     fitLevel,
     approach,
     locationExpectations,
+    locationData,
+    categoryModifiers,
     businessData,
     factorResults,
     language,
@@ -1151,6 +1172,24 @@ function buildStrategyPrompt(input: any): string {
 
   const { operations, profile, brandProfile, menuSummary } = businessData;
   const isEn = language === 'en';
+  
+  // Extract location context
+  const neighborhoodCharacter = locationData?.neighborhood_character || '';
+  const landmarks = locationData?.landmarks_nearby || [];
+  const hasShoppingModifier = categoryModifiers?.includes('shopping');
+  
+  // Identify cultural venues from landmarks
+  const culturalVenues = landmarks
+    .filter((l: any) => 
+      l.type?.includes('museum') || 
+      l.type?.includes('theater') || 
+      l.type?.includes('performing_arts') || 
+      l.type?.includes('cultural') ||
+      l.type?.includes('entertainment')
+    )
+    .slice(0, 5);
+  
+  const hasCulturalVenues = culturalVenues.length > 0;
   
   // Inline location guidance instead of importing from prompt-builder
   const locationTypeName = locationExpectations.displayName || locationExpectations.locationTypeId || (isEn ? 'the area' : 'området');
@@ -1177,7 +1216,7 @@ Beskrivelse: ${profile?.long_description || 'Ingen beskrivelse'}
 
 SERVICE CAPABILITIES:
 - Etableringstype: ${operations?.establishment_type || 'Ukendt'}
-- Prisleje: ${operations?.price_level || 'Ukendt'} (gennemsnit: ${operations?.average_check_per_person ? operations.average_check_per_person + ' ' + (operations?.currency || 'DKK') : 'Ukendt'})
+- Prisleje: ${operations?.price_level || 'Ukendt'}
 - Bordservice: ${operations?.has_table_service ? 'Ja' : 'Nej'}
 - Takeaway: ${operations?.has_takeaway ? 'Ja' : 'Nej'}
 - Udeservering: ${operations?.has_outdoor_seating ? 'Ja' : 'Nej'}
@@ -1191,6 +1230,30 @@ MENU SCOPE (til kontekst - nævn IKKE specifikke retter i din strategi):
 ${menuSummary}
 ` : 'Menu data ikke tilgængelig'}
 
+---
+
+🏛️ LOKATIONS KONTEKST (FAKTISK OMGIVELSER):
+
+${neighborhoodCharacter ? `OMRÅDEBESKRIVELSE:
+${neighborhoodCharacter}
+` : ''}
+${hasCulturalVenues ? `
+🎭 KULTURELLE VENUES I NÆRHEDEN (HØJESTE PRIORITET):
+${culturalVenues.map((v: any) => `- ${v.name} (${v.walking_minutes || Math.round(v.distance / 80)} min gang)`).join('\n')}
+
+⚡ STRATEGISK MULIGHED:
+- Pre-show positionering: "Aperitif før forestilling", "Let middag før koncert"
+- Post-show positionering: "Midnatsmad efter teater", "Drinks efter museumsbesøg"
+- Kulturpublikum: Kvalitetsbevidste gæster der søger autentiske oplevelser
+` : ''}${hasShoppingModifier ? `
+🛍️ SHOPPING KONTEKST:
+Denne lokation ligger i et stærkt shoppingområde med stormagasiner og butikker.
+
+⚡ STRATEGISK MULIGHED:
+- Shopping-pause positionering: "Hvil under shopping-turen", "Energi-boost mellem butikker"
+- Post-shopping positioning: "Belønning efter shopping", "Måltid efter handletur"
+- Shopping-publikum: Målrettede shoppere der søger bekvemmelighed og komfort
+` : ''}
 ---
 
 LOKATIONS FORVENTNINGER:
@@ -1255,11 +1318,14 @@ REGLER:
 - Nævn FAKTISKE målgrupper: "familier med børnemenu", "par til aftenmiddag"
 - Nævn FAKTISKE tidsperioder: "weekend brunch", "sen aften fredag/lørdag"
 - Nævn FAKTISKE fordele: "moderate priser (140 DKK gennemsnit)", "både casual og premium"
+- **PRIORITÉR KULTUREL KONTEKST**: Hvis museer/teatre i nærheden → pre-show/post-show positioning
+- **PRIORITÉR SHOPPING KONTEKST**: Hvis shopping-modifier → shopping-pause/post-shopping positioning
 
 ❌ UNDGÅ:
 - Generiske vendinger: "kvalitet + service", "det bedste fra begge verdener", "balanceret tilgang"
 - Vage begreber: "hybrid", "alsidighed", "variation" (uden at specificere hvad)
 - Specifikke menupunkter: PARISERBØF, FAVORITTEN, RIBEYE osv.
+- Ignorering af kulturelle venues når de er til stede i location context
 
 ---
 
@@ -1271,6 +1337,10 @@ GODE EKSEMPLER PÅ "emphasis":
 ✅ "Positioner som gruppe-venligt med plads til 6-8 personer"
 ✅ "Spil på variation: casual frokost (120-180 DKK) til premium middag (300+ DKK)"
 ✅ "Brug late hours (fredag/lørdag til 02:00) til nightlife positioning"
+✅ "Pre-show positioning: Let middag eller aperitif før teater/koncert" (hvis kulturelle venues)
+✅ "Post-show positioning: Midnatsmad eller drinks efter forestilling" (hvis kulturelle venues)
+✅ "Shopping-pause: Hvil og genoplad mellem butikker" (hvis shopping-context)
+✅ "Target kulturpublikum med kvalitetsbevidst tilgang" (hvis museer/teatre)
 
 ❌ DÅRLIGE EKSEMPLER:
 
@@ -1284,12 +1354,15 @@ GODE EKSEMPLER PÅ "emphasis":
 ---
 
 KRAV:
-- "emphasis" array SKAL have MINIMUM 3 items
+- "emphasis" array SKAL have MINIMUM 3 items (4-5 anbefalet)
 - "strengths" array SKAL have MINIMUM 2 items
 - Hver "emphasis" SKAL være unik, konkret og forskellig fra de andre
 - Brug FAKTISK data fra forretningsprofilen
 - Vær SPECIFIK om tal, tider, priser når tilgængelige
 - "positioning" skal beskrive HVAD forretningen er, ikke bare "hybrid" eller "balanceret"
+- **HVIS KULTURELLE VENUES** (museer/teatre): SKAL inkludere pre-show eller post-show strategi
+- **HVIS SHOPPING MODIFIER**: SKAL inkludere shopping-pause eller post-shopping strategi
+- Prioritér kulturel og shopping kontekst højere end generiske budskaber
 
 ${langInstruction}
 

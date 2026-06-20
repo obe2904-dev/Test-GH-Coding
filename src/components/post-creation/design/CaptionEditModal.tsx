@@ -40,8 +40,8 @@ const Spinner = ({ className }: { className?: string }) => (
 interface CaptionEditModalProps {
   isOpen: boolean
   onClose: () => void
-  /** Called with the final, confirmed text when the user saves. */
-  onSave: (newText: string) => void
+  /** Called with the final, confirmed text when the user saves. Second arg is true when owner checked "save as voice example". */
+  onSave: (newText: string, saveAsExample?: boolean) => void
   initialText: string
   currentTier: string
   language: string
@@ -82,6 +82,9 @@ export function CaptionEditModal({
   const [toneAdjust, setToneAdjust] = useState<ToneAdjust>(null)
   const [isAIAdjusting, setIsAIAdjusting] = useState(false)
 
+  // ── Voice example save option ────────────────────────────────────────────────
+  const [saveAsVoiceExample, setSaveAsVoiceExample] = useState(false)
+
   // ── Reset all state when modal opens or initialText changes ─────────────────
   useEffect(() => {
     if (isOpen) {
@@ -91,6 +94,7 @@ export function CaptionEditModal({
       setLengthAdjust(null)
       setToneAdjust(null)
       setIsAIAdjusting(false)
+      setSaveAsVoiceExample(false)
     }
   }, [isOpen, initialText])
 
@@ -170,9 +174,9 @@ export function CaptionEditModal({
 
   // ── Save ────────────────────────────────────────────────────────────────────
   const handleSave = useCallback(() => {
-    onSave(editedText.trim())
+    onSave(editedText.trim(), saveAsVoiceExample)
     onClose()
-  }, [editedText, onSave, onClose])
+  }, [editedText, saveAsVoiceExample, onSave, onClose])
 
   // ── Keyboard: Escape closes, Ctrl+Enter saves ────────────────────────────────
   useEffect(() => {
@@ -254,12 +258,6 @@ export function CaptionEditModal({
                 ? (isDanish ? 'Stavning tjekket' : 'Spelling checked')
                 : (isDanish ? 'Tjek stavning' : 'Check spelling')}
             </button>
-
-            {!isEdited && !isSpellingChecked && (
-              <span className="text-xs text-gray-400">
-                {isDanish ? 'Rediger teksten for at tjekke stavning' : 'Edit the text to check spelling'}
-              </span>
-            )}
           </div>
 
           {/* Pro: length + tone adjusters */}
@@ -339,23 +337,42 @@ export function CaptionEditModal({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100 gap-3">
-          <button
-            onClick={onClose}
-            disabled={isBusy}
-            className="px-4 py-2 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {isDanish ? 'Annuller' : 'Cancel'}
-          </button>
+        <div className="flex flex-col gap-2 px-5 py-4 border-t border-gray-100">
+          {/* Voice example opt-in — shown only after the user has made edits */}
+          {isEdited && (
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={saveAsVoiceExample}
+                onChange={(e) => setSaveAsVoiceExample(e.target.checked)}
+                className="w-3.5 h-3.5 rounded accent-brand"
+              />
+              <span className="text-xs text-gray-600">
+                {isDanish
+                  ? 'Gem som stemmeeksempel (forbedrer fremtidige tekster)'
+                  : 'Save as voice example (improves future captions)'}
+              </span>
+            </label>
+          )}
 
-          <button
-            onClick={handleSave}
-            disabled={isBusy}
-            className="flex items-center gap-1.5 px-5 py-2 text-xs font-semibold text-white bg-brand rounded-lg hover:bg-[#1a4045] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <CheckIcon className="w-3.5 h-3.5" />
-            {isDanish ? 'Gem ændringer' : 'Save changes'}
-          </button>
+          <div className="flex items-center justify-between gap-3">
+            <button
+              onClick={onClose}
+              disabled={isBusy}
+              className="px-4 py-2 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {isDanish ? 'Annuller' : 'Cancel'}
+            </button>
+
+            <button
+              onClick={handleSave}
+              disabled={isBusy}
+              className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium text-white bg-cta rounded-lg hover:bg-cta-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <CheckIcon className="w-3.5 h-3.5" />
+              {isDanish ? 'Gem ændringer' : 'Save changes'}
+            </button>
+          </div>
         </div>
 
       </div>

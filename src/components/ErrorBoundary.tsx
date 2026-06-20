@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             </p>
             <button
               onClick={this.handleRetry}
-              className="px-4 py-2 bg-brand text-mint rounded-lg hover:bg-[#12393D] transition-colors text-sm font-semibold"
+              className="px-4 py-2 bg-cta text-text-inverse rounded-lg hover:bg-cta-hover transition-colors text-sm font-medium"
             >
               Prøv igen
             </button>

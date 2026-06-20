@@ -10,14 +10,16 @@ import type { LocaleConfig } from '../locales.ts'
 import { buildBrandEssenceFallback, buildSignatureShotFallback, buildToneOfVoiceFallback, buildContentFocusFallback, removeBannedWords } from '../fallbacks.ts'
 import { extractBrandEssenceConstraints, validateBrandEssence, buildConstrainedBrandEssence } from '../constraints/brand-essence-constraints.ts'
 import { formatAndRepairProfile, type FormatContext } from './auto-repair-formatters.ts'
+import { buildBusinessCharacterDeterministic, buildAudienceFrameworkDeterministic, buildVoiceSystemDeterministic } from './fallback-builders.ts'
+import { getLanguageByCode } from '../languages.ts'
 
-export function applyDeterministicRepairs(sections: any, dataSources: any, analysis: any, language: string, locale: LocaleConfig): any {
+export function applyDeterministicRepairs(sections: any, dataSources: any, analysis: any, language: string, locale: LocaleConfig, requestErrors?: any): any {
   // Create fallback context for robust fallbacks
   const fallbackCtx = {
     dataSources,
     analysis,
     locale,
-    errors: (globalThis as any).requestErrors  // Global error collector
+    errors: requestErrors ?? null
   }
   
   // Extract canonical location and venue type
@@ -84,9 +86,9 @@ export function applyDeterministicRepairs(sections: any, dataSources: any, analy
   // 3. Force content_focus to cover 3 areas (food/service, atmosphere/interior, moments/transitions)
   if (sections?.content_focus?.value && typeof sections.content_focus.value === 'string') {
     const cf = sections.content_focus.value.toLowerCase()
-    const hasFoodService = /mad|service|food|retter|menu|essen/i.test(cf)
-    const hasAtmosphere = /stemning|atmosf[æä]re|interiør|interior|atmosphere/i.test(cf)
-    const hasMoments = /folk|øjeblikke|moments|overgange|transitions|menschen|momente|gæster|liv\b|hverdags|sociale|sæson|tilholdssted/i.test(cf)
+    const hasFoodService = /mad|service|food|retter|menu|essen|servering|køkken|brunch|frokost|middag/i.test(cf)
+    const hasAtmosphere = /stemning|atmosf[æä]re|interiør|interior|atmosphere|oplevelse|udend[oø]rs|udeservering|terrasse|terasse|[aå]en|haven|vand|miljø|rum|lys|vibe/i.test(cf)
+    const hasMoments = /folk|øjeblikke|moments|overgange|transitions|menschen|momente|gæster|liv\b|hverdags|sociale|sæson|tilholdssted|mennesker|tempo|fortæll|bts/i.test(cf)
     
     if (!hasFoodService || !hasAtmosphere || !hasMoments) {
       console.log(`⚠️ content_focus missing 3 required areas, applying robust fallback`)
@@ -184,68 +186,186 @@ export function applyDeterministicRepairs(sections: any, dataSources: any, analy
     }
   }
 
-  // STEP 7: Strip temporal/programme narration from brand_essence_elaboration.
-  // AI invariably produces programme-description framing for hybrid venues (what they do/offer)
-  // instead of competitive differentiation (why THIS place vs the next one).
-  // Approach: for HYBRID venues, always rebuild deterministically.
-  // For non-hybrid, rebuild only if temporal narration tokens are detected.
-  {
-    const TEMPORAL_RX = /\bOm dagen\b|\bOm aftenen\b|\bforvandles\b|\bskifter til\b|\bdag og aften\b|\bdag til aften\b|\bbåde dag og\b|\bdag ved\b/i
-    // Detect programme-description framing ("kombinere", "tilbyder", "spænder fra ... til")
-    const PROGRAMME_RX = /\bkombinerer\b|\bkombination af\b|\bspænder fra\b|\btilbyder [a-zæøå]+ og [a-zæøå]+/i
-
-    const elab = sections?.brand_essence_elaboration
-    const elaborationText: string = typeof elab === 'object' && elab !== null
-      ? (elab.value || '')
-      : (typeof elab === 'string' ? elab : '')
-
-    // Determine if venue is hybrid (re-check here — isHybridVenue not in scope; use dataSources signals)
-    const waAnal: any = dataSources?.websiteAnalysis?.raw_result?.analysis || {}
-    const waKw: string[] = Array.isArray(waAnal?.keywords) ? waAnal.keywords : []
-    const waHooks: any[] = waAnal?.venueHooks?.uniqueHooks || []
-    const waText = `${waKw.join(' ')} ${waHooks.map((h: any) => `${h.hook || ''} ${h.text || ''}`).join(' ')}`.toLowerCase()
-    const hasBarSignal7 = /cocktail|bar\b|drink|aftensmad|3[-.]?rett|dinner|middag/i.test(waText)
-    const hasDaySignal7 = /brunch|frokost|morgen|morgenmad|lunch/i.test(waText)
-    const isHybrid7 = hasDaySignal7 && hasBarSignal7
-
-    const needsRebuild = elaborationText && (
-      (isHybrid7 && PROGRAMME_RX.test(elaborationText)) ||
-      TEMPORAL_RX.test(elaborationText)
-    )
-
-    if (needsRebuild) {
-      console.log(`⚠️ brand_essence_elaboration contains programme framing — rebuilding with competitive framing (isHybrid=${isHybrid7})`)
-      const rebuilt = buildElaborationFallback(canonicalLocationHook, venueType, dataSources, analysis)
-      if (!sections.brand_essence_elaboration || typeof sections.brand_essence_elaboration !== 'object') {
-        sections.brand_essence_elaboration = {}
-      }
-      sections.brand_essence_elaboration.value = rebuilt
-      console.log(`✅ brand_essence_elaboration rebuilt: "${rebuilt.slice(0, 100)}..."`)
+  // STEP 7: Build brand_essence_elaboration deterministically — ALWAYS overwrites AI output.
+  // Wrapped in try-catch: this step must never crash the pipeline.
+  try {
+    const rebuilt = buildDeterministicElaborationBlock(canonicalLocationHook, venueType, dataSources, analysis)
+    if (!sections.brand_essence_elaboration || typeof sections.brand_essence_elaboration !== 'object') {
+      sections.brand_essence_elaboration = {}
     }
+    sections.brand_essence_elaboration.value = rebuilt
+    console.log(`✅ brand_essence_elaboration (deterministic): "${rebuilt.slice(0, 120)}"`)
+  } catch (err7) {
+    console.error(`⚠️ STEP 7 error (brand_essence_elaboration) — skipping:`, (err7 as Error)?.message || err7)
   }
 
-  // FINAL STEP: Deterministic brand_essence.value + proof overwrite.
-  // AI consistently inflects brand names and adds spurious adjectives. This step runs LAST
-  // so that no downstream fallback (validateBrandEssence / buildConstrainedBrandEssence) can undo it.
+  // STEP 7.5: business_character — ALWAYS BUILD DETERMINISTICALLY (v5.0)
+  // Moved from fallback to primary generation. AI output is no longer used.
+  // Deterministic generation ensures factual accuracy, no hallucinations,
+  // and consistent quality across all business types (café, hybrid, wine bar, etc.)
+  try {
+    const languageConfig = getLanguageByCode(language)
+    const deterministicChar = buildBusinessCharacterDeterministic(dataSources, analysis, languageConfig)
+    sections.business_character = deterministicChar
+    console.log(`✅ business_character (deterministic v5.0): "${deterministicChar}"`)
+  } catch (err7_5) {
+    console.error(`⚠️ STEP 7.5 error (business_character deterministic) — skipping:`, (err7_5 as Error)?.message || err7_5)
+  }
+
+  // STEP 7.6: audience_framework ─ REMOVED (Sprint 1 - Complexity Reduction)
+  // Reason: Duplicates audience_segments (Stage B5) which has actionable timing_windows + content_angles.
+  // audience_framework was abstract; segments are consumed by get-quick-suggestions.
+  // Consolidation: keep segments, remove framework.
+  // try {
+  //   const languageConfig = getLanguageByCode(language)
+  //   const audienceFramework = buildAudienceFrameworkDeterministic(dataSources, languageConfig)
+  //   sections.audience_framework = audienceFramework
+  //   console.log(`✅ audience_framework (${audienceFramework.complexity}): ${audienceFramework.primaryAudiences.length} audiences, ${audienceFramework.locationContexts.length} contexts, ${audienceFramework.timeSlots.length} time slots`)
+  // } catch (err7_6) {
+  //   console.error(`⚠️ STEP 7.6 error (audience_framework) — skipping:`, (err7_6 as Error)?.message || err7_6)
+  // }
+
+  // STEP 7.7: voice_system — BUILD CONTEXT-ADAPTIVE VOICE GUIDANCE
+  // Creates programme-specific and time-based voice variations:
+  // - HYBRID businesses: different voice for brunch (warm, no imperatives) vs cocktails (social, imperatives OK)
+  // - Simple businesses: single consistent voice
+  // - Moderate businesses: dual voice (day/night)
+  // Prevents inappropriate imperatives in family contexts (børnemenu)
+  try {
+    const languageConfig = getLanguageByCode(language)
+    const voiceSystem = buildVoiceSystemDeterministic(dataSources, languageConfig)
+    sections.voice_system = voiceSystem
+    const variationCount = Object.keys(voiceSystem.variations).length + Object.keys(voiceSystem.programmeSpecific).length
+    console.log(`✅ voice_system (${voiceSystem.complexity}): ${voiceSystem.primaryArchetype}, ${variationCount} variations`)
+  } catch (err7_7) {
+    console.error(`⚠️ STEP 7.7 error (voice_system) — skipping:`, (err7_7 as Error)?.message || err7_7)
+  }
+
+  // STEP 8: Vocabulary guard on business_character.
+  // Rule 1: "terrasse" is only allowed if the word literally appears in website analysis text.
+  //         If AI wrote "terrasse" but the scrape data doesn't confirm it, replace with
+  //         "udendørs servering" — the safe unconfirmed fallback.
+  // Rule 2: Remove temporal narration phrases ("om dagen", "om aftenen", "skifter til").
+  //         Prompt B instructions already forbid these; this guard handles AI non-compliance.
+  try {
+    // Handle both plain string (normal) and { value: string } object (occasional AI mis-format)
+    const bcRaw = sections?.business_character
+    const bc: string = typeof bcRaw === 'string'
+      ? bcRaw
+      : (typeof bcRaw === 'object' && bcRaw !== null && typeof bcRaw.value === 'string' ? bcRaw.value : '')
+    if (bc) {
+      let guarded = bc
+
+      if (/terrasse/i.test(guarded)) {
+        // STRICT CHECK: Only allow "terrasse" if it appears in venue description/about fields
+        // (not keywords, not menu_mentions, not reviews — these are too noisy).
+        // If outdoor seating exists but "terrasse" isn't explicitly described, use generic term.
+        const wsText = (() => {
+          const wa = dataSources?.websiteAnalysis || {}
+          const parts: string[] = []
+          // Only check core descriptive text — keywords/mentions are excluded (too noisy)
+          const raw = wa.raw_result
+          if (raw && typeof raw === 'object') {
+            const a = raw.analysis || raw
+            if (typeof a.description === 'string') parts.push(a.description)
+            if (typeof a.about === 'string') parts.push(a.about)
+          }
+          return parts.join(' ')
+        })()
+        // STRICTER: Replace terrasse UNLESS it's confirmed in venue description
+        if (!/terrasse/i.test(wsText)) {
+          // If "udendørs" already precedes "terrasse", keep just "siddepladser" to avoid duplication
+          guarded = guarded
+            .replace(/\b(stor\s+)?udendørs\s+terrasse\b/gi, 'udendørs siddepladser')
+            .replace(/\bterrasse\b/gi, 'udendørs siddepladser')
+          console.log(`⚠️ Vocabulary guard: replaced "terrasse" → "udendørs siddepladser" in business_character (not confirmed in venue description)`)
+        }
+      }
+
+      // Remove temporal narration — these phrases belong in brand_essence, not the plain descriptor
+      const prevGuarded = guarded
+      guarded = guarded
+        .replace(/\b(om dagen|om aftenen|om morgenen|skifter til|forvandles til|fra morgen til aften)\b/gi, '')
+        // Clean up dangling conjunctions left after removal: "kaffe og brunch  og  cocktails" → "kaffe og brunch og cocktails"
+        .replace(/\s+og\s+og\s+/gi, ' og ')
+        .replace(/\s+og\s*\.\s*/gi, '.')
+        .replace(/,\s*og\s*og\s*/gi, ' og ')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+\.\s*/g, '. ')
+        .trim()
+      if (guarded !== prevGuarded) {
+        console.log(`⚠️ Vocabulary guard: removed temporal narration from business_character`)
+      }
+
+      if (guarded !== bc) {
+        // Write back in the same shape it came in
+        if (typeof sections.business_character === 'string') {
+          sections.business_character = guarded
+        } else {
+          sections.business_character = { ...sections.business_character, value: guarded }
+        }
+      }
+    }
+  } catch (err8) {
+    console.error(`⚠️ STEP 8 error (business_character guard) — skipping:`, (err8 as Error)?.message || err8)
+  }
+
+  // FINAL STEP: brand_essence.value — preserve AI output when it passes quality check.
+  // Quality gate: AI output is kept if it is ≥30 chars AND contains the locationPhrase.
+  // Fallback to deterministic template only when AI output is missing, too short, or unanchored.
   {
-    const deterministicValue = buildDeterministicBrandEssence(venueType, canonicalLocationHook, dataSources, analysis)
     if (!sections.brand_essence || typeof sections.brand_essence !== 'object') {
       sections.brand_essence = {}
     }
-    sections.brand_essence.value = deterministicValue
 
-    // Build deterministic proof bullets from signals actually used
+    const aiValue: string = sections.brand_essence?.value ?? ''
+    const aiContainsLocation = locationPhrase ? aiValue.toLowerCase().includes(locationPhrase.toLowerCase()) : true
+    const aiIsSubstantial = aiValue.length >= 30
+
+    const menuItemNames = (dataSources?.menu || [])
+      .filter((item: any) => item.name?.length > 4)
+      .map((item: any) => item.name.toLowerCase().trim())
+
+    const aiContainsMenuItemName = menuItemNames.some(
+      (name: string) => aiValue.toLowerCase().includes(name)
+    )
+
+    // Reject AI output that contains programme narration: "åbent fra X til Y".
+    // This pattern indicates the AI echoed back the identity statement format rather than writing positioning copy.
+    // Example: "Stamstedet ved åen — åbent fra morgenkaffe til natøl, seks dage om ugen med hugo spritz."
+    const BRAND_ESSENCE_PROGRAMME_RX = /\båbent\s+fra\b/i
+    const aiHasProgrammeNarration = BRAND_ESSENCE_PROGRAMME_RX.test(aiValue)
+
+    // Detect hybrid signal for diagnostics only — no longer used to unconditionally override AI output.
+    // The AI path is now preserved for hybrid venues when output passes structural quality checks.
+    const waAnal2: any = dataSources?.websiteAnalysis?.raw_result?.analysis || {}
+    const waKw2: string[] = Array.isArray(waAnal2?.keywords) ? waAnal2.keywords : []
+    const waHooks2: any[] = waAnal2?.venueHooks?.uniqueHooks || []
+    const waText2 = `${waKw2.join(' ')} ${waHooks2.map((h: any) => `${h.hook || ''} ${h.text || ''}`).join(' ')}`.toLowerCase()
+    const isHybridEssence = /brunch|frokost|morgen|morgenmad|lunch/i.test(waText2) &&
+      /cocktail|bar\b|drink|aftensmad|3[-.]?rett|dinner|middag/i.test(waText2)
+
+    // Build proof bullets from signals actually used (always built — used in both paths)
     const proofBullets: string[] = []
     if (canonicalLocationHook) proofBullets.push(`Lokationshook "${canonicalLocationHook}" fra lokationsdata`)
     const offeringPhrase = extractMealCategoryPhrase(dataSources, analysis) ?? extractOfferingPhraseFromDescription(dataSources)
     if (offeringPhrase) proofBullets.push(`Tilbudsformulering "${offeringPhrase}" fra data`)
     const hook = extractBehavioralHook(analysis)
     if (hook) proofBullets.push(`Adfærdshook "${hook}" fra rituals_and_moments`)
-    if (proofBullets.length > 0) {
-      sections.brand_essence.proof = proofBullets.slice(0, 3)
-    }
 
-    console.log(`🎯 brand_essence.value set deterministically: "${deterministicValue}"`)
+    // Override AI output only when structurally broken — not merely because the venue is hybrid.
+    // isHybridEssence is retained as a diagnostic signal in the log but no longer triggers override.
+    if (!aiIsSubstantial || !aiContainsLocation || aiContainsMenuItemName || aiHasProgrammeNarration) {
+      const deterministicValue = buildDeterministicBrandEssence(venueType, canonicalLocationHook, dataSources, analysis)
+      sections.brand_essence.value = deterministicValue
+      if (proofBullets.length > 0) sections.brand_essence.proof = proofBullets.slice(0, 3)
+      console.log(`🎯 brand_essence.value set deterministically (AI length=${aiValue.length}, containsLocation=${aiContainsLocation}, containsMenuItemName=${aiContainsMenuItemName}, programmeNarration=${aiHasProgrammeNarration}, isHybrid=${isHybridEssence}): "${deterministicValue}"`)
+    } else {
+      if (proofBullets.length > 0 && (!sections.brand_essence.proof || sections.brand_essence.proof.length === 0)) {
+        sections.brand_essence.proof = proofBullets.slice(0, 3)
+      }
+      console.log(`🎯 brand_essence.value preserved from AI (length=${aiValue.length}, containsLocation=${aiContainsLocation}): "${aiValue.slice(0, 80)}"`)
+    }
   }
 
   return sections
@@ -281,9 +401,13 @@ function buildDeterministicCoreOfferings(dataSources: any, analysis: any, canoni
 
   // Experience / service anchors
   const expBullets: string[] = []
-  const hasTerrasse = /terrasse|udend.rs|outdoor/i.test(combinedDesc)
+  const hasOutdoorSeating = /udend.rs|outdoor/i.test(combinedDesc)
+  const explicitTerrasse = /\bterrasse\b/i.test(combinedDesc)
   const locationRef = canonicalLocationHook ? ` ${canonicalLocationHook}` : ''
-  expBullets.push(hasTerrasse ? `- Udendørs terrasse${locationRef}` : `- Afslappede siddepladser${locationRef}`)
+  // Only use "terrasse" if explicitly mentioned in description
+  expBullets.push(hasOutdoorSeating 
+    ? (explicitTerrasse ? `- Udendørs terrasse${locationRef}` : `- Udendørs servering${locationRef}`)
+    : `- Afslappede siddepladser${locationRef}`)
 
   if (/event|privat|selskab|reception/i.test(combinedDesc)) {
     expBullets.push('- Private events og selskaber')
@@ -599,9 +723,21 @@ export function buildDeterministicBrandEssence(
     if (hasBar) eveningParts.push('drinks')
 
     if (dayParts.length > 0 && eveningParts.length > 0) {
-      const dayText = dayParts.slice(0, 2).join(' og ')
-      const eveningText = eveningParts.join(' og ')
-      const result = `${hybridVenueType} ${canonicalLocationHook}, der serverer ${dayText} om dagen og skifter til ${eveningText} om aftenen.`
+      // Derive open-day count from opening hours rows — rows with empty open_time are closed days
+      const openDayCount = openingHoursRows.filter((r: any) => r.open_time && r.open_time.trim() !== '').length
+      const dayCountText = openDayCount >= 7 ? ', alle ugens dage'
+        : openDayCount === 6 ? ', seks dage om ugen'
+        : openDayCount === 5 ? ', fem dage om ugen'
+        : openDayCount >= 2 ? `, ${openDayCount} dage om ugen`
+        : ''  // 0 or 1 open day — too sparse, omit
+
+      // Emotional positioning format (required by quality-validators).
+      // Avoids forbidden patterns: venue-type enumeration ("café, restaurant og bar")
+      // and programme enumeration ("brunch og frokost til aftensmad").
+      // Uses one day anchor and one evening anchor — factual, not assumed.
+      const primaryDay = dayParts[0]  // most prominent day programme (brunch or frokost)
+      const primaryEvening = eveningParts.find(p => /drinks|cocktail/i.test(p)) ?? eveningParts[0]  // prefer drinks over aftensmad as closing marker
+      const result = `Det velfortjente stop ${canonicalLocationHook} — til ${primaryDay} og ${primaryEvening}${dayCountText}.`
       console.log(`🎯 Deterministic brand_essence (HYBRID arc): "${result}"`)
       return result
     }
@@ -621,38 +757,196 @@ export function buildDeterministicBrandEssence(
 }
 
 /**
- * Builds brand_essence_elaboration deterministically using competitive differentiation framing.
- * Called when AI output contains temporal narration ("Om dagen/aftenen/forvandles/skifter til").
+ * Helper: Extract earliest opening time across all days (HH:MM format).
+ * Returns null if no opening hours data available.
  */
-function buildElaborationFallback(
+function extractEarliestOpenTime(dataSources: any): string | null {
+  const rows: any[] = dataSources?.openingHoursRows || []
+  if (!rows.length) return null
+  const times = rows.map((r: any) => r.open_time).filter(Boolean)
+  if (!times.length) return null
+  return times.sort()[0] // lexicographic min works for HH:MM format
+}
+
+/**
+ * Builds brand_essence_elaboration deterministically.
+ *
+ * Produces a factually-grounded paragraph that serves both:
+ *   Output A: user-facing prose (shown under "Skjul detaljer" in the dashboard)
+ *   Context:  weekly planner AI (injected via phase1.ts as 📌 anchor)
+ *
+ * NO AI involvement. All claims are taken only from confirmed data sources:
+ *   - location.category_scores  (multi-type location awareness)
+ *   - dataSources.menu          (confirmed offering categories)
+ *   - websiteAnalysis text      ("terrasse" guard — only allowed when literally present)
+ *   - dataSources.operations    (outdoor seating flag)
+ *
+ * Previously named buildElaborationFallback — now unconditional (not a fallback).
+ */
+function buildDeterministicElaborationBlock(
   canonicalLocationHook: string,
   venueType: string,
   dataSources: any,
-  analysis: any
+  _analysis: any
 ): string {
   const location = dataSources?.location || {}
-  const isWaterfront = location?.enrichment?.micro?.area_type === 'waterfront'
   const profile = (dataSources?.profile as any) || {}
-  const businessName: string = profile.business_name || profile.name || dataSources?.business?.business_name || dataSources?.business?.name || dataSources?.business?.display_name || (dataSources?.profile as any)?.business_name || (dataSources?.profile as any)?.name || ''
-  const city = canonicalLocationHook.split(' i ')[1] || 'byen'
-  const priceLevel: string = dataSources?.business?.price_level || dataSources?.business?.priceRange || ''
-  const pricePart = priceLevel === 'budget' ? 'et lavprisformat'
-    : priceLevel === 'premium' ? 'et højere prisleje'
-    : 'et midtklasse prisleje'
+  const businessName: string =
+    profile.business_name || profile.name ||
+    dataSources?.business?.business_name || dataSources?.business?.name ||
+    dataSources?.business?.display_name || ''
+  const city = location?.enrichment?.macro?.city || dataSources?.business?.city || 'byen'
 
-  const locationDiff = isWaterfront
-    ? `beliggenheden ${canonicalLocationHook} — en placering de fleste ${venueType.toLowerCase()}er i ${city} ikke kan matche`
-    : `beliggenheden ${canonicalLocationHook}`
+  // ─── LOCATION PROFILE (multi-type) ───
+  // Use category_scores for richer multi-type awareness; fall back to micro.area_type.
+  const categoryScores: Record<string, number> = location?.category_scores || {}
+  const scoredEntries = Object.entries(categoryScores)
+    .filter(([, v]) => typeof v === 'number')
+    .sort(([, a], [, b]) => (b as number) - (a as number))
+  const primaryType: string = scoredEntries[0]?.[0] ?? location?.enrichment?.micro?.area_type ?? 'unknown'
+  const secondaryTypes: string[] = scoredEntries.slice(1, 3).map(([k]) => k)
 
-  const offeringPhrase = extractMealCategoryPhrase(dataSources, analysis)
-    ?? extractOfferingPhraseFromDescription(dataSources)
-    ?? 'brunch og frokost'
+  const isCityCenter = ['city_centre', 'city_center'].includes(primaryType)
+    || secondaryTypes.some(t => ['city_centre', 'city_center'].includes(t))
+  const isTourist = primaryType === 'tourist'
+    || secondaryTypes.includes('tourist') || secondaryTypes.includes('destination')
+    || (categoryScores['tourist'] ?? 0) >= 50
+  const isWaterfront = primaryType === 'waterfront' || secondaryTypes.includes('waterfront')
 
+  // ─── OUTDOOR SEATING — terrasse guard ───
+  // "terrasse" is only written if the word literally appears in website analysis text.
+  const websiteAnalysis = dataSources?.websiteAnalysis || {}
+
+  // Safe text extraction — never JSON.stringify the full raw_result blob (may be non-serializable).
+  // Instead pull specific known string fields from the analysis.
+  // webScrapedText: ONLY what came from the website scraper — used for terrasse confirmation.
+  //   Profile descriptions are excluded because they may themselves have been AI-generated and
+  //   could already contain "terrasse" — using them would be circular.
+  // safeWebText: scrape + profile descriptions — used for offering/audience signal detection.
+  const webScrapedText = (() => {
+    const parts: string[] = []
+    if (typeof websiteAnalysis.homepage_content === 'string') parts.push(websiteAnalysis.homepage_content)
+    const raw = websiteAnalysis.raw_result
+    if (raw && typeof raw === 'object') {
+      const a = raw.analysis || raw
+      if (typeof a.summary === 'string') parts.push(a.summary)
+      if (typeof a.description === 'string') parts.push(a.description)
+      if (typeof a.about === 'string') parts.push(a.about)
+      if (Array.isArray(a.keywords)) parts.push(a.keywords.join(' '))
+      if (Array.isArray(a.menu_mentions)) parts.push(a.menu_mentions.join(' '))
+      if (Array.isArray(a.programmes)) parts.push(a.programmes.join(' '))
+      if (Array.isArray(a.venueHooks?.uniqueHooks)) {
+        parts.push(a.venueHooks.uniqueHooks.map((h: any) => `${h.hook || ''} ${h.text || ''}`).join(' '))
+      }
+    }
+    return parts.join(' ')
+  })()
+
+  const safeWebText = webScrapedText
+    + (typeof profile.short_description === 'string' ? ' ' + profile.short_description : '')
+    + (typeof profile.long_description === 'string' ? ' ' + profile.long_description : '')
+
+  // Outdoor seating — ONLY from structured database field, NOT from unreliable regex on web scrape.
+  // Use generic "udendørs siddepladser" term — do NOT invent specific details like "terrasse".
+  const hasOutdoor = !!(dataSources?.operations?.has_outdoor_seating)
+  const outdoorTerm = 'udendørs siddepladser'
+
+  // ─── OFFERING PROFILE ───
+  // Three data sources, checked exhaustively for EVERY category — not just first-match.
+  // Source 1: menu item names in the DB (category rows like "BRUNCH", "FROKOST", etc.)
+  // Source 2: menuSignalProgrammes — structured programme objects from business_profile.menu_signal
+  //           (this is what buildBusinessCharacterFallback uses and correctly detects lunch/dinner)
+  // Source 3: website analysis text (homepage_content, raw_result, descriptions)
+  const menuItemNames: string[] = (dataSources?.menu || [])
+    .map((item: any) => (item.name || '').toUpperCase().trim())
+  const menuProgrammes: Array<{ role: string }> = Array.isArray(dataSources?.menuSignalProgrammes)
+    ? dataSources.menuSignalProgrammes : []
+
+  const wsOfferingText = safeWebText.toLowerCase()
+
+  const inNames = (cat: string) =>
+    menuItemNames.some(n => n === cat || n.startsWith(cat + ' ') || n.endsWith(' ' + cat))
+  const inProgs = (rx: RegExp) =>
+    menuProgrammes.some((p: any) => rx.test(p.role || ''))
+
+  // ── Day offerings — collect ALL confirmed, not just first hit ──
+  const dayLabels: string[] = []
+
+  // morgenkaffe / morgenmad: only add if brunch is not also confirmed (brunch supersedes)
+  if ((inNames('MORGENMAD') || inProgs(/morgen|breakfast/i))
+      && !inNames('BRUNCH') && !inProgs(/brunch/i) && !/\bbrunch\b/.test(wsOfferingText)) {
+    const openTime = extractEarliestOpenTime(dataSources)
+    dayLabels.push(openTime && openTime < '09:00' ? 'morgenkaffe' : 'morgenmad')
+  }
+  if (inNames('BRUNCH') || inProgs(/brunch/i) || /\bbrunch\b/.test(wsOfferingText)) {
+    dayLabels.push('brunch')
+  }
+  if ((inNames('FROKOST') || inNames('LUNCH') || inProgs(/frokost|lunch/i) || /\bfrokost\b/.test(wsOfferingText))
+      && !dayLabels.includes('frokost')) {
+    dayLabels.push('frokost')
+  }
+
+  // ── Evening offerings — collect ALL confirmed ──
+  const eveningLabels: string[] = []
+
+  // aftensmad/middag — check before cocktails so dinner is listed first
+  if (inNames('AFTENSMAD') || inNames('MIDDAG') || inProgs(/aften|middag|dinner/i)
+      || /\b(aftensmad|middag|dinner)\b/.test(wsOfferingText)) {
+    eveningLabels.push('aftensmad')
+  }
+  if (inNames('COCKTAILS') || inNames('COCKTAIL') || inProgs(/cocktail/i)
+      || /\bcocktail/.test(wsOfferingText)) {
+    eveningLabels.push('cocktails')
+  } else if ((inNames('DRINKS') || inNames('BAR') || inProgs(/drink|bar/i)
+              || /\bbar\b|\bdrinks\b/.test(wsOfferingText))
+             && eveningLabels.length === 0) {
+    // drinks/bar only as fallback when no stronger signal exists
+    eveningLabels.push('drinks')
+  }
+
+  const allOfferingLabels = [...dayLabels, ...eveningLabels]
+  const isHybrid = dayLabels.length > 0 && eveningLabels.length > 0
+
+  // ─── AUDIENCE SEGMENTS (derived from confirmed location types) ───
+  const segments: string[] = []
+  if (isWaterfront) segments.push('destinationsbesøgende')
+  if (isCityCenter) segments.push('hverdagsgæster')
+  if (isTourist) segments.push('turister')
+  if (segments.length === 0) segments.push('lokale gæster')
+
+  // ─── ASSEMBLE PROSE ───
   const nameOrType = businessName || venueType
-  const s1 = `${nameOrType} er et oplagt valg til ${offeringPhrase} fordi ${locationDiff} giver et naturligt tilholdssted fremfor blot endnu en café i gadebilledet.`
-  const s2 = `Tilbuddet i ${pricePart} placerer stedet i en konkret niche — et alternativ for gæster der søger mere end standardformatet.`
 
-  return `${s1} ${s2}`
+  // Physical location description
+  const locationPhysical: string[] = [canonicalLocationHook]
+  // Add "centralt i [city]" when city_centre is secondary (primary already in canonicalLocationHook)
+  if (isCityCenter && !['city_centre', 'city_center'].includes(primaryType)) {
+    locationPhysical.push(`centralt i ${city}`)
+  }
+  if (hasOutdoor) locationPhysical.push(`med ${outdoorTerm}`)
+
+  const locationDesc = locationPhysical.length === 1
+    ? locationPhysical[0]
+    : locationPhysical[0] + ' — ' + locationPhysical.slice(1).join(', ')
+
+  const s1 = `${nameOrType} er beliggende ${locationDesc}.`
+
+  let s2 = ''
+  if (allOfferingLabels.length >= 2) {
+    const joined = allOfferingLabels.slice(0, -1).join(', ') + ' og ' + allOfferingLabels[allOfferingLabels.length - 1]
+    s2 = `Bekræftede tilbud: ${joined}.`
+  } else if (allOfferingLabels.length === 1) {
+    s2 = `Bekræftede tilbud: ${allOfferingLabels[0]}.`
+  }
+
+  const audienceList = segments.length > 1
+    ? segments.slice(0, -1).join(', ') + ' og ' + segments[segments.length - 1]
+    : segments[0]
+  const s3 = `Gæstegrundlag: ${audienceList}.`
+
+  const result = [s1, s2, s3].filter(Boolean).join(' ')
+  console.log(`🎯 Deterministic brand_essence_elaboration: primary="${primaryType}", outdoor=${hasOutdoor}, hybrid=${isHybrid}, offerings=[${allOfferingLabels.join(',')}]`)
+  return result
 }
 
 /**
@@ -670,7 +964,8 @@ export function buildContentPillarsFallback(dataSources: any, analysis: any, loc
     || dataSources?.business?.name
     || 'Stedet'
   const city: string = location?.enrichment?.macro?.city || dataSources?.business?.city || 'byen'
-  const locationLabel = isWaterfront ? `${locationHook || 'ved vandet'} i ${city}` : hasDistinctiveLocation ? `den centrale placering i ${city}` : `beliggenheden i ${city}`
+  // NEVER use generic "ved vandet" - use specific location term from locale (ved åen, ved fjorden, ved søen, ved havnen)
+  const locationLabel = isWaterfront ? `${locationHook || 'ved åen'} i ${city}` : hasDistinctiveLocation ? `den centrale placering i ${city}` : `beliggenheden i ${city}`
 
   // Determine if the venue is food-led, craft-led, or event-led
   const hasFoodMenu = !!(dataSources?.menu?.length || dataSources?.menuSummaries?.length
@@ -687,7 +982,7 @@ export function buildContentPillarsFallback(dataSources: any, analysis: any, loc
 
   const vibeEncouraged = isWaterfront || hasTerraceOrOutdoor || hasDistinctiveLocation
   const vibeNotes = isWaterfront
-    ? `${businessName} ligger direkte ${locationHook || 'ved vandet'} — atmosfærebilleder af lyset og livet ved terrassen er oplagt primært indhold.`
+    ? `${businessName} ligger direkte ${locationHook || 'ved åen'} — atmosfærebilleder af lyset og livet ved terrassen er oplagt primært indhold.`
     : hasTerraceOrOutdoor
     ? `Udendørsarealerne giver naturlige vibe-billeder i godt vejr — indhold der sælger oplevelsen af at sidde udenfor.`
     : `Fysiske rammer og belysning kan understøtte stemningsbilleder — brug konkrete detaljer fra interiøret som signal.`

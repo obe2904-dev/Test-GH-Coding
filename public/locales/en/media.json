@@ -1,0 +1,131 @@
+{
+  "mediaGallery": {
+    "title": "Media Gallery",
+    "uploadTab": "Upload",
+    "browseTab": "Browse",
+    
+    "filter": {
+      "search": "Search media...",
+      "mediaType": "Media Type",
+      "all": "All",
+      "images": "Images",
+      "videos": "Videos",
+      "postType": "Post Type",
+      "sortBy": "Sort By",
+      "uploadDate": "Upload Date",
+      "usageCount": "Most Used",
+      "fileSize": "File Size",
+      "clearFilters": "Clear Filters"
+    },
+    
+    "postTypes": {
+      "all": "All Categories",
+      "food": "Food",
+      "drinks": "Drinks",
+      "atmosphere": "Atmosphere",
+      "other": "Other"
+    },
+    
+    "categories": {
+      "food": "Food",
+      "drinks": "Drinks",
+      "atmosphere": "Atmosphere",
+      "other": "Other"
+    },
+    
+    "allCategories": "All Categories",
+    
+    "quota": {
+      "storage": "Storage",
+      "used": "{{used}}MB / {{limit}}MB",
+      "percentUsed": "{{percent}}% used",
+      "remaining": "{{remaining}}MB remaining",
+      "storageFull": "Storage Full",
+      "storageAlmostFull": "Storage Almost Full",
+      "uploadsBlocked": "Uploads blocked",
+      "almostFull": "{{percent}}% used - consider upgrading or deleting old media",
+      "fullDescription": "You've used all {{limitMB}}MB of storage. Delete old media or upgrade to continue uploading.",
+      "almostFullDescription": "You've used {{percent}}% of your {{limitMB}}MB storage. Consider deleting old media or upgrading.",
+      "upgradeButton": "Upgrade to {{size}} Storage →",
+      "upgradeFor1GB": "Upgrade to 1GB",
+      "tier": {
+        "free": "Free",
+        "standardplus": "Standard Plus",
+        "premium": "Premium"
+      }
+    },
+    
+    "upload": {
+      "dragDrop": "Drag & drop files here",
+      "or": "or",
+      "clickBrowse": "Click to browse",
+      "acceptedFormats": "JPG, PNG, WebP, MP4, WebM",
+      "maxSize": "Max {{size}}MB",
+      "uploading": "Uploading...",
+      "uploadSuccess": "Upload successful!",
+      "uploadError": "Upload failed: {{error}}",
+      "selectFromGallery": "Select from Media Gallery",
+      "quotaExceeded": "Storage full! Delete old media or upgrade your plan.",
+      "quotaWarning": "Warning: You're using {{percent}}% of your storage ({{usedMB}}MB / {{limitMB}}MB). Continue uploading?"
+    },
+    
+    "grid": {
+      "loading": "Loading media...",
+      "empty": "No media yet",
+      "emptyDescription": "Upload your first photo or video to get started",
+      "error": "Error loading media",
+      "select": "Select",
+      "edit": "Edit",
+      "delete": "Delete",
+      "used": "Used {{count}}x",
+      "video": "Video"
+    },
+    
+    "metadata": {
+      "edit": "Edit Metadata",
+      "postType": "Post Type",
+      "dishName": "Dish Name (optional)",
+      "dishNamePlaceholder": "e.g., Margherita Pizza",
+      "tags": "Tags",
+      "tagsPlaceholder": "Add a tag...",
+      "altText": "Alt Text (Accessibility)",
+      "altTextPlaceholder": "Describe this image for screen readers",
+      "save": "Save Changes",
+      "cancel": "Cancel",
+      "hasChanges": "You have unsaved changes"
+    },
+    
+    "actions": {
+      "useSelected": "Use Selected",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "confirmDelete": "Are you sure you want to delete this media? This action cannot be undone.",
+      "viewAll": "View All",
+      "upload": "Upload",
+      "browse": "Browse"
+    },
+    
+    "sidebar": {
+      "title": "Recent Media",
+      "empty": "No media uploaded yet",
+      "uploadFirst": "Upload First Photo"
+    },
+    
+    "selection": {
+      "itemSelected": "1 item selected",
+      "selectPrompt": "Select a photo or video to use in your post",
+      "limitReached": "Photo limit reached for your tier",
+      "limitDescription": "You can add up to {{max}} photos per post on your plan"
+    },
+    
+    "errors": {
+      "loadFailed": "Failed to load media. Please try again.",
+      "uploadFailed": "Upload failed. Please try again.",
+      "deleteFailed": "Failed to delete media. Please try again.",
+      "updateFailed": "Failed to update metadata. Please try again.",
+      "quotaFailed": "Failed to load storage quota.",
+      "invalidFile": "Invalid file type. Please upload JPG, PNG, WebP, MP4, or WebM files.",
+      "fileTooLarge": "File size ({{size}}MB) exceeds {{max}}MB limit"
+    }
+  }
+}

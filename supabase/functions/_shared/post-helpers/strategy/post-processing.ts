@@ -153,53 +153,113 @@ export function cleanTextForConsultantSpeak(text: string): string {
   });
 
   // Stem-level regex: catches conjugated/declined variants that evade exact-string matching
+  // "salen" = theater/cinema vocabulary. In a hospitality context it should be "lokalet".
+  // Exception: compound words like "selskabssalen" or "festsalen" are legitimate venue-specific names
+  // and are preserved (the negative lookahead \w+ catches them).
+  cleaned = cleaned.replace(/\b(?<!\w)salen\b(?!\w)/gi, 'lokalet');
   cleaned = cleaned.replace(/\baktivt\s+valgt\w*\s+destination\w*\b/gi, 'planlagte besøg');
   cleaned = cleaned.replace(/\bdriftsprogramm\w*\b(?:\s*:)?/gi, m => m.trimEnd().endsWith(':') ? '' : 'dagsdels-spændet');
   cleaned = cleaned.replace(/\bstandardformat\w*\b/gi, 'det gennemsnitlige tilbud');
+
+  // Generic seasonal phrases: strip when no specific ingredient name appears in the same sentence.
+  // "sæsonens grønt" without a concrete name is geographically unverifiable and often wrong.
+  const SEASONAL_GENERIC_PATTERN = /sæsonens\s+grønt|sæsonens\s+råvarer|sæsonens\s+ingredienser|hvad\s+sæsonen\s+byder\s+på|friske\s+sæsoningredienser|sæsonens\s+bedste|sæsonens\s+friske|lokale\s+sæsonvarer/gi;
+  // Split into sentences, strip the phrase from sentences that don't also contain a specific food noun
+  const FOOD_NOUN_PATTERN = /\b(asparges|ramsløg|jordbær|hindbær|blåbær|tomater|agurk|spinat|ærter|majs|svampe|græskar|blommer|pærer|æbler|vildand|vildsvin|kål|rodfrugter|selleri|porrer|zucchini|figner|nye kartofler|blommetomater)\b/i;
+  cleaned = cleaned.replace(/[^.!?]*[.!?]/g, sentence =>
+    SEASONAL_GENERIC_PATTERN.test(sentence) && !FOOD_NOUN_PATTERN.test(sentence)
+      ? sentence.replace(SEASONAL_GENERIC_PATTERN, '').replace(/\s{2,}/g, ' ').trim()
+      : sentence
+  );
 
   return cleaned;
 }
 
 // ============================================================
 // FULL OUTPUT POST-PROCESSOR
+//
+// Recursive deep-clean: traverses the entire output object and applies
+// cleanTextForConsultantSpeak to every string that is narrative prose.
+//
+// Structural keys (IDs, codes, URLs, enums) and non-prose values are
+// preserved as-is. This means any field added to the output schema in
+// the future is automatically covered without touching this function.
 // ============================================================
 
+// Keys whose values are always structural (identifiers, codes, enums, URLs).
+// Only structural semantics here — not content words. This list should barely grow.
+const STRUCTURAL_KEY_RE = /^(id|slug|url|href|date|time|version|type|status|country|platform|_)/i;
+
+function isStructuralValue(value: string): boolean {
+  // ISO date (2026-04-20) or ISO datetime
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return true;
+  // All-uppercase alphanumeric (enum tokens like 'HIGH', 'DK', 'drive_footfall' is lowercase so safe)
+  if (/^[A-Z0-9_]+$/.test(value) && value.length <= 30) return true;
+  // Too short to be prose, or single-word (no space)
+  if (value.length < 12 || !value.includes(' ')) return true;
+  return false;
+}
+
+function deepClean(value: unknown, key?: string): unknown {
+  if (typeof value === 'string') {
+    if (key && STRUCTURAL_KEY_RE.test(key)) return value;
+    if (isStructuralValue(value)) return value;
+    return cleanTextForConsultantSpeak(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => deepClean(item, key));
+  }
+  if (value !== null && typeof value === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      result[k] = deepClean(v, k);
+    }
+    return result;
+  }
+  return value;
+}
+
+// ============================================================
+// COMPETITIVE ADVANTAGE VALIDATOR
+//
+// Checks that competitive_advantage contains at least one token
+// that actually varies week-to-week: a digit (temperature, %),
+// a specific day name, or an economic signal word.
+// Prompt-level TEST 3 is insufficient alone because models wrap
+// static claims in temporal markers ("netop denne uges rytme")
+// that satisfy the spirit-reading of the test without containing
+// any variable data. This is a structural post-generation check.
+// ============================================================
+const DK_DAY_NAMES = /\b(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|weekenden|hverdagene)\b/i;
+const VARIABLE_TOKEN_RE = /\d|%|°|DK_DAY_NAMES|\b(lønningsuge|løndag|payday)\b/i;
+const BANNED_TEMPORAL_MARKERS = /\b(netop denne uges rytme|matcher ugens profil|passer til denne uge|matcher denne uges|netop denne uge er relevant)\b/i;
+
+function hasVariableToken(text: string): boolean {
+  return /\d/.test(text) || /%/.test(text) || /°/.test(text) ||
+    DK_DAY_NAMES.test(text) ||
+    /\b(lønningsuge|løndag|payday)\b/i.test(text);
+}
+
+export function validateCompetitiveAdvantage(brief: any): void {
+  const ca: string = brief?.competitive_advantage ?? '';
+  if (!ca) return;
+  if (BANNED_TEMPORAL_MARKERS.test(ca)) {
+    console.warn(
+      `[PostProcess] competitive_advantage contains banned temporal marker (static claim wrapped in temporal language): "${ca.substring(0, 120)}"`
+    );
+  }
+  if (!hasVariableToken(ca)) {
+    console.warn(
+      `[PostProcess] competitive_advantage has no variable token (digit/°/%/day name/lønningsuge). ` +
+      `Sentence is likely week-invariant: "${ca.substring(0, 120)}"`
+    );
+  }
+}
+
 export function postProcessConsultantSpeak(raw: any): any {
-  if (raw.narrative) {
-    if (raw.narrative.overview) {
-      raw.narrative.overview = cleanTextForConsultantSpeak(raw.narrative.overview);
-    }
-    if (raw.narrative.headline) {
-      raw.narrative.headline = cleanTextForConsultantSpeak(raw.narrative.headline);
-    }
-    if (raw.narrative.detailed_sections) {
-      Object.keys(raw.narrative.detailed_sections).forEach(section => {
-        const value = raw.narrative.detailed_sections[section];
-        if (typeof value === 'string') {
-          raw.narrative.detailed_sections[section] = cleanTextForConsultantSpeak(value);
-        }
-      });
-    }
-  }
-
-  if (raw.strategic_priorities) {
-    raw.strategic_priorities.forEach((priority: any) => {
-      if (priority.rationale) {
-        priority.rationale = cleanTextForConsultantSpeak(priority.rationale);
-      }
-    });
-  }
-
-  if (raw.post_ideas) {
-    raw.post_ideas.forEach((idea: any) => {
-      if (idea.title) {
-        idea.title = cleanTextForConsultantSpeak(idea.title);
-      }
-      if (idea.rationale) {
-        idea.rationale = cleanTextForConsultantSpeak(idea.rationale);
-      }
-    });
-  }
-
-  return raw;
+  const cleaned = deepClean(raw) as any;
+  // Validate Phase 1 output if it contains a strategic_brief
+  if (cleaned?.competitive_advantage) validateCompetitiveAdvantage(cleaned);
+  if (cleaned?.strategic_brief?.competitive_advantage) validateCompetitiveAdvantage(cleaned.strategic_brief);
+  return cleaned;
 }

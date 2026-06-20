@@ -11,6 +11,7 @@ import type { WeekContext } from '../types/strategy-types.ts';
  * Cold weather + Valentine's Day
  */
 export const MOCK_WEEK_CONTEXT_CAFE_FAUST: WeekContext = {
+  business_id: 'f4679fa9-3120-4a59-9506-d059b010c34a',
   week_number: 7,
   week_start: '2026-02-10',
   week_end: '2026-02-16',
@@ -101,6 +102,7 @@ export const MOCK_WEEK_CONTEXT_CAFE_FAUST: WeekContext = {
  * Wine bar, cold week, no major events
  */
 export const MOCK_WEEK_CONTEXT_WINE_BAR: WeekContext = {
+  business_id: 'mock-wine-bar-id',
   week_number: 7,
   week_start: '2026-02-10',
   week_end: '2026-02-16',
@@ -163,6 +165,7 @@ export const MOCK_WEEK_CONTEXT_WINE_BAR: WeekContext = {
  * Coffee in morning, wine in evening
  */
 export const MOCK_WEEK_CONTEXT_HYBRID: WeekContext = {
+  business_id: 'mock-hybrid-id',
   week_number: 7,
   week_start: '2026-02-10',
   week_end: '2026-02-16',

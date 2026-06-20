@@ -74,16 +74,48 @@ export interface HybridWeighting {
  * Used for archetype-aware slot timing guidance in Phase 1.
  */
 export type BusinessArchetype =
-  | 'morning_cafe'         // Opens early, no lunch/dinner kitchen
-  | 'brunch_cafe'          // Brunch-only, typically closes early afternoon
-  | 'all_day_cafe'         // Brunch + lunch, no dinner kitchen
-  | 'lunch_restaurant'     // Lunch-only restaurant
-  | 'dinner_restaurant'    // Dinner-only restaurant
+  | 'fine_dining'
+  | 'casual_dining'
+  | 'cafe_bistro'
+  | 'cafe_bar'           // Hybrid: cafe by day, bar by night
+  | 'restaurant_bar'     // Full-service restaurant + late-night bar
+  | 'wine_bar'
+  | 'coffee_shop'
+  | 'quick_service'
+  | 'bakery'
+  | 'morning_cafe'       // Opens early, no lunch/dinner kitchen
+  | 'brunch_cafe'        // Brunch-only, typically closes early afternoon
+  | 'all_day_cafe'       // Brunch + lunch, no dinner kitchen
+  | 'lunch_restaurant'   // Lunch-only restaurant
+  | 'dinner_restaurant'  // Dinner-only restaurant
   | 'full_service_restaurant' // Brunch/lunch + dinner full service
-  | 'evening_bar'          // Opens for drinks in the evening, no full kitchen
-  | 'late_night_bar'       // Open after midnight — nightlife / bar archetype
-  | 'wine_bar'             // Wine-focused, typically evening + nightcap format
-  | 'fast_casual';         // QSR / food truck / counter service
+  | 'evening_bar'        // Opens for drinks in the evening, no full kitchen
+  | 'late_night_bar'     // Open after midnight — nightlife / bar archetype
+  | 'nightlife_bar'      // Nightlife-focused bar
+  | 'brunch_specialist'  // Brunch-focused
+  | 'fast_casual';       // QSR / food truck / counter service
+
+/**
+ * Validate and normalize business archetype string
+ */
+export function validateBusinessArchetype(value: unknown): BusinessArchetype | null {
+  if (typeof value !== 'string') return null;
+  
+  const normalized = value.toLowerCase().trim().replace(/\s+/g, '_');
+  
+  const validArchetypes: BusinessArchetype[] = [
+    'fine_dining', 'casual_dining', 'cafe_bistro', 'cafe_bar', 'restaurant_bar', 'wine_bar',
+    'coffee_shop', 'quick_service', 'bakery', 'morning_cafe', 'brunch_cafe',
+    'all_day_cafe', 'lunch_restaurant', 'dinner_restaurant', 'full_service_restaurant',
+    'evening_bar', 'late_night_bar', 'nightlife_bar', 'brunch_specialist', 'fast_casual'
+  ];
+  
+  if (validArchetypes.includes(normalized as BusinessArchetype)) {
+    return normalized as BusinessArchetype;
+  }
+  
+  return null;
+}
 
 /**
  * Compact operating-model classification used by the interpretation layer.
@@ -130,7 +162,11 @@ export interface WeekModifiers {
   economic_signal: 'push' | 'neutral' | 'none';             // push = payday, none = budget_conscious
   event_weight: 'high' | 'medium' | 'low' | 'none';         // Closest upcoming event distance
   weather_opportunity: 'strong' | 'normal' | 'constrained'; // From weather_interpretation bias
-  overall_priority: 'high' | 'normal' | 'low';              // Derived from sub-signals
+  /**
+   * 'quiet_normal' = no events, no payday, weather not newsworthy — AI should not invent narrative drama.
+   * 'low' = mild signals exist but below normal threshold.
+   */
+  overall_priority: 'high' | 'normal' | 'low' | 'quiet_normal';  // Derived from sub-signals
 }
 
 // ============================================================
@@ -265,6 +301,7 @@ export interface MenuSummary {
  * Enables dish descriptions to flow all the way to the caption generator.
  */
 export interface SignatureMenuItem {
+  id?: string;               // UUID from menu_items_normalized (preferred for deduplication)
   name: string;              // Dish name as it appears on the menu
   description?: string;      // Full preparation detail, e.g. "Sauce bearnaise, fritter og salat ad libitum"
   category?: string;         // Menu category, e.g. "FROKOST", "AFTENSMAD"
@@ -274,6 +311,9 @@ export interface SignatureMenuItem {
 }
 
 export interface WeekContext {
+  // Business identity
+  business_id: string; // Business entity identifier (required for fetching intelligence data)
+  
   // Timing
   week_number: number;
   week_start: string; // ISO date (Monday)
@@ -281,6 +321,13 @@ export interface WeekContext {
   is_current_week: boolean;
   owner_note?: string; // Optional free-text from owner: "anything special this week?"
   available_days: string[]; // ISO dates of days available for posting
+  /**
+   * Human-readable opening hours summary built from opening_hours rows + kitchen_close_time.
+   * Example: "Man-Tir 09:30–23:00, Ons 09:30–00:00, Tor 09:30–01:00, Fre-Lør 09:30–02:00, Søn 09:00–23:00, køkken lukker 21:30"
+   * Injected into Phase 1 BUSINESS PROFILE so the AI never hallucinates opening times.
+   */
+  opening_hours_summary?: string;
+
   /**
    * Opening time for each day in the week (ISO date → "HH:MM" | null).
    * null = no open_time on record for that day.
@@ -338,6 +385,12 @@ export interface WeekContext {
   late_night_closing?: boolean;
   service_periods: string[]; // e.g. ['brunch', 'lunch', 'dinner']
   signature_items: SignatureMenuItem[]; // Top menu items with descriptions
+  /**
+   * Drink items extracted from menu categories matching drink/cocktail/wine/beer patterns.
+   * Kept separate from signature_items so Phase 2b can offer optional drink pairing
+   * without polluting the main dish selection pool.
+   */
+  drink_items?: SignatureMenuItem[];
   menu_summaries?: MenuSummary[]; // Per-menu AI helicopter summaries for Phase 0 routing
   country: string; // ISO 3166-1 alpha-2, default 'DK'
   city: string;
@@ -402,6 +455,24 @@ export interface WeekContext {
       };
       week_strategic_rationale?: string;
     };
+    venue_scene?: string;         // v5: sensory/perceptual atmosphere from photo analysis (light, material contrast, spatial density)
+    visual_character?: string;    // v5: concept label for tone register (e.g. "Casual moderne café")
+  };
+  
+  /**
+   * V5 Phase 1: Layer 3 Identity Profile
+   * Generated by brand-profile-generator-v5, stored in business_brand_profile.
+   * Used when V5_ENABLED && V5_LAYER3_ENABLED feature flags are true.
+   * Provides enhanced brand consistency through verified identity fields.
+   */
+  v5_identity?: {
+    brand_essence: string;
+    positioning: string;
+    core_values: string[];  // Array of "Title - Description" strings
+    what_makes_us_different: string;
+    identity_confidence: number;
+    identity_reasoning?: string;
+    local_location_reference?: string;  // e.g., "ved åen" (factual location phrase)
   };
 
   // Derived business drivers (Step 3 — built in get-weekly-strategy/index.ts)
@@ -410,6 +481,21 @@ export interface WeekContext {
     always_relevant: boolean; // True = present every week regardless of context
     amplified_by?: string[];  // Context signals that amplify this driver, e.g. ['weekend', 'sunny']
   }>;
+
+  /**
+   * Revenue drivers from business_brand_profile.revenue_drivers
+   * Analyzed by analyze-revenue-drivers Edge Function
+   * Used by Business Rules Engine to generate intelligent slot allocation
+   * Confidence score 90-100 when from structured programme data
+   */
+  revenue_drivers?: {
+    analyzed_at: string;
+    analyzed_from: string;
+    confidence_score: number;
+    primary_revenue_moment: any;
+    secondary_revenue_moments: any[];
+    normal_week_strategy: any;
+  };
 
   // Interpreted weather (Step 4 — built by weather-interpreter.ts)
   weather_interpretation?: {
@@ -421,6 +507,10 @@ export interface WeekContext {
     operational_note: string; // One-sentence practical implication, e.g. 'Lørdag bliver den bedste udedag'
     precipitation_days: string[];   // Danish weekday names where condition is rain/snow OR precipitation_chance >= 60
     week_character: string;         // Temperature range + cloud/sun character without precipitation attribution
+    /** True when this week deviates meaningfully from the monthly climate normal — gates weather narrative. */
+    weather_is_newsworthy: boolean;
+    /** Whether outdoor dining is expected this month based on climate baseline (not this week's forecast). */
+    baseline_outdoor_viable: boolean;
   };
 
   // Named visit occasions derived from matched_motivations + service_periods + archetype (Item A)
@@ -519,6 +609,90 @@ export interface WeekContext {
   /** Topic labels Phase 1 must NOT allocate capacity to this week — set by strategy modulator */
   deprioritize?: string[];
 
+  /**
+   * Posting occasions stored in the brand profile (PostingOccasion[] from occasion-library.ts).
+   * Written once by brand-profile-generator; read into WeekContext by get-weekly-strategy.
+   * Phase 0 resolves these into active_occasions_this_week.
+   */
+  posting_occasions?: import('../occasions/occasion-library.ts').PostingOccasion[];
+
+  /**
+   * Week-specific activated occasions — resolved by Phase 0 resolveActiveOccasions().
+   * Each entry maps to one post slot and carries resolved timing + CTA.
+   * Phase 1 reads this to assign concrete timing_window per angle instead of inventing one.
+   */
+  active_occasions_this_week?: import('../occasions/occasion-library.ts').ActiveOccasion[];
+
+  /**
+   * Service behavior signals derived from business_operations flags (NEW).
+   * Transforms service capabilities into posting behavior implications.
+   * Used by Phase 0 to understand posting timing constraints.
+   */
+  service_behavior_signals?: {
+    booking_pattern: 'advance_planning' | 'mixed' | 'impulse_friendly';
+    booking_lead_time_days: number;
+    family_orientation: 'high' | 'medium' | 'low';
+    work_from_venue_suitable: boolean;
+    destination_signals: string[];
+    convenience_signals: string[];
+    posting_modifiers: {
+      needs_advance_posts: boolean;
+      supports_impulse_posts: boolean;
+      weekend_planning_critical: boolean;
+    };
+  };
+
+  /**
+   * Posting windows mapped by audience segment (NEW).
+   * Transforms brand profile segments into concrete posting timing strategy.
+   * Maps consumption windows to decision windows.
+   */
+  posting_windows_by_segment?: {
+    primary_segments: Array<{
+      segment: string;
+      consumption_window: {
+        days: string[];
+        time_range: string;
+      };
+      posting_window: {
+        optimal_day: string;
+        optimal_time_range: string;
+        lead_time_hours: number;
+        reasoning: string;
+      };
+      behavior_type: 'planned' | 'impulse' | 'mixed';
+      behavior_split?: { planned_pct: number; impulse_pct: number };
+    }>;
+    seasonal_adjustments: Array<{
+      segment: string;
+      season: string;
+      weight_modifier: number;
+      reasoning: string;
+    }>;
+  };
+
+  /**
+   * Historical content analysis (last 3 weeks).
+   * Tracks programme-specific content patterns to prevent repetition and ensure variety.
+   * Generated in get-weekly-strategy before Phase 1, consumed by Phase 2a.
+   * Adapts to any business type: 1-4+ programmes, specialized or hybrid.
+   */
+  historical_context?: {
+    weeks_analyzed: number;
+    total_posts_analyzed: number;
+    programme_patterns: Record<string, {
+      programme_name: string;
+      programme_type: string;
+      content_categories: Record<string, number>;
+      goal_modes: Record<string, number>;
+      menu_items: string[];
+      total_posts: number;
+    }>;
+    overuse_warnings: string[];
+    underuse_opportunities: string[];
+    recent_dishes: string[];
+  };
+
   // History
   previous_week: PreviousWeekPerformance;
 }
@@ -616,6 +790,17 @@ export interface ContextFactor {
   // Timing guidance
   timing_recommendation: string;         // When to post about this (if time-sensitive)
   
+  // Structured posting timing (NEW - optional, Phase 0 AI can populate if confident)
+  posting_window?: {
+    day: string;                         // 'Monday', 'Friday', 'same_day', etc
+    time_range: string;                  // '15:00-18:00'
+    lead_time_hours: number;             // Hours before consumption
+  };
+  consumption_window?: {
+    days: string[];                      // ['Saturday', 'Sunday']
+    time_range: string;                  // '10:00-14:00'
+  };
+  
   // Weight for strategic planning
   strategic_weight: ContextFactorWeight; // How important is this factor?
   
@@ -692,10 +877,27 @@ export interface StrategicAngle {
   goal_mode?: 'drive_footfall' | 'build_brand' | 'retain_loyalty';  // Business goal for this post
   content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people'; // Content type
   timing_window?: string;     // Recommended timing context e.g. "Thu-Fri 14:00"
+  // CTA mode — Phase 1 decision on how to drive action for drive_footfall posts.
+  // Replaces day-of-week heuristics in Phase 2b with a strategy-level decision.
+  //   walk_in   → "kom forbi i dag" — no booking push, low-threshold invitation
+  //   booking   → "book dit bord" — hard booking link CTA
+  //   hybrid    → "kom forbi eller book via link" — both options
+  cta_mode?: 'walk_in' | 'booking' | 'hybrid';
   suggested_content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people'; // AI hint from Phase 1 prompt for semantic slot matching
 }
 
 export interface StrategicBrief {
+  // Contextual analysis (reasoning visibility — REQUIRED validates 6-step process)
+  contextual_analysis: {
+    unique_factors_this_week: Array<{
+      factor: string;
+      customer_behavior_enabled: string;
+      time_windows_activated: string[];
+      audience_segments: string[];
+    }>;
+    opportunity_synthesis: string;
+  };
+  
   // Week synthesis
   week_summary: string;       // 2-3 sentences: what makes THIS week unique for THIS business
   
@@ -725,6 +927,7 @@ export interface PostIdea {
   // Goal-mode system (NEW — from Phase 1 slot assignment)
   goal_mode?: 'drive_footfall' | 'build_brand' | 'retain_loyalty';
   content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people';
+  service_period?: string;  // e.g. "FROKOST", "AFTEN", "Brunch" (from business intelligence)
 
   // Platform targeting (NEW)
   platforms: Platform[];     // Which platforms this idea targets (derived from active platforms)
@@ -740,6 +943,23 @@ export interface PostIdea {
     label: string;               // Short label (e.g. "Varmt i kulden")
     explanation: string;         // Why this post addresses this factor
   }>;
+
+  // Strategic intent — carries the Phase 1 narrative purpose of this post through to
+  // the plan generator and caption prompt so the cross-day booking/occasion logic is
+  // never lost in translation between phases.
+  // e.g. "Drive family brunch bookings for Saturday — early-week teaser with booking CTA"
+  strategic_intent?: string;
+
+  // Booking nudge judgment metadata (v2)
+  // Written by Phase 1 when booking_nudge_capable is true.
+  // Carried through PostSpecification to generate-text-from-idea via suggestion object.
+  // nudge_rationale is stored in strategy_rationale on weekly_strategies for audit.
+  booking_nudge_warranted?: boolean;       // Did AI decide to use nudge this week?
+  booking_nudge_reasoning?: string;        // One sentence: why warranted or why skipped
+  peak_day?: string;                       // ISO date (YYYY-MM-DD) of targeted visit day
+  nudge_post_date?: string;                // ISO date: peak_day minus lead_days_used
+  lead_days_used?: number;                 // 1–5: actual lead time chosen by AI
+  nudge_rationale?: string;                // Human-readable audit string, stored in DB
 }
 
 export interface StrategyNarrative {

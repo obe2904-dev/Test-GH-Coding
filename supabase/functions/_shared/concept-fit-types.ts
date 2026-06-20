@@ -63,24 +63,6 @@ export interface ConceptFitOutput {
   
   // Strategy
   strategy_approach: 'amplify' | 'adapt' | 'contrarian';
-  strategy_positioning: string;
   emphasis: string[];
   avoid: string[];
-  cta_style: string;
-  
-  // Detected motivations
-  detected_motivations: Array<{
-    motivation: string;
-    confidence: number;
-  }>;
-  
-  // External factors (from location expectations)
-  weather_sensitivity: 'low' | 'medium' | 'high';
-  seasonality_pattern: string;
-  seasonal_weights: {
-    winter: number;
-    spring: number;
-    summer: number;
-    autumn: number;
-  };
 }

@@ -39,6 +39,7 @@ interface MediaAnalysisPanelProps {
   onUndo?: () => void
   canUndo?: boolean
   onEditText?: () => void
+  onChangePhoto?: () => void
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -156,12 +157,12 @@ export function MediaAnalysisPanel({
   onUndo,
   canUndo = false,
   onEditText,
+  onChangePhoto,
 }: MediaAnalysisPanelProps) {
   const { t } = useTranslation()
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set())
-  const [copiedRewrite, setCopiedRewrite] = useState(false)
 
   function getRatingLabel(rating: string) {
     return t(`createPost.photoAnalysis.ratings.${rating}`, rating)
@@ -299,60 +300,25 @@ export function MediaAnalysisPanel({
               </div>
               <p className="text-xs text-amber-700 leading-relaxed">{analysis.contentMatch.feedback}</p>
 
-              {/* Rewrite path */}
-              {analysis.contentMatch.rewriteSuggestion && (
-                <div className="mt-1 space-y-1">
-                  <p className="text-[10px] font-semibold text-amber-800">
-                    {t('createPost.photoAnalysis.contentMatchActions.rewriteSuggestionLabel', 'Foreslået tekst:')}
-                  </p>
-                  <p className="text-xs text-amber-900 bg-amber-100 rounded p-2 leading-relaxed italic">
-                    {analysis.contentMatch.rewriteSuggestion}
-                  </p>
-                  <div className="flex items-center gap-2 pt-0.5">
+              {/* Actions: two simple choices */}
+              {(analysis.contentMatch.rewriteSuggestion || analysis.contentMatch.reshootGuidance || onEditText) && (
+                <div className="flex gap-2 pt-0.5">
+                  {onEditText && (
                     <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(analysis.contentMatch!.rewriteSuggestion!)
-                        setCopiedRewrite(true)
-                        setTimeout(() => setCopiedRewrite(false), 2000)
-                      }}
-                      className="text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900 transition-colors duration-150"
+                      onClick={onEditText}
+                      className="flex-1 px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-medium rounded-lg transition-colors text-center"
                     >
-                      {copiedRewrite
-                        ? t('createPost.photoAnalysis.contentMatchActions.copiedButton', 'Kopiéret!')
-                        : t('createPost.photoAnalysis.contentMatchActions.copyButton', 'Kopiér')}
+                      ✏️ {t('createPost.photoAnalysis.contentMatchActions.rewriteButton', 'Skriv ny tekst')}
                     </button>
-                    {onEditText && (
-                      <button
-                        onClick={onEditText}
-                        className="text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900 transition-colors duration-150"
-                      >
-                        ✏️ {t('createPost.photoAnalysis.contentMatchActions.rewriteButton', 'Rediger tekst')}
-                      </button>
-                    )}
-                  </div>
+                  )}
+                  <button
+                    onClick={onChangePhoto}
+                    disabled={!onChangePhoto}
+                    className="flex-1 px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-medium rounded-lg transition-colors text-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    📷 {t('createPost.photoAnalysis.contentMatchActions.changePhoto', 'Skift foto')}
+                  </button>
                 </div>
-              )}
-
-              {/* Reshoot path — only when actionNeeded = 'choice' */}
-              {analysis.contentMatch.actionNeeded === 'choice' && analysis.contentMatch.reshootGuidance && (
-                <div className="mt-2 pt-2 border-t border-amber-200 space-y-1">
-                  <p className="text-[10px] font-semibold text-amber-800">
-                    {t('createPost.photoAnalysis.contentMatchActions.reshootLabel', 'Eller tag et nyt foto')}
-                  </p>
-                  <p className="text-xs text-amber-700 leading-relaxed">
-                    {t('createPost.photoAnalysis.contentMatchActions.reshootGuidanceLabel', 'Hvad skal fotograferes:')} {analysis.contentMatch.reshootGuidance}
-                  </p>
-                </div>
-              )}
-
-              {/* Fallback edit button for old responses without rewriteSuggestion */}
-              {!analysis.contentMatch.rewriteSuggestion && onEditText && (
-                <button
-                  onClick={onEditText}
-                  className="mt-1 text-xs font-medium text-amber-800 underline underline-offset-2 hover:text-amber-900 transition-colors duration-150"
-                >
-                  ✏️ {t('createPost.photoAnalysis.contentMatchActions.rewriteButton', 'Rediger tekst')}
-                </button>
               )}
             </div>
           )}

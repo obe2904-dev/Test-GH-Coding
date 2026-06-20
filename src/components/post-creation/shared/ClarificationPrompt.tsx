@@ -53,7 +53,7 @@ export function ClarificationPrompt({
         <button
           onClick={handleSubmit}
           disabled={!inputValue.trim()}
-          className="px-3 py-1.5 bg-brand text-mint rounded-lg text-xs font-semibold hover:bg-[#12393D] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-3 py-1.5 bg-cta text-text-inverse rounded-lg text-xs font-medium hover:bg-cta-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Opdater tekst
         </button>

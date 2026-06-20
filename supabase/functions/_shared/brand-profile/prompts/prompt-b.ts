@@ -8,46 +8,134 @@
 import type { DataSources, LanguageConfig } from '../types.ts'
 import { extractStructuredWebsiteData } from '../signal-extractor.ts'
 import { buildMenuSummary } from '../data-gatherer.ts'
-import { detectWebsitePresence } from '../website-presence.ts'
 import { renderLocationPhrase } from './prompt-builder.ts'
 
-import { DEFAULT_BANNED_WORDS_DA, DEFAULT_BANNED_WORDS_EN, aggregateWebsiteText, filterBannedWordsByBusinessUsage, computeAllowedSet } from './brand-word-lists.ts'
-import { BRAND_PROFILE_SCHEMA } from './brand-profile-schema.ts'
+import { DEFAULT_BANNED_WORDS_DA, DEFAULT_BANNED_WORDS_EN, aggregateWebsiteText, filterBannedWordsByBusinessUsage } from './brand-word-lists.ts'
 import { filterAudienceLabels } from '../../utils/audience-filter.ts'
+import { loadLanguageConfig as loadPromptLanguageConfig, type Language } from '../../prompts/utils/prompt-loader.ts'
+
+// Import modular language-specific components
+import { DANISH_FORBIDDEN, buildForbiddenWordsSection, buildMetaCommentarySection } from '../../prompts/languages/da/brand-profile-b-forbidden.ts'
+import { buildCoreRulesSection } from '../../prompts/languages/da/brand-profile-b-core-rules.ts'
+import { buildFieldInstructions, type FieldInstructionParams } from '../../prompts/languages/da/brand-profile-b-field-instructions.ts'
 
 /**
  * Builds the system prompt for Prompt B.
  * Contains core rules and behavioral contracts for the AI.
+ * 
+ * MIGRATED: Now uses centralized language files instead of hardcoded English.
  */
-export function buildSystemPromptB(language: LanguageConfig): string {
-  return `You are a social media expert who builds Brand Profiles for small local businesses. The tone_of_voice rules you produce will be used verbatim as writing guidelines for every Instagram and Facebook caption this business publishes. Output: JSON only.
+export async function buildSystemPromptB(language: LanguageConfig): Promise<string> {
+  // Load language-specific system message
+  const lang = (language.code || 'da') as Language
+  const result = await loadPromptLanguageConfig(lang, 'brand-profile-b-system')
+  
+  let systemOpener: string
+  let systemCloser: string
+  
+  if (!result.success || !result.prompt) {
+    console.warn(`Failed to load ${lang} brand-profile-b system prompt, using hardcoded fallback`)
+    // Fallback to original English (for safety)
+    systemOpener = `You are a social media expert who builds Brand Profiles for small local businesses. The tone_of_voice rules you produce will be used verbatim as writing guidelines for every Instagram and Facebook caption this business publishes.`
+    systemCloser = `Output: JSON only.`
+  } else {
+    systemOpener = result.prompt.system
+    systemCloser = result.prompt.closer
+  }
+  
+  // Return system opener + modular rules sections + closer
+  // REFACTORED: Rules now loaded from language-specific modules for maintainability
+  const forbiddenWordsSection = buildForbiddenWordsSection(DANISH_FORBIDDEN)
+  const metaCommentarySection = buildMetaCommentarySection()
+  const coreRulesSection = buildCoreRulesSection(language.name)
+  
+  return `${systemOpener}
 
-🚨 LOCATION CONTEXT (HIGHEST PRIORITY) 🚨
-If the prompt provides location enrichment data with area_type (waterfront, transit_hub, etc.), you MUST include the specific location phrase in:
-1. brand_essence.value (start the sentence with it, e.g., "Café ved åen i Aarhus hvor...")
-2. image_preferences.signature_shot (include the area phrase, e.g., "ved åen", "ved stationen")
-→ Copy the exact phrases from the prompt. Don't paraphrase. Validation checks for these specific words.
+${forbiddenWordsSection}
 
-STYLE:
-- Write in natural ${language.name}
-- Use the business's OWN words from the data provided
-- Be specific where evidence exists, neutral where it doesn't
-- Sound like a helpful colleague, not a marketing agency
+${metaCommentarySection}
 
-STRUCTURE (3+2 rule for core_offerings):
-- 3 meal anchors (brunch, frokost, middag, etc.)
-- 2 experience/service anchors (terrasse, takeaway, etc.)
+${coreRulesSection}
 
-TARGET AUDIENCE (behavior-centric, TEMPORAL FORMAT):
-- Use "Når gæster..." temporal phrasing to describe WHEN and HOW guests use the venue
-- Each clause = SITUATION + TIME + CONTEXT (observable behavior only)
-- Write 2-4 occasions using this pattern: "Når gæster [behavior + context], når [situation + time], samt når [transition]"
-- ALLOWED: Temporal behavioral moments and contextual constraints
-  ✅ "Når gæster samles om længere brunch ved bordet"
-  ✅ "Når børn kan spise med uden bøvl" (behavioral constraint, NOT persona)
-  ✅ "Når man søger hurtig frokost mellem møder" (temporal context)
-  ✅ "Når aftenen glider fra middag til cocktails" (temporal flow)
-  ✅ "med god tid", "i eget tempo", "før/efter arbejde" (duration/time context)
+PAID-TIER SOURCE OF TRUTH:
+- If Brand Profile V5 data exists, treat it as authoritative for identity, hybrid roles, programmes, commercial orientation, and audience segments.
+- Web analysis is only a bootstrap/fallback signal. It may seed the first label, but it must never flatten a confirmed hybrid into a single category.
+- When V5 and website analysis disagree, prefer the richer verified V5 evidence unless a validation rule fails.
+
+🎯 OCCASION SCAFFOLD TEMPLATES (use these structures — fill with THIS business's specific signals):
+
+TEMPLATE 1 — Duration/Tempo occasion:
+"Når gæster [activity] [i/med] [tempo/duration marker], [optional: location/context detail]"
+Examples with signals:
+- "Når gæster tager den lange brunch ved åen, med god tid og ingen stress" 
+  → Requires: brunch in meal_arc + waterfront location + mid/premium price_register
+- "Når børn kan spise med i roligt tempo udendørs"
+  → Requires: has_kids_menu=true + has_outdoor_seating=true + casual/mid price
+- "Når frokosten spises i eget tempo mellem møderne"
+  → Requires: lunch in meal_arc + office_strength≥40 + business_district location
+
+TEMPLATE 2 — Transition/Flow occasion:
+"Når [time period] glider/skifter fra [programme A] til [programme B]"
+Examples with signals:
+- "Når aftenen glider fra middag til cocktails og drinks"
+  → Requires: meal_arc contains both 'middag' + 'bar/cocktail' + late closing time
+- "Når dagen starter med kaffe og fortsætter med frokost"
+  → Requires: meal_arc contains both 'kaffe/morgen' + 'frokost'
+- "Når køkkenet lukker men baren holder åbent"
+  → Requires: kitchen_close_time in operations + bar programme confirmed
+
+TEMPLATE 3 — Destination/Journey occasion:
+"Når gæster [journey verb] til [specific location hook] som [visit type]"
+Examples with signals:
+- "Når gæster tager turen til åen som destination i sig selv"
+  → Requires: waterfront area_type + tourist_strength≥secondary + canonical location hook
+- "Når besøgende til [city] finder vejen hertil"
+  → Requires: tourist_strength=secondary/primary (check AUDIENCE PERMISSIONS)
+- "Når vejen går forbi [nearby_signal] og frokosten kalder"
+  → Requires: nearby_signals from location enrichment + lunch programme
+
+TEMPLATE 4 — Constraint-based occasion (when no temporal arc):
+"Når [constraint/requirement] gør forskellen"
+Examples with signals:
+- "Når børn kan spise med uden at menuen skal forenkles"
+  → Requires: has_kids_menu=true BUT menu shows full variety (not just nuggets)
+- "Når glutenfri ikke skal bestilles særskilt"
+  → Requires: dietary_flags contains 'glutenfri' from menu summaries
+- "Når engelsk menu gør beslutningen lettere"
+  → Requires: has_english_menu=true
+
+🎯 MULTI-SIGNAL STACKING (CRITICAL FOR SPECIFICITY):
+DO NOT write one clause per signal. STACK 2-3 signals in EACH clause for maximum specificity.
+
+❌ WRONG (single-signal clauses — too generic):
+"Når gæster tager turen til åen som destination"
+"Når børn kan spise med"
+"Når der er tid til at blive siddende"
+→ Could apply to ANY waterfront family café
+
+✅ RIGHT (multi-signal clauses — specific):
+"Når besøgende til [city name from data] tager børnene med til udendørs servering ved åen i roligt tempo"
+→ Stacks 4 signals: tourist_strength + has_kids_menu + location hook + price_register
+
+"Når åbningstiden fra brunch til kl. 02:00 bliver forskellen"
+→ Stacks 2 signals: meal_arc (brunch) + late hours (if data shows late closing)
+
+"Når CARPACCIO til frokost og cocktails til natten bor samme sted ved åen"
+→ Stacks 4 signals: specific menu item + meal_arc span + bar programme + location
+
+STACKING STRATEGY:
+- Combine location + operational + temporal in one clause
+- Combine menu specificity + location + visitor type in one clause
+- Each clause = mini brand positioning statement (not just one attribute)
+
+CONSTRUCTION CHECKLIST (before finalizing target_audience):
+□ Each "Når..." clause STACKS 2-3 signals (not single-signal clauses)
+□ Each clause cites specific signals from prompt (usage occasion #N, category score, operations flag, meal_arc, location hook, menu items)
+□ No demographic personas used unless score≥40 permits them (check AUDIENCE PERMISSIONS)
+□ Minimum 2 clauses, maximum 4 clauses
+□ Each clause describes a DIFFERENT visitor intent/occasion (no redundancy)
+□ Proof bullet will cite which signals were used (prepare evidence trail)
+
 - PERSONA RULE — score-gated: Demographic labels are FORBIDDEN unless the LOCATION ENRICHMENT data block
   explicitly provides a score ≥40 that unlocks them (see AUDIENCE PERMISSIONS in the data).
   ❌ Always banned: "familier", "børnefamilier", "par", "venner", "lokale", "unge", "erhvervsfolk"
@@ -64,6 +152,96 @@ TARGET AUDIENCE (behavior-centric, TEMPORAL FORMAT):
 - EXAMPLE (waterfront, tourist secondary): "Når gæster tager turen til åen som destination, når børn kan spise med i roligt tempo, samt når besøgende til Aarhus finder vejen hertil."
 - VALIDATE: No always-banned personas; minimum 2 occasions; maximum 4 occasions
 
+🎭 STEMME-KVALITET (Voice Quality Layer)
+
+Denne brandprofil skal FØLES som:
+- En lokal ven der anbefaler et sted de elsker
+- En varm, afslappet stemme der smiler når de taler
+- Autentisk dansk sprog uden tourist-brochure tone
+
+IKKE som:
+- En brochure fra VisitDenmark
+- En procesbeskrivelse af hvad stedet gør
+- En liste af features og services
+
+PERSPEKTIV-REGEL:
+- Skriv fra GÆSTENS oplevelse, ikke stedets udbud
+- Fokusér på HVORFOR nogen vælger dette sted (emotional need)
+- Brug konkrete detaljer der FØLES, ikke abstrakte påstande
+
+❌ "Vi tilbyder en dynamisk atmosfære fra dag til aften"
+   → Café's offering, abstract claim
+
+✅ "Støjen stiger kl. 19 når after-work gæsterne kommer"
+   → Guest observation, concrete detail
+
+KRÆV SENSORISKE DETALJER:
+
+Hvert felt skal indeholde mindst ÉN konkret, observerbar detalje.
+
+🎯 SENSORY HIERARCHY (safest to most risky):
+
+1. VISUAL (always safe, prioritize first):
+   - "udsigt til åen", "solen der rammer bordet kl. 11"
+   - "lys fra gaden", "folk der går forbi vinduet"
+   - Observable movement, colors, light, reflections
+
+2. TEMPORAL (always safe, very concrete):
+   - "kl. 11 når solen rammer bordet", "efter kl. 19 når arbejdsdagen er slut"
+   - Clock time, day of week, season
+
+3. SPATIAL/TEMPERATURE (usually safe if verifiable):
+   - "varmen fra de andre gæster", "kølig luft fra åen"
+   - "åben himmel", "grønt lige udenfor"
+
+4. MOVEMENT/ACTIVITY (safe if observable):
+   - "folk der skifter fra kaffe til vin kl. 17"
+   - "løbere langs åen om morgenen", "cykler der passerer"
+
+5. SOUND (DANGEROUS — only for specific contexts):
+   - ✅ SEA/COAST ONLY: "lyden af bølger", "vinden fra havet"
+   - ✅ ACTIVE HARBOR: "båd-motorer", "måger", "aktivitet på kajen" (NOT water sounds)
+   - ❌ CALM RIVERS (åen): NO water sounds — too calm to hear
+   - ❌ LAKES (søen): NO water sounds — still surface, silent
+   - ✅ URBAN: "støj fra gaden", "samtaler", "musik"
+
+6. SMELL (VERY DANGEROUS — avoid except very specific contexts):
+   - ✅ FOOD/COFFEE: "duften af nybagt brød", "kaffe fra baren"
+   - ⚠️ SEA: "salt luft" (okay but cliché risk)
+   - ❌ GENERAL WATERFRONT: Avoid smell references
+
+⚠️ PHYSICAL REALITY CHECK:
+- You CANNOT hear calm rivers (åen) or lakes (søen) — water too calm
+- You CAN hear sea/ocean (waves, wind) and urban noise (traffic, people)
+- Active harbors have boat motors, seagulls, activity — NOT water sounds
+- When in doubt: USE VISUAL DETAILS (safest, always verifiable)
+
+❌ FORBUDTE ABSTRAKTIONER:
+- "dynamisk atmosfære" → brug konkret skift (hvornår? hvordan?)
+- "fleksibel stemning" → brug specifik transition (fra hvad til hvad?)
+- "afslappet vibe" → brug observerbar adfærd (folk der tier, ler?)
+- "autentisk oplevelse" → brug konkret detalje (hvad gør det autentisk?)
+- "lyden af åen/søen" → WRONG! Use "udsigt til åen" instead (visual)
+
+EMOTIONEL POSITIONERING:
+
+Identificér stedets EMOTIONELLE ROLLE i gæstens liv:
+- "Det velfortjente stop" (not "pause i en travl dag")
+- "Stedet du får lyst til når X" (not "tilbyder Y service")
+- "Følelsen af..." (not "konceptet er...")
+
+PRIORITERING:
+1. Emotional need (hvorfor kommer folk følelsesmæssigt?)
+2. Temporal context (hvilken tid på dagen/ugen/året?)
+3. Menu specificity (kun hvis stabilt og emotionelt ankret)
+4. Physical features (SIDST, kun hvis differentierender >7/10)
+
+❌ "Café med udendørs servering ved åen der serverer brunch og cocktails"
+   → Operational description, physical-first
+
+✅ "Det velfortjente stop ved åen — kaffe om morgenen, drinks når du skal have det godt"
+   → Emotional role, temporal transitions, menu as mood anchor
+
 BRAND ESSENCE ELABORATION (brand_essence_elaboration):
 - Answer: why would a guest choose THIS place over a café/restaurant of the same type 100 metres away?
 - Sentence scaffold: '[Name] er et oplagt valg til [specific occasion] fordi [location × price × menu register gives specific trait]. [One confirming concrete detail this venue has that a competitor cannot claim]. Optional: [what brings back a returning guest].'
@@ -78,14 +256,26 @@ IDENTITY KEYWORDS (identity_keywords):
   3. Category/format dimension (klassikere, specialty, håndværk, fusion...)
 - ANTI-PATTERN: all synonyms e.g. "Hygge · Samvær · Fællesskab" = WRONG
 - Must NOT overlap with tone_model.primary_keywords (those describe writing STYLE, not identity)
+- EVIDENCE REQUIREMENT: Do NOT include value-based keywords (bæredygtighed, kvalitet, fællesskab) UNLESS you have explicit evidence in menu items, Om Os text, or website content
+  ❌ "Bæredygtighed" (if no local/organic/sustainability claims visible in data)
+  ✅ "Bæredygtighed" (if menu shows "lokale råvarer", "økologisk", or zero-waste practices)
+  ❌ "Kvalitet" (generic claim - use specific attributes instead: "Håndværk", "Råvarer", etc.)
+  ✅ "Håndværk" (if menu shows "hjemmelavet", "håndskåret", specific craft techniques)
 
-BUSINESS CHARACTER (business_character):
-- 1–2 plain-text sentences describing what this business factually IS
+BUSINESS CHARACTER (business_character) — ⚠️ OBLIGATORISK:
+- 2-3 factual sentences describing what this business IS, what it OFFERS, and WHEN/HOW it operates
+- Include ALL confirmed details from data: opening hours, specific menu items, service types, operational facts
+- For paid businesses, let V5 identity/programmes/commercial orientation govern the hybrid framing; web analysis labels are fallback only.
 - When a hybrid, list EVERY role explicitly: 'café, restaurant og bar' — not just the primary one
-- Include defining physical features when they shape content opportunities: 'med udendørs terrasse', 'med havudsigt', 'i en gammel industrihal'
-- Include temporal format or transitions if relevant: 'om morgenen som kaffebar, om aftenen som vinbar'
-- No marketing language — just enough for an AI to infer post content priorities
-- Example: 'Café, restaurant og bar med stor udendørs terrasse, der serverer kaffe og brunch om dagen og skifter til mad og drinks om aftenen.'
+- ⚠️ OUTDOOR SEATING: Use generic terms ONLY — "udendørs siddepladser" or "udendørs servering". NEVER invent "terrasse", "altan", "gårdhave" unless explicitly in website text
+- Include physical features when they shape content: 'ved åen', 'med havudsigt', 'i en gammel industrihal'
+- Include temporal format or transitions if relevant — use programme names from meal_arc, not time-of-day assumptions.
+  ✅ 'brunch og kaffe fra åbning, aftensmad og cocktails fra middag og fremefter'
+  ❌ 'om morgenen som kaffebar, om aftenen som vinbar' (time-of-day labels are assumptions — programme names are facts from data)
+  Reason: a venue opening at 09:30 is NOT a 'morgen'-venue in Danish culture; its opening programme is 'brunch', not 'morgenmad'.
+- No marketing language — just factual operational details for an AI to infer content priorities
+- Example: 'Café beliggende ved havnen, der tilbyder brunch, frokost og aftenmenu. Frokostservering fra kl. 11.00 til 16.00 med retter som flæskestegssandwich og fiskefilet. Stedet har også en cocktailmenu og børnemenu. Åbent til kl. 23 i weekenden, med udendørs siddepladser og mulighed for takeaway.'
+- VALIDERINGSKRAV: Feltet må IKKE være tomt. Hvis ingen menuprogrammer er tilgængelige, beskriv forretningen baseret på business_type og location intelligence.
 
 VOICE CONSTRAINTS (voice_constraints):
 - ONE sentence explaining WHY this tone fits this business
@@ -98,6 +288,64 @@ BRAND ESSENCE behavioral hook rule:
 - Hook examples: "roligt tempo", "glide naturligt over i aftenen", "lange ophold", "fra dag til aften"
 - NOT allowed as hook: menu items alone, location alone, or subjective words
 - BANNED WORDS in brand_essence: "lækker", "hyggelig", "afslappet", "autentisk", "unik", "charmerende", "fantastisk"
+
+🎯 BEHAVIORAL HOOK SELECTION MATRIX (choose the highest-priority hook with evidence):
+
+PRIORITY 1 — Duration hooks (when evidence exists):
+Template: "fra [start] til [end]" or "[tid]-marker"
+Evidence required: opening_hours shows ≥12h span OR meal_arc contains ≥3 programmes
+Examples: "fra brunch til cocktails" (opens 09:00–11:29 + cocktail programme), "fra morgenkaffe til øl" (opens before 09:00 + beer bar confirmed), "hele dagen"
+✅ Use when: hybrid venue (café+restaurant+bar) OR late closing time (after 22:00)
+❌ Skip when: single-programme venue (brunch-only café) OR no time-arc evidence
+
+⚠️ OPENING LABEL RULE (Danish cultural norm — do not guess from category):
+Derive the opening label from the actual open_time in opening_hours:
+- Opens before 09:00                → "morgenkaffe" or "morgenmad" ✅
+- Opens 09:00–11:29 (incl. 09:30)   → "brunch" ✅ / "morgenkaffe" ❌
+- Opens 11:30–14:59                 → "frokost" ✅ / "brunch" or "morgenkaffe" ❌
+- Opens 15:00 or later              → "aftensmad" ✅
+NEVER label a 09:30 opening as "morgenkaffe" — in Danish culture 09:30 is brunch time, not morning.
+
+⚠️ CLOSING DRINK LABEL RULE (derive from meal_arc — do not guess):
+Derive the evening drink label from the confirmed drink category in meal_arc:
+- meal_arc contains "cocktails" or cocktail programme → "cocktails" ✅ / "natøl" ❌
+- meal_arc contains "øl" or beer category confirmed  → "øl" ✅
+- meal_arc contains "vin" or wine bar confirmed      → "vin" ✅
+- Bar confirmed but no specific drink category       → "drinks" ✅ / "natøl" ❌
+NEVER use "natøl" unless beer (øl) is explicitly the primary late-night offering in the data.
+
+PRIORITY 2 — Tempo/flow hooks (when behaviorally distinctive):
+Template: "[adverb] tempo" or "[flow verb]"
+Evidence required: usage_occasions mention duration/pacing OR distinctive_hooks reference time experience
+Examples: "i roligt tempo", "med god tid", "uden stress", "når aftenen glider over i..."
+✅ Use when: price_register=mid/premium OR outdoor_seating=true OR waterfront location
+❌ Skip when: fast-casual/street-food format OR no occasion evidence
+
+PRIORITY 3 — Transition hooks (when programmes shift):
+Template: "glide/skifte fra [X] til [Y]"
+Evidence required: meal_arc shows distinct day→evening shift OR kitchen_close_time exists
+Examples: "glide naturligt over i aftenen", "fra frokost til drinks"
+✅ Use when: hybrid with confirmed bar/evening programme + day programme
+❌ Skip when: no clear temporal transition in data
+
+PRIORITY 4 — Commitment/occasion hooks (when no temporal evidence):
+Template: "[occasion type]" or "[frequency marker]"
+Evidence required: usage_occasions describe visit type OR location signals destination visit
+Examples: "alle ugens dage", "til den lange brunch", "når turen tages hertil"
+✅ Use when: tourist_strength=secondary/primary OR weekend-focus in opening_hours
+❌ Skip when: better hook available from Priority 1-3
+
+SELECTION RULE: Pick the HIGHEST priority hook where you have actual evidence in the prompt data.
+Do NOT invent hooks from category assumptions — cite the specific signal (usage occasion #N, distinctive hook #M, opening_hours, meal_arc).
+
+⚠️ brand_essence ≠ business_character — dette er den hyppigste fejl:
+- business_character: FAKTUEL beskrivelse af hvad stedet ER.
+  Svar på: "Hvad er dette sted?"
+  Eksempel: "Café, restaurant og bar ved åen i Aarhus med åbningstid til kl. 02."
+- brand_essence: HVORFOR vælger en gæst DETTE sted frem for nabocafén 100m væk?
+  Svar på: "Hvad gør dette sted ved dig?" — ikke hvad det er.
+  Eksempel: "Café ved åen der er åbent fra morgenkaffe til natøl — alle ugens dage."
+  ALDRIG: en gentagelse af hvad stedet serverer eller hvad det hedder.
 - Use a meal CATEGORY in brand_essence (brunch, frokost, middag) — not a specific dish name
 - NOTE: brand_essence.value is post-processed; focus on the behavioral hook being accurate
 IMAGE PREFERENCES STRUCTURE:
@@ -123,6 +371,12 @@ CONDITIONAL FIELDS:
 - recognizable_interior_identity: ONLY populate if explicit visual evidence exists
   * Set has_verified_evidence=true ONLY if interior photos exist in uploaded images
   * Leave value="" if has_verified_evidence=false
+  * Write value as a DRY PHYSICAL INVENTORY — list concretely visible elements: furniture types, materials, wall/floor surfaces, window count/size, distinctive decor items (murals, art, iconic fixtures)
+  * Write like a property surveyor listing facts — NOT like a copywriter painting a scene
+  * FORBUDT: atmospheric or sensory language — "naturligt lys", "lunt", "indbydende", "stemningsfuldt", "varmt", "levende", "hyggelig", "cozy", "inviting", "warm", "airy", "bright", "charming", "natural light fills"
+  * FORBUDT: impressions about how the space "feels" — only state what physically exists
+  * CORRECT: "Åben spisesal med lyse træborde og sorte metalstole. Tre store vinduer langs én væg. Eksponeret betongulv, ingen duge."
+  * WRONG: "Indbydende spisesal badet i naturligt lys fra store vinduer. Varme trægulve skaber en hyggelig atmosfære."
 
 CONTENT STRATEGY (content_strategy):
 Before setting any percentages, reason through two classification axes. These are internal reasoning steps — do NOT output them as JSON fields.
@@ -136,6 +390,8 @@ AXIS 2 — CONCEPT DISTINCTIVENESS:
   * commodity: category-standard (café, pizza, burger) with no strong differentiation beyond quality. The food is the message.
   * distinctive_concept: clear narrative hook — unusual sourcing, unusual format (set menu only, one-ingredient specialisation, strong chef-identity), polarising visual style.
   * destination_experience: the location IS the product (waterfront, rooftop, historic building, iconic street), or the occasion itself is the primary reason to visit.
+
+MULTI-PROGRAMME RULE: A venue with ≥3 confirmed distinct service programmes (brunch + frokost + aftensmad + bar) serving different guest intents at different times is NEVER community/loyalty-led as its primary orientation, regardless of how established it appears. Each programme attracts a different acquisition decision. Classify as destination_experience with footfall as primary goal.
 
 GOAL BLEND rules — use maturity × primary orientation:
   * emerging, any orientation:           drive_footfall 35–45%, build_brand 40–50%, retain_loyalty 10–20%
@@ -152,7 +408,9 @@ GOAL BLEND rules — use maturity × primary orientation:
   * emerging businesses: loyalty_hooks must be FORWARD-LOOKING ("brunch-ritualet vi bygger", "de første stamgæster") — do NOT claim existing loyalty that isn't evidenced
   * established businesses: loyalty_hooks must be SPECIFIC AND EARNED (cite years, specific rituals, named staff relationships) — generic repeat-visit language is not acceptable
   * commodity businesses: brand_anchors must focus on execution quality and specific menu items, not concept narrative
-- LOCATION RULE: when a signal references the physical location, use the EXACT location type word from the data ("åen", "søen", "havnen", "stranden", "torvet" etc.). Only use "vandet" if the actual location is the sea or open coast — it is wrong for rivers (åen), lakes (søen) and harbours (havnen).
+- LOCATION RULE: when a signal references the physical location, use the SPECIFIC location type word provided in LOCATION ENRICHMENT data ("åen", "fjorden", "søen", "havnen", "stranden", "bugten", "torvet" etc.). 
+  CRITICAL: "vandet" is a FALLBACK ONLY for open sea/coast — it is WRONG for rivers (åen), lakes (søen), fjords (fjorden), bays (bugten) and harbours (havnen).
+  IF waterfront type but specific term unknown: use "ved åen" as Danish default (most waterfront restaurants in Denmark are by streams/rivers).
 
 - content_category_weights: based on business type AND concept distinctiveness:
   * product_menu: always ≥20 for food businesses; higher for menu-driven or commodity concepts
@@ -174,7 +432,7 @@ CONTENT PILLARS (content_pillars):
   * Vibe: atmosphere shots — light, space, setting, location texture → encouraged=true for venues with distinctive physical context (waterfront, terrace, unique interior, open-air area)
   * Engagement: interactive content, questions, polls → encouraged=true only for community-driven local venues where audience interaction is natural; otherwise allowed=true, encouraged=false
   * Offers: promotions, seasonal specials, events → encouraged=true only if the venue has frequent events or seasonal menu changes in the data; otherwise allowed=true, encouraged=false
-- notes: 1–2 sentences explaining HOW this pillar applies specifically to THIS venue — reference the venue's own attributes (location signal, food style, temporal context). Never write a generic note.
+- notes: 1–2 sentences with TWO elements: (1) HOW this pillar applies to THIS venue — reference a specific venue attribute (location, food style, temporal context, service arc); (2) WHY this content type performs commercially for this guest profile — what social/emotional trigger does it activate, what decision does it influence. Never write a generic note. Example good note for "Vibe" at a waterfront café: "Udendørs udeservering ved åen er stedets primære visuelle appel. Vibe-content driver 'hvor skal vi mødes?'-beslutningen hos grupper — vandkanten er det kommercielle argument."
 
 BANNED WORDS (never use):
 hyggelig, lækker, indbydende, autentisk, unik, afslappet/afslappede, perfekt spot, charmerende, fantastisk, udsøgt, gastronomisk
@@ -184,7 +442,9 @@ INSTEAD USE SPECIFIC ALTERNATIVES:
 - NOT "hyggelig" → USE specific details (candlelight, intimate tables, warm lighting)
 - NOT "lækker" → USE actual descriptors (sprød, cremet, syrlig)
 
-GAPS: Uncertainties go to clarifications_needed[] only. Never write "(mangler evidens)" in main fields.`
+GAPS: Uncertainties go to clarifications_needed[] only. Never write "(mangler evidens)" in main fields.
+
+${systemCloser}`
 }
 
 /**
@@ -199,7 +459,7 @@ export function buildPromptB(
   language: LanguageConfig,
   locale: any
 ): { prompt: string; anchorCount: number; isPathB: boolean } {
-  const { business, location, profile, menu, images, websiteAnalysis, operations, locationIntelligenceRow, menuSummaries, aiSummaryItems, existingSamplePosts,
+  const { business, location, profile, menu, images, websiteAnalysis, operations, locationIntelligenceRow, menuSummaries, aiSummaryItems,
           existingBusinessCharacter, menuSignalProgrammes, openingHoursRows, locationsCount } = dataSources
 
   // --- Derive multi-audience location context from category_scores ---
@@ -217,9 +477,6 @@ export function buildPromptB(
   // Multi-location detection: when ≥3 categories score ≥70 the brand serves multiple equal contexts
   const highScoreCategories = sortedCategories.filter(([, score]) => score >= 70)
   const isMultiLocationBusiness = highScoreCategories.length >= 3
-  const multiLocationNote = isMultiLocationBusiness
-    ? `MULTI-LOCATION BALANCE (${highScoreCategories.length} location types ≥70 — all roughly equal): Do NOT anchor solely on the top-scoring location type. At least one sentence MUST reflect non-seasonal, non-waterfront contexts (city-centre pedestrian traffic, shopping-detour stop, everyday proximity visit). The brand narrative must work year-round, not just in good weather.`
-    : ''
 
   // Score-gated persona permissions — shared logic via audience-filter.ts
   // maxMenuPrice passed as null here: the model receives price_register separately and
@@ -264,8 +521,6 @@ export function buildPromptB(
   const nearbySignal = location?.enrichment?.micro?.nearby_signals?.[0]
   const locationPhrase = renderLocationPhrase(areaType, langCode, nearbySignal)
 
-  const analysisLoc = Array.isArray(analysis?.micro_location_context) ? analysis.micro_location_context[0] : null
-  const fallbackLocationPhrase = analysisLoc?.description ? analysisLoc.description : cityName
 
   const rawVenueType = (profile as any)?.business_category || business?.vertical || 'Café'
   const venueTypeMap: Record<string, string> = {
@@ -277,13 +532,18 @@ export function buildPromptB(
   const cityPreposition = langCode.startsWith('da') ? 'i' : langCode.startsWith('de') ? 'in' : 'in'
   const canonicalLocationHook = locationPhrase ? `${locationPhrase} ${cityPreposition} ${cityName}` : ''
 
-  // Build menu proof tokens — use aiSummaryItems (category-level phrases) instead of raw item names
-  // This eliminates the root cause of dish names leaking into core_offerings via ALLOWED_PROOF_TOKENS
-  const menuAnchors = analysis?.signals?.core_offerings?.must_use_phrases || []
-  const summaryTokens = (aiSummaryItems || []).slice(0, 8)
+  // Build menu proof tokens — use aiSummaryItems (category-level phrases) PLUS specific dish names
+  // This gives AI concrete examples to cite in proofs instead of generic statements
+  const menuAnchors = Array.isArray(analysis?.must_use_phrases?.brand_essence) ? analysis.must_use_phrases.brand_essence : []
+  const summaryTokens = (aiSummaryItems || []).slice(0, 15)  // Increased from 8 to 15 for more proof material
+  
+  // Extract specific dish names from menu items (first 10 items for proof diversity)
+  const dishNames = (menu || []).slice(0, 10).map((item: any) => item.name).filter(Boolean)
+  
   const uniqueMenuTokens = Array.from(new Set([
     ...menuAnchors.map((a: string) => String(a).toUpperCase()),
-    ...summaryTokens.map((t: string) => t.toUpperCase())
+    ...summaryTokens.map((t: string) => t.toUpperCase()),
+    ...dishNames.map((d: string) => String(d))  // Keep dish names in original case for natural citation
   ].filter(Boolean))) as string[]
 
   // Primary CTA
@@ -296,7 +556,15 @@ export function buildPromptB(
   })()
 
   const ALLOWED_PROOF_TOKENS = [
-    canonicalLocationHook, primaryCta, ...uniqueMenuTokens, locationPhrase || 'ved åen', cityName
+    canonicalLocationHook, 
+    primaryCta, 
+    ...uniqueMenuTokens, 
+    locationPhrase || 'ved åen',  // Specific location term from locale
+    cityName,
+    // Add opening hours if available (proof of late-night service)
+    ...(openingHoursRows || []).filter((h: any) => h.close_time >= '22:00').map((h: any) => `åbent til ${h.close_time}`),
+    // Add service period names as proof tokens
+    ...(menuSummaries || []).map((m: any) => m.title)
   ].filter(Boolean).map(t => String(t)).filter((t, i, arr) => arr.indexOf(t) === i)
 
   // ---- Analysis sections ----
@@ -312,13 +580,7 @@ export function buildPromptB(
     }).join('\n')
   }
 
-  const hooksSection = [
-    listWithEvidence(analysis?.distinctive_hooks || [], 'hook', 'DISTINCTIVE HOOKS (non-menu differentiators)'),
-    listWithEvidence(analysis?.physical_space_cues || [], 'cue', 'PHYSICAL SPACE CUES'),
-    listWithEvidence(analysis?.rituals_and_moments || [], 'moment', 'RITUALS & MOMENTS'),
-    listWithEvidence(analysis?.local_identity_cues || [], 'cue', 'LOCAL IDENTITY CUES'),
-    listWithEvidence(analysis?.copy_patterns || [], 'pattern', 'COPY PATTERNS (exact phrasing)')
-  ].filter(Boolean).join('\n\n') || 'No distinctive hooks identified'
+  const hooksSection = listWithEvidence(analysis?.distinctive_hooks || [], 'hook', 'DISTINCTIVE HOOKS (non-menu differentiators)') || 'No distinctive hooks identified'
 
   // Usage occasions
   const usageOccasions = Array.isArray(analysis?.usage_occasions) ? analysis.usage_occasions.slice(0, 4) : []
@@ -337,54 +599,8 @@ export function buildPromptB(
       }).join('\n\n')
     : 'No usage occasions identified'
 
-  // Content triggers
-  const contentTriggers = Array.isArray(analysis?.content_triggers) ? analysis.content_triggers.slice(0, 5) : []
-  const triggersSection = contentTriggers.length
-    ? contentTriggers.map((t: any, i: number) => {
-        const ev = Array.isArray(t.evidence) && t.evidence[0]
-          ? `"${t.evidence[0].quote}" [${t.evidence[0].source}]`
-          : (Array.isArray(t.evidence_refs) ? t.evidence_refs.slice(0, 2).join('; ') : '—')
-        return `${i + 1}. ${t.trigger}
-   Based on: ${(t.based_on_usage_occasion_ids || []).join(', ') || '—'}
-   What to show: ${(t.what_to_show || []).join(', ') || '—'}
-   Copy angles: ${(t.copy_angles || []).join(', ') || '—'}
-   Evidence: ${ev}`
-      }).join('\n\n')
-    : 'No content triggers identified'
-
-  // Voice context
-  const voiceCtx = analysis?.voice_context
-  const voiceContextSection = voiceCtx
-    ? `Voice Context (use to calibrate tone + competitive positioning):
-  - location_profile: ${voiceCtx.location_profile || '—'}
-  - business_personality: ${voiceCtx.business_personality || '—'}
-  - language_mix: ${voiceCtx.language_mix || '—'}
-  - energy_level: ${voiceCtx.energy_level || '—'}
-  ${voiceCtx.reasoning?.length ? `- reasoning: ${voiceCtx.reasoning.join('; ')}` : ''}`
-    : ''
-
-  // Must-use phrases from signals
-  const signals = analysis?.signals || {}
-  const mustUsePhrases: Record<string, string[]> = {}
-  Object.keys(signals).forEach((key: string) => {
-    const sig = signals[key]
-    if (Array.isArray(sig?.must_use_phrases) && sig.must_use_phrases.length > 0) {
-      mustUsePhrases[key] = sig.must_use_phrases
-    }
-  })
-  const mustUseSection = Object.keys(mustUsePhrases).length > 0
-    ? Object.entries(mustUsePhrases).map(([k, ps]) => `${k}: ${ps.map((p: string) => `"${p}"`).join(', ')}`).join('\n')
-    : '—'
-
-  // Example sentences from evidence
-  const evidence = analysis?.evidence || {}
-  const exampleSentences: string[] = []
-  if (Array.isArray(evidence.tone_of_voice?.example_phrases)) {
-    exampleSentences.push(...evidence.tone_of_voice.example_phrases.slice(0, 3))
-  }
-  if (structuredWebsite.valuePhrases?.length > 0) {
-    exampleSentences.push(...structuredWebsite.valuePhrases.slice(0, 2))
-  }
+  // Example sentences from website (value phrases only — Prompt A evidence field is not populated in compact schema)
+  const exampleSentences: string[] = structuredWebsite.valuePhrases?.slice(0, 2) || []
   const exampleSentencesSection = exampleSentences.length > 0
     ? exampleSentences.map((s: string) => `"${s}"`).join('\n')
     : '—'
@@ -401,8 +617,6 @@ export function buildPromptB(
   const hasWaterfront = locationAtmosphere.includes('waterfront') || /åen|havn|strand|waterfront/i.test(business?.address || '')
   const hasOutdoor = operations?.has_outdoor_seating === true || locationAtmosphere.includes('outdoor_seating')
 
-  // toneConstraintsSection: retired — constraints are now part of signalProfileSection (Voice Reasoning Framework)
-  const toneConstraintsSection = ''
 
   // --- Signal profile: location cluster detection ---
   // Co-primary cluster: signals within COPRIMARY_SPREAD pts of top score are treated as co-equal.
@@ -470,33 +684,9 @@ export function buildPromptB(
   const venueTypeLower = rawVenueType.toLowerCase()
   const isBakeryPatisserie = /bageri|bager|patisserie|konditori|kagebar/i.test(venueTypeLower)
   const isStreetFoodFastCasual = /pizza|burger|street.?food|food.?truck|shawarma|sandwich|smørrebrød|pølsevogn|takeaway|fastfood/i.test(venueTypeLower)
-  const hasCityCenter = locationAtmosphere.includes('city_centre') || locationAtmosphere.includes('shopping_street')
-  const hasNeighbourhood = locationAtmosphere.includes('neighbourhood')
 
-  // Writing samples section (Tier 1 tone signal — V2)
-  // Path A quality gate: reject posts that contain banned words — prevents dirty AI-generated
-  // sample_posts (containing 'lækker', 'hyggelig' etc.) from teaching the AI its own worst habits.
-  const cleanSamplePosts = (existingSamplePosts && existingSamplePosts.length > 0)
-    ? existingSamplePosts.filter((p: { post_text: string }) => {
-        const text = (p.post_text || '').toLowerCase()
-        return !finalBannedWords.some(w => new RegExp(`\\b${w.toLowerCase()}\\b`).test(text))
-      })
-    : null
-
-  // existingSamplePosts comes from business_brand_profile.sample_posts (saved from social media)
-  // Path A: clean samples available — derive rules FROM observed patterns
-  // Path B: no clean samples — derive rules from tone markers + signal profile
-  const writingSamplesSection = (cleanSamplePosts && cleanSamplePosts.length > 0)
-    ? `---
-WRITING SAMPLES (Path A — Tier 1 tone signal — highest priority for tone_of_voice):
-Analyse sentence rhythm, punctuation style, use of du/vi/man, sentence length, and warmth level.
-For each pattern you observe, derive exactly ONE rule that operationalises that pattern.
-Derive tone_of_voice rules ONLY FROM these samples — do NOT add rules not evidenced here.
-Apply VOICE REASONING FRAMEWORK constraints from SIGNAL PROFILE.
-
-${cleanSamplePosts.slice(0, 6).map((p: { post_text: string; why_this_works?: string }, i: number) => `Sample ${i + 1}:\n"${p.post_text}"${p.why_this_works ? `\n(Note: ${p.why_this_works})` : ''}`).join('\n\n')}
-`
-    : `---
+  // No saved social posts — derive tone rules from observed markers (Path B always).
+  const writingSamplesSection = `---
 NO WRITING SAMPLES (Path B — derive rules from observed markers):
 No saved social posts exist. Derive tone_of_voice rules using this strict process:
 1. Look at TONE MARKERS FROM TEXT below. Each marker describes something observed in the actual website copy.
@@ -588,8 +778,12 @@ No saved social posts exist. Derive tone_of_voice rules using this strict proces
     : venueType
 
   // Meal arc from programme data, with structural fallback when menu extraction is unavailable
-  const mealArc = menuSignalProgrammes && menuSignalProgrammes.length > 0
-    ? menuSignalProgrammes.map((p: { role: string; timeContext: string | null }) =>
+  // Only primary brand programmes contribute to the meal arc (operational ones like BØRNEMENU are excluded)
+  const brandProgrammes = menuSignalProgrammes
+    ? menuSignalProgrammes.filter((p: { brand_weight?: string }) => p.brand_weight !== 'operational')
+    : null
+  const mealArc = brandProgrammes && brandProgrammes.length > 0
+    ? brandProgrammes.map((p: { role: string; timeContext: string | null }) =>
         `${p.role}${p.timeContext ? ` (${p.timeContext})` : ''}`
       ).join(', ')
     : isHybridVenue
@@ -600,9 +794,9 @@ No saved social posts exist. Derive tone_of_voice rules using this strict proces
           ? 'dag (kaffe/brunch/frokost) — inferred fra venue_type (ingen menu-ekstrakt tilgængelig)'
           : null
 
-  // Ordered programme slot labels for data-driven Eksempel: slot instruction
-  const confirmedProgrammeSlots: string[] = menuSignalProgrammes && menuSignalProgrammes.length > 0
-    ? menuSignalProgrammes.map((p: { role: string; timeContext: string | null }) =>
+  // Ordered programme slot labels for data-driven Eksempel: slot instruction (brand programmes only)
+  const confirmedProgrammeSlots: string[] = brandProgrammes && brandProgrammes.length > 0
+    ? brandProgrammes.map((p: { role: string; timeContext: string | null }) =>
         p.timeContext ? `${p.role} (${p.timeContext})` : p.role
       )
     : []
@@ -749,7 +943,6 @@ No saved social posts exist. Derive tone_of_voice rules using this strict proces
     ...reasoningQuestions,
   ].join('\n')
 
-  const voiceDerivationHintsSection = '' // Legacy: fully replaced by signalProfileSection
 
   // Elaboration constraint: competitive differentiation framing — NOT temporal narration
   const brandElaborationConstraint = isHybridVenue ? `
@@ -768,24 +961,27 @@ BANNED: afslapppet, afslappende, hyggelig, lækker, autentisk, unik, charmerende
 
   const brandEssenceConstraint = isHybridVenue ? `
 🎯 BRAND ESSENCE — HYBRID VENUE:
-This business has MULTIPLE confirmed service programmes including an evening/bar dimension.
-brand_essence.value MUST capture the full time arc — NOT just one meal period.
-Required format: "[full hybrid type] [location] der serverer [day programme] om dagen og skifter til [evening programme] om aftenen."
-Example: "Café, restaurant og bar ${canonicalLocationHook || `i ${cityName}`} der serverer brunch og frokost om dagen og skifter til aftensmad og drinks om aftenen."
-Rules:
-- venueType MUST list ALL confirmed roles from OPERATIONAL PROGRAMMES (e.g. 'café, restaurant og bar') — never reduce to one
-- Do NOT use 'kan nydes i roligt tempo' — use the time-arc format
-- Keep under 200 chars
-- BANNED: "lækker", "hyggelig", "afslappet", "autentisk", "unik"
+Stedet har FLERE bekræftede serviceprogrammer inkl. en aften/bar-dimension.
+brand_essence.value skal indeholde lokationsfrasen naturligt og antyde at stedet bruges hele dagen.
+REGLER:
+- Svar på: "Hvorfor vælger en gæst DETTE sted frem for nabocafén 100m væk?" — ikke hvad det er.
+- Nævn IKKE programmer som en liste ("frokost om dagen og skifter til cocktails om aftenen") — det er business_character, ikke brand_essence.
+- Antyd tidsbuen med én sætning der indikerer bredde, f.eks. "fra morgenkaffe til natøl" eller "morgen til sen aften".
+- Inkludér lokationsfrasen (f.eks. "${canonicalLocationHook || `i ${cityName}`}") naturligt i sætningen.
+- Maks 180 tegn.
+- FORBUDT: "lækker", "hyggelig", "afslappet", "autentisk", "unik", "serverer", "skifter til", "om dagen", "om aftenen"
+Godt eksempel: "Stamstedet ${canonicalLocationHook || `i ${cityName}`} — åbent fra morgenkaffe til natøl, seks dage om ugen."
+Dårligt eksempel: "${venueType} ${canonicalLocationHook || `i ${cityName}`} der serverer frokost om dagen og skifter til cocktails om aftenen."
 ` : `
 🎯 BRAND ESSENCE — NOTE:
-brand_essence.value is post-processed and will be built from your data automatically.
-Still fill brand_essence.value with your best attempt following this pattern:
-"${venueType} ${canonicalLocationHook || `i ${cityName}`} hvor [meal category] kan nydes [behavioral hook]."
-Example: "${venueType} ${canonicalLocationHook || `i ${cityName}`} hvor brunch og frokost kan nydes i roligt tempo."
-- Use a meal CATEGORY (brunch/frokost/middag) — not a specific dish name
-- Include EXACTLY ONE behavioral hook: flow/tempo/duration (e.g. "i roligt tempo", "med god tid")
-- BANNED: "lækker", "hyggelig", "afslappet", "autentisk", "unik"
+brand_essence.value post-processes men skriv dit bedste forsøg baseret på data.
+Krav: indeholder lokationsfrasen naturligt. Starter IKKE med en fast skabelon.
+Mål: en fremmed læser skal genkende stedet og ikke forveksle det med nabocaféen.
+Eksempel på godt: "Det velfortjente stop ${canonicalLocationHook || `i ${cityName}`} — åbent fra morgenkaffe til natøl."
+Eksempel på dårligt: "${venueType} ${canonicalLocationHook || `i ${cityName}`} hvor brunch og frokost kan nydes i roligt tempo."
+- Brug en måltidskategori (brunch, frokost, middag) — IKKE et specifikt rettavn
+- Inkludér én adfærdshook: flow/tempo/varighed (f.eks. "i roligt tempo", "med god tid")
+- FORBUDT: "lækker", "hyggelig", "afslappet", "autentisk", "unik"
 `
 
   const builtPrompt = `
@@ -806,7 +1002,7 @@ BUSINESS:
 ${location?.enrichment ? `LOCATION ENRICHMENT (deterministic — COPY VERBATIM):
 - city: ${location.enrichment.macro.city} (${location.enrichment.macro.city_tier})
 - country: ${location.enrichment.macro.country}
-- area_type: ${location.enrichment.micro.area_type}
+- area_type: ${location.enrichment.micro.area_type}${location.enrichment.micro.waterfront_term ? ` → use "${location.enrichment.micro.waterfront_term}" (NEVER generic "ved vandet" or "waterfront")` : location.enrichment.micro.area_type === 'waterfront' ? ' (use specific waterway term if mentioned elsewhere)' : ''}
 - nearby_signals: ${location.enrichment.micro.nearby_signals.join(', ')}
 - confidence: ${location.enrichment.micro.confidence}
 - neighborhood: ${neighborhood || '—'}
@@ -821,7 +1017,8 @@ ${sortedCategories.length > 0
     }).join('\n')
   : '- (no category scores — use lightweight area_type only)'}
 CATEGORY KEY TRANSLATIONS (brug disse når du skriver publikumslabels):
-- waterfront → ved vandet / åen / havnen
+- waterfront → ${location?.enrichment?.micro?.waterfront_term || 'ved åen (default) / ved fjorden / ved søen / ved havnen / ved stranden / ved bugten'}
+  ${location?.enrichment?.micro?.waterfront_term ? `USE "${location.enrichment.micro.waterfront_term}" (already detected from location)` : 'NEVER use "ved vandet" unless explicitly a sea/ocean location'}
 - city_centre → bymidten / bycentrum
 - tourist → turister / besøgende
 - student → studerende
@@ -838,8 +1035,11 @@ SERVICE FACTS (fact-gated — OVERRIDE any demographic inference from location o
 ${hasKidsMenu ? '- has_kids_menu: true → "børnemenu" MUST appear as an experience anchor in core_offerings.value; add "Når børn kan spise med" occasion in target_audience' : '- has_kids_menu: false → FORBIDDEN: do NOT mention børnemenu, børn spiser med, familietilbud, or any family-meal framing anywhere in the profile'}
 ${allMarketingHooks.length > 0 ? `LOCATION MARKETING HOOKS (place verbatim in voice_examples.do_say AND cta_style — do not paraphrase, do NOT put in tone_model.good_examples):\n${allMarketingHooks.map(h => `- "${h}"`).join('\n')}` : ''}
 
-🔴 MANDATORY PHRASES — COPY EXACTLY:
-1. brand_essence.value MUST START WITH: "${venueType} ${canonicalLocationHook} hvor..."
+🔴 MANDATORY PHRASES:
+1. brand_essence.value SKAL indeholde lokationsfrasen naturligt — sætningen behøver IKKE starte med en fast skabelon.
+   Mål: stedet er uigenkendeligt fra en konkurrent 100m væk. Konstatér — reklamér ikke.
+   Godt eksempel: "Det velfortjente stop ${canonicalLocationHook} — åbent fra morgenkaffe til natøl."
+   Dårligt eksempel: "${venueType} ${canonicalLocationHook} hvor man kan nyde brunch og cocktails hele dagen."
 2. image_preferences.signature_shot MUST INCLUDE: "${locationPhrase}"
 3. image_preferences.dos[0] MUST REFERENCE: "${locationPhrase}"` : `LOCATION: ${cityName} (no enrichment — use city name only)`}
 
@@ -848,12 +1048,22 @@ OPERATIONS:
 - has_outdoor_seating: ${operations?.has_outdoor_seating ?? false}
 - has_takeaway: ${operations?.has_takeaway ?? false}
 ${operations?.has_outdoor_seating ? '- NOTE: has_outdoor_seating=true → include outdoor terrace/udendørs as an experience anchor in core_offerings; reflect terrace occasions in target_audience' : ''}
+${operations?.kitchen_close_time ? `- kitchen_close_time: ${operations.kitchen_close_time} — signals a bar/drinks arc AFTER kitchen closes. Include this temporal transition in business_character and as a content anchor in content_focus. The period from kitchen close until venue close is a distinct social/bar occasion.` : ''}
+${operations?.weekly_programme ? `- weekly_programme: "${operations.weekly_programme}" — these recurring events are confirmed non-food content anchors. Include them in content_strategy.loyalty_hooks and as explicit occasion types in target_audience (not as demographic labels).` : '- weekly_programme: null — no confirmed recurring events; do NOT invent happy hours, quiz nights, or DJ nights.'}
 
 ${(menuSignalProgrammes && menuSignalProgrammes.length > 0) || (openingHoursRows && openingHoursRows.length > 0) ? `OPERATIONAL PROGRAMMES (confirmed from menu extraction + opening hours):
 ${menuSignalProgrammes && menuSignalProgrammes.length > 0
-  ? menuSignalProgrammes.map((p: { role: string; timeContext: string | null; items: string[] }) =>
-      `- ${p.role}${p.timeContext ? ` (${p.timeContext})` : ''}${p.items?.length > 0 ? `: ${p.items.slice(0, 5).join(', ')}` : ''}`
-    ).join('\n')
+  ? (() => {
+      const brandProgs = menuSignalProgrammes.filter((p: { brand_weight?: string }) => p.brand_weight !== 'operational')
+      const opProgs = menuSignalProgrammes.filter((p: { brand_weight?: string }) => p.brand_weight === 'operational')
+      const brandLines = brandProgs.map((p: { role: string; timeContext: string | null; items: string[] }) =>
+        `- ${p.role}${p.timeContext ? ` (${p.timeContext})` : ''}${p.items?.length > 0 ? `: ${p.items.slice(0, 5).join(', ')}` : ''}`
+      ).join('\n')
+      const opLines = opProgs.length > 0
+        ? `\nTILGÆNGELIGT MEN IKKE ET BRAND-ANKER (nævn kun hvis direkte relevant — driver IKKE tone, caption-eksempler eller brand_essence):\n${opProgs.map((p: { role: string }) => `- ${p.role}`).join('\n')}`
+        : ''
+      return brandLines + opLines
+    })()
   : ''}
 ${openingHoursRows && openingHoursRows.length > 0 ? (() => {
   const lateRows = openingHoursRows!.filter((r: { weekday: string; open_time: string; close_time: string }) => {
@@ -876,9 +1086,23 @@ ${existingBusinessCharacter ? `EXISTING BUSINESS CHARACTER (previously confirmed
 Rule: Only improve/expand this — do NOT regress to a shorter or less specific description.
 ` : ''}
 
-${voiceContextSection ? `---\n${voiceContextSection}\n---` : ''}
-
 ${brandEssenceConstraint}
+
+⚠️ KRITISK FORSKEL — læs dette inden du skriver brand_essence:
+
+business_character = HVAD stedet er (faktuel, deskriptiv)
+brand_essence = HVORFOR dette sted frem for naboen 100m væk (differentierende)
+
+FORKERT brand_essence (dette er business_character):
+"Café, restaurant og bar ved åen i Aarhus der serverer frokost om dagen og skifter til cocktails om aftenen."
+
+RIGTIGT brand_essence (dette er differentierende):
+"Café ved åen der er åbent fra morgenkaffe til natøl — alle ugens dage."
+"Det eneste sted i Aarhus midtby hvor du kan bruge hele dagen ved åen."
+
+brand_essence må ALDRIG være en omskrivning af business_character.
+Spørg dig selv: kunne en hvilken som helst café i Aarhus sige dette? Hvis ja — skriv om.
+
 ${brandElaborationConstraint}
 ---
 USAGE OCCASIONS (build target_audience + content_focus from these):
@@ -891,15 +1115,8 @@ ${sortedCategories.length > 0
   : '- no category scores available (use usage_occasions only)'}
 
 ---
-CONTENT TRIGGERS (derive content_focus what_to_show + copy_angles):
-${triggersSection}
-
----
 PROMPT A SIGNALS:
 ${hooksSection}
-
-MUST-USE PHRASES (copy exact words):
-${mustUseSection}
 
 TONE MARKERS FROM TEXT (each marker = one observed pattern from website copy — derive one rule per marker):
 ${toneMarkers.length ? toneMarkers.map((t: string) => `- ${t}`).join('\n') : '— (no markers extracted — use TONE CONSTRAINTS only and generate minimum viable rules)'}
@@ -923,9 +1140,115 @@ IMAGES:
 ${imageScenes}
 
 ${ALLOWED_PROOF_TOKENS.length > 0 ? `---
-ALLOWED PROOF TOKENS (use verbatim in proof bullets):
-${ALLOWED_PROOF_TOKENS.slice(0, 10).map((t, i) => `${i + 1}. "${t}"`).join('\n')}
-Every proof bullet MUST contain at least one of these verbatim.` : ''}
+🎯 PROOF CITATION REQUIREMENTS (CRITICAL — READ THIS BEFORE WRITING ANY PROOF BULLET)
+
+WHY PROOFS EXIST:
+Proof bullets explain HOW you know the field value is correct. They cite specific data from this prompt.
+Validators check that proofs reference actual tokens — generic statements fail validation.
+
+ALLOWED PROOF TOKENS (cite these EXACT phrases in proof bullets):
+${ALLOWED_PROOF_TOKENS.slice(0, 15).map((t, i) => `${i + 1}. "${t}"`).join('\n')}
+
+PROOF BULLET FORMAT — USE ONE OF THESE CITATION PATTERNS:
+Pattern 1 (Location hook): "Location hook '${canonicalLocationHook || 'ved åen i ' + cityName}' appears in..."
+Pattern 2 (Menu item): "Menu analysis contains '${uniqueMenuTokens[0] || 'BRUNCH'}' + [X other items]..."
+Pattern 3 (Usage occasion): "Usage occasion #[N] confirms [behavioral pattern]..."
+Pattern 4 (Distinctive hook): "Distinctive hook #[N]: [hook label] supports..."
+Pattern 5 (CTA anchor): "Website CTA '${primaryCta}' signals..."
+Pattern 6 (Signal type): "Signal price_register=${priceRegister} + tourist_strength=${touristStrength} + area_type=${areaType}..."
+
+EXAMPLES — WRONG vs RIGHT:
+
+❌ WRONG (generic reasoning — NO SPECIFIC TOKEN):
+"Field 'tone_of_voice' derived from waterfront location and casual dining context"
+"Based on the business being by the water and serving brunch"
+"The atmosphere and target audience suggest..."
+→ FAILS validation: contains NO exact token from ALLOWED_PROOF_TOKENS
+
+✅ RIGHT (cites specific tokens from data):
+"Field 'tone_of_voice': Location hook '${canonicalLocationHook || 'ved åen i ' + cityName}' + usage occasion #1 (roligt tempo) supports casual register"
+"Field 'brand_essence': Menu analysis contains '${uniqueMenuTokens[0] || 'BRUNCH'}' + distinctive hook #1 + location hook '${locationPhrase || 'ved åen'}'"
+"Field 'target_audience': Usage occasions #1, #2, #3 describe behavioral patterns; tourist_strength=${touristStrength} permits 'besøgende'"
+"Field 'tone_of_voice': Signal price_register=${priceRegister} + has_kids_menu=true + area_type=${areaType} → inclusive register required"
+
+VALIDATION RULE:
+Every proof bullet MUST contain at least ONE exact phrase from ALLOWED_PROOF_TOKENS above.
+If your proof could apply to any café/restaurant with similar characteristics → it's too generic → REWRITE IT.
+
+OUTPUT JSON FORMAT (proofs must be ARRAY of strings):
+{
+  "field_name": {
+    "value": "...",
+    "proof": [
+      "First bullet citing Token A + Token B",
+      "Second bullet citing Token C",
+      "Optional third bullet (1-3 total)"
+    ]
+  }
+}
+
+❌ WRONG FORMAT (single string):
+"proof": "Single explanation here"
+
+✅ RIGHT FORMAT (array of 1-3 strings):
+"proof": ["Bullet 1", "Bullet 2"]
+
+CITATION CHECKLIST (before writing each proof):
+□ Does this proof mention a specific token by name? (location hook, menu item, usage occasion #N, distinctive hook #N)
+□ Would this proof still make sense if I removed all the business data from the prompt?
+  → If YES, it's too generic — add specific token citations
+□ Can I point to the exact line in the prompt where this evidence appears?
+  → If NO, I'm making an inference — cite the signal I'm inferring FROM
+` : ''}
+
+---
+🎯 UNIQUENESS FILTER (ANSWER BEFORE WRITING ANY FIELD)
+
+This is your STRATEGIC FRAMEWORK for moving from generic → specific brand profiles.
+
+STEP 1: IDENTIFY MICRO-CATEGORY
+What is the NARROWEST category this business belongs to?
+- ❌ TOO BROAD: "café", "restaurant", "bar"
+- ✅ SPECIFIC: "waterfront hybrid café/restaurant with extended hours"
+- ✅ SPECIFIC: "specialty coffee shop with morning rush + afternoon quiet"
+- ✅ SPECIFIC: "traditional lunch-focused restaurant with modern dinner menu"
+
+Your micro-category: Combine venue_type + location type + temporal pattern (opening hours span)
+
+STEP 2: LIST COMPETITIVE SET (mental exercise — do not output)
+Think of 3 businesses in this city that could claim similar positioning.
+This forces you to understand what's COMMON vs what's UNIQUE.
+
+STEP 3: IDENTIFY DIFFERENTIATION SIGNALS (2-3 REQUIRED)
+Which data signals does THIS business have that competitors in the micro-category DON'T?
+
+Available differentiation dimensions (check the data above to identify which apply):
+□ Location specificity: exact location phrase (NOT just "waterfront" — exact landmark like "ved åen i Aarhus")
+□ Temporal arc: opening hours range (brunch-only vs brunch-to-late-night = different positioning)
+□ Operational combo: kids menu + outdoor seating + bar (unique COMBINATION matters)
+□ Price register WITHIN micro-category: budget/mid/premium (budget waterfront vs premium waterfront = different audiences)
+□ Menu provenance: named suppliers, hjemmelavet, specific signature dishes
+□ Tourist context: tourist_strength from location data (locals-only vs tourist-friendly)
+□ Physical features: terrace, view, waterfront, historic building
+
+YOUR DIFFERENTIATION SIGNALS FOR THIS BUSINESS:
+(Identify 2-3 signals from the data above that most competitors in micro-category DON'T have)
+
+Signal 1: [Location specificity - identify exact location phrase]
+Signal 2: [Temporal/operational uniqueness - identify from hours/menu/operational data]
+Signal 3: [Menu/price/tourist context - identify from available data]
+
+STEP 4: PROOF CONSTRUCTION RULE (MANDATORY)
+Every field MUST cite at least ONE differentiation signal from Step 3.
+- brand_essence: Must reference Signal 1 (location)
+- target_audience: Must reference at least 2 of the 3 signals in occasion clauses
+- tone_of_voice STEMME-IDENTITET: Must cite signal types (price_register, area_type, meal_arc, etc.)
+- core_offerings: Must reflect operational uniqueness (Signal 3)
+
+FALSIFICATION TEST:
+For each field you write, ask: "Could a competitor in my micro-category use this same text without lying?"
+→ If YES: Field is too generic. Add more differentiation signals.
+→ If NO: Field is appropriately specific. ✅
 
 ---
 FIELD-SPECIFIC RULES:
@@ -947,10 +1270,11 @@ FIELD-SPECIFIC RULES:
 1d) core_offerings.value
    - MUST list 3 meal CATEGORY anchors + 2 experience/service anchors
    - MEAL ANCHORS = broad meal time categories: "Brunch og morgenmad", "Frokost og smørrebrød", "Middag og 3-retters", "Brunch og frokost" etc.
-   - EXPERIENCE ANCHORS = non-food offerings: "Terrasse ved åen", "Take away", "Private events", "Bar og cocktails"
+   - EXPERIENCE ANCHORS = non-food offerings with SPECIFIC location terms when applicable: "Udendørs servering ved åen" (NOT "ved vandet"), "Take away", "Private events", "Bar og cocktails", "Beliggenhed ved fjorden", "Udsigt over søen". ONLY use "terrasse" if the business explicitly calls it that in their own description.
+   - LOCATION TERMINOLOGY: ALWAYS use specific waterway terms ("åen", "fjorden", "søen", "havnen", "bugten") - NEVER "vandet" unless actually open sea
    - STRICTLY FORBIDDEN: copying menu item names (THE FAVORIT, BRUNCH DELUXE, DEN NYE, etc.) or ALL-CAPS token names
    - USE EVIDENCE: Derive categories from the MENU items and USAGE OCCASIONS — don't copy item names verbatim
-   - EXAMPLE: "- Brunch og morgenmad\n- Frokost og salater\n- Middagsmenuer\n- Udendørs terrasse ved åen\n- Cocktails og drinks"
+   - EXAMPLE: "- Brunch og morgenmad\n- Frokost og salater\n- Middagsmenuer\n- Udendørs servering ved åen\n- Cocktails og drinks"
 
 2) target_audience.value
    - Pattern: "Når gæster [behavior + context], når [situation + time], samt når [transition]"
@@ -973,118 +1297,15 @@ FIELD-SPECIFIC RULES:
    - VALIDATE: No always-banned personas; minimum 2 clauses; maximum 4 clauses
    - proof MUST reference usage_occasion IDs or #hook numbers
 
-0) voice_rationale — SKRIV DETTE FØR tone_of_voice
-   - List every signal category available for this business with its specific voice implication
-   - Explicitly state text evidence quality: was there real prose to observe? (website copy, social posts) Or only structural signals (menu items, opening hours, location)?
-   - Close with: are the Voice rules "observed" (from actual text) or "assessed" (inferred from situational signals)?
-   - Written in plain Danish a business owner can read and understand
-   - Every sentence must contain at least one concrete business signal — no generic filler
+📋 PROOF QUALITY REQUIREMENTS (ALL FIELDS):
+Every proof MUST cite at least ONE specific data point:
+- ✅ ALLOWED: Specific dish names ("Pariserbøf", "CARPACCIO"), menu categories in CAPS ("BRUNCH", "COCKTAILS"), location hooks ("ved åen", "udeservering"), opening hours ("åbent til 02:00"), price points ("ca. 150 kr"). Note: "terrassen" only allowed if business explicitly uses that term.
+- ❌ FORBIDDEN: Generic statements without evidence ("beliggenheden gør det til...", "bredt udvalg af...", "passer til mange gæster...")
+- VALIDATION: If proof contains NO words from ALLOWED_PROOF_TOKENS or menu summary items, it is GENERIC and must be rewritten
 
-3) tone_of_voice.value — TWO-PART FORMAT
-   Write this field in two clearly labelled sections, then Eksempel: lines.
-
-   SECTION 1 — STEMME-MEKANIK (2–3 rules):
-   Universal mechanics rules about HOW sentences are built. These are portable — they could apply to other venues in the same category.
-   - Each rule: imperative verb + specific guidance. No period at end.
-   - Must cover: sentence register (du/vi/man), tense (nutid), sentence length or rhythm.
-   - FORBIDDEN: content tactics ("Indled med spørgsmål for engagement", "Afslut med CTA") — wrong section entirely.
-   - Path A (writing samples): derive mechanics from observed owner rhythm — do NOT invent generic rules.
-   - Path B no samples: derive EXACTLY 2–3 mechanics. Do NOT pad.
-   Example mechanics (form only — do NOT copy these words): "Undgå hjælpeverber — aktiv form holder tempo", "Tal til én, ikke mange — 'du' frem for 'alle'", "Klip relativsætninger — ét verbum pr. sætning".
-   CRITICAL: the examples above show the FORMAT (imperative + specific guidance) only. Derive mechanics from THIS business's actual signals — not from any wording in these instructions.
-
-   SECTION 2 — STEMME-IDENTITET (2–3 rules):
-   Voice POSTURE rules grounded in THIS business's specific SIGNAL PROFILE signals. These are NOT portable — a competitor with different signals cannot use them.
-   - Each rule MUST name the specific signal it comes from in parentheses. SIGNAL KEYS — CLOSED SET (use exactly one, verbatim): meal_arc | price_register | location | venue_type | exclusion_list | dietary_flags. Do NOT invent compound keys, append Danish words to keys, or join keys with slashes.
-   - Derive from confirmed signals in SIGNAL PROFILE: meal_arc, venue_type, price_register, location, dietary_flags, exclusion_list.
-   - FALSIFICERINGSTEST (OBLIGATORISK): For each rule ask: "Kan en naborestaurant med et andet signal bruge denne regel?" Ja → kassér og omskriv med et smallere signal.
-   - FORBIDDEN: generic rules that apply to all casual cafés. Rules must reference THIS venue's specific configuration.
-   GOOD examples (these would FAIL at a different venue):
-     'Stedet har et konkret fysisk anker — skriv det som aktør i situationen, ikke som stemningsbaggrund' (signal: location)
-     'Første service og sen aften er ikke det samme gæsteforhold — ton ned med klokkeslættet' (signal: meal_arc)
-     'Sproget behøver ikke appellere til studerende — de er ekskluderet konceptmæssigt' (signal: exclusion_list)
-   BAD examples (portable to any café — would PASS at a competitor — FORBIDDEN):
-     'Skriv som en person, ikke et reklamebureau' (no specific signal — fails test)
-     'Vær uformel og varm' (no signal — fails test)
-
-   FORMAT strictly:
-   STEMME-MEKANIK:
-   - [regel]
-   - [regel]
-   STEMME-IDENTITET:
-   - [identitetsregel (signal: ...)]
-   - [identitetsregel (signal: ...)]
-   Eksempel: "[eksempel]"
-   Eksempel: "[eksempel]"
-
-   EKSEMPEL LINES — quantity:
-   - Non-hybrid venue: EXACTLY 2 Eksempel: lines.
-   - Hybrid venue (SIGNAL PROFILE contains dag_til_aften_arc OR meal_arc lists ≥2 programme roles):
-     Write ${confirmedProgrammeSlots.length > 0 ? confirmedProgrammeSlots.length : 3} Eksempel: lines — one per confirmed programme from OPERATIONAL PROGRAMMES, in this order:
-${confirmedProgrammeSlots.length > 0
-    ? confirmedProgrammeSlots.map((slot, i) =>
-        `     Eksempel: "[${slot} — ${i === 0 ? 'lidt rummeligere' : i === confirmedProgrammeSlots.length - 1 ? 'lakonisk, færrest mulige ord' : 'kortere, mere bestemt'}]"`
-      ).join('\n')
-    : `     Eksempel: "[første programme fra OPERATIONAL PROGRAMMES — lidt rummeligere]"
-     Eksempel: "[aftenregister — kortere, mere bestemt]"
-     Eksempel: "[sen aften/bar — lakonisk, færrest mulige ord]"`}
-     Do NOT label or annotate the lines — just write ${confirmedProgrammeSlots.length > 0 ? confirmedProgrammeSlots.length : 3} sequential Eksempel: lines.
-
-   EKSEMPEL LINES — content rules:
-   - Demonstrate REGISTER ONLY: rhythm and tone, nothing else.
-   - FORBIDDEN: location, setting, menu content, CTA, dish names.
-   - WRONG: "Oplev café-kulturen ved vandet" (location), "Nyd carpaccio" (menu), "Bestil bord til fredag" (CTA).
-   - RIGHT: short statement demonstrating stated register — no identifiable content.
-   - CRITICAL: Do NOT copy or paraphrase any sentence shown as RIGHT: in these instructions. Write fresh lines that demonstrate the STEMME-MEKANIK rules you derived.
-
-3a) tone_model.good_examples — STYLE DEMONSTRATIONS ONLY
-   - Each example must demonstrate rhythm and register, NOT facts about the business
-   - WRONG: "Nyd carpaccio ved åen" (dish name + location — NOT allowed)
-   - WRONG: "Bestil bord til fredag aften" (CTA — NOT allowed)
-   - RIGHT: "Vi er klar." (register only — neutral, clear)
-   - RIGHT: "Det tager ti minutter." (rhythm only — facts-free, no context)
-   - A reader should NOT be able to identify the business from these examples alone
-
-3b) voice_constraints.value
-   - ONE principle sentence explaining WHY this tone fits this specific business
-   - NOT a list of forbidden words — a principle AI can reason from
-   - Example: "Undgå ord der lyder som de hører hjemme i et reklamefirma — dette sted kommunikerer som en person, ikke en kampagne"
-
-4) content_focus.value
-   - USAGE-DRIVEN: derive from CONTENT TRIGGERS what_to_show + copy_angles
-   - Required coverage: (1) food/service observable, (2) atmosphere/flow, (3) behavioral moments
-   - Multi-signal threshold: ≥2 different signals = SUFFICIENT evidence
-   - NOT allowed: Menu-only focus ("Fokus på brunch og frokost")
-
-5) image_preferences — dos: [3 items], donts: [3 items], signature_shot: 1 iconic description
-   - dos[0]: reference the mandatory location phrase
-   - donts: focus on tone mismatches and generic stock-photo feel ONLY
-   - signature_shot: scene + lighting + people/objects + location phrase
-
-6) cta_style.value
-   - MUST define BOTH: primary CTA (booking) AND 2-3 secondary soft CTAs
-   - Not allowed: single CTA only
-
-7) content_strategy
-   - FIRST: silently classify the business on maturity (emerging/growing/established) and concept distinctiveness (commodity/distinctive_concept/destination_experience) using the evidence in the data. These are reasoning steps only — do NOT output them as fields.
-   - primary_goal: the single dominant goal derived from maturity × orientation (see system prompt rules)
-   - goal_blend: percentages summing to 100 using the maturity-anchored ranges from system prompt. CONSTRAINT: if emerging, retain_loyalty must be lowest. Justify your classification in your internal reasoning before committing to numbers.
-   - footfall_signals: derive from USAGE OCCASIONS and business type (e.g. "weekend dinner service")
-   - brand_anchors: derive from DISTINCTIVE HOOKS and brand identity signals. For commodity businesses: focus on execution quality and specific dishes, not concept narrative.
-   - loyalty_hooks: derive from RITUALS & MOMENTS and repeat-visit patterns. For emerging businesses: forward-looking language only — do not fabricate existing loyalty. For established businesses: must be specific and earned, not generic.
-   - LOCATION RULE: use the precise location type from the data ("åen", "søen", "havnen", "stranden"). Only use "vandet" if the location is actually the sea or open coast — it is incorrect for rivers, lakes and harbours.
-   - content_category_weights: percentages summing to 100; apply concept distinctiveness modifiers from system prompt (destination_experience boosts craving_visual, distinctive_concept boosts behind_scenes, established boosts team_people)
-
-8) voice_examples — BRAND DISPLAY LAYER (shown to business owner, NOT injected into caption AI except vocabulary)
-   - do_say: MINIMUM 3 brand-authentic phrases — INCLUDE location anchors, specific CTAs, place marketing hooks here verbatim
-   - dont_say: MINIMUM 3 phrases (wrong tone, too generic, wrong personality)
-   - vocabulary.prefer: MINIMUM 5 words — these DO feed the caption AI as soft word signals
-   - vocabulary.avoid: MINIMUM 5 words — these DO feed the caption AI as suppressed words
-   - NOTE: tone_model.good_examples feeds caption AI style; do_say/dont_say are for display only
-
-OUTPUT: Return complete Brand Profile JSON matching all required fields.
-Write in ${language.name}.`.trim()
-  return { prompt: builtPrompt, anchorCount: structuralSignalLines.length, isPathB: !(existingSamplePosts && existingSamplePosts.length > 0) }
+${buildFieldInstructions({ confirmedProgrammeSlots, languageName: language.name })}`.trim()
+  // isPathB: always true — sample_posts column removed; Path B (no examples) is now the only path.
+  return { prompt: builtPrompt, anchorCount: structuralSignalLines.length, isPathB: true }
 }
 
 

@@ -8,6 +8,8 @@ import { AnalyzeIcon } from './BusinessProfileIcons'
 import type { BusinessSector } from '../../types/businessSector'
 import { guessBusinessSector } from '../../types/businessSector'
 import { getPrimaryType, getBusinessTypeLabel } from '../../lib/businessTypeHelpers'
+import { QuarterHourTimePicker } from '../../components/ui/QuarterHourTimePicker'
+import { enrichKeyOfferings } from './businessProfile/utils/keyOfferings'
 
 const DEFAULT_COUNTRY = 'Danmark'
 
@@ -16,7 +18,6 @@ type ProfileFormState = {
   businessName: string
   businessSector: BusinessSector | null
   businessCategory: string
-  tagline: string
   aboutText: string
   phone: string
   email: string
@@ -26,6 +27,7 @@ type ProfileFormState = {
   country: string
   bookingLink: string
   logoUrl: string
+  localLocationReference: string
 }
 
 const createDefaultState = (): ProfileFormState => ({
@@ -33,7 +35,6 @@ const createDefaultState = (): ProfileFormState => ({
   businessName: '',
   businessSector: null,
   businessCategory: '',
-  tagline: '',
   aboutText: '',
   phone: '',
   email: '',
@@ -42,7 +43,8 @@ const createDefaultState = (): ProfileFormState => ({
   city: '',
   country: DEFAULT_COUNTRY,
   bookingLink: '',
-  logoUrl: ''
+  logoUrl: '',
+  localLocationReference: ''
 })
 
 function BusinessProfilePage() {
@@ -56,7 +58,6 @@ function BusinessProfilePage() {
   const [businessName, setBusinessName] = useState('')
   const [businessSector, setBusinessSector] = useState<BusinessSector | null>(null)
   const [businessCategory, setBusinessCategory] = useState('')
-  const [tagline, setTagline] = useState('')
   const [aboutText, setAboutText] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -67,6 +68,8 @@ function BusinessProfilePage() {
   const [country, setCountry] = useState(defaultCountry)
   const [bookingLink, setBookingLink] = useState('')
   const [logoUrl, setLogoUrl] = useState('')
+  const [keyOfferings, setKeyOfferings] = useState('')
+  const [localLocationReference, setLocalLocationReference] = useState('')
 
   // UI state
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -80,23 +83,28 @@ function BusinessProfilePage() {
   const [isEditingBasics, setIsEditingBasics] = useState(false)
   const [isEditingLocation, setIsEditingLocation] = useState(false)
   const [isEditingContact, setIsEditingContact] = useState(false)
+  const [isEditingKeyOfferings, setIsEditingKeyOfferings] = useState(false)
   const [_isEditingAbout, _setIsEditingAbout] = useState(false)
-  const [isEditingHours, setIsEditingHours] = useState(false)
+  const [_isEditingHours, _setIsEditingHours] = useState(true)
   const [_isEditingMenu, _setIsEditingMenu] = useState(false)
   const [_newMenuItem, _setNewMenuItem] = useState('')
   const [menuHighlights, setMenuHighlights] = useState<string[]>([])
   const [menuDescription, setMenuDescription] = useState('')
   const [menuProgrammes, setMenuProgrammes] = useState<any[]>([])
-  const [isEditingService, setIsEditingService] = useState(false)
+  const [_isEditingService, _setIsEditingService] = useState(true)
 
   // Business character (AI-inferred hybrid type + physical features)
   const [businessCharacter, setBusinessCharacter] = useState('')
   const [isEditingCharacter, setIsEditingCharacter] = useState(false)
   const [isGeneratingCharacter, setIsGeneratingCharacter] = useState(false)
 
-
   // Opening hours state
   type DaySchedule = { open: string; close: string }
+  type ManualWindow = { open: string; close: string }
+  type ManualDaySchedule = {
+    extraWindows: ManualWindow[]
+    kitchenClose: string
+  }
   type WeekSchedule = {
     man: DaySchedule
     tir: DaySchedule
@@ -108,6 +116,10 @@ function BusinessProfilePage() {
   }
   type DayKey = keyof WeekSchedule
 
+  type ManualWeekSchedule = {
+    [K in DayKey]: ManualDaySchedule
+  }
+
   const createEmptySchedule = (): WeekSchedule => ({
     man: { open: '', close: '' },
     tir: { open: '', close: '' },
@@ -118,7 +130,83 @@ function BusinessProfilePage() {
     søn: { open: '', close: '' }
   })
 
+  const createEmptyManualDay = (): ManualDaySchedule => ({
+    extraWindows: [],
+    kitchenClose: ''
+  })
+
+  const createEmptyManualSchedule = (): ManualWeekSchedule => ({
+    man: createEmptyManualDay(),
+    tir: createEmptyManualDay(),
+    ons: createEmptyManualDay(),
+    tor: createEmptyManualDay(),
+    fre: createEmptyManualDay(),
+    lør: createEmptyManualDay(),
+    søn: createEmptyManualDay()
+  })
+
+  const normalizeManualSchedule = (value: unknown): ManualWeekSchedule => {
+    const schedule = createEmptyManualSchedule()
+
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return schedule
+    }
+
+    const source = value as Record<string, unknown>
+    ;(Object.keys(schedule) as DayKey[]).forEach((day) => {
+      const entry = source[day]
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+
+      const typedEntry = entry as Record<string, unknown>
+      const extraWindows = Array.isArray(typedEntry.extraWindows)
+        ? typedEntry.extraWindows
+            .map((window) => {
+              if (!window || typeof window !== 'object' || Array.isArray(window)) return null
+              const typedWindow = window as Record<string, unknown>
+              const open = typeof typedWindow.open === 'string' ? typedWindow.open : ''
+              const close = typeof typedWindow.close === 'string' ? typedWindow.close : ''
+              return open || close ? { open, close } : null
+            })
+            .filter(Boolean) as ManualWindow[]
+        : []
+
+      schedule[day] = {
+        extraWindows,
+        kitchenClose: typeof typedEntry.kitchenClose === 'string' ? typedEntry.kitchenClose : ''
+      }
+    })
+
+    return schedule
+  }
+
+  const serializeManualSchedule = (schedule: ManualWeekSchedule) => {
+    const serialized: Record<string, { extraWindows: ManualWindow[]; kitchenClose: string } | null> = {}
+
+    ;(Object.keys(schedule) as DayKey[]).forEach((day) => {
+      const entry = schedule[day]
+      const extraWindows = entry.extraWindows.filter((window) => window.open || window.close)
+      const kitchenClose = entry.kitchenClose.trim()
+
+      if (extraWindows.length === 0 && !kitchenClose) {
+        serialized[day] = null
+        return
+      }
+
+      serialized[day] = {
+        extraWindows,
+        kitchenClose
+      }
+    })
+
+    return Object.values(serialized).some((value) => value !== null) ? serialized : null
+  }
+
   const [openingHours, setOpeningHours] = useState<WeekSchedule>(createEmptySchedule())
+  const [manualHours, setManualHours] = useState<ManualWeekSchedule>(createEmptyManualSchedule())
+  const [openingHoursReview, setOpeningHoursReview] = useState<{ required: boolean; reasons: string[] }>({
+    required: false,
+    reasons: []
+  })
 
   // Service model state
   const [hasTableService, setHasTableService] = useState(false)
@@ -130,6 +218,8 @@ function BusinessProfilePage() {
   const [hasParking, setHasParking] = useState(false)
   const [reservationRequired, setReservationRequired] = useState(false)
   const [hasKidsMenu, setHasKidsMenu] = useState(false)
+  const [kitchenCloseTime, setKitchenCloseTime] = useState('')
+  const [weeklyProgramme, setWeeklyProgramme] = useState('')
 
   const markUnsaved = () => setHasUnsavedChanges(true)
 
@@ -143,7 +233,6 @@ function BusinessProfilePage() {
     businessName,
     businessSector,
     businessCategory,
-    tagline,
     aboutText,
     phone,
     email,
@@ -152,7 +241,8 @@ function BusinessProfilePage() {
     city,
     country,
     bookingLink,
-    logoUrl
+    logoUrl,
+    localLocationReference
   })
 
   const applyState = (state: ProfileFormState) => {
@@ -160,7 +250,6 @@ function BusinessProfilePage() {
     setBusinessName(state.businessName)
     setBusinessSector(state.businessSector)
     setBusinessCategory(state.businessCategory)
-    setTagline(state.tagline)
     setAboutText(state.aboutText)
     setPhone(state.phone)
     setEmail(state.email)
@@ -169,6 +258,7 @@ function BusinessProfilePage() {
     setCity(state.city)
     setCountry(state.country || defaultCountry)
     setBookingLink(state.bookingLink)
+    setLocalLocationReference(state.localLocationReference || '')
     setLogoUrl(state.logoUrl)
   }
 
@@ -282,10 +372,21 @@ function BusinessProfilePage() {
           .eq('business_id', (businessData as any).id)
           .maybeSingle()
 
-        // Load AI-inferred business character
+        const { data: websiteAnalysisData } = await sb
+          .from('website_analyses')
+          .select('source_url')
+          .eq('business_id', (businessData as any).id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        // Load AI-inferred business character (persona/strategy field)
         if ((brandData as any)?.business_character) {
           setBusinessCharacter((brandData as any).business_character)
         }
+
+        // Load owner-editable competitive differentiator
+        // Note: what_makes_us_different field removed - use identity_keywords instead
 
         // Load opening hours from opening_hours table
         const { data: hoursData } = await sb
@@ -337,6 +438,9 @@ function BusinessProfilePage() {
           setHasParking(operationsData.has_parking || false)
           setReservationRequired(operationsData.reservation_required || false)
           setHasKidsMenu(operationsData.has_kids_menu || false)
+          setKitchenCloseTime(operationsData.kitchen_close_time || '')
+          setWeeklyProgramme(operationsData.weekly_programme || '')
+          setManualHours(normalizeManualSchedule(operationsData.opening_hours))
         }
 
         const sector: BusinessSector | null = 
@@ -345,21 +449,26 @@ function BusinessProfilePage() {
             ? (businessData as any).vertical as BusinessSector
             : null
 
+        // Load key_offerings
+        if ((profileData as any)?.key_offerings) {
+          setKeyOfferings(enrichKeyOfferings((profileData as any).key_offerings))
+        }
+
         const loadedState: ProfileFormState = {
-          websiteUrl: (businessData as any).website_url ?? '',
+          websiteUrl: (businessData as any).website_url ?? (websiteAnalysisData as any)?.source_url ?? '',
           businessName: (businessData as any).name ?? '',
           businessSector: sector,
           businessCategory: (businessData as any).vertical ?? '',
-          tagline: (profileData as any)?.short_description ?? '',
-          aboutText: (profileData as any)?.long_description ?? '',
+          aboutText: (profileData as any)?.user_about_text ?? (profileData as any)?.long_description ?? '',
           phone: (locationData as any)?.phone ?? '',
           email: (locationData as any)?.email ?? '',
           address: (locationData as any)?.address_line1 ?? '',
           postalCode: (locationData as any)?.postal_code ?? '',
           city: (locationData as any)?.city ?? '',
           country: (locationData as any)?.country ?? DEFAULT_COUNTRY,
-          bookingLink: (brandData as any)?.booking_link ?? '',
-          logoUrl: (businessData as any).logo_url ?? ''
+          bookingLink: (profileData as any)?.booking_url ?? (brandData as any)?.booking_link ?? '',
+          logoUrl: (businessData as any).logo_url ?? '',
+          localLocationReference: (businessData as any).local_location_reference ?? ''
         }
         
         console.log('📋 Final loadedState:', loadedState)
@@ -424,10 +533,16 @@ function BusinessProfilePage() {
         return
       }
 
+      setOpeningHoursReview({
+        required: !!analysis.openingHoursReviewRequired,
+        reasons: analysis.openingHoursReviewReasons || []
+      })
+
       let fieldsUpdated = 0
 
       // Business name
-      if (analysis.businessName && (!businessName.trim() || businessName.trim() === 'Min Virksomhed')) {
+      // Prefer the website-derived name so obvious onboarding typos get corrected.
+      if (analysis.businessName && analysis.businessName.trim() !== businessName.trim()) {
         setBusinessName(analysis.businessName)
         fieldsUpdated++
       }
@@ -447,6 +562,10 @@ function BusinessProfilePage() {
       if (analysis.shortDescription && !aboutText.trim()) {
         setAboutText(analysis.shortDescription)
         fieldsUpdated++
+      }
+
+      if (analysis.keyOfferings) {
+        setKeyOfferings(enrichKeyOfferings(analysis.keyOfferings))
       }
 
       // Phone
@@ -527,18 +646,38 @@ function BusinessProfilePage() {
         }
       }
 
+      if ((analysis as any).kitchenCloseTime && !kitchenCloseTime.trim()) {
+        setKitchenCloseTime((analysis as any).kitchenCloseTime)
+        fieldsUpdated++
+        console.log('✅ Kitchen close time extracted and populated:', (analysis as any).kitchenCloseTime)
+      }
+
       // Service model detection - save to business_operations
       console.log('🔍 Checking service model fields:', {
         takeaway: (analysis as any).takeaway,
         delivery: (analysis as any).delivery,
         hasTableService: (analysis as any).hasTableService,
-        reservationRequired: (analysis as any).reservationRequired
+        reservationRequired: (analysis as any).reservationRequired,
+        outdoorSeating: (analysis as any).outdoorSeating,
+        wifi: (analysis as any).wifi,
+        powerOutlets: (analysis as any).powerOutlets,
+        parking: (analysis as any).parking,
+        kidsMenu: (analysis as any).kidsMenu
       })
       
-      if ((analysis as any).takeaway !== null && (analysis as any).takeaway !== undefined ||
-          (analysis as any).delivery !== null && (analysis as any).delivery !== undefined ||
-          (analysis as any).hasTableService !== null && (analysis as any).hasTableService !== undefined ||
-          (analysis as any).reservationRequired !== null && (analysis as any).reservationRequired !== undefined) {
+      const hasAnyServiceField = [
+        (analysis as any).takeaway,
+        (analysis as any).delivery,
+        (analysis as any).hasTableService,
+        (analysis as any).reservationRequired,
+        (analysis as any).outdoorSeating,
+        (analysis as any).wifi,
+        (analysis as any).powerOutlets,
+        (analysis as any).parking,
+        (analysis as any).kidsMenu
+      ].some(v => v !== null && v !== undefined)
+
+      if (hasAnyServiceField) {
         
         // Update or create business_operations record with service model flags
         const { data: existingOps } = await sb
@@ -548,25 +687,63 @@ function BusinessProfilePage() {
           .maybeSingle()
 
         const serviceModelData: any = {}
+        if (kitchenCloseTime.trim()) {
+          serviceModelData.kitchen_close_time = kitchenCloseTime.trim()
+        }
         if (analysis.takeaway !== null && analysis.takeaway !== undefined) {
           serviceModelData.has_takeaway = Boolean(analysis.takeaway)
+          setHasTakeaway(Boolean(analysis.takeaway))
           console.log(`✅ Takeaway detected: ${serviceModelData.has_takeaway ? 'Yes' : 'No'}`)
           fieldsUpdated++
         }
         if ((analysis as any).delivery !== null && (analysis as any).delivery !== undefined) {
           serviceModelData.has_delivery = Boolean((analysis as any).delivery)
+          setHasDelivery(Boolean((analysis as any).delivery))
           console.log(`✅ Delivery detected: ${serviceModelData.has_delivery ? 'Yes' : 'No'}`)
           fieldsUpdated++
         }
         if ((analysis as any).hasTableService !== null && (analysis as any).hasTableService !== undefined) {
           serviceModelData.has_table_service = Boolean((analysis as any).hasTableService)
+          setHasTableService(Boolean((analysis as any).hasTableService))
           console.log(`✅ Table service detected: ${serviceModelData.has_table_service ? 'Yes' : 'No'}`)
           fieldsUpdated++
         }
         if ((analysis as any).reservationRequired !== null && (analysis as any).reservationRequired !== undefined) {
           serviceModelData.reservation_required = Boolean((analysis as any).reservationRequired)
           serviceModelData.accepts_walk_ins = !Boolean((analysis as any).reservationRequired)
+          setReservationRequired(Boolean((analysis as any).reservationRequired))
+          setAcceptsWalkIns(!Boolean((analysis as any).reservationRequired))
           console.log(`✅ Reservation required: ${serviceModelData.reservation_required ? 'Yes' : 'No'}`)
+          fieldsUpdated++
+        }
+        if (analysis.outdoorSeating !== null && analysis.outdoorSeating !== undefined) {
+          serviceModelData.has_outdoor_seating = Boolean(analysis.outdoorSeating)
+          setHasOutdoorSeating(Boolean(analysis.outdoorSeating))
+          console.log(`✅ Outdoor seating detected: ${serviceModelData.has_outdoor_seating ? 'Yes' : 'No'}`)
+          fieldsUpdated++
+        }
+        if (analysis.wifi !== null && analysis.wifi !== undefined) {
+          serviceModelData.has_wifi = Boolean(analysis.wifi)
+          setHasWifi(Boolean(analysis.wifi))
+          console.log(`✅ WiFi detected: ${serviceModelData.has_wifi ? 'Yes' : 'No'}`)
+          fieldsUpdated++
+        }
+        if (analysis.powerOutlets !== null && analysis.powerOutlets !== undefined) {
+          serviceModelData.has_power_outlets = Boolean(analysis.powerOutlets)
+          setHasPowerOutlets(Boolean(analysis.powerOutlets))
+          console.log(`✅ Power outlets detected: ${serviceModelData.has_power_outlets ? 'Yes' : 'No'}`)
+          fieldsUpdated++
+        }
+        if (analysis.parking !== null && analysis.parking !== undefined) {
+          serviceModelData.has_parking = Boolean(analysis.parking)
+          setHasParking(Boolean(analysis.parking))
+          console.log(`✅ Parking detected: ${serviceModelData.has_parking ? 'Yes' : 'No'}`)
+          fieldsUpdated++
+        }
+        if ((analysis as any).kidsMenu !== null && (analysis as any).kidsMenu !== undefined) {
+          serviceModelData.has_kids_menu = Boolean((analysis as any).kidsMenu)
+          setHasKidsMenu(Boolean((analysis as any).kidsMenu))
+          console.log(`✅ Kids menu detected: ${serviceModelData.has_kids_menu ? 'Yes' : 'No'}`)
           fieldsUpdated++
         }
 
@@ -652,32 +829,6 @@ function BusinessProfilePage() {
             setMenuHighlights(highlights)
             console.log('🍽️ Menu highlights refreshed after analysis:', highlights.length, 'items', highlights)
 
-            // Auto-generate business character after analysis (always refresh if analysis ran)
-            try {
-              const freshProgrammes = updatedProfile.menu_signal?.programmes
-              const { data: charData } = await sb.functions.invoke('suggest-business-character', {
-                body: {
-                  businessName: analysis.businessName || businessName,
-                  businessCategory,
-                  aboutText: analysis.shortDescription || '',
-                  menuDescription: updatedProfile.menu_signal?.menuDescription || '',
-                  menuHighlights: highlights,
-                  programmes: freshProgrammes && Array.isArray(freshProgrammes) && freshProgrammes.length > 0
-                    ? freshProgrammes
-                    : undefined,
-                  openingHours,
-                  hasOutdoorSeating,
-                  hasTableService,
-                  hasTakeaway: analysis.takeaway ?? hasTakeaway,
-                  websiteUrl: sanitized,
-                },
-              })
-              if (charData?.suggestion) {
-                setBusinessCharacter(charData.suggestion)
-              }
-            } catch (e) {
-              console.warn('Auto-generering af forretningstype fejlede:', e)
-            }
           }
         }
         
@@ -716,7 +867,6 @@ function BusinessProfilePage() {
       console.log('📝 handleSaveProfile called with state:', {
         businessName,
         websiteUrl,
-        tagline,
         aboutText,
         address: effectiveAddress,
         postalCode: effectivePostalCode,
@@ -771,7 +921,11 @@ function BusinessProfilePage() {
 
       // Update business table fields (only update if changed from existing)
       const updateData: any = {
-        name: businessName
+        name: businessName,
+        // Always include these fields to allow clearing/updating them
+        website_url: websiteUrl || null,
+        logo_url: logoUrl || null,
+        local_location_reference: localLocationReference.trim() || null
       }
       
       // Map businessCategory to vertical column
@@ -779,14 +933,6 @@ function BusinessProfilePage() {
         updateData.vertical = businessCategory
       } else if (businessSector) {
         updateData.vertical = businessSector
-      }
-      
-      // Only include URLs if they have values
-      if (websiteUrl) {
-        updateData.website_url = websiteUrl
-      }
-      if (logoUrl) {
-        updateData.logo_url = logoUrl
       }
 
       console.log('💾 Saving business data:', updateData)
@@ -871,51 +1017,51 @@ function BusinessProfilePage() {
         .eq('business_id', effectiveBusinessId)
         .maybeSingle()
 
+      const enrichedKeyOfferings = enrichKeyOfferings(keyOfferings)
+
       console.log('📋 Saving about text:', aboutText, 'Existing profile:', !!existingProfile)
 
       if (existingProfile) {
         const { error: profileUpdateError } = await sb
           .from('business_profile')
           .update({
-            short_description: tagline || null,
-            long_description: aboutText || null
+            user_about_text: aboutText || null,
+            key_offerings: enrichedKeyOfferings || null,
+            booking_url: effectiveBookingLink || null
           })
           .eq('business_id', effectiveBusinessId)
         
         if (profileUpdateError) {
           console.error('❌ Profile update error:', profileUpdateError)
         } else {
-          console.log('✅ Profile updated with tagline + about text')
+          console.log('✅ Profile updated with about text and key offerings')
         }
       } else {
         const { error: profileInsertError } = await sb
           .from('business_profile')
           .insert({
             business_id: effectiveBusinessId,
-            short_description: tagline || null,
-            long_description: aboutText || null
+            user_about_text: aboutText || null,
+            key_offerings: enrichedKeyOfferings || null,
+            booking_url: effectiveBookingLink || null
           })
         
         if (profileInsertError) {
           console.error('❌ Profile insert error:', profileInsertError)
         } else {
-          console.log('✅ Profile created with tagline + about text')
+          console.log('✅ Profile created with about text and key offerings')
         }
       }
 
-      // Update or create brand profile (booking link + business_character)
-      const businessProfileUpdates: Record<string, any> = {}
-      if (effectiveBookingLink) businessProfileUpdates.booking_link = effectiveBookingLink
-      if (businessCharacter.trim()) businessProfileUpdates.business_character = businessCharacter.trim()
-
-      if (Object.keys(businessProfileUpdates).length > 0) {
-        await sb
-          .from('business_brand_profile')
-          .upsert({
-            business_id: effectiveBusinessId,
-            ...businessProfileUpdates
-          } as any, { onConflict: 'business_id' })
-      }
+      // Update or create brand profile (booking link + business_character + differentiator)
+      // Always save these fields to allow clearing them
+      await sb
+        .from('business_brand_profile')
+        .upsert({
+          business_id: effectiveBusinessId,
+          booking_link: effectiveBookingLink || null,
+          business_character: businessCharacter.trim() || null
+        } as any, { onConflict: 'business_id' })
 
       // Save opening hours - delete and re-insert approach
       const { error: deleteHoursError } = await sb
@@ -961,23 +1107,52 @@ function BusinessProfilePage() {
       }
 
       // Save service model to business_operations
-      await sb
+      const { data: existingOperations, error: existingOperationsError } = await sb
         .from('business_operations')
-        .upsert({
-          business_id: effectiveBusinessId,
-          has_table_service: hasTableService,
-          has_takeaway: hasTakeaway,
-          has_delivery: hasDelivery,
-          has_outdoor_seating: hasOutdoorSeating,
-          has_wifi: hasWifi,
-          has_power_outlets: hasPowerOutlets,
-          has_parking: hasParking,
-          reservation_required: reservationRequired,
-          has_kids_menu: hasKidsMenu,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'business_id'
-        })
+        .select('business_id')
+        .eq('business_id', effectiveBusinessId)
+        .maybeSingle()
+
+      if (existingOperationsError) {
+        throw existingOperationsError
+      }
+
+      const operationsPayload = {
+        has_table_service: hasTableService,
+        has_takeaway: hasTakeaway,
+        has_delivery: hasDelivery,
+        has_outdoor_seating: hasOutdoorSeating,
+        has_wifi: hasWifi,
+        has_power_outlets: hasPowerOutlets,
+        has_parking: hasParking,
+        reservation_required: reservationRequired,
+        has_kids_menu: hasKidsMenu,
+        kitchen_close_time: kitchenCloseTime || null,
+        weekly_programme: weeklyProgramme || null,
+        updated_at: new Date().toISOString()
+      }
+
+      if (existingOperations) {
+        const { error: updateOperationsError } = await sb
+          .from('business_operations')
+          .update(operationsPayload)
+          .eq('business_id', effectiveBusinessId)
+
+        if (updateOperationsError) {
+          throw updateOperationsError
+        }
+      } else {
+        const { error: insertOperationsError } = await sb
+          .from('business_operations')
+          .insert({
+            business_id: effectiveBusinessId,
+            ...operationsPayload
+          })
+
+        if (insertOperationsError) {
+          throw insertOperationsError
+        }
+      }
 
       const snapshot = buildStateSnapshot()
       syncSavedSnapshot(snapshot)
@@ -994,32 +1169,7 @@ function BusinessProfilePage() {
   }
 
   const handleGenerateBusinessCharacter = async () => {
-    setIsGeneratingCharacter(true)
-    try {
-      const { data, error } = await sb.functions.invoke('suggest-business-character', {
-        body: {
-          businessName,
-          businessCategory,
-          aboutText,
-          menuDescription,
-          menuHighlights,
-          programmes: menuProgrammes.length > 0 ? menuProgrammes : undefined,
-          openingHours,
-          hasOutdoorSeating,
-          hasTableService,
-          hasTakeaway,
-          websiteUrl,
-        },
-      })
-      if (!error && data?.suggestion) {
-        setBusinessCharacter(data.suggestion)
-        markUnsaved()
-      }
-    } catch (e) {
-      console.error('Business character suggestion error:', e)
-    } finally {
-      setIsGeneratingCharacter(false)
-    }
+    console.warn('business_character generation is now owned by Brand Profile V5')
   }
 
   const handleRevertChanges = () => {
@@ -1036,173 +1186,9 @@ function BusinessProfilePage() {
     )
   }
 
-  // FREE TIER VIEW
-  if (currentTier === 'free') {
-    return (
-      <div className="bg-surface-page min-h-full py-6 px-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-6">
-            <h1 className="text-xl font-bold text-brand mb-1">{t('businessProfile.title')}</h1>
-            <p className="text-sm text-text-secondary">{t('businessProfile.freeSubtitleBasic')}</p>
-          </div>
-
-          <div className="bg-surface rounded-lg border border-border p-4 mb-4">
-            <h3 className="text-sm font-semibold text-brand mb-3">{t('businessProfile.basicInfoSection')}</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.businessName')}</label>
-                <input
-                  type="text"
-                  value={businessName}
-                  onChange={(e) => { setBusinessName(e.target.value); markUnsaved() }}
-                  className="w-full px-3 py-2 border border-border rounded text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.websiteLabel')}</label>
-                <div className="flex gap-2">
-                  <input
-                    type="url"
-                    value={websiteUrl}
-                    onChange={(e) => { setWebsiteUrl(e.target.value); markUnsaved() }}
-                    placeholder={t('businessProfile.websitePlaceholder')}
-                    className="flex-1 px-3 py-2 border border-border rounded text-sm"
-                  />
-                  <button
-                    onClick={handleWebsiteAnalysis}
-                    disabled={!websiteUrl.trim()}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-opacity
-                      ${isAnalyzing
-                        ? 'bg-cta text-text-inverse opacity-75 cursor-wait'
-                        : 'bg-cta text-text-inverse hover:bg-cta-hover disabled:bg-surface-alt disabled:text-text-muted disabled:cursor-not-allowed'
-                      }`}
-                  >
-                    <AnalyzeIcon className={isAnalyzing ? 'w-4 h-4 animate-spin motion-reduce:animate-none text-text-inverse' : 'w-4 h-4 text-text-inverse'} />
-                    <span>{isAnalyzing ? t('businessProfile.analyzingWebsiteButton') : t('businessProfile.analyzeWebsiteButton')}</span>
-                  </button>
-                </div>
-                <p className="text-xs text-text-muted mt-1">
-                  {t('businessProfile.analyzeHint')}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1">
-                  {t('businessProfile.taglineLabel')}
-                  <span className="ml-1 text-xs font-normal text-cta">{t('businessProfile.taglineAiBadge')}</span>
-                </label>
-                <input
-                  type="text"
-                  value={tagline}
-                  onChange={(e) => { setTagline(e.target.value); markUnsaved() }}
-                  placeholder={t('businessProfile.taglinePlaceholder')}
-                  maxLength={100}
-                  className="w-full px-3 py-2 border border-border rounded text-sm"
-                />
-                <p className="text-xs text-text-muted mt-0.5">{t('businessProfile.taglineHint')}</p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.aboutLabel')}</label>
-                <textarea
-                  value={aboutText}
-                  onChange={(e) => { setAboutText(e.target.value); markUnsaved() }}
-                  placeholder={t('businessProfile.aboutPlaceholder')}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-border rounded text-sm resize-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.addressLabel')}</label>
-                <input
-                  type="text"
-                  value={address}
-                  onChange={(e) => { setAddress(e.target.value); markUnsaved() }}
-                  className="w-full px-3 py-2 border border-border rounded text-sm"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.postalCodeLabel')}</label>
-                  <input
-                    type="text"
-                    value={postalCode}
-                    onChange={(e) => { setPostalCode(e.target.value.replace(/\D/g, '').slice(0, 4)); markUnsaved() }}
-                    maxLength={4}
-                    className="w-full px-3 py-2 border border-border rounded text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.cityLabel')}</label>
-                  <input
-                    type="text"
-                    value={city}
-                    readOnly
-                    className="w-full px-3 py-2 border border-border rounded bg-surface-alt text-sm"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.typeLabel')}</label>
-                <input
-                  type="text"
-                  value={businessCategory}
-                  onChange={(e) => { setBusinessCategory(e.target.value); markUnsaved() }}
-                  placeholder={t('businessProfile.typePlaceholder')}
-                  className="w-full px-3 py-2 border border-border rounded text-sm"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-surface-alt rounded-lg border border-border p-4 mb-4">
-            <div className="flex items-start gap-3">
-              <div className="text-2xl">✨</div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-brand mb-1 text-sm">{t('businessProfile.upgradeBannerTitle')}</h3>
-                <p className="text-xs text-text-secondary mb-2">
-                  {t('businessProfile.upgradeBannerDesc')}
-                </p>
-                <button
-                  onClick={() => window.location.href = '/dashboard/plans'}
-                  className="px-3 py-1.5 bg-cta text-text-inverse rounded text-xs font-medium"
-                >
-                  {t('businessProfile.upgradeBannerCta')}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-surface border border-border rounded-lg px-4 py-3">
-            <div className="flex items-center justify-between">
-              <div className="text-sm">
-                {justSaved ? (
-                  <span className="text-success font-medium">{t('businessProfile.savedStatus')}</span>
-                ) : hasUnsavedChanges ? (
-                  <span className="text-warning">{t('businessProfile.unsavedStatus')}</span>
-                ) : (
-                  <span className="text-text-muted">{t('businessProfile.noChangesStatus')}</span>
-                )}
-              </div>
-              <button
-                onClick={() => handleSaveProfile()}
-                disabled={!hasUnsavedChanges || !businessName.trim()}
-                className="px-4 py-2 bg-cta text-text-inverse rounded text-sm font-semibold disabled:bg-surface-alt"
-              >
-                {t('businessProfile.saveButton')}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // SMART/PRO TIER VIEW
+  // ALL TIERS VIEW (Free, Smart, Pro)
   return (
-    <div className="bg-surface-page min-h-full py-6 px-6">
+    <div className="bg-[#FAFAF8] min-h-full py-6 px-6">
       <div className="max-w-6xl mx-auto">
         {/* Progress indicator */}
         <div className="mb-6">
@@ -1217,16 +1203,16 @@ function BusinessProfilePage() {
           </div>
         </div>
         <div className="text-center mb-4">
-          <h1 className="text-xl font-bold text-brand mb-1">{t('businessProfile.title')}</h1>
+          <h1 className="text-xl font-medium text-brand mb-1">{t('businessProfile.title')}</h1>
           <p className="text-sm text-text-secondary">{t('businessProfile.fullSubtitle')}</p>
         </div>
 
         <div className="space-y-3">
           {/* Website Analysis */}
-          <div className="bg-surface rounded-lg border border-border px-4 py-3" aria-busy={isAnalyzing}>
+          <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] px-4 py-3" aria-busy={isAnalyzing}>
             <div className="space-y-2">
               <div>
-                <label className="block text-xs font-medium text-text-secondary mb-1">
+                <label className="block text-xs font-medium text-[#3C3830] mb-1">
                   {t('businessProfile.websiteUrlLabel')}
                 </label>
                 <input
@@ -1234,7 +1220,7 @@ function BusinessProfilePage() {
                   value={websiteUrl}
                   onChange={(e) => { setWebsiteUrl(e.target.value); markUnsaved() }}
                   placeholder={t('businessProfile.websiteUrlPlaceholder')}
-                  className="w-full px-3 py-2 border border-border rounded text-sm"
+                  className="w-full px-3 py-2 border border-[#C8C3BB] bg-[#F4F1EC] rounded-lg text-sm"
                 />
               </div>
               <div className="flex items-center gap-3">
@@ -1257,10 +1243,10 @@ function BusinessProfilePage() {
           </div>
 
           {/* Business Basics */}
-          <div className="bg-surface rounded-lg border border-border p-4">
+          <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
-                <h3 className="text-sm font-semibold text-brand mb-1">{t('businessProfile.sectionBusiness')}</h3>
+                <h3 className="text-sm font-medium text-brand mb-1">{t('businessProfile.sectionBusiness')}</h3>
                 {!isEditingBasics && (
                   <p className="text-sm text-text-secondary">
                     {businessName || t('businessProfile.notFilled')} {businessCategory && `· ${businessCategory}`}
@@ -1269,7 +1255,7 @@ function BusinessProfilePage() {
               </div>
               <button
                 onClick={() => setIsEditingBasics(!isEditingBasics)}
-                className="px-3 py-1.5 text-sm text-text-secondary border border-border rounded hover:bg-surface-alt"
+                className="text-[13px] font-medium text-[#076B4E] py-1.5 hover:underline"
               >
                 {isEditingBasics ? t('businessProfile.closeButton') : t('businessProfile.editButton')}
               </button>
@@ -1286,72 +1272,36 @@ function BusinessProfilePage() {
                     className="w-full px-3 py-2 border border-border rounded text-sm"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-text-secondary mb-1">Branche</label>
-                    <select
-                      value={businessSector || ''}
-                      onChange={(e) => { setBusinessSector(e.target.value as BusinessSector); markUnsaved() }}
-                      className="w-full px-3 py-2 border border-border rounded text-sm"
-                    >
-                      <option value="">{t('businessProfile.sectorPlaceholder')}</option>
-                      <option value="hospitality">Hospitality</option>
-                      <option value="beauty">Beauty</option>
-                      <option value="wellness">Wellness</option>
-                      <option value="retail">Retail</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.typeLabel')}</label>
-                    <input
-                      type="text"
-                      value={businessCategory}
-                      onChange={(e) => { setBusinessCategory(e.target.value); markUnsaved() }}
-                      placeholder={t('businessProfile.typePlaceholder')}
-                      className="w-full px-3 py-2 border border-border rounded text-sm"
-                    />
-                  </div>
-                </div>
                 <div>
-                  <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.logoLabel')}</label>
+                  <label className="block text-xs font-medium text-text-secondary mb-1">{t('businessProfile.typeLabel')}</label>
                   <input
-                    type="url"
-                    value={logoUrl}
-                    onChange={(e) => { setLogoUrl(e.target.value); markUnsaved() }}
-                    placeholder="https://..."
+                    type="text"
+                    value={businessCategory}
+                    onChange={(e) => { setBusinessCategory(e.target.value); markUnsaved() }}
+                    placeholder={t('businessProfile.typePlaceholder')}
                     className="w-full px-3 py-2 border border-border rounded text-sm"
                   />
-                  <p className="text-xs text-text-muted mt-1">{t('businessProfile.logoHint')}</p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Business Character */}
-          <div className="bg-surface rounded-lg border border-border p-4">
+          {/* Om os */}
+          <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-brand mb-1">{t('businessProfile.sectionAbout')}</h3>
+                <h3 className="text-sm font-medium text-brand mb-1">{t('businessProfile.sectionAbout')}</h3>
                 {!isEditingCharacter && (
                   <p className="text-sm text-text-secondary">
-                    {businessCharacter || (
+                    {aboutText || (
                       <span className="text-text-muted italic">{t('businessProfile.aboutRunAnalysis')}</span>
                     )}
                   </p>
                 )}
-                {!isEditingCharacter && menuProgrammes.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {menuProgrammes.map((p: any, i: number) => (
-                      <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-surface-alt text-text-secondary">
-                        {p.role}{p.timeContext ? ` · ${p.timeContext}` : ''}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
               <button
                 onClick={() => setIsEditingCharacter(!isEditingCharacter)}
-                className="shrink-0 px-3 py-1.5 text-sm text-text-secondary border border-border rounded hover:bg-surface-alt"
+                className="shrink-0 text-[13px] font-medium text-[#076B4E] py-1.5 hover:underline"
               >
                 {isEditingCharacter ? t('businessProfile.closeButton') : t('businessProfile.editButton')}
               </button>
@@ -1365,8 +1315,8 @@ function BusinessProfilePage() {
                     <span className="ml-1 text-text-muted font-normal">{t('businessProfile.aboutBusinessSuffix')}</span>
                   </label>
                   <textarea
-                    value={businessCharacter}
-                    onChange={(e) => { setBusinessCharacter(e.target.value); markUnsaved() }}
+                    value={aboutText}
+                    onChange={(e) => { setAboutText(e.target.value); markUnsaved() }}
                     rows={3}
                     placeholder={t('businessProfile.aboutCharacterPlaceholder')}
                     className="w-full px-3 py-2 border border-border rounded text-sm resize-none"
@@ -1397,20 +1347,71 @@ function BusinessProfilePage() {
             )}
           </div>
 
+          {/* Key Offerings */}
+          <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-medium text-brand mb-1">
+                  Hvad tilbyder I?
+                  <span className="ml-1 text-text-muted font-normal text-xs">(kun navne)</span>
+                </h3>
+                {!isEditingKeyOfferings && (
+                  keyOfferings ? (
+                    <p className="text-sm text-text-secondary whitespace-pre-wrap">{keyOfferings}</p>
+                  ) : (
+                    <p className="text-sm text-text-muted italic">Ikke angivet</p>
+                  )
+                )}
+              </div>
+              <button
+                onClick={() => setIsEditingKeyOfferings(!isEditingKeyOfferings)}
+                className="text-[13px] font-medium text-[#076B4E] py-1.5 hover:underline"
+              >
+                {isEditingKeyOfferings ? 'Luk' : 'Rediger'}
+              </button>
+            </div>
+
+            {isEditingKeyOfferings && (
+              <div className="mt-4 pt-4 border-t space-y-3">
+                <div>
+                  <textarea
+                    value={keyOfferings}
+                    onChange={(e) => { setKeyOfferings(e.target.value); markUnsaved() }}
+                    rows={6}
+                    placeholder={"Kaffe\nMorgenmad\nSmørrebrød\nSalater\nKage\nSmoothies"}
+                    className="w-full px-3 py-2 border border-border rounded text-sm resize-none font-mono"
+                  />
+                  <p className="text-xs text-text-muted mt-1">
+                    Angiv 5-7 af jeres hovedprodukter eller populære retter — kun navne, ingen beskrivelser. 
+                    Skriv ét produkt per linje. AI'en kender typiske ingredienser og vil automatisk generere passende beskrivelser baseret på rettenavnene.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Location */}
-          <div className="bg-surface rounded-lg border border-border p-4">
+          <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
-                <h3 className="text-sm font-semibold text-brand mb-1">{t('businessProfile.sectionLocation')}</h3>
+                <h3 className="text-sm font-medium text-brand mb-1">{t('businessProfile.sectionLocation')}</h3>
                 {!isEditingLocation && (
-                  <p className="text-sm text-text-secondary">
-                    {address && city ? `${address}, ${city}` : t('businessProfile.notFilled')}
-                  </p>
+                  <div className="space-y-2">
+                    <p className="text-sm text-text-secondary">
+                      {address && city ? `${address}, ${city}` : t('businessProfile.notFilled')}
+                    </p>
+                    {localLocationReference && (
+                      <div className="px-3 py-2 bg-[#F4F1EC] rounded border border-[#E2DDD6]">
+                        <p className="text-xs font-medium text-text-secondary mb-0.5">Lokal betegnelse</p>
+                        <p className="text-sm text-brand font-medium">{localLocationReference}</p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
               <button
                 onClick={() => setIsEditingLocation(!isEditingLocation)}
-                className="px-3 py-1.5 text-sm text-text-secondary border border-border rounded hover:bg-surface-alt"
+                className="text-[13px] font-medium text-[#076B4E] py-1.5 hover:underline"
               >
                 {isEditingLocation ? t('businessProfile.closeButton') : t('businessProfile.editButton')}
               </button>
@@ -1457,24 +1458,57 @@ function BusinessProfilePage() {
                     />
                   </div>
                 </div>
+                <div className="bg-[#F9F8F6] border border-[#E2DDD6] rounded-lg p-4">
+                  <label className="block text-sm font-medium text-brand mb-1">
+                    Lokal stedsbetegnelse <span className="text-text-tertiary font-normal">(valgfri)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={localLocationReference}
+                    onChange={(e) => { setLocalLocationReference(e.target.value); markUnsaved() }}
+                    placeholder="f.eks. 'ved åen', 'Nyhavn', 'i Vesterbro'"
+                    maxLength={50}
+                    className="w-full px-3 py-2 border border-border rounded text-sm"
+                  />
+                  <div className="mt-2 p-3 bg-[#E8F5F1] rounded border border-[#B8E6D5]">
+                    <p className="text-xs text-[#0D5C4C] leading-relaxed">
+                      <strong>Hvordan bruges dette?</strong><br/>
+                      AI'en bruger denne lokale betegnelse i alt genereret indhold for at gøre opslag mere autentiske. 
+                      Eksempler: "ved åen", "Nyhavn", "bugten", "i Vesterbro".<br/>
+                      <span className="text-[#0A4A3D] font-medium">→ Forbedrer kvaliteten af opslag markant!</span>
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </div>
 
           {/* Contact */}
-          <div className="bg-surface rounded-lg border border-border p-4">
+          <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
-                <h3 className="text-sm font-semibold text-brand mb-1">{t('businessProfile.sectionContact')}</h3>
+                <h3 className="text-sm font-medium text-brand mb-1">{t('businessProfile.sectionContact')}</h3>
                 {!isEditingContact && (
-                  <p className="text-sm text-text-secondary">
-                    {[phone, email].filter(Boolean).join(' · ') || t('businessProfile.notFilled')}
-                  </p>
+                  <div className="space-y-1.5">
+                    <p className="text-sm text-text-secondary">
+                      {[phone, email].filter(Boolean).join(' · ') || t('businessProfile.notFilled')}
+                    </p>
+                    {bookingLink.trim() && (
+                      <a
+                        href={bookingLink.trim()}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm text-[#076B4E] hover:underline break-all"
+                      >
+                        {bookingLink.trim()}
+                      </a>
+                    )}
+                  </div>
                 )}
               </div>
               <button
                 onClick={() => setIsEditingContact(!isEditingContact)}
-                className="px-3 py-1.5 text-sm text-text-secondary border border-border rounded hover:bg-surface-alt"
+                className="text-[13px] font-medium text-[#076B4E] py-1.5 hover:underline"
               >
                 {isEditingContact ? t('businessProfile.closeButton') : t('businessProfile.editButton')}
               </button>
@@ -1516,27 +1550,33 @@ function BusinessProfilePage() {
             )}
           </div>
 
-          {/* Opening Hours */}
-          <div className="bg-surface rounded-lg border border-border p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-brand mb-1">{t('businessProfile.sectionHours')}</h3>
-                {!isEditingHours && (
-                  <p className="text-sm text-text-secondary">
-                    {Object.values(openingHours).some(h => h.open || h.close) ? t('businessProfile.hoursHasData') : t('businessProfile.hoursEmpty')}
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={() => setIsEditingHours(!isEditingHours)}
-                className="px-3 py-1.5 text-sm text-text-secondary border border-border rounded hover:bg-surface-alt"
-              >
-                {isEditingHours ? t('businessProfile.closeButton') : t('businessProfile.editButton')}
-              </button>
-            </div>
+          {/* Opening Hours + Service Model — side by side */}
+          <div className="grid grid-cols-2 gap-3 items-start">
 
-            {isEditingHours && (
-              <div className="mt-4 pt-4 border-t space-y-2">
+            {/* Opening Hours */}
+            <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-brand">{t('businessProfile.sectionHours')}</h3>
+              </div>
+              <p className="mb-2 text-xs text-text-muted">
+                Brug 15-minutters intervaller: 00, 15, 30 og 45 minutter. Komplekse åbningstider med flere servicevinduer eller forskellige køkkenlukketider pr. dag skal kontrolleres manuelt.
+              </p>
+
+              {openingHoursReview.required && (
+                <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <p className="font-medium">Åbningstiderne ser tvetydige ud.</p>
+                  <p className="mt-1">AI har fundet flere forskellige åbningstidsblokke på hjemmesiden. Gå dem igennem manuelt, før du gemmer.</p>
+                  {openingHoursReview.reasons.length > 0 && (
+                    <ul className="mt-1 list-disc pl-4 space-y-1">
+                      {openingHoursReview.reasons.map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-2">
                 {(Object.keys(openingHours) as DayKey[]).map((day) => {
                   const dayNames: Record<DayKey, string> = {
                     man: t('businessProfile.days.man'),
@@ -1549,67 +1589,47 @@ function BusinessProfilePage() {
                   }
 
                   return (
-                    <div key={day} className="flex items-center gap-3">
-                      <div className="w-24 text-xs text-text-secondary">{dayNames[day]}</div>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="time"
-                          value={openingHours[day].open}
-                          onChange={(e) => {
-                            setOpeningHours(prev => ({
-                              ...prev,
-                              [day]: { ...prev[day], open: e.target.value }
-                            }))
-                            markUnsaved()
-                          }}
-                          className="px-2 py-1.5 border border-border rounded text-xs"
-                        />
-                        <span className="text-xs text-text-muted">-</span>
-                        <input
-                          type="time"
-                          value={openingHours[day].close}
-                          onChange={(e) => {
-                            setOpeningHours(prev => ({
-                              ...prev,
-                              [day]: { ...prev[day], close: e.target.value }
-                            }))
-                            markUnsaved()
-                          }}
-                          className="px-2 py-1.5 border border-border rounded text-xs"
-                        />
+                    <div key={day} className="space-y-2 rounded-md border border-[#E7E2DA] bg-[#FCFBF8] p-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 text-xs text-text-secondary shrink-0">{dayNames[day]}</div>
+                        <div className="flex gap-1 items-center">
+                          <QuarterHourTimePicker
+                            value={openingHours[day].open}
+                            className="w-32"
+                            onChange={(value) => {
+                              setOpeningHours(prev => ({
+                                ...prev,
+                                [day]: { ...prev[day], open: value }
+                              }))
+                              markUnsaved()
+                            }}
+                          />
+                          <span className="text-xs text-text-muted">–</span>
+                          <QuarterHourTimePicker
+                            value={openingHours[day].close}
+                            className="w-32"
+                            onChange={(value) => {
+                              setOpeningHours(prev => ({
+                                ...prev,
+                                [day]: { ...prev[day], close: value }
+                              }))
+                              markUnsaved()
+                            }}
+                          />
+                        </div>
                       </div>
                     </div>
                   )
                 })}
               </div>
-            )}
-          </div>
-
-          {/* Service Model */}
-          <div className="bg-surface rounded-lg border border-border p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold text-brand mb-1">{t('businessProfile.sectionService')}</h3>
-                {!isEditingService && (
-                  <p className="text-sm text-text-secondary">
-                    {[
-                      hasTableService && t('businessProfile.tableService'),
-                      hasTakeaway && t('businessProfile.takeaway'),
-                      hasDelivery && t('businessProfile.delivery')
-                    ].filter(Boolean).join(', ') || t('businessProfile.serviceNotSet')}
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={() => setIsEditingService(!isEditingService)}
-                className="px-3 py-1.5 text-sm text-text-secondary border border-border rounded hover:bg-surface-alt"
-              >
-                {isEditingService ? t('businessProfile.closeButton') : t('businessProfile.editButton')}
-              </button>
             </div>
 
-            {isEditingService && (
-              <div className="mt-4 pt-4 border-t space-y-2">
+            {/* Service Model */}
+            <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-brand">{t('businessProfile.sectionService')}</h3>
+              </div>
+              <div className="space-y-2">
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -1637,16 +1657,16 @@ function BusinessProfilePage() {
                   />
                   <span className="text-sm text-text-secondary">{t('businessProfile.delivery')}</span>
                 </label>
-                <label className="flex items-center gap-2 py-1 px-2 rounded bg-cta-surface border border-cta-surface">
+                <label className="flex items-center gap-2 py-1 px-2 rounded-md bg-[#E6F4F1] border border-[#E6F4F1]">
                   <input
                     type="checkbox"
                     checked={hasOutdoorSeating}
                     onChange={(e) => { setHasOutdoorSeating(e.target.checked); markUnsaved() }}
                     className="rounded accent-cta"
                   />
-                  <span className="text-sm font-medium text-cta-text">
+                  <span className="text-sm font-medium text-[#076B4E]">
                     {t('businessProfile.outdoorSeating')}
-                    <span className="ml-1 text-xs font-normal text-cta">{t('businessProfile.outdoorSeatingBadge')}</span>
+                    <span className="ml-1.5 inline-block bg-[#E6F4F1] text-[#076B4E] border-[0.5px] border-[#88CDB9] rounded-full px-2 py-0.5 text-[11px] font-medium">{t('businessProfile.outdoorSeatingBadge')}</span>
                   </span>
                 </label>
                 <label className="flex items-center gap-2">
@@ -1695,11 +1715,46 @@ function BusinessProfilePage() {
                   <span className="text-sm text-text-secondary">{t('businessProfile.kidsMenu')}</span>
                 </label>
               </div>
-            )}
+            </div>
+
+            {/* Kitchen close time */}
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-text-secondary mb-1">
+                {t('businessProfile.kitchenCloseLabel')}
+              </label>
+              <p className="text-xs text-text-muted mb-2">{t('businessProfile.kitchenCloseHint')}</p>
+              <p className="text-xs text-text-muted mb-2">
+                Køkkenlukketid er én samlet værdi her. Hvis den varierer pr. dag, bør den eftertjekkes manuelt.
+              </p>
+              <QuarterHourTimePicker
+                value={kitchenCloseTime}
+                className="w-32"
+                onChange={(value) => { setKitchenCloseTime(value); markUnsaved() }}
+              />
+            </div>
+
+            {/* Weekly programme */}
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-text-secondary mb-1">
+                {t('businessProfile.weeklyProgrammeLabel')}
+              </label>
+              <p className="text-xs text-text-muted mb-2">{t('businessProfile.weeklyProgrammeHint')}</p>
+              <textarea
+                value={weeklyProgramme}
+                onChange={(e) => { setWeeklyProgramme(e.target.value); markUnsaved() }}
+                rows={4}
+                className="w-full text-sm border border-[#C8C3BB] bg-[#F4F1EC] rounded-lg px-3 py-2 text-text-primary resize-none focus:outline-none focus:ring-1 focus:ring-brand"
+                placeholder={"f.eks. Mandag: Quiz-aften fra kl. 19\nFredag: Happy hour 16–18, DJ fra kl. 22\nSøndag: Brunch hele dagen"}
+              />
+            </div>
+
           </div>
 
           {/* Save */}
-          <div className="bg-surface border border-border rounded-lg px-4 py-3">
+          <div className="bg-surface border-[0.5px] border-[#E2DDD6] rounded-lg px-4 py-3">
+            <p className="mb-3 text-xs text-text-muted">
+              {t('businessProfile.saveReminder')}
+            </p>
             <div className="flex items-center justify-between">
               <div className="text-sm">
                 {justSaved ? (
@@ -1714,14 +1769,14 @@ function BusinessProfilePage() {
                 <button
                   onClick={handleRevertChanges}
                   disabled={!hasUnsavedChanges}
-                  className="px-3 py-1.5 border border-border text-text-secondary rounded text-sm disabled:opacity-50"
+                  className="px-3 py-1.5 border border-border text-[#5C5650] rounded text-sm disabled:opacity-50"
                 >
                   {t('businessProfile.revertButton')}
                 </button>
                 <button
                   onClick={() => handleSaveProfile()}
                   disabled={!hasUnsavedChanges || !businessName.trim()}
-                  className="px-4 py-2 bg-cta text-text-inverse rounded text-sm font-semibold disabled:bg-surface-alt"
+                  className="px-4 py-2 bg-cta text-text-inverse rounded text-sm font-semibold disabled:opacity-40"
                 >
                   {t('businessProfile.saveButton')}
                 </button>
@@ -1733,12 +1788,21 @@ function BusinessProfilePage() {
 
       {/* Navigation button */}
       <div className="flex justify-end mt-6">
-        <a
-          href="/dashboard/menu"
-          className="inline-flex items-center gap-2 px-6 py-2 text-sm bg-cta text-text-inverse font-medium rounded-lg hover:bg-cta-hover transition-colors"
-        >
-          {t('businessProfile.nextMenu')}
-        </a>
+        {currentTier === 'free' ? (
+          <span
+            aria-disabled="true"
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm bg-slate-200 text-slate-500 font-medium rounded-lg cursor-not-allowed"
+          >
+            {t('businessProfile.nextMenu')}
+          </span>
+        ) : (
+          <a
+            href="/dashboard/menu"
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm bg-cta text-text-inverse font-medium rounded-lg hover:bg-cta-hover transition-colors"
+          >
+            {t('businessProfile.nextMenu')}
+          </a>
+        )}
       </div>
     </div>
   )

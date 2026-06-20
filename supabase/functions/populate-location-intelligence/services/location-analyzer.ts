@@ -9,13 +9,24 @@ interface MarketingHook {
   show_on_location_page: boolean;
 }
 
+interface NearbyHospitality {
+  radius_meters: number;
+  total_count: number;
+  breakdown: { restaurant: number; cafe: number; bar: number };
+  density_label: 'low' | 'medium' | 'high';
+  fetched_at: string;
+}
+
 interface AnalyzedLocation {
   neighborhood: string | null;
   neighborhood_character: string | null;
   area_type: string | null;
-  category_scores?: Record<string, number>; // NEW: All location category scores
+  category_scores?: Record<string, number>; // Geographic location types only (WHERE business is)
+  demographic_proximity?: Record<string, number>; // NEW: Demographic proximity data (WHO is nearby)
+  category_modifiers?: Record<string, string[]>; // Category qualifiers (e.g., {city_centre: ["shopping"]})
   latitude: number;
   longitude: number;
+  nearby_hospitality: NearbyHospitality;
   landmarks_nearby: Array<{
     name: string;
     type: string;
@@ -56,15 +67,15 @@ export class LocationAnalyzer {
   /**
    * Analyze and structure location data
    */
-  analyze(geocodeResult: any, nearbyPlaces: any[]): AnalyzedLocation {
+  analyze(geocodeResult: any, nearbyPlaces: any[], hospitalityPlaces?: any[]): AnalyzedLocation {
     // Extract landmarks and categorize them
     const landmarks = this.categorizeLandmarks(nearbyPlaces);
 
     // Count POIs by category
     const poiCounts = this.countPOIsByCategory(nearbyPlaces);
 
-    // Determine area type with weighted scoring (NEW: returns both primary + all scores)
-    const { primaryAreaType, allScores } = this.improvedDetermineAreaType(nearbyPlaces);
+    // Determine area type with weighted scoring (returns geographic scores + demographic proximity)
+    const { primaryAreaType, allScores, demographicProximity } = this.improvedDetermineAreaType(nearbyPlaces);
 
     // Generate rich neighborhood character
     const neighborhoodCharacter = this.generateNeighborhoodCharacter(
@@ -87,18 +98,61 @@ export class LocationAnalyzer {
     // Extract public transport
     const publicTransport = this.extractPublicTransport(nearbyPlaces);
 
+    // Compute hospitality density within 300m for competitive context
+    // Use dedicated hospitalityPlaces (300m hospitality-only API call) when available;
+    // fall back to filtering the general nearbyPlaces array.
+    const nearbyHospitality = this.computeHospitalityDensity(hospitalityPlaces ?? nearbyPlaces, !hospitalityPlaces);
+
     return {
       neighborhood: geocodeResult.neighborhood || null,
       neighborhood_character: neighborhoodCharacter,
       area_type: primaryAreaType,
-      category_scores: allScores, // NEW: Save all location category scores
+      category_scores: allScores, // Geographic location types only (WHERE)
+      demographic_proximity: demographicProximity, // NEW: WHO is nearby (students, tourists, etc.)
       latitude: geocodeResult.latitude,
       longitude: geocodeResult.longitude,
+      nearby_hospitality: nearbyHospitality,
       landmarks_nearby: landmarks,
       poi_counts: poiCounts,
       public_transport: publicTransport,
       location_marketing_hooks: marketingHooks,
       street_visibility: streetVisibility,
+    };
+  }
+
+  /**
+   * Compute hospitality venue density for competitive context.
+   * When `filterByRadius` is true, filters the input to ≤300m first (fallback path).
+   * When `filterByRadius` is false, all supplied places are assumed to be within 300m
+   * (they came from a dedicated 300m hospitality-only Places API call).
+   */
+  private computeHospitalityDensity(places: any[], filterByRadius = false): NearbyHospitality {
+    const RADIUS = 300;
+    const nearby = filterByRadius ? places.filter(p => (p.distance_meters ?? Infinity) <= RADIUS) : places;
+
+    const breakdown = { restaurant: 0, cafe: 0, bar: 0 };
+    for (const place of nearby) {
+      const type = (place.type || '').toLowerCase();
+      if (type.includes('restaurant') || type === 'meal_takeaway' || type === 'food') {
+        breakdown.restaurant++;
+      } else if (type.includes('cafe') || type.includes('coffee')) {
+        breakdown.cafe++;
+      } else if (type.includes('bar') || type.includes('night_club')) {
+        breakdown.bar++;
+      }
+    }
+
+    const total = breakdown.restaurant + breakdown.cafe + breakdown.bar;
+    // density_label thresholds: ≤3 = low, ≤10 = medium, 11+ = high
+    const density_label: 'low' | 'medium' | 'high' =
+      total <= 3 ? 'low' : total <= 10 ? 'medium' : 'high';
+
+    return {
+      radius_meters: RADIUS,
+      total_count: total,
+      breakdown,
+      density_label,
+      fetched_at: new Date().toISOString(),
     };
   }
 
@@ -457,86 +511,111 @@ export class LocationAnalyzer {
    * Improved area type determination with weighted scoring
    * Returns both primary category and all category scores
    */
-  private improvedDetermineAreaType(places: any[]): { primaryAreaType: string; allScores: Record<string, number> } {
-    const typeScores: Record<string, number> = {
+  private improvedDetermineAreaType(places: any[]): { 
+    primaryAreaType: string; 
+    allScores: Record<string, number>;
+    demographicProximity: Record<string, number>;
+  } {
+    // GEOGRAPHIC LOCATION TYPES (WHERE the business is)
+    const geographicScores: Record<string, number> = {
       city_centre: 0,
       residential: 0,
-      tourist: 0,
       office: 0,
       transport_hub: 0,
-      student: 0,
       waterfront: 0,
       shopping_district: 0,
       mixed_use: 0,
-      destination: 0, // NEW: Destination / Drive-To Area
+      destination: 0,
+      nature_park: 0,
     };
 
-    // Score based on place types (matching client-side categories)
+    // DEMOGRAPHIC PROXIMITY (WHO is nearby)
+    const demographicScores: Record<string, number> = {
+      university_proximity: 0,
+      tourist_flow: 0,
+      office_worker_density: 0,
+      residential_density: 0,
+    };
+
+    // Score based on place types
     places.forEach(place => {
       const placeType = (place.type || '').toLowerCase();
       
-      // Tourist indicators
+      // Tourist flow indicators (DEMOGRAPHIC: WHO is nearby)
       if (placeType.includes('tourist') || placeType.includes('museum') || 
           placeType.includes('art_gallery') || placeType.includes('attraction')) {
-        typeScores.tourist += 3;
-        typeScores.city_centre += 1;
+        demographicScores.tourist_flow += 3;
+        geographicScores.city_centre += 1; // Also indicates central location
       }
       
-      // Shopping indicators
+      // Shopping indicators (GEOGRAPHIC: WHERE)
       if (placeType.includes('shopping') || placeType.includes('store') ||
           placeType.includes('clothing') || placeType.includes('mall')) {
-        typeScores.shopping_district += 3;
-        typeScores.city_centre += 1;
+        geographicScores.shopping_district += 3;
+        geographicScores.city_centre += 1;
       }
       
-      // Waterfront indicators
+      // Waterfront indicators (GEOGRAPHIC: WHERE)
       if (placeType.includes('harbor') || placeType.includes('marina') ||
           placeType.includes('waterfront') || place.name.toLowerCase().includes('harbor') ||
           place.name.toLowerCase().includes('havn')) {
-        typeScores.waterfront += 3;
+        geographicScores.waterfront += 3;
       }
       
-      // Office/business indicators
+      // Office/business indicators (both DEMOGRAPHIC density and GEOGRAPHIC type)
       if (placeType.includes('office') || placeType.includes('bank') ||
           placeType.includes('finance')) {
-        typeScores.office += 2;
-        typeScores.city_centre += 1;
+        demographicScores.office_worker_density += 2;
+        geographicScores.office += 2;
+        geographicScores.city_centre += 1;
       }
       
-      // Transport hub indicators
-      if (placeType.includes('train') || placeType.includes('subway') ||
-          placeType.includes('bus_station') || placeType.includes('transit')) {
-        typeScores.transport_hub += 3;
+      // Transport hub indicators (GEOGRAPHIC: WHERE)
+      // Only major transit infrastructure counts (not regular bus stops)
+      if (placeType.includes('train_station') || placeType.includes('subway_station') ||
+          placeType.includes('transit_station')) {
+        geographicScores.transport_hub += 5;  // Higher score for major stations
+      }
+      // Bus terminals (major hubs only, not individual stops)
+      if (placeType === 'bus_station' || place.name.toLowerCase().includes('rutebilstation')) {
+        geographicScores.transport_hub += 3;
       }
       
-      // Student area indicators
+      // University proximity indicators (DEMOGRAPHIC: WHO is nearby)
       if (placeType.includes('university') || placeType.includes('school') ||
           placeType.includes('library') || placeType.includes('college')) {
-        typeScores.student += 3;
+        demographicScores.university_proximity += 3;
       }
       
-      // Residential indicators
-      if (placeType.includes('residential') || placeType.includes('neighborhood') ||
-          placeType.includes('park') || placeType.includes('playground')) {
-        typeScores.residential += 2;
+      // Residential indicators (both DEMOGRAPHIC density and GEOGRAPHIC type)
+      if (placeType.includes('residential') || placeType.includes('neighborhood')) {
+        demographicScores.residential_density += 2;
+        geographicScores.residential += 2;
+      }
+      
+      // Park indicators (GEOGRAPHIC: WHERE)
+      if (placeType.includes('park') || placeType.includes('playground')) {
+        geographicScores.nature_park += 2;
+        geographicScores.residential += 1; // Parks often in residential areas
+        demographicScores.residential_density += 1;
       }
       
       // City centre indicators (high density of services)
       if (placeType.includes('restaurant') || placeType.includes('cafe') ||
           placeType.includes('bar')) {
-        typeScores.city_centre += 1;
-        typeScores.mixed_use += 1;
+        geographicScores.city_centre += 1;
+        geographicScores.mixed_use += 1;
       }
     });
 
     // Destination / Drive-To scoring: LOW POI density suggests non-central location
     const totalPOIs = places.length;
     if (totalPOIs < 10) {
-      typeScores.destination += 4; // Strong signal of low walkability
+      geographicScores.destination += 4;
     } else if (totalPOIs < 20) {
-      typeScores.destination += 2;
+      geographicScores.destination += 2;
     } else if (totalPOIs < 30) {
-      typeScores.destination += 1;
+      geographicScores.destination += 1;
     }
     
     // Check if transit-poor (suggests car-dependent)
@@ -546,45 +625,65 @@ export class LocationAnalyzer {
       (p.type || '').toLowerCase().includes('bus')
     );
     if (!hasTransit) {
-      typeScores.destination += 2;
+      geographicScores.destination += 2;
     }
 
-    // Normalize scores to 0-100 scale
-    const maxScore = Math.max(...Object.values(typeScores), 1);
-    const normalizedScores: Record<string, number> = {};
-    for (const [type, score] of Object.entries(typeScores)) {
-      normalizedScores[type] = Math.round((score / maxScore) * 100);
+    // Normalize GEOGRAPHIC scores to 0-100 scale
+    const maxGeoScore = Math.max(...Object.values(geographicScores), 1);
+    const normalizedGeoScores: Record<string, number> = {};
+    for (const [type, score] of Object.entries(geographicScores)) {
+      normalizedGeoScores[type] = Math.round((score / maxGeoScore) * 100);
     }
 
-    // Find primary category (highest score)
+    // Normalize DEMOGRAPHIC scores to 0-100 scale
+    const maxDemoScore = Math.max(...Object.values(demographicScores), 1);
+    const normalizedDemoScores: Record<string, number> = {};
+    for (const [type, score] of Object.entries(demographicScores)) {
+      normalizedDemoScores[type] = Math.round((score / maxDemoScore) * 100);
+    }
+
+    // Find primary category (highest geographic score)
     let maxNormalizedScore = 0;
     let primaryAreaType = 'mixed_use';
     
-    for (const [type, score] of Object.entries(normalizedScores)) {
+    for (const [type, score] of Object.entries(normalizedGeoScores)) {
       if (score > maxNormalizedScore) {
         maxNormalizedScore = score;
         primaryAreaType = type;
       }
     }
 
-    // Filter out categories with score < 40 (not significant enough)
-    const significantScores: Record<string, number> = {};
-    for (const [type, score] of Object.entries(normalizedScores)) {
+    // Filter out geographic categories with score < 40
+    const significantGeoScores: Record<string, number> = {};
+    for (const [type, score] of Object.entries(normalizedGeoScores)) {
       if (score >= 40) {
-        significantScores[type] = score;
+        significantGeoScores[type] = score;
       }
     }
 
-    // If no significant scores, default to mixed_use with 100 score
-    if (Object.keys(significantScores).length === 0) {
-      significantScores.mixed_use = 100;
+    // If no significant scores, default to mixed_use
+    if (Object.keys(significantGeoScores).length === 0) {
+      significantGeoScores.mixed_use = 100;
       primaryAreaType = 'mixed_use';
     }
 
-    console.log('📊 Location category scores:', significantScores);
-    console.log('🎯 Primary category:', primaryAreaType);
+    // Filter out demographic scores < 20 (not significant proximity)
+    const significantDemoScores: Record<string, number> = {};
+    for (const [type, score] of Object.entries(normalizedDemoScores)) {
+      if (score >= 20) {
+        significantDemoScores[type] = score;
+      }
+    }
 
-    return { primaryAreaType, allScores: significantScores };
+    console.log('📊 Geographic location scores:', significantGeoScores);
+    console.log('👥 Demographic proximity scores:', significantDemoScores);
+    console.log('🎯 Primary geographic category:', primaryAreaType);
+
+    return { 
+      primaryAreaType, 
+      allScores: significantGeoScores,
+      demographicProximity: significantDemoScores
+    };
   }
 
   /**

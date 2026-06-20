@@ -8,9 +8,10 @@ interface PostCreationFooterProps {
   onNext: () => void
   nextLabel?: string
   renderNextButton?: (options: { onNext: () => void }) => ReactNode
+  disabled?: boolean
 }
 
-export function PostCreationFooter({ hasPersistedDraft, onNext, nextLabel, renderNextButton }: Omit<PostCreationFooterProps, 'hasUnsavedChanges'> & { hasUnsavedChanges?: boolean }) {
+export function PostCreationFooter({ hasPersistedDraft, onNext, nextLabel, renderNextButton, disabled }: Omit<PostCreationFooterProps, 'hasUnsavedChanges'> & { hasUnsavedChanges?: boolean }) {
   const [hasSavedOnce, setHasSavedOnce] = useState(hasPersistedDraft)
 
   useEffect(() => {
@@ -26,7 +27,8 @@ export function PostCreationFooter({ hasPersistedDraft, onNext, nextLabel, rende
       ) : (
         <button
           onClick={onNext}
-          className="px-6 py-2 bg-brand text-mint rounded-lg hover:bg-[#12393D] transition-all font-semibold text-xs shadow-md flex items-center gap-2"
+          disabled={disabled}
+          className="px-6 py-2 bg-cta text-text-inverse rounded-lg hover:bg-cta-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium text-xs shadow-md flex items-center gap-2"
         >
           <span>{nextLabel ?? 'Fortsæt til Design'}</span>
           <ChevronRight className="w-4 h-4" />

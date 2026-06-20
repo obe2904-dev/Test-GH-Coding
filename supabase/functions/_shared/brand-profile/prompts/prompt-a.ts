@@ -10,14 +10,31 @@ import { extractStructuredWebsiteData } from '../signal-extractor.ts'
 import { renderLocationPhrase } from './prompt-builder.ts'
 import { buildMenuTypeSummary, buildSocialSummary } from '../data-gatherer.ts'
 import { buildGeoContextBlock } from '../location-intelligence.ts'
+import { loadLanguageConfig as loadPromptLanguageConfig, type Language } from '../../prompts/utils/prompt-loader.ts'
 
-export function buildPromptA(
+export async function buildPromptA(
   dataSources: DataSources,
   language: LanguageConfig,
   allowThirdParty: boolean = false
-): string {
+): Promise<string> {
   const { business, location, profile, menu, images, websiteAnalysis, socialAccounts, menuSummaries,
           menuSignalProgrammes, openingHoursRows, existingBusinessCharacter } = dataSources
+
+  // Load language-specific system message
+  const lang = (language.code || 'da') as Language
+  const result = await loadPromptLanguageConfig(lang, 'brand-profile-a-system')
+  
+  let systemOpener: string
+  let systemCloser: string
+  
+  if (!result.success || !result.prompt) {
+    console.warn(`Failed to load ${lang} brand-profile-a system prompt, using hardcoded fallback`)
+    systemOpener = `You are an internal signal extractor.`
+    systemCloser = `Output JSON ONLY. No markdown.`
+  } else {
+    systemOpener = result.prompt.system
+    systemCloser = result.prompt.closer
+  }
 
   // Use AI helicopter summaries when available; fall back to code-generated type summary
   const menuSummary = menuSummaries && menuSummaries.length > 0
@@ -58,14 +75,24 @@ WEBSITE (compact):
   const geoContextBlock = buildGeoContextBlock(location, city, areaType, locationPhrase || '')
 
   // WP1: Build operational programmes block for Prompt A injection
+  // Operational programmes (brand_weight='operational') are listed separately and must not
+  // influence tone, must_use_phrases, or tone_markers_from_text extraction.
   let operationalProgrammesBlock = ''
   if ((menuSignalProgrammes && menuSignalProgrammes.length > 0) || (openingHoursRows && openingHoursRows.length > 0)) {
     const lines: string[] = ['OPERATIONAL PROGRAMMES:']
     if (menuSignalProgrammes && menuSignalProgrammes.length > 0) {
-      for (const p of menuSignalProgrammes) {
+      const brandProgs = menuSignalProgrammes.filter((p: { brand_weight?: string }) => p.brand_weight !== 'operational')
+      const opProgs = menuSignalProgrammes.filter((p: { brand_weight?: string }) => p.brand_weight === 'operational')
+      for (const p of brandProgs) {
         const timeCtx = p.timeContext ? ` (${p.timeContext})` : ''
         const itemList = p.items?.length > 0 ? `: ${p.items.slice(0, 6).join(', ')}` : ''
         lines.push(`- ${p.role}${timeCtx}${itemList}`)
+      }
+      if (opProgs.length > 0) {
+        lines.push(`TILGÆNGELIGT MEN IKKE ET BRAND-ANKER (udelad fra tone_markers, must_use_phrases og positionering):`)
+        for (const p of opProgs) {
+          lines.push(`- ${p.role}`)
+        }
       }
     }
     if (openingHoursRows && openingHoursRows.length > 0) {
@@ -102,7 +129,9 @@ LOCATION ENRICHMENT (deterministic):
 
   return `${language.instructionsPromptA}
 
-You are an internal signal extractor. Output JSON ONLY. No markdown.
+${systemOpener}
+
+${systemCloser}
 
 CONSTRAINTS (hard):
 - Use ONLY provided data.
@@ -115,12 +144,19 @@ SIZE LIMITS (hard):
 - distinctive_hooks: max 4
 - micro_location_context: max 2
 - usage_occasions: max 3
-- tone_markers_from_text: max 8 — concrete sentence-rhythm observations from the ACTUAL TEXT.
-  Describe what you observe. Format: pattern name + optional example from the actual text.
-  Good examples of format: "du-form throughout", "short imperative sentences", "no punctuation after exclamations", "sentence fragments used for rhythm", "present tense only — no future promises", "scene-setting before offer: [quote from actual text]", "commands without softening: [quote from actual text]", "ellipsis or dash used for pause effect".
-  Do NOT copy the bracketed placeholders above — replace them with real quotes from the website/menu text.
-  Do NOT use abstract adjectives (e.g. NOT: 'friendly', 'warm', 'casual', 'authentic', 'informal phrasing', 'direct address').
-  REQUIRED: describe the grammatical/structural pattern, not the emotional tone.
+- tone_markers_from_text: max 8 — SPECIFIKKE observationer fra FAKTISK website-tekst.
+  Hver markør skal være en konkret teknisk observation, ikke en vurdering.
+  Format: "[Kategori]: [Specifik observation]"
+  Kategorier og eksempler på FORMAT (KOPIER IKKE disse ord — brug faktisk tekst fra dette site):
+  Sætningslængde: "Under 8 ord pr. sætning i hero-teksten"
+  Interpunktion: "Ingen udråbstegn på hele sitet" / "Tankestreg bruges til pause-effekt"
+  Åbninger: "Sætninger starter med stedsnavn eller tidspunkt, ikke adjektiv"
+  Undgåelse: "Ordet 'oplev' bruges ikke — stedet konstaterer frem for at invitere"
+  Rytme: "To korte sætninger efterfulgt af én lidt længere — gentaget mønster"
+  Pronomen: "Teksten bruger 'vi' og 'du' direkte — ingen passiv konstruktion"
+  FORKERT: "Teksten er afslappet og uformel" (vurdering, ikke observation)
+  RIGTIGT: "Sætninger er under 10 ord i gennemsnit — ingen lange forklarende konstruktioner"
+  REQUIRED: beskriv det grammatiske/strukturelle mønster, ikke den emotionelle tone.
 - must_use_phrases.brand_essence: max 3
 - must_use_phrases.cta: max 3
 - evidence snippets: max 140 chars each

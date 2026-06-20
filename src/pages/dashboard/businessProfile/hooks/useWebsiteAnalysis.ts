@@ -1,3 +1,6 @@
+// DISABLED: website_analysis_jobs table does not exist in database
+// This feature is not implemented
+/*
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../../../lib/supabase';
 import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
@@ -185,5 +188,17 @@ export const useWebsiteAnalysis = (businessId: string) => {
     error,
     startAnalysis,
     cancelAnalysis,
+  };
+};
+*/
+
+// Export a disabled hook that returns dummy values
+export const useWebsiteAnalysis = (_businessId: string) => {
+  return {
+    isAnalyzing: false,
+    currentJob: null,
+    error: 'Website analysis feature not implemented',
+    startAnalysis: () => {},
+    cancelAnalysis: () => {},
   };
 };

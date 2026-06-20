@@ -19,6 +19,8 @@ interface UseGenerateValidationOptions {
   text: string
   photoContent: PhotoContent | null
   t: TFunction
+  activePath?: 'write' | 'ai-ideas' | 'weekly-plan'
+  selectedSuggestionData?: { id: number } | null
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
@@ -42,7 +44,9 @@ export function useGenerateValidation({
   platformTexts,
   text,
   photoContent,
-  t
+  t,
+  activePath,
+  selectedSuggestionData
 }: UseGenerateValidationOptions) {
   const [hasAttempted, setHasAttempted] = useState(false)
 
@@ -62,6 +66,23 @@ export function useGenerateValidation({
         message: t('generate.selectPlatformError', 'Please select at least one platform')
       })
     }
+
+    // Require content before advancing (prevents dummy posts in calendar)
+    // Only validate AI Ideas path - Skriv Selv can proceed to Design to upload photos
+    if (activePath === 'ai-ideas') {
+      const hasAiSuggestion = selectedSuggestionData && selectedSuggestionData.id !== 0
+      const hasManualText = text && text.trim().length >= 10
+      const hasPhotos = photoContent?.uploadedMedia && photoContent.uploadedMedia.length > 0
+
+      if (!hasAiSuggestion && !hasManualText && !hasPhotos) {
+        issues.push({
+          id: 'no-content',
+          message: t('generate.selectSuggestionError', 'Vælg en AI idé eller skriv din egen tekst (min. 10 tegn)')
+        })
+      }
+    }
+    // Weekly Plan: auto-generates from plan data
+    // Skriv Selv: no validation at Generate step (can proceed to Design to upload photos)
 
     const effectivePlatforms = customizePerPlatform ? selectedPlatforms : [selectedPlatforms[0] ?? 'facebook']
     const contentTargets = effectivePlatforms.map((platform) => {
@@ -96,7 +117,10 @@ export function useGenerateValidation({
     platformTexts,
     text,
     hasMediaAttachments,
-    t
+    t,
+    activePath,
+    selectedSuggestionData,
+    photoContent
   ])
 
   const validateBeforeNext = useCallback(() => {
@@ -105,7 +129,7 @@ export function useGenerateValidation({
       return false
     }
     return true
-  }, [validationIssues.length])
+  }, [validationIssues])
 
   useEffect(() => {
     if (hasAttempted && validationIssues.length === 0) {

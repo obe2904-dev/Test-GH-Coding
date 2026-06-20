@@ -4,6 +4,8 @@
 // Replaces the 700-line prompt-builder path to eliminate robot language.
 // ============================================================================
 
+import { getHospitalityRegisterBlock } from '../utils/hospitality-register.ts'
+
 export interface PlanPostContext {
   businessName: string
   city: string
@@ -22,6 +24,7 @@ export interface PlanPostContext {
   thingsToAvoid?: string        // concatenated language/tone constraints
   emojiInstruction?: string     // overrides default "1-2 emojis" rule
   signaturePhrases?: string[]   // brand-specific phrases to weave in if contextually fitting
+  language?: string             // ISO 639-1 code — 'da', 'no', 'sv', 'de', 'en' (defaults to 'da')
 }
 
 // Maps contentType to a specific writing directive
@@ -97,6 +100,8 @@ TYPE: ${typeInstruction}${menuLine}
 AFSLUT teksten med:
 ${ctx.ctaInstruction}
 ${brandBlock}
+${getHospitalityRegisterBlock(ctx.language ?? 'da')}
+
 KRAV:
 1. Længde: 250-380 tegn (inkl. emojis og CTA)
 2. Struktur: 2-3 korte sætninger. Start direkte med emnet — INGEN titel eller overskrift

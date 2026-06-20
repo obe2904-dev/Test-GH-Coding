@@ -14,6 +14,12 @@ interface ScheduleCalendarPickerProps {
   hourLabel: string
   minuteLabel: string
   timeInPastLabel: string
+  dayPosts?: Array<{
+    date: Date
+    title: string
+    platform: string
+    time: string
+  }>
   onSelectDate: (date: Date) => void
   onSelectHour: (hour: string) => void
   onSelectMinute: (minute: string) => void
@@ -30,6 +36,47 @@ const normalizeDate = (date: Date) => {
   return normalized
 }
 
+const dateKey = (date: Date) => {
+  const normalized = normalizeDate(date)
+  const year = normalized.getFullYear()
+  const month = String(normalized.getMonth() + 1).padStart(2, '0')
+  const day = String(normalized.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const platformDot = (platform: string) => {
+  const normalized = platform.toLowerCase()
+  if (normalized === 'facebook') return 'bg-blue-500'
+  if (normalized === 'instagram') return 'bg-pink-500'
+  return 'bg-slate-400'
+}
+
+function PastDayTooltip({ posts }: { posts: Array<{ title: string; platform: string; time: string }> }) {
+  if (posts.length === 0) return null
+
+  return (
+    <div className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 w-56 -translate-x-1/2 rounded-xl border border-slate-200 bg-white p-2.5 text-left shadow-xl">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        Opslag denne dag
+      </div>
+      <div className="space-y-1">
+        {posts.slice(0, 5).map((post, index) => (
+          <div key={`${post.title}-${post.time}-${index}`} className="flex items-start gap-1.5">
+            <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${platformDot(post.platform)}`} />
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold text-slate-700 line-clamp-1">{post.title}</div>
+              <div className="text-[9px] text-slate-400">{post.time}</div>
+            </div>
+          </div>
+        ))}
+        {posts.length > 5 && (
+          <div className="text-[9px] font-medium text-slate-400">+ {posts.length - 5} mere</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function ScheduleCalendarPicker({
   selectedDate,
   selectedHour,
@@ -43,6 +90,7 @@ export function ScheduleCalendarPicker({
   hourLabel,
   minuteLabel,
   timeInPastLabel,
+  dayPosts,
   onSelectDate,
   onSelectHour,
   onSelectMinute,
@@ -135,6 +183,21 @@ export function ScheduleCalendarPicker({
 
     return days
   }, [currentMonth])
+
+  const postsByDay = useMemo(() => {
+    const map = new Map<string, Array<{ title: string; platform: string; time: string }>>()
+
+    for (const post of dayPosts ?? []) {
+      const key = dateKey(post.date)
+      const list = map.get(key) ?? []
+      list.push({ title: post.title, platform: post.platform, time: post.time })
+      map.set(key, list)
+    }
+
+    return map
+  }, [dayPosts])
+
+  const [hoveredPastDayKey, setHoveredPastDayKey] = useState<string | null>(null)
 
   const isSelectedDay = useCallback(
     (date: Date) => {
@@ -273,15 +336,20 @@ export function ScheduleCalendarPicker({
             const selected = isSelectedDay(dayObj.date)
             const timeInPast = todayDate &&
               isPastDateTime(dayObj.date, selectedHour, selectedMinute)
+            const key = dateKey(dayObj.date)
+            const postsForDay = postsByDay.get(key) ?? []
+            const showTooltip = pastDate && hoveredPastDayKey === key && postsForDay.length > 0
 
             return (
               <button
                 key={`${dayObj.date.toISOString()}-${index}`}
                 onClick={() => handleDayClick(dayObj.date)}
-                disabled={pastDate}
-                className={`aspect-square flex items-center justify-center text-xs font-medium rounded transition-all ${
+                onMouseEnter={() => setHoveredPastDayKey(pastDate ? key : null)}
+                onMouseLeave={() => setHoveredPastDayKey((current) => (current === key ? null : current))}
+                aria-disabled={pastDate}
+                className={`relative aspect-square flex flex-col items-center justify-center text-xs font-medium rounded transition-all overflow-visible ${
                   pastDate
-                    ? 'bg-transparent text-slate-300 cursor-not-allowed'
+                    ? 'bg-transparent text-slate-300 cursor-default'
                     : selected
                     ? timeInPast
                       ? 'bg-amber-500 text-white shadow-md'
@@ -293,7 +361,24 @@ export function ScheduleCalendarPicker({
                     : 'bg-transparent text-slate-400 hover:bg-slate-50 hover:text-slate-500'
                 }`}
               >
-                {dayObj.day}
+                <span>{dayObj.day}</span>
+                {postsForDay.length > 0 && (
+                  <div className="flex max-w-full flex-wrap justify-center gap-0.5 px-1 mt-0.5">
+                    {postsForDay.map((post, postIndex) => {
+                      const dotColor = selected 
+                        ? 'bg-white/80' 
+                        : post.platform.toLowerCase() === 'facebook' 
+                        ? 'bg-blue-500' 
+                        : post.platform.toLowerCase() === 'instagram' 
+                        ? 'bg-pink-500' 
+                        : 'bg-slate-400'
+                      return (
+                        <span key={`${key}-post-${postIndex}`} className={`h-1 w-1 rounded-full ${dotColor}`} />
+                      )
+                    })}
+                  </div>
+                )}
+                {showTooltip && <PastDayTooltip posts={postsForDay} />}
               </button>
             )
           })}

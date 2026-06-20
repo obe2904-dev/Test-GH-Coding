@@ -171,7 +171,7 @@ export const useConnectionsStore = create<ConnectionsState>((set, get) => ({
 
       // Handle JSONB - it comes back as an array already
       const rawPlatforms = data?.selected_platforms
-      const savedPlatforms: string[] = Array.isArray(rawPlatforms) ? rawPlatforms : []
+      const savedPlatforms: string[] = Array.isArray(rawPlatforms) ? rawPlatforms.filter((p): p is string => typeof p === 'string') : []
       // console.log('🔄 loadPlatformsFromDatabase: Parsed platforms:', savedPlatforms)
 
       if (savedPlatforms.length > 0) {

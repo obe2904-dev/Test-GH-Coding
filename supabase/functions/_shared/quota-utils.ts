@@ -13,7 +13,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 export type UserTier = 'free' | 'standardplus' | 'premium'
-type QuotaType = 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis' | 'videoUploads'
+type QuotaType = 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis'
 type QuotaPeriod = 'daily' | 'monthly' | 'weekly'
 
 type UsageColumn =
@@ -23,7 +23,6 @@ type UsageColumn =
   | 'pdf_uploads_this_month'
   | 'website_analysis_today'
   | 'website_analysis_this_month'
-  | 'video_uploads_this_week'
 
 interface BusinessUsage {
   plan?: string | null
@@ -33,7 +32,6 @@ interface BusinessUsage {
   pdf_uploads_this_month?: number | null
   website_analysis_today?: number | null
   website_analysis_this_month?: number | null
-  video_uploads_this_week?: number | null
 }
 
 /**
@@ -82,10 +80,8 @@ const columnMap: Record<QuotaType, Partial<Record<QuotaPeriod, UsageColumn>>> = 
   websiteAnalysis: {
     daily: 'website_analysis_today',
     monthly: 'website_analysis_this_month'
-  },
-  videoUploads: {
-    weekly: 'video_uploads_this_week'
   }
+  // videoUploads removed - database column 'video_uploads_this_week' does not exist
 }
 
 /**
@@ -101,36 +97,55 @@ export async function getUserQuota(
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   const supabase = createClient(supabaseUrl, supabaseKey)
 
+  console.log(`🔍 getUserQuota called for user: ${userId}, quota: ${quotaType}, period: ${period}`)
+
   // Get user's business (as owner or team member)
-  const { data: business } = await supabase
+  const { data: business, error: businessError } = await supabase
     .from('businesses')
-    .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month, video_uploads_this_week')
+    .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
     .eq('owner_id', userId)
     .maybeSingle()
+  
+  if (businessError) {
+    console.error(`❌ Error fetching business for owner_id ${userId}:`, businessError)
+  } else if (business) {
+    console.log(`✅ Found business as owner: ${business.id}, plan: ${business.plan}`)
+  } else {
+    console.log(`⚠️ No business found for owner_id: ${userId}, checking team members...`)
+  }
 
   let businessData = business as BusinessUsage | null
 
   // If not owner, check if team member
   if (!businessData) {
-    const { data: teamMember } = await supabase
+    const { data: teamMember, error: teamError } = await supabase
       .from('business_team_members')
       .select('business_id')
       .eq('user_id', userId)
       .not('accepted_at', 'is', null)
       .maybeSingle()
-
-    if (teamMember) {
-      const { data: teamBusiness } = await supabase
+    
+    if (teamError) {
+      console.error(`❌ Error checking team membership:`, teamError)
+    } else if (teamMember) {
+      console.log(`✅ Found team membership: business_id ${teamMember.business_id}`)
+      const { data: teamBusiness, error: teamBusinessError } = await supabase
         .from('businesses')
-        .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month, video_uploads_this_week')
+        .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
         .eq('id', teamMember.business_id)
         .maybeSingle()
       
+      if (teamBusinessError) {
+        console.error(`❌ Error fetching team business:`, teamBusinessError)
+      }
       businessData = teamBusiness as BusinessUsage | null
+    } else {
+      console.log(`⚠️ No team membership found for user: ${userId}`)
     }
   }
 
   if (!businessData) {
+    console.error(`❌ QUOTA CHECK FAILED: No business found for user ${userId}`)
     return {
       allowed: false,
       tier: 'free',
@@ -139,6 +154,8 @@ export async function getUserQuota(
       reason: 'No business found for user'
     }
   }
+  
+  console.log(`✅ Using business: ${businessData.id}, plan: ${businessData.plan}`)
 
   // Get tier from business plan
   const tier: UserTier = (businessData.plan as UserTier) || 'free'

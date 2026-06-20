@@ -83,10 +83,19 @@ serve(async (req) => {
     // this is what the caption pipeline reads. Do this first so the response
     // is still useful even if the secondary save fails.
     const interiorText = visualIdentity.recognizable_interior_identity;
+    const venueCharacter = visualIdentity.venue_character;
+    const venueScene = visualIdentity.venue_scene;
+    const venueEnergy = (visualIdentity as any).venue_energy;
+    const guestSituationType = (visualIdentity as any).guest_situation_type;
     if (interiorText && interiorText !== 'Not yet analyzed') {
+      const upsertData: Record<string, string> = { business_id: business_id, recognizable_interior_identity: interiorText, venue_data_source: 'photo_analysis' };
+      if (venueCharacter) upsertData['visual_character'] = venueCharacter;
+      if (venueScene) upsertData['venue_scene'] = venueScene;
+      if (venueEnergy) upsertData['venue_energy'] = venueEnergy;
+      if (guestSituationType) upsertData['guest_situation_type'] = guestSituationType;
       const { error: brandProfileError } = await supabase
         .from('business_brand_profile')
-        .upsert({ business_id: business_id, recognizable_interior_identity: interiorText }, { onConflict: 'business_id' });
+        .upsert(upsertData, { onConflict: 'business_id' });
       if (brandProfileError) {
         console.warn('Could not save to business_brand_profile:', brandProfileError.message);
       }

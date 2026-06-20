@@ -27,9 +27,10 @@ export interface BrandProfileForm {
   content_focus: string
   image_preferences: string
   things_to_avoid: string
-  cta_style: string
   communication_goal: string
   recognizable_interior_identity: string
+  visual_character: string
+  venue_scene: string
 }
 
 export interface BrandProfileData extends BrandProfileForm {
@@ -188,15 +189,16 @@ export async function fetchBrandProfile(businessId: string): Promise<BrandProfil
 
     return {
       brand_essence: (brandData as any)?.brand_essence ?? '',
-      tone_of_voice: (brandData as any)?.tone_of_voice ?? (brandData as any)?.voice_style ?? '',
+      tone_of_voice: (brandData as any)?.tone_of_voice ?? '',  // voice_style column dropped April 2026
       target_audience: (brandData as any)?.target_audience ?? (profileData as any)?.target_audience ?? '',
       core_offerings: formatCoreOfferingsForUI(coreOfferingsStructured),
       content_focus: (brandData as any)?.content_focus ?? '',
       image_preferences: formatImagePreferencesForUI(imagePrefsStructured),
       things_to_avoid: formatThingsToAvoidForUI(thingsToAvoidStructured),
-      cta_style: (brandData as any)?.cta_style ?? (brandData as any)?.cta_preference ?? '',
       communication_goal: (brandData as any)?.communication_goal ?? '',
-      recognizable_interior_identity: (brandData as any)?.recognizable_interior_identity ?? ''
+      recognizable_interior_identity: (brandData as any)?.recognizable_interior_identity ?? '',
+      visual_character: (brandData as any)?.visual_character ?? '',
+      venue_scene: (brandData as any)?.venue_scene ?? ''
     }
   } catch (error) {
     console.error('Unexpected error fetching brand profile:', error)
@@ -240,19 +242,6 @@ export async function saveBrandProfile(
   editedBy: 'user' | 'ai' = 'user'
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    // Update business_profile with target audience (legacy compatibility)
-    const { error: profileError } = await supabase
-      .from('business_profile')
-      .upsert({
-        business_id: businessId,
-        target_audience: toDbString(form.target_audience),
-        updated_at: new Date().toISOString()
-      } as any, { onConflict: 'business_id' })
-
-    if (profileError) {
-      console.error('Failed to save business_profile:', profileError.message)
-    }
-
     // Update business_brand_profile with all fields
     const { error: brandError } = await supabase
       .from('business_brand_profile')
@@ -268,7 +257,6 @@ export async function saveBrandProfile(
         image_preferences_jsonb: toJsonb(form.image_preferences, parseImagePreferencesToJsonb),
         things_to_avoid: toDbString(form.things_to_avoid),
         things_to_avoid_jsonb: toJsonb(form.things_to_avoid, parseThingsToAvoidToJsonb),
-        cta_style: toDbString(form.cta_style),
         communication_goal: toDbString(form.communication_goal),
         recognizable_interior_identity: toDbString(form.recognizable_interior_identity),
         last_edited_by: editedBy,

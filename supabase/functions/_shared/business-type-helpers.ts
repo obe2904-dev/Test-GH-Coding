@@ -217,3 +217,123 @@ export function parseBusinessType(value: any): BusinessType | null {
   console.warn('⚠️ Unknown businessType format:', value)
   return null
 }
+
+/**
+ * Detect the effective operational vertical from all available identity signals.
+ *
+ * `businesses.vertical` is a signup enum that is often imprecise for crossover concepts
+ * (e.g. a café-bar registered as 'cafe', a florist-café registered as 'florist').
+ * Brand Profile fields — `business_character` and `identity_keywords` — are richer
+ * free-text descriptions written or confirmed by the owner and are the authoritative source.
+ *
+ * This function scans all three together so crossovers are classified correctly.
+ * For overlapping signals, bar > bakery > coffee > default so the most commercially
+ * differentiating axis wins for content-rule purposes.
+ *
+ * Returns one of: 'bar' | 'bakery' | 'coffee_shop' | the raw vertical string (fallback)
+ *
+ * Examples:
+ * - vertical='cafe', businessCharacter='cocktailbar og naturvin' → 'bar'
+ * - vertical='florist', businessCharacter='blomsterbutik med integreret kaffebar' → 'coffee_shop'
+ * - vertical='restaurant', identityKeywords='tapas, deleborde, drinks' → 'bar'
+ * - vertical='cafe', businessCharacter='dansk bageri med kaffe' → 'bakery'
+ * - vertical='restaurant', businessCharacter='' → 'restaurant'
+ */
+export function detectEffectiveVertical(
+  vertical: string,
+  businessCharacter: string,
+  identityKeywords: string | string[],
+): string {
+  const keywordsStr = Array.isArray(identityKeywords)
+    ? identityKeywords.join(' ')
+    : (identityKeywords || '')
+
+  const combined = [vertical, businessCharacter, keywordsStr].join(' ').toLowerCase()
+
+  const isBar     = /\bbar\b|cocktailbar|cocktail.?bar|vinbar|wine.?bar|tapasbar|tapas\b|drinksmenu|drinksbar|natklub|nightclub/.test(combined)
+  const isBakery  = /\bbageri\b|\bbakery\b|patisserie|konditori|brød.?bagning|artisan.?ba(k|g)/.test(combined)
+  const isCoffee  = /\bkaffebar\b|coffee.?shop|coffeeshop|\bespresso\b|specialkaffe|kafferi\b|coffee.?bar/.test(combined)
+
+  if (isBar)    return 'bar'
+  if (isBakery) return 'bakery'
+  if (isCoffee) return 'coffee_shop'
+  return vertical || 'cafe'
+}
+
+/**
+ * Detect ALL matched verticals for hybrid business time-of-day resolution.
+ * Unlike detectEffectiveVertical(), returns ALL matches rather than the first one.
+ * Used by resolveActiveVertical() to pick the right vertical for the current hour.
+ */
+export function detectHybridVerticals(
+  vertical: string,
+  businessCharacter: string,
+  identityKeywords: string | string[],
+): string[] {
+  const keywordsStr = Array.isArray(identityKeywords)
+    ? identityKeywords.join(' ')
+    : (identityKeywords || '')
+  const combined = [vertical, businessCharacter, keywordsStr].join(' ').toLowerCase()
+
+  const matched: string[] = []
+  if (/\bbar\b|cocktailbar|cocktail.?bar|vinbar|wine.?bar|tapasbar|tapas\b|drinksmenu|drinksbar|natklub|nightclub/.test(combined)) matched.push('bar')
+  if (/\bbageri\b|\bbakery\b|patisserie|konditori|brød.?bagning|artisan.?ba(k|g)/.test(combined)) matched.push('bakery')
+  if (/\bkaffebar\b|coffee.?shop|coffeeshop|\bespresso\b|specialkaffe|kafferi\b|coffee.?bar/.test(combined)) matched.push('coffee_shop')
+
+  // Include the base vertical unless it's already covered by a more specific match
+  const base = vertical || 'cafe'
+  if (base && !matched.includes(base)) matched.push(base)
+
+  return matched.length > 0 ? matched : ['cafe']
+}
+
+/**
+ * Resolve the active vertical for a hybrid business based on time of day.
+ * For single-vertical businesses returns the same value as detectEffectiveVertical().
+ *
+ * Resolution rules:
+ * - Bakery + anything → bakery in the first 2h after open, otherwise the non-bakery type
+ * - Coffee shop + bar → coffee_shop before 14:00, bar from 14:00
+ * - Bar + cafe/restaurant (the core hybrid) → cafe before 14:00, transition 14–17, bar from 17:00
+ * - Single vertical → returned unchanged
+ */
+export function resolveActiveVertical(
+  hybrids: string[],
+  nowHour: number,
+  openTime: string | null,
+  closeTime: string | null,
+): string {
+  if (hybrids.length <= 1) return hybrids[0] || 'cafe'
+
+  const hasBar    = hybrids.includes('bar')
+  const hasCafe   = hybrids.includes('cafe') || hybrids.includes('restaurant')
+  const hasCoffee = hybrids.includes('coffee_shop')
+  const hasBakery = hybrids.includes('bakery')
+
+  // Bakery + anything: bakery mode for first 2h after open, then switch
+  if (hasBakery) {
+    if (openTime) {
+      const [openH] = openTime.split(':').map(Number)
+      if (nowHour < openH + 2) return 'bakery'
+    } else if (nowHour < 10) {
+      return 'bakery'
+    }
+    const nonBakery = hybrids.find(v => v !== 'bakery')
+    return nonBakery || 'bakery'
+  }
+
+  // Coffee shop + bar (coffee-and-wine-bar hybrid)
+  if (hasCoffee && hasBar) {
+    return nowHour < 14 ? 'coffee_shop' : 'bar'
+  }
+
+  // Bar + café/restaurant (the core hybrid: morning coffee service + evening bar)
+  if (hasBar && hasCafe) {
+    if (nowHour < 14) return 'cafe'
+    if (nowHour < 17) return hasCafe ? 'cafe' : 'restaurant'
+    return 'bar'
+  }
+
+  // Default: first match (preserves existing priority order)
+  return hybrids[0]
+}

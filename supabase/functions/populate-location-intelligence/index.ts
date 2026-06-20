@@ -13,6 +13,7 @@ import { AIAnalyzer } from './services/claude-analyzer.ts';
 
 interface PopulateLocationRequest {
   business_id: string;
+  force_refresh?: boolean;  // Task 4.5: Bypass cache and re-analyze
 }
 
 serve(async (req) => {
@@ -21,7 +22,7 @@ serve(async (req) => {
   }
 
   try {
-    const { business_id } = await req.json() as PopulateLocationRequest;
+    const { business_id, force_refresh = false } = await req.json() as PopulateLocationRequest;
 
     if (!business_id) {
       return new Response(
@@ -92,16 +93,17 @@ serve(async (req) => {
 
     // ─────────────────────────────────────────────────────────
     // CACHE CHECK: skip all Google API calls if data is fresh
-    // (same address, updated within last 30 days)
+    // (same address, updated within last 90 days)
+    // Task 4.5: Extended from 30 to 90 days for cost optimization
     // ─────────────────────────────────────────────────────────
-    const CACHE_TTL_DAYS = 30;
+    const CACHE_TTL_DAYS = 90;  // Task 4.5: Increased from 30 days
     const { data: cachedIntel } = await supabase
       .from('business_location_intelligence')
       .select('last_updated_by_ai, neighborhood')
       .eq('business_id', business_id)
       .maybeSingle();
 
-    if (cachedIntel?.last_updated_by_ai) {
+    if (cachedIntel?.last_updated_by_ai && !force_refresh) {  // Task 4.5: Respect force_refresh flag
       const cacheAgeDays =
         (Date.now() - new Date(cachedIntel.last_updated_by_ai).getTime()) /
         (1000 * 60 * 60 * 24);
@@ -109,7 +111,8 @@ serve(async (req) => {
       if (cacheAgeDays < CACHE_TTL_DAYS) {
         console.log(
           `✅ Cache hit: location data is ${Math.round(cacheAgeDays)} days old (< ${CACHE_TTL_DAYS} days). ` +
-          `Returning cached result without calling Google Maps APIs.`
+          `Returning cached result without calling Google Maps APIs. ` +
+          `Use force_refresh=true to bypass cache.`
         );
 
         // Fetch and return the full cached row
@@ -210,9 +213,65 @@ serve(async (req) => {
       // Continue without competitive data - not critical
     }
 
+    // Fetch hospitality venues via a dedicated 300m call so restaurant/cafe/bar
+    // slots aren't crowded out by the general 1500m multi-type search.
+    let hospitalityPlaces: any[] = [];
+    try {
+      hospitalityPlaces = await googleMaps.findHospitalityVenues(
+        geocodeResult.latitude,
+        geocodeResult.longitude,
+        300
+      );
+      console.log(`✅ Found ${hospitalityPlaces.length} hospitality venues within 300m`);
+    } catch (hospError) {
+      console.warn('⚠️ Could not fetch hospitality venues:', hospError);
+    }
+
     console.log(`[4/6] Analyzing location data...`);
     const analyzer = new LocationAnalyzer();
-    const analyzedLocation = analyzer.analyze(geocodeResult, nearbyPlaces);
+    const analyzedLocation = analyzer.analyze(geocodeResult, nearbyPlaces, hospitalityPlaces);
+
+    // Detect category modifiers (e.g., city_centre + shopping)
+    const categoryModifiers: Record<string, string[]> = {};
+    
+    // Shopping detection: major department stores or high retail density
+    if (nearbyPlaces && nearbyPlaces.length > 0) {
+      const shoppingSignals = {
+        majorStores: nearbyPlaces.filter(p => 
+          p && 
+          (p.type === 'department_store' || p.type === 'shopping_mall') &&
+          p.distance_meters < 300 &&
+          (p.user_ratings_total || 0) > 5000
+        ),
+        retailDensity: nearbyPlaces.filter(p => 
+          p &&
+          (p.type === 'shopping_mall' || p.type === 'department_store') &&
+          p.distance_meters < 500
+        ).length
+      };
+      
+      const hasShoppingContext = shoppingSignals.majorStores.length >= 1 || shoppingSignals.retailDensity >= 3;
+      const cityCentreScore = analyzedLocation.category_scores?.city_centre || 0;
+      
+      if (hasShoppingContext && cityCentreScore >= 60) {
+        categoryModifiers.city_centre = categoryModifiers.city_centre || [];
+        categoryModifiers.city_centre.push('shopping');
+        
+        console.log('🛍️ Shopping context detected:', {
+          majorStores: shoppingSignals.majorStores.map(s => `${s.name} (${s.user_ratings_total} reviews, ${s.distance_meters}m)`),
+          retailDensity: shoppingSignals.retailDensity,
+          cityCentreScore: cityCentreScore
+        });
+      } else if (hasShoppingContext && cityCentreScore < 60) {
+        console.log('ℹ️ Shopping context found but city_centre score too low:', {
+          cityCentreScore: cityCentreScore,
+          threshold: 60
+        });
+      }
+    }
+    
+    // Add modifiers to analyzed location
+    analyzedLocation.category_modifiers = categoryModifiers;
 
     // Enhance with OpenAI if API key is available
     if (openaiApiKey) {

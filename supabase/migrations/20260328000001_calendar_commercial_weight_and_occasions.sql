@@ -83,56 +83,56 @@ BEGIN
        '2026-11-10'::date, NULL::date, 'annual'::text,
        ARRAY['families', 'couples', 'cozy_indoor']::text[],
        5::smallint, 5::smallint,
-       'Emphasis: Duck dinner tradition — the biggest reservation night of the Danish restaurant year outside Christmas. Any restaurant NOT serving duck should acknowledge the tradition and offer their own comfort alternative.',
-       'Promote: Andesteg menu, festive set menu, table reservations essential — start promoting 5–7 days ahead.'),
+       'Vægt på: Andesteg-tradition — årets største bordreservationsaften for danske restauranter udenfor jul. Restauranter der IKKE serverer andesteg bør anerkende traditionen og tilbyde deres eget komfortalternativ.',
+       'Fremhæv: Andestemenu, festmenu, bordreservation essentiel — begynd promovering 5-7 dage før.'),
 
       -- Sankt Hans Aften — 23. juni. Midsummer bonfire evening.
       ('DK', 'cultural',                  'Sankt Hans Aften',
        '2026-06-23', NULL, 'annual',
        ARRAY['outdoor', 'families']::text[],
        3, 3,
-       'Emphasis: Midsummer evening, Danish tradition, outdoor gatherings. People are in a festive outdoor mood.',
-       'Promote: Summer evening menu, outdoor seating, light summer dishes, cold drinks.'),
+       'Vægt på: Midsommeraften, dansk tradition, udendørs sammenkomster. Folk er i festlig udestemning.',
+       'Fremhæv: Sommeraftensmenu, udendørs servering, lette sommerretter, kolde drinks.'),
 
       -- Halloween — 31. oktober. Growing commercial relevance in DK especially for families.
       ('DK', 'cultural',                  'Halloween',
        '2026-10-31', NULL, 'annual',
        ARRAY['families']::text[],
        2, 2,
-       'Emphasis: Especially relevant for family-oriented venues. Adults/young guests enjoy themed events.',
-       'Promote: Halloween-themed dishes or drinks, cozy autumn atmosphere, family-friendly events.'),
+       'Vægt på: Særligt relevant for familievenlige steder. Voksne/unge gæster nyder tematiske events.',
+       'Fremhæv: Halloween-tematiske retter eller drinks, hyggelig efterårsstemning, familievenlige arrangementer.'),
 
       -- Pinse (1. Pinsedag) — 24. maj. Whit Sunday — long weekend with outdoor weather.
       ('DK', 'holiday',                   '1. Pinsedag',
        '2026-05-24', NULL, 'annual',
        ARRAY['outdoor', 'families']::text[],
        3, 3,
-       'Emphasis: Pentecost Sunday — start of a long weekend, often the first reliably warm outdoor weekend.',
-       'Promote: Outdoor seating, spring menu, light lunches, terrace atmosphere.'),
+       'Vægt på: Pinsedag — start på lang weekend, ofte første pålidelige varme udeweekend.',
+       'Fremhæv: Udendørs spisning, forårsmenu, lette frokoster, frisk luft.'),
 
       -- Nytårsaften — 31. december. New Year''s Eve dinner.
       ('DK', 'cultural',                  'Nytårsaften',
        '2026-12-31', NULL, 'annual',
        ARRAY['couples', 'families', 'cozy_indoor']::text[],
        5, 10,
-       'Emphasis: New Year''s Eve — the one night where even casual restaurants fill up. Most guests book weeks in advance.',
-       'Promote: New Year''s set menu, festive drinks, early bird reservation offer. Start promoting 10+ days ahead.'),
+       'Vægt på: Nytårsaften — den ene aften hvor selv afslappede restauranter fyldes op. De fleste gæster booker uger i forvejen.',
+       'Fremhæv: Nytårsmenu, festlige drinks, early bird reservationstilbud. Begynd promovering 10+ dage før.'),
 
       -- Kvinder Kampdag / Internationale Kvindedags — 8. marts.
       ('DK', 'cultural',                  'Internationale Kvindedagens Dag',
        '2026-03-08', NULL, 'annual',
        ARRAY['couples', 'families']::text[],
        2, 2,
-       'Emphasis: Relevant for venues with a strong female guest base or brunch culture.',
-       'Promote: Brunch specials, celebrate the women in your life, social media congratulations.'),
+       'Vægt på: Relevant for steder med stærk kvindelig gæstebase eller brunchkultur.',
+       'Fremhæv: Brunch-specials, fejr kvinderne i dit liv, sociale medie-hilsner.'),
 
       -- Juleaften (Julefrokost season) — the work Christmas lunch season runs through December.
       ('DK', 'cultural',                  'Julefrokost-sæsonen',
        '2026-11-27', '2026-12-18', 'annual',
        ARRAY['business', 'cozy_indoor']::text[],
        4, 7,
-       'Emphasis: Danish work Christmas lunch (julefrokost) is a major seated event. Restaurants fill up weeks in advance for group bookings.',
-       'Promote: Group dining packages, set julefrokost menu, available Fridays, advance booking required.'),
+       'Vægt på: Dansk julefrokost er en stor bordreservation. Restauranter fyldes uger i forvejen til gruppebookinger.',
+       'Fremhæv: Gruppemiddagspakker, julefrokostmenu, tilgængelig fredage, forudbestilling påkrævet.'),
 
       -- Fastelavns søndag — the Sunday before Fastelavn Monday when kids hit barrels.
       -- (Fastelavn is already in the seed data as Monday — this adds Sunday for bakeries/cafés)
@@ -140,32 +140,32 @@ BEGIN
        '2026-02-14', NULL, 'annual',
        ARRAY['families']::text[],
        2, 1,
-       'Emphasis: Families are out with kids in costumes. Bakeries and cafés with fastelavnsboller are the focus.',
-       'Promote: Fastelavnsboller, kids-welcome atmosphere, family Sunday brunch.'),
+       'Vægt på: Familier er ude med børn i kostumer. Bagerier og cafeer med fastelavnsboller er i fokus.',
+       'Fremhæv: Fastelavnsboller, børnevenlig stemning, familie søndagsbrunch.'),
 
       -- Påskelørdag — Easter Saturday (between Good Friday and Easter Sunday)
       ('DK', 'cultural',                  'Påskelørdag',
        '2026-04-04', NULL, 'annual',
        ARRAY['families', 'cozy_indoor']::text[],
        3, 0,
-       'Emphasis: Mid-Easter Saturday — families are home, some restaurants are open for brunch/lunch.',
-       'Promote: Easter brunch, family-friendly, spring menu.'),
+       'Vægt på: Midt-påske lørdag — familier er hjemme, nogle restauranter er åbne for brunch/frokost.',
+       'Fremhæv: Påskebrunch, familievenligt, forårsmenu.'),
 
       -- Mors Dag — second Sunday in May 2026 = 10. maj
       ('DK', 'cultural',                  'Mors Dag',
        '2026-05-10', NULL, 'annual',
        ARRAY['families']::text[],
        4, 5,
-       'Emphasis: Mother''s Day — one of the busiest brunch/lunch days of the year. Bookings fill up fast.',
-       'Promote: Mother''s Day brunch, special menu, flowers on the table, book early — start promoting 5 days ahead.'),
+       'Vægt på: Mors Dag — en af årets travleste brunch/frokost-dage. Bookinger fyldes hurtigt.',
+       'Fremhæv: Mors Dag brunch, specialmenu, blomster på bordet, book tidligt — begynd promovering 5 dage før.'),
 
       -- Fars Dag — first Sunday in June 2026 = 7. juni
       ('DK', 'cultural',                  'Fars Dag',
        '2026-06-07', NULL, 'annual',
        ARRAY['families']::text[],
        3, 4,
-       'Emphasis: Father''s Day — busy Sunday lunch/dinner. Fathers often get to choose the restaurant.',
-       'Promote: Father''s Day specials, BBQ, outdoor dining if weather allows, hearty menu for dads.')
+       'Vægt på: Fars Dag — travl søndag frokost/middag. Fædre vælger ofte restauranten.',
+       'Fremhæv: Fars Dag-specials, grill, udendørs servering hvis vejret tillader det, solid menu til far.')
     ) AS t(
       country, event_type, event_name,
       date_start, date_end, recurrence,

@@ -115,18 +115,34 @@ export async function saveBrandProfile(
   versionHash?: string,
   locationIntelligence?: LocationIntelligence | null,
   voiceOptions?: any | null,
-  voiceArchetype?: string | null
+  voiceArchetype?: string | null,
+  b0Classification?: { business_model_type: string; primary_copy_hook: string; audience_breadth: string; classification_rationale: string } | null
 ): Promise<void> {
   // Pre-fetch protected fields — content_strategy is written once and survives regeneration.
+  // posting_occasions is re-written when the hash of the new selection differs from the stored one
+  // (allowing updates when AI selects different occasions after a brand profile refresh).
   // typical_openings is always refreshed from the latest Eksempel: lines on every regeneration.
-  // To enable owner-lock for manually curated openings, apply ADD_TYPICAL_OPENINGS_LOCKED_COLUMN.sql
-  // and update this select to include typical_openings_locked.
   const { data: existingRow } = await supabase
     .from('business_brand_profile')
-    .select('content_strategy')
+    .select('content_strategy, posting_occasions_hash')
     .eq('business_id', businessId)
     .maybeSingle()
   const hasExistingContentStrategy = existingRow?.content_strategy != null
+
+  // Compute hash for the new posting_occasions (simple FNV-32-like string hash is enough here)
+  const newPostingOccasions = (brandProfile as any).posting_occasions
+  let newOccasionsHash: string | null = null
+  if (Array.isArray(newPostingOccasions) && newPostingOccasions.length > 0) {
+    const serialised = JSON.stringify(newPostingOccasions)
+    let h = 0x811c9dc5
+    for (let i = 0; i < serialised.length; i++) {
+      h ^= serialised.charCodeAt(i)
+      h = (h * 0x01000193) >>> 0
+    }
+    newOccasionsHash = h.toString(16)
+  }
+  const existingOccasionsHash: string | null = existingRow?.posting_occasions_hash ?? null
+  const shouldWriteOccasions = newOccasionsHash !== null && newOccasionsHash !== existingOccasionsHash
 
   // Prepare data for database
   const profileData = {
@@ -151,9 +167,25 @@ export async function saveBrandProfile(
       business_character: brandProfile.business_character
     }),
 
+    // Business archetype — explicit validated classification (cafe_bar, wine_bar, etc.)
+    // Auto-detected during brand profile generation from service periods and opening hours
+    ...((brandProfile as any).business_archetype !== undefined && {
+      business_archetype: (brandProfile as any).business_archetype
+    }),
+
     // Voice derivation rationale — why these rules, what signals were used
     ...((brandProfile as any).voice_rationale !== undefined && {
       voice_rationale: (brandProfile as any).voice_rationale
+    }),
+
+    // Audience framework — multi-dimensional audience system (location contexts, time slots, seasonal variation)
+    ...((brandProfile as any).audience_framework !== undefined && {
+      audience_framework: (brandProfile as any).audience_framework
+    }),
+
+    // Voice system — context-adaptive voice guidance (programme-specific, time-based variations)
+    ...((brandProfile as any).voice_system !== undefined && {
+      voice_system: (brandProfile as any).voice_system
     }),
 
     // Content strategy — drives Phase 1 slot assignment (goal_mode + content_category per post)
@@ -162,13 +194,18 @@ export async function saveBrandProfile(
       content_strategy: brandProfile.content_strategy
     }),
 
+    // Posting occasions — re-written when the occasion selection changes (hash-gated)
+    ...(shouldWriteOccasions && {
+      posting_occasions: newPostingOccasions,
+      posting_occasions_hash: newOccasionsHash,
+    }),
+
     // Legacy TEXT columns (kept as fallback for older clients)
     things_to_avoid: toJsonString(brandProfile.things_to_avoid.value),
     target_audience: brandProfile.target_audience.value,
     core_offerings: brandProfile.core_offerings.value,
     content_focus: brandProfile.content_focus.value,
     content_pillars: toJsonString(brandProfile.content_pillars.value),
-    cta_style: brandProfile.cta_style.value,
     communication_goal: brandProfile.communication_goal.value,
     image_preferences: toJsonString(brandProfile.image_preferences.value),
 
@@ -176,7 +213,8 @@ export async function saveBrandProfile(
     things_to_avoid_jsonb: brandProfile.things_to_avoid.value,
     image_preferences_jsonb: brandProfile.image_preferences.value,
     core_offerings_jsonb: deriveCoreOfferingsJsonb(brandProfile.core_offerings.value),
-    content_pillars_jsonb: brandProfile.content_pillars.value,
+    social_style: (brandProfile as any).social_style?.value ?? null,
+    voice_examples: (brandProfile as any).voice_examples?.value ?? null,
 
     // Lifecycle columns (when migration is applied)
     // generated_at: new Date().toISOString(),
@@ -193,10 +231,19 @@ export async function saveBrandProfile(
     // Location intelligence — deterministic, zero-latency, queryable by post generator
     ...(locationIntelligence !== undefined && { location_intelligence: locationIntelligence }),
 
-    // Voice archetype options — both generated options (recommended + alternative)
-    ...(voiceOptions !== undefined && voiceOptions !== null && { voice_options: voiceOptions }),
-    // Active archetype key (= recommended on first generation; changes when owner uses "Skift stemme")
-    ...(voiceArchetype !== undefined && voiceArchetype !== null && { voice_archetype: voiceArchetype }),
+    // Voice archetype options REMOVED (Sprint 1 - Complexity Reduction)
+    // Owner gets ONE voice (opinionated). If unsatisfied, they regenerate or edit manually.
+    // Removed: voice_options (JSONB), voice_archetype (text) — saves ~15s generation time.
+    // ...(voiceOptions !== undefined && voiceOptions !== null && { voice_options: voiceOptions }),
+    // ...(voiceArchetype !== undefined && voiceArchetype !== null && { voice_archetype: voiceArchetype }),
+
+    // Stage B0 — Business model classification (deterministic pre-classification for Stage B5)
+    ...(b0Classification && {
+      business_model_type: b0Classification.business_model_type,
+      primary_copy_hook: b0Classification.primary_copy_hook,
+      audience_breadth: b0Classification.audience_breadth,
+      classification_rationale: b0Classification.classification_rationale
+    }),
 
     // Derive typical_openings from the Eksempel: lines in tone_of_voice.value.
     // Always refreshed on regeneration — ensures stale openings from old prompt versions are replaced.
@@ -210,26 +257,21 @@ export async function saveBrandProfile(
 
   // Safety: if migrations haven't been applied yet, retry with only guaranteed base columns
   if (error) {
+    console.log(`⚠️ Full save failed (${error.message}), retrying with minimal column set...`)
     const baseOnly = {
       business_id: profileData.business_id,
-      updated_at: new Date().toISOString(), // ✅ FIX: also required in fallback path
+      updated_at: new Date().toISOString(),
       brand_essence: profileData.brand_essence,
       tone_of_voice: profileData.tone_of_voice,
-      things_to_avoid: profileData.things_to_avoid,
-      target_audience: profileData.target_audience,
-      core_offerings: profileData.core_offerings,
-      content_focus: profileData.content_focus,
-      cta_style: profileData.cta_style,
-      communication_goal: profileData.communication_goal,
-      image_preferences: profileData.image_preferences,
+      // All other fields may not exist in older schemas - only save if successful on first try
     }
     const { error: retryError } = await supabase
       .from('business_brand_profile')
       .upsert(baseOnly, { onConflict: 'business_id' })
     if (retryError) {
-      throw new Error(`Failed to save brand profile (legacy retry): ${retryError.message}`)
+      throw new Error(`Failed to save brand profile (ultra-minimal retry): ${retryError.message}. Your database schema needs migration.`)
     }
-    console.log('✅ Brand profile saved to database (base-only retry; newer columns not yet migrated)')
+    console.log('⚠️ Brand profile saved to database (ULTRA-MINIMAL: only brand_essence + tone_of_voice). Run schema migrations to enable full features.')
     return
   }
 

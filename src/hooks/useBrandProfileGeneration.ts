@@ -34,7 +34,7 @@ interface UseBrandProfileGenerationResult {
 // Returns the new profile row on success, null on timeout/abort.
 async function pollForUpdatedProfile(
   businessId: string,
-  updatedAtBefore: string | null,
+  updatedAtBefore: string,
   pollIntervalMs = 4000,
   timeoutMs = 165_000, // 2.75 minutes — Supabase wall-clock limit is 150s; stop polling 15s after that
   abortFn: () => boolean = () => false
@@ -78,13 +78,15 @@ export function useBrandProfileGeneration(): UseBrandProfileGenerationResult {
       setGenerating(true);
       setError(null);
 
-      // Snapshot the current updated_at so we can detect when the DB row changes
+      // Snapshot the current updated_at so we can detect when the DB row changes.
+      // Use a sentinel string (not null) when no row exists — otherwise the poll
+      // would immediately match any existing row because `"<timestamp>" !== null`.
       const { data: currentRow } = await supabase
         .from('business_brand_profile')
         .select('updated_at')
         .eq('business_id', businessId)
         .single();
-      const updatedAtBefore: string | null = currentRow?.updated_at ?? null;
+      const updatedAtBefore: string = currentRow?.updated_at ?? '__NO_PROFILE__';
 
       // Fire the edge function — fire-and-forget: we don't need the response body
       // (the function writes directly to the DB), but we DO watch for definitive
@@ -129,16 +131,18 @@ export function useBrandProfileGeneration(): UseBrandProfileGenerationResult {
       console.log('[useBrandProfileGeneration] Polling DB for profile update...');
       const updatedProfile = await pollForUpdatedProfile(businessId, updatedAtBefore, 4000, 165_000, () => functionFailed);
 
+      // If polling found a new profile, return it — even if the edge function reported
+      // a transient error (e.g. 409 stale-lock race). The DB write is the source of truth.
+      if (updatedProfile) {
+        console.log('[useBrandProfileGeneration] ✅ New profile detected via polling');
+        return updatedProfile;
+      }
+
       if (functionFailed) {
         throw new Error(functionFailedReason || 'Generation failed — please try again');
       }
 
-      if (!updatedProfile) {
-        throw new Error('Generation timed out — please try again');
-      }
-
-      console.log('[useBrandProfileGeneration] ✅ New profile detected via polling');
-      return updatedProfile;
+      throw new Error('Generation timed out — please try again');
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
       console.error('Brand profile generation error:', err);

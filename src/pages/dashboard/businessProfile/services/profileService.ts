@@ -211,7 +211,6 @@ export async function saveBusinessProfile(data: ProfileData): Promise<void> {
     .from('business_brand_profile') as any)
     .upsert({
       business_id: businessId,
-      voice_style: data.brandVoice?.trim() || null,
       booking_link: data.bookingLink?.trim() || null,
       cta_preference: data.ctaPreference?.trim() || null,
       updated_at: new Date().toISOString()

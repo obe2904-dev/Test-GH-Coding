@@ -1,0 +1,376 @@
+// ============================================================================
+// TONE DNA GENERATOR - Strategic Tone Recommendation
+// ============================================================================
+// Generates business-specific tone strategy as marketing expert analysis
+// 
+// PURPOSE:
+// - Analyze business holistically (location + menu + price + owner voice)
+// - Recommend optimal tone positioning (not generic rules)
+// - Provide reasoning for why this tone fits THIS business
+// 
+// INPUT:
+// - Location intelligence (waterfront, city centre, etc.)
+// - Menu overview (culinary character, fusion patterns)
+// - Commercial orientation (price positioning)
+// - Owner voice (Om Os text linguistic analysis)
+// - Market context (demographics, competition, cultural norms)
+// 
+// OUTPUT:
+// - Strategic tone DNA with reasoning
+// - Location-driven tone implications
+// - Culinary character tone requirements
+// - Owner voice register matching
+// - Market context considerations
+// ============================================================================
+
+import OpenAI from 'https://deno.land/x/openai@v4.28.0/mod.ts';
+import type { 
+  V5ToneDNA, 
+  V5ToneDNARecommendation,
+  V5ToneDNALocationDriver,
+  V5ToneDNACulinaryCharacter,
+  V5ToneDNAOwnerVoice,
+  V5ToneDNAMarketContext,
+  V5EnhancedSocialExample,
+  V5EnhancedAvoidExample
+} from './types-v5.ts';
+import { getV5Prompt } from './v5-prompts.ts';
+
+// ============================================================================
+// INPUT INTERFACES
+// ============================================================================
+
+export interface ToneDNAInput {
+  business: {
+    name: string;
+    city: string;
+    country: string;
+    om_os_text: string;
+  };
+  
+  location_intelligence?: {
+    category_scores?: Record<string, number>;
+    neighborhood_character?: string;
+    area_type?: string;
+    location_marketing_hooks?: string[];
+    local_location_reference?: string;  // Operator-set factual phrase (e.g. "ved åen") — non-negotiable
+  };
+  
+  menu_overview_summary?: {
+    cross_menu_summary?: string;
+    signature_themes?: string[];
+    gastronomic_profile?: string;
+    overall_avg_price?: number;
+  };
+  
+  commercial_orientation?: {
+    price_positioning?: string;
+    primary_hook?: string;
+    business_model?: string;
+  };
+  
+  demographic_signals?: {
+    primary_demographic?: string;
+    score?: number;
+  };
+  
+  market_context?: {
+    competition_level?: string;
+    cultural_context?: string;
+  };
+}
+
+// ============================================================================
+// GENERATE TONE DNA
+// ============================================================================
+
+export async function generateToneDNA(
+  input: ToneDNAInput,
+  openaiClient: OpenAI,
+  language: string = 'da'
+): Promise<V5ToneDNA> {
+  
+  console.log('[ToneDNA] Generating strategic tone recommendation...');
+  
+  // 1. Build comprehensive analysis prompt
+  const prompt = buildToneDNAPrompt(input, language);
+  
+  // 2. Call AI as strategic marketing expert
+  const toneDNA = await callToneDNAAI(prompt, input.business.name, openaiClient, language);
+  
+  // 3. Validate and return
+  validateToneDNA(toneDNA);
+  
+  console.log(`[ToneDNA] ✅ Generated tone DNA: ${toneDNA.recommended_tone.tone_positioning}`);
+  console.log(`[ToneDNA]    Confidence: ${toneDNA.confidence_score}%`);
+  console.log(`[ToneDNA]    Location driver: ${toneDNA.location_driver.primary_dimension} (${toneDNA.location_driver.strategic_importance})`);
+  console.log(`[ToneDNA]    Price positioning: ${toneDNA.culinary_character.price_positioning}`);
+  console.log(`[ToneDNA]    Owner register: ${toneDNA.owner_voice.register_level}`);
+  
+  return toneDNA;
+}
+
+// ============================================================================
+// BUILD STRATEGIC ANALYSIS PROMPT
+// ============================================================================
+
+function buildToneDNAPrompt(input: ToneDNAInput, language: string): string {
+  // Get base strategic prompt
+  let prompt = getV5Prompt('tone_dna', language);
+  
+  // Find primary location dimension
+  const locationScores = input.location_intelligence?.category_scores || {};
+  const sortedDimensions = Object.entries(locationScores)
+    .filter(([_, score]) => score && score >= 80)
+    .sort(([_, a], [__, b]) => (b || 0) - (a || 0));
+  
+  const primaryDimension = sortedDimensions.length > 0 
+    ? sortedDimensions[0][0] 
+    : 'unknown';
+  const primaryScore = sortedDimensions.length > 0 
+    ? sortedDimensions[0][1] 
+    : 0;
+  
+  // Replace placeholders
+  prompt = prompt
+    .replace(/{business_name}/g, input.business.name)
+    .replace(/{city}/g, input.business.city)
+    .replace(/{country}/g, input.business.country)
+    .replace(/{om_os_text}/g, input.business.om_os_text || 'Not provided')
+    .replace(/{primary_dimension}/g, primaryDimension)
+    .replace(/{score}/g, String(primaryScore))
+    .replace(/{competition_level}/g, input.market_context?.competition_level || 'medium')
+    .replace(/{price_tier}/g, input.commercial_orientation?.price_positioning || 'moderate')
+    .replace(/{primary_hook}/g, input.commercial_orientation?.primary_hook || 'product')
+    .replace(/{content_strategy}/g, input.commercial_orientation?.business_model || 'offer_led');
+  
+  // Add structured data sections
+  prompt += '\n\n═══════════════════════════════════════════════════════════\n';
+  prompt += 'STRUKTUREREDE DATA TIL ANALYSE\n';
+  prompt += '═══════════════════════════════════════════════════════════\n\n';
+  
+  // Location intelligence
+  if (input.location_intelligence) {
+    prompt += 'LOCATION INTELLIGENCE:\n';
+    prompt += JSON.stringify(input.location_intelligence, null, 2);
+    prompt += '\n\n';
+  }
+
+  // Hard constraint: local_location_reference is the operator-defined location phrase.
+  // It MUST be the first entry in natural_vocabulary, verbatim. Never paraphrase it.
+  const llr = input.location_intelligence?.local_location_reference;
+  if (llr) {
+    prompt += `⚠️ KRITISK LOKATIONSKRAV:\n`;
+    prompt += `Forretningen bruger PRÆCIST denne formulering for sin placering: "${llr}"\n`;
+    prompt += `Dette er operatørens eget ord for lokationen og SKAL:`;
+    prompt += `\n  1. Fremgå som den FØRSTE post i natural_vocabulary (ordret, ikke omskrevet)`;
+    prompt += `\n  2. Aldrig erstattes af generiske alternativer ("ved vandet", "havnefronten", "waterfront", "åen" alene osv.)`;
+    prompt += `\n  3. Ikke parres med havbeskrivelser (bølger, hav, maritim) — det er en å, ikke et hav/fjord/strand.\n\n`;
+  }
+  
+  // Menu overview
+  if (input.menu_overview_summary) {
+    prompt += 'MENU OVERVIEW:\n';
+    prompt += `Signature themes: ${input.menu_overview_summary.signature_themes?.join(', ') || 'None'}\n`;
+    prompt += `Cross-menu summary: ${input.menu_overview_summary.cross_menu_summary || 'Not available'}\n`;
+    prompt += `Average price: ${input.menu_overview_summary.overall_avg_price || 'Unknown'}\n`;
+    prompt += '\n';
+  }
+  
+  // Demographic signals
+  if (input.demographic_signals) {
+    prompt += 'DEMOGRAPHIC SIGNALS:\n';
+    prompt += JSON.stringify(input.demographic_signals, null, 2);
+    prompt += '\n\n';
+  }
+  
+  return prompt;
+}
+
+// ============================================================================
+// CALL AI FOR STRATEGIC RECOMMENDATION
+// ============================================================================
+
+async function callToneDNAAI(
+  prompt: string,
+  businessName: string,
+  openaiClient: OpenAI,
+  language: string
+): Promise<V5ToneDNA> {
+  
+  try {
+    const completion = await openaiClient.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { 
+          role: 'system', 
+          content: 'You are the world\'s best marketing strategist specializing in tone of voice for restaurants and cafés. You analyze businesses holistically and recommend optimal tone strategies based on location, menu, price, owner voice, and market context. You output ONLY valid JSON.' 
+        },
+        { role: 'user', content: prompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.4,
+      max_tokens: 1500
+    });
+
+    const content = completion.choices[0].message.content;
+    if (!content) {
+      throw new Error('Empty AI response for tone DNA');
+    }
+
+    const parsed = JSON.parse(content);
+    
+    console.log('[ToneDNA] Raw AI response structure:', Object.keys(parsed));
+    console.log('[ToneDNA] Response sample:', JSON.stringify(parsed).substring(0, 500));
+    
+    // Add generated_at timestamp
+    parsed.generated_at = new Date().toISOString();
+
+    // Enforce local_location_reference as first natural_vocabulary entry (AI may omit it)
+    const llr = prompt.match(/PRÆCIST denne formulering for sin placering: "([^"]+)"/);
+    if (llr?.[1] && parsed.location_driver?.natural_vocabulary) {
+      const ref = llr[1];
+      const vocab: string[] = Array.isArray(parsed.location_driver.natural_vocabulary)
+        ? parsed.location_driver.natural_vocabulary
+        : [];
+      if (vocab[0] !== ref) {
+        parsed.location_driver.natural_vocabulary = [ref, ...vocab.filter((v: string) => v !== ref)];
+        console.log('[ToneDNA] ✅ local_location_reference enforced as first natural_vocabulary:', ref);
+      }
+    }
+    
+    return parsed as V5ToneDNA;
+    
+  } catch (error) {
+    console.error('[ToneDNA] AI generation error:', error);
+    throw new Error(`Failed to generate tone DNA: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// ============================================================================
+// VALIDATE TONE DNA STRUCTURE
+// ============================================================================
+
+function validateToneDNA(toneDNA: V5ToneDNA): void {
+  const required = [
+    'recommended_tone',
+    'location_driver',
+    'culinary_character',
+    'owner_voice',
+    'market_context',
+    'strategic_summary',
+    'tone_do_list',
+    'tone_dont_list'
+  ];
+  
+  for (const field of required) {
+    if (!(field in toneDNA)) {
+      throw new Error(`Tone DNA missing required field: ${field}`);
+    }
+  }
+  
+  // Validate lists have content
+  if (toneDNA.tone_do_list.length < 5) {
+    console.warn('[ToneDNA] Warning: tone_do_list has fewer than 5 items');
+  }
+  
+  if (toneDNA.tone_dont_list.length < 3) {
+    console.warn('[ToneDNA] Warning: tone_dont_list has fewer than 3 items');
+  }
+}
+
+// ============================================================================
+// GENERATE ENHANCED EXAMPLES WITH REASONING
+// ============================================================================
+
+export async function generateEnhancedExamples(
+  toneDNA: V5ToneDNA,
+  businessIdentityPersona: string,
+  openaiClient: OpenAI,
+  language: string = 'da',
+  programmes?: Array<{ type: string; name: string; audienceSegments?: Array<{ segment_name: string }> }>
+): Promise<{
+  social_examples: V5EnhancedSocialExample[];
+  avoid_examples: V5EnhancedAvoidExample[];
+}> {
+  
+  console.log('[ToneDNA] Generating enhanced examples with reasoning...');
+  
+  // Build prompt
+  let prompt = getV5Prompt('enhanced_examples', language);
+  
+  // Add programme context if available
+  let programmeContext = '';
+  if (programmes && programmes.length > 0) {
+    programmeContext = '\n\nPROGRAMMES (dæk alle i eksemplerne):\n';
+    programmes.forEach(prog => {
+      programmeContext += `- ${prog.name} (${prog.type})`;
+      if (prog.audienceSegments && prog.audienceSegments.length > 0) {
+        const segments = prog.audienceSegments.slice(0, 3).map(s => s.segment_name).join(', ');
+        programmeContext += ` → ${segments}`;
+      }
+      programmeContext += '\n';
+    });
+  }
+  
+  // Replace placeholders
+  prompt = prompt
+    .replace(/{tone_dna_json}/g, JSON.stringify(toneDNA, null, 2))
+    .replace(/{business_identity_persona}/g, businessIdentityPersona + programmeContext);
+  
+  // Call AI
+  try {
+    const completion = await openaiClient.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { 
+          role: 'system', 
+          content: 'You generate social media examples with detailed reasoning for why they work or fail. You demonstrate tone DNA in practice. You MUST output valid JSON with exactly these fields: {"social_examples": [...], "avoid_examples": [...]}. Each array must contain 8-10 objects (social) and 5-6 objects (avoid).'
+        },
+        { role: 'user', content: prompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.5,  // Slightly higher for creative examples
+      max_tokens: 4000  // Increased for 12-15 social + 8-10 avoid examples with reasoning
+    });
+
+    const content = completion.choices[0].message.content;
+    if (!content) {
+      throw new Error('Empty AI response for enhanced examples');
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (parseError) {
+      console.error('[ToneDNA] JSON parse failed, response length:', content.length);
+      console.error('[ToneDNA] Response preview:', content.substring(0, 500));
+      console.error('[ToneDNA] Response end:', content.substring(content.length - 200));
+      throw parseError;
+    }
+    
+    // DEBUG: Log the response structure to understand what AI is returning
+    console.log('[ToneDNA] AI response keys:', Object.keys(parsed));
+    console.log('[ToneDNA] social_examples type:', typeof parsed.social_examples, 'isArray:', Array.isArray(parsed.social_examples));
+    console.log('[ToneDNA] avoid_examples type:', typeof parsed.avoid_examples, 'isArray:', Array.isArray(parsed.avoid_examples));
+    
+    if (!Array.isArray(parsed.social_examples)) {
+      console.error('[ToneDNA] ⚠️  social_examples is not an array! Full response:', JSON.stringify(parsed, null, 2));
+    }
+    if (!Array.isArray(parsed.avoid_examples)) {
+      console.error('[ToneDNA] ⚠️  avoid_examples is not an array! Full response:', JSON.stringify(parsed, null, 2));
+    }
+    
+    console.log(`[ToneDNA] ✅ Generated ${parsed.social_examples?.length || 0} social examples`);
+    console.log(`[ToneDNA] ✅ Generated ${parsed.avoid_examples?.length || 0} avoid examples`);
+    
+    return {
+      social_examples: parsed.social_examples || [],
+      avoid_examples: parsed.avoid_examples || []
+    };
+    
+  } catch (error) {
+    console.error('[ToneDNA] Enhanced examples generation error:', error);
+    throw new Error(`Failed to generate enhanced examples: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}

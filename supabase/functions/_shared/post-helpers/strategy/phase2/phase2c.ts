@@ -132,12 +132,45 @@ export async function generateNarrative(
   const isOutdoorLed = context.weather.has_outdoor_seating &&
     (weatherEffect === 'terrace_pull' || weatherRelevance === 'high');
 
+  // Count rainy days for explicit warning — prevents "Solrige dage" hallucination
+  // NEW: Also detect weekday vs weekend contrast (e.g., rainy Mon-Thu, sunny Fri-Sat)
+  const weekdayDays = (context.weather.days as any[]).filter((d: any) => {
+    const dow = new Date(d.date).getDay();
+    return dow >= 1 && dow <= 5; // Mon-Fri
+  });
+  const weekendDays = (context.weather.days as any[]).filter((d: any) => {
+    const dow = new Date(d.date).getDay();
+    return dow === 0 || dow === 6; // Sat-Sun
+  });
+  
+  const rainyDayCount = (context.weather.days as any[]).filter((d: any) =>
+    /rain|snow|fog|drizzle/i.test(d.condition || '') || (d.precipitation_chance ?? 0) >= 60
+  ).length;
+  const totalDayCount = (context.weather.days as any[]).length;
+  
+  const weekdayRainyCount = weekdayDays.filter((d: any) =>
+    /rain|snow|fog|drizzle/i.test(d.condition || '') || (d.precipitation_chance ?? 0) >= 60
+  ).length;
+  const weekendRainyCount = weekendDays.filter((d: any) =>
+    /rain|snow|fog|drizzle/i.test(d.condition || '') || (d.precipitation_chance ?? 0) >= 60
+  ).length;
+  
+  // Check for weekday vs weekend contrast
+  const hasWeekdayWeekendContrast = weekdayRainyCount >= 3 && weekendRainyCount === 0 && weekendDays.some((d: any) => d.temp_max >= 18);
+  
+  const rainyWeekWarning = rainyDayCount >= Math.ceil(totalDayCount / 2)
+    ? hasWeekdayWeekendContrast
+      ? `⚠️ VEJRKONTRAST: Regnfulde hverdage (${weekdayRainyCount}/${weekdayDays.length}) MEN pæn weekend. Du MÅ nævne "pæn weekend" eller "weekend-vejret" som fordel — men IKKE "hele ugen" eller "solrige dage". Vær præcis om hvornår vejret er godt.`
+      : `⚠️ REGNUGE (${rainyDayCount}/${totalDayCount} dage): Skriv IKKE om sol, solrigt vejr, udendørs eller "solrige dage" i weather_season — det er faktuelt forkert.`
+    : null;
+
   // Compact summary always injected
   const weatherCompact = [
     `relevans: ${weatherRelevance}`,
     `effekt: ${shortEffect}`,
     bestDay  ? `bedste dag: ${bestDay}`  : null,
     worstDay && worstDay !== bestDay ? `dårligste dag: ${worstDay}` : null,
+    rainyWeekWarning,
   ].filter(Boolean).join(' | ');
 
   // Day-by-day: only for high relevance or outdoor-led businesses
@@ -163,6 +196,7 @@ export async function generateNarrative(
 
   // ── Brand voice extraction (mirrors phase2b approach) ─────────────────────
   const bv = context.brand_voice as any;
+  
   const toneKeywords: string = (
     bv?.tone_model?.primary_keywords ||
     bv?.tone_keywords ||
@@ -210,8 +244,8 @@ export async function generateNarrative(
   if (voiceConstraints) brandVoiceLines.push(`Undgå specifikt for denne forretning: ${voiceConstraints}`);
 
   const brandVoiceBlock = brandVoiceLines.length > 0
-    ? `DENNE FORRETNINGS STEMME (KRITISK):\n${brandVoiceLines.join('\n')}`
-    : `BRAND VOICE: Brug en jordnær, autentisk dansk stemme der passer til stedet.`;
+    ? `DENNE FORRETNINGS STEMME — GÆLDER KUN FOR POST-INDHOLD (ikke for din kommunikation til ejeren):\n${brandVoiceLines.join('\n')}`
+    : `BRAND VOICE (KUN FOR POSTS): Brug en jordnær, autentisk dansk stemme der passer til stedet.`;
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Outdoor seating: weather-gated to prevent hallucination of opening decisions ──
@@ -224,6 +258,12 @@ export async function generateNarrative(
     : anyDayOutdoorOk
       ? `UDESERVERING: Tilgængelig — vejret er egnet mindst én dag denne uge (≥14°C og sol/let skyet)`
       : `UDESERVERING: Forretningen HAR udeservering — men vejret er IKKE egnet denne uge (ingen dage ≥14°C med sol). Nævn IKKE at udeserveringen åbner, aktiveres eller er i brug denne uge.`;
+
+  // Location phrase rule — enforces the canonical local reference term
+  const localRef = (context as any).location?.local_location_reference as string | null | undefined;
+  const locationPhraseRule = localRef
+    ? `⚠️ LOKATION: Brug ALTID "${localRef}" — ALDRIG generiske termer som "vandet", "ved vandet", "havnefronten", "waterfront", "området".`
+    : '';
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Business concept block — encodes what the business IS beyond brand voice ──
@@ -276,8 +316,27 @@ export async function generateNarrative(
     : '';
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ── CRITICAL OUTDOOR TERMINOLOGY CONSTRAINT ──
+  const outdoorTerminologyBlock = `⚠️ UDENDØRS TERMINOLOGI (gælder ALLE felter — uanset vejr):
+FORBUDTE specifikke stedtermer: "terrasse", "terrassevejr", "gårdhave", "gård", "haven", "altanen", "udearealet", "udepladsen", "udeområdet"
+TILLADTE generiske termer: "indendørs" / "udendørs" (kun hvis has_outdoor_seating=true)
+${!context.weather.has_outdoor_seating ? '⛔ DENNE forretning HAR IKKE udeservering — nævn ALDRIG udendørs som en mulighed.' : '✓ Forretningen HAR udeservering — brug "udendørs" når relevant (ikke specifikke stednavne).'}`;
+
+  // ── CRITICAL WEATHER CONSTRAINT (top-level — applies to ALL output fields) ──
+  const weatherConstraintBlock = rainyWeekWarning
+    ? `⛔⛔⛔ KRITISK VEJRFAKTA FOR DENNE UGE (${rainyDayCount}/${totalDayCount} dage med regn):
+Dette gælder ALLE felter (headline, overview, business_advantage, weather_season):
+- Skriv ALDRIG: "godt vejr", "fint vejr", "solrigt", "solskin", "varmt vejr", "gode udevejr", "udendørs muligheder", "al fresco"
+- Skriv ALDRIG at udeserveringen er en mulighed, åbner, aktiveres eller er i brug denne uge
+- Beskriv vejret realistisk: "ustabilt vejr", "regn flere dage", "overskyet", "indendørs-venlig uge", "vejret favoriserer indendørs besøg"
+${weatherEffect === 'indoor_refuge' || weatherEffect === 'minimal' ? '- Udendørs må IKKE nævnes som en fordel denne uge — det er faktuelt forkert.' : ''}
+Dette er en HÅRD REGEL — overtrædelse gør output ugyldigt.`
+    : '';
+
   const prompt = `Komprimér og genformulér den allerede besluttede strategi for ${context.business_name}s uge ${context.week_number}.
 
+${outdoorTerminologyBlock}
+${weatherConstraintBlock ? '\n' + weatherConstraintBlock + '\n' : ''}
 PHASE 2c ROLLE:
 Du syntetiserer bagud fra de faktisk genererede post-argumenter (se POST-ARGUMENTER i PLANLAGT MIX nedenfor) og forklarer til ejeren hvorfor dette specifikke sæt posts tilsammen tjener ugens argument.
 Du skriver overview som om du netop har læst alle post-rationaler og nu komprimerer den samlede logik — ikke som en forhåndsplan, men som en bagudblikkende synthese af hvad posts faktisk argumenterer.
@@ -291,9 +350,12 @@ PRIORITETSREGLER:
 4. Hvis business concept og weather peger i forskellige retninger, vægt business concept højest.
 
 REGISTER:
-Du briefer ejeren mundtligt mandag morgen over en kop kaffe — som en kollega der kender forretningen, ikke en konsulent der leverer en rapport.
+Du briefer ejeren direkte og professionelt — som en betroet sparringspartner der kender forretningen og respekterer ejerens tid.
 Skriv i årsag → effekt → hvad vi gør ved det-logik. Ingen strategilabels ("ugens primære fokus er..."). Ingen slide-overskrifter. Ingen "prioritér"-formularsprog.
 Brug konkret hverdagsdansk. Skriv om virkeligheden — gæsternes adfærd, forretningens konkrete styrke denne uge, og hvad der virker.
+Tone: professionel og personlig. Kortfattet og præcis. Varm faglig — ikke formel, ikke hyggesnakkende.
+
+⚠️ VIGTIG ADSKILLELSE: DENNE FORRETNINGS STEMME nedenfor beskriver tonen i de sociale medier-opslag der laves TIL gæsterne. Den gælder IKKE for din kommunikation til ejeren. Du skriver altid til ejeren i ovenstående register — uanset om brandets tone er legesyg, poetisk eller uformel.
 
 BESLUTTET STRATEGI — AUTORITATIV KILDE (må IKKE omfortolkes):
 
@@ -347,44 +409,27 @@ VEJR (støtteforklaring — brug kun til at forklare adfærd, IKKE til at sætte
 SÆSON (støtteforklaring): ${context.season.current}
 ØKONOMI (støtteforklaring): Uge ${context.economic.week_of_month}/4 i måneden (${translateEconomicPattern(context.economic.pattern)})
 ${context.events.length > 0 ? `EVENTS (støtteforklaring): ${context.events.map(e => { const label = (e as any).name_dk || e.name; return (e as any).in_week === false ? `${label} (næste uge — ikke i denne uges dage)` : label; }).join(', ')}` : 'EVENTS: Ingen'}
-${outdoorSeatingLine}
-
-FORBUDTE VENDINGER (må ALDRIG optræde i noget felt — hverken headline, overview, weather_season, timing_context, business_advantage eller post_plan):
-  "hygge" · "hyggelig" · "hyggelige" · "hyggefølelse" · "hyggepause" · "hyggelig stemning"
-  "hyggelige rammer" · "den perfekte ramme" · "indbydende atmosfære" · "autentisk oplevelse"
-  "lokal perle" · "socialt samvær" · "fristed" · "fristed fra vejret" · "oase" · "indendørs oase"
-  "trækker folk ind" · "foråret er på vej" · "folk vil forkæle sig selv" · "forkælelse" · "giv dig selv lov"
-  "noget for enhver" · "noget for alle" · "tag chancen" · "friske sæsoningredienser"
-  "i læ for vejret" · "i ly for vejret" · "oplagt valg" · "er et oplagt valg" · "oplagt udflugtsmål" · "oplagt destination"
-TEKNISKE DATABASE-ORD (må ALDRIG optræde i output — omsæt til konkret dansk ejervendt sprog i stedet):
-  "hybrid" · "hybridformat" · "hybridmodel" · "day-to-evening" · "day-to-evening format" · "treat" · "discovery"
-  "driftsmodel" · "besøgstype" · "serviceforløb" · "visit_mode" · "business_mode"
-  Brug i stedet det konkrete dagsdels-span fra Serviceforløb, fx "fra brunch og frokost til aftensmenu" eller "fra formiddag til aften"
-UNDGÅ PÅ LINJE MED ØVRIGE REGLER: Skriv IKKE stemnings-metaforer om vejret. Brug kommerciel mekanisme:
-  ✓ "Regnfuldt mandag–onsdag øger sandsynlighed for spontane indendørs [primær dagsdel]-besøg [tidspunkt]"
-  ✗ "Det kolde vejr indbyder til en hyggelig frokost inden døre"
-LOCATION-FRAMING REGEL: Nævn lokationen KUN som valg-argument — aldrig som baggrund, backdrop, suffix eller shelter ("i læ for vejret").
-  ✗ "med udsigt til [lokation]", "[lokation] som ramme", "frokostpause ved [lokation]", "vinduesborde med [lokation] i baggrunden"
-  ✓ "placeringen ved [lokation] giver et møde- og destinationsargument frem for anonymt alternativ"
+${outdoorSeatingLine}${locationPhraseRule ? '\n' + locationPhraseRule : ''}
+⚠️ SPROGKRAV: Skriv KUN på dansk. Kildematerialet (BESLUTTET STRATEGI ovenfor) kan indeholde engelske labels som "Terrace Pull", "Destination Visit", "Outdoor Opportunity" o.l. — disse må ALDRIG citeres eller parafraseres i dit output. Oversæt dem til konkret dansk: "destinationsbesøg ved åen", "besøg planlagt som udflugtssted" osv.
+FORBUDTE ORD — uanset sammenhæng: "al fresco" (italiensk restaurantjargon — brug "udendørsspisning" eller "udeservering") · "hygge" (som et-ords-reklame uden konkret indhold) · "fika" (svensk) · "koselig" (norsk). Brug naturlig hverdagsdansk.
 
 REGLER:
 1. headline: "Uge ${context.week_number}: [tema]" — max 8 ord.
    PRIMARY_ANGLE LABEL (brug dette som udgangspunkt — du MÅ IKKE skifte tema): "${primaryAngleLabel}"
    Headline er en KONDENSERET VERSION af primary_angle-labelen ovenfor — komprimér og formulér den konkret, men skift IKKE tema.
-   Vejr, location og events må KUN refinere formuleringen hvis de forstærker primary_angle direkte — de må ALDRIG erstatte det.
+   Vejr, location og events må KUN refinere formuleringen hvis de forstærker primary_angle direkte — de må ALDRIG erstatte det.${rainyWeekWarning ? '\n   ⛔ VEJRPROHIBITION: Nævn ALDRIG "terrassevejr", "udevejr", "udendørs", "solrigt" i headline. Det er faktuelt forkert denne uge.' : ''}
    FORBUDT: ny vinkel der ikke fremgår af primary_angle · lokation som suffix ("...ved åen", "...ved havnen") · vejr som stemning ("i køligt vejr", "i vintervejr") · generiske løfter.
    HEADLINE AFVISNINGSREGLER (kontrollér inden du afslutter — afvis og skriv om hvis én gælder):
-     ✗ Headline starter med: "Indendørs", "Udendørs", "Vejr", "Regn", "Sæson", "Koldt", "Varmt" — disse er vejr/kontekstord, ikke forretningsidentitet     ✗ Headline indeholder ordet "indendørs" eller "udendørs" NOGEN steder — disse er vejreffekt-ord, ikke forretningsidentitet     ✗ Headline indeholder ikke mindst ét forretningsspecifikt anker fra PRIMARY_ANGLE, Identitet eller Serviceforløb
+     ✗ Headline starter med: "Indendørs", "Udendørs", "Vejr", "Regn", "Sæson", "Koldt", "Varmt" — disse er vejr/kontekstord, ikke forretningsidentitet     ✗ Headline indeholder ordet "indendørs" eller "udendørs" NOGEN steder — disse er vejreffekt-ord, ikke forretningsidentitet${rainyWeekWarning ? '\n     ✗ Headline nævner terrassevejr, udevejr eller udendørs muligheder — det er faktuelt forkert denne uge' : ''}
+     ✗ Headline indeholder ikke mindst ét forretningsspecifikt anker fra PRIMARY_ANGLE, Identitet eller Serviceforløb
      ✗ Headline kunne passe på enhver café/restaurant i ${context.city} uden ændringer — tilføj det konkrete element der adskiller NETOP denne forretning
 2. overview: 3 bullet-punkter direkte til ejeren — et 4. bullet er tilladt hvis sætning 3 ellers skal udføre to adskilte jobs (fx taktik + sekundær dagsdel eller event).
-   Hvert bullet starter med "• " og indeholder præcis én sætning. Ingen prosa-blok — brug linjeskift (\n) mellem hvert bullet.
+   Hvert bullet starter med "• " og indeholder præcis én sætning. Ingen prosa-blok — brug linjeskift (\n) mellem hvert bullet.${rainyWeekWarning ? '\n   ⛔ VEJRPROHIBITION FOR DENNE UGE: Nævn ALDRIG "godt terrassevejr", "fint udevejr", "udendørs muligheder" eller at udeservering er aktiv. Det er faktuelt forkert.' : ''}
    STANDARD PRIORITET:
    Sætning 1: TRIGGER — den konkrete mekanisme eller det ugssignal der gør retningen indlysende.
      Skriv en observation om verden eller gæsternes adfærd: "Sidst på ugen planlægger folk i højere grad at spise ude ordentligt", "Midt i måneden er det spontane besøg det normale mønster".
      MÅ IKKE starte med et strategilabel: ALDRIG "[X] er ugens primære fokus", ALDRIG "Ugens fokus er...", ALDRIG "Primært fokus..."
-     Vejr åbner KUN S1 hvis weather_relevance = 'high' (se VEJR-feltet ovenfor) OG vejret også er den domæinerende adfærdsdrivende faktor denne uge — dvs. stormregn hele ugen, ekstrem varme/kulde der direkte ændrer besøgsmønstret markant.
-     Når weather_relevance er 'medium' eller 'low': undlad vejropener helt. Brug i stedet ugedag-timing, gæstadfærd eller forretningens driftsstyrke som trigger.
-     FORBUDT vejrklichéer i S1 (og hele overview): "skubber gæsterne indœndørs", "skubber indœndørs", "trækker gæsterne indœndørs", "trækker indœndørs", "vejret gør stedet attraktivt", "vejret indbyder", "søger indœndørs alternativer"
+     FORBUDT vejrklichéer: "skubber gæsterne indendørs", "skubber indendørs", "trækker gæsterne indendørs", "trækker indendørs", "vejret gør stedet attraktivt", "vejret indbyder", "søger indendørs alternativer"${rainyWeekWarning ? ', "godt terrassevejr", "fint udevejr", "udendørs muligheder"' : ''}
    Sætning 2: DIFFERENTIERING — hvad KUN denne forretning kan tilbyde, ikke blot hvad der passer til anledningen.
      Frem for "vi matcher de planlagte besøg": beskriv den specifikke kombination — hvad ejeren har, som gæsten ikke finder det anonyme alternativ samme sted.
      SKAL bygges af mindst 2 af disse 4 elementer:
@@ -407,11 +452,13 @@ REGLER:
    FORBUDT i hele overview: vage retningsangivelser uden tal eller operationel detalje
 3. weather_season: Beskriv vejret og sæsonen, forklar hvad det betyder for gæsternes adfærd. Brug "Uge ${context.week_number}" i starten.
    ⚠️ INGREDIENS-REGEL: Nævn ALDRIG specifikke retter, ingredienser eller madvarer i weather_season — hverken sæsonvarer (forårsløg, spinat, asparges, osv.) eller menuretter. Beskriv KUN vejr + gæste-adfærd.
+   ${rainyWeekWarning || ''}
+   📍 VEJR-PRÆCISION: Brug dag-for-dag detaljer fra VEJR-FORTOLKNING øverst. Hvis der er kontrast mellem hverdage og weekend (fx regnfulde hverdage, pæn weekend), beskriv det præcist — undgå generiske udsagn om "hele ugen".
 4. timing_context: Beskriv GÆSTE-ADFÆRD og HANDLEMØNSTRE, ikke generiske stemningsbeskrivelser:
    Økonomisk timing: Konkret adfærd ("folk overvejer mere hvad de bruger" — ikke "stramt budget")
    Events: Konkrete forventninger og handlinger (booking-adfærd, besøgsmønster)
    Hvis ingen events: fokusér på ugespecifik adfærd (hverdagsrytme, frokostpause-mønstre)
-5. business_advantage: Svar på "Hvorfor NETOP denne forretning — ikke bare en forretning som denne — denne uge?"
+5. business_advantage: Svar på "Hvorfor NETOP denne forretning — ikke bare en forretning som denne — denne uge?"${rainyWeekWarning && !hasWeekdayWeekendContrast ? '\n   ⛔ VEJRPROHIBITION: Nævn ALDRIG udeservering eller udendørs fordele som en styrke denne uge — det er faktuelt forkert når vejret ikke kvalificerer.' : hasWeekdayWeekendContrast ? '\n   ✅ WEEKEND-UDESERVERING: Du MÅ nævne udeservering som fordel HVIS du begrænser det til weekend (fx "weekend-terassen" eller "lørdag-søndag udeservering") — men IKKE som en hel-uges fordel.' : ''}
    KRÆVER mindst to af disse dimensioner:
      a) Lokal/geografisk fordel — beskriv som aktivt valg-argument, IKKE visuel baggrund: "placeringen ved X giver et møde- og destinationsargument" / "beliggenheden gør stedet til et aktivt valg frem for anonymt alternativ"
      b) Dagsdels- eller menukortfordel (hvad vi har der matcher ugens adfærd)
@@ -423,7 +470,7 @@ REGLER:
      - beliggenhed alene uden valg-argumentation (eks. "centralt beliggende", "tæt på")
      - "god oplevelse" eller "kvalitetsoplevelse" uden konkret begrundelse
      - "kvalitet" som ubegrundet standalone-påstand
-     - "hyggelig stemning" eller atmosfære-metaforer
+     - "hyggelig stemning" eller atmosfære-metaforer${rainyWeekWarning ? '\n     - udeservering eller udendørs fordele (faktuelt forkert denne uge)' : ''}
    Test: Kan business_advantage stå alene som svar på "Hvorfor ikke bare en anden forretning i samme gade?" — hvis nej, skriv om.
 6. post_plan: Beskriv det overordnede mix i 1-2 sætninger — eks. "3 menu-posts med brunch-fokus + 1 bag-om-post". Brug PLANLAGT MIX ovenfor som reference — ikke til at skrive om strategien, kun for at validere mixet.
 
@@ -525,15 +572,38 @@ Svar KUN med JSON:
       HEADLINE_BANNED_STARTS.some(w => body.startsWith(w)) ||
       /\bindendørs\b|\budendørs\b/i.test(body);
     const BLOCKED_OVERVIEW_PHRASES = ['samlet oplevelse', 'oplagt valg', 'søger mere end', 'noget særligt', 'mere end bare', 'giver en oplevelse', 'matcher netop', 'prioritér derfor', 'ugens primære fokus', 'primært fokus', 'i baggrunden', 'som baggrund', 'som backdrop', 'skubber gæsterne ind', 'skubber ind', 'trækker gæsterne ind', 'skal vi gøre'];
+    
+    // Forbidden specific outdoor location terms — always prohibited regardless of weather
+    const FORBIDDEN_OUTDOOR_TERMS = ['terrasse', 'terrassevejr', 'gårdhave', 'gården', 'haven', 'altanen', 'udearealet', 'udepladsen', 'udeområdet'];
+    
+    // Rainy week hallucination phrases — forbidden when rainyWeekWarning is active
+    const RAINY_WEEK_HALLUCINATIONS = rainyWeekWarning 
+      ? ['godt vejr', 'fint vejr', 'solrigt', 'solskin', 'varmt vejr', 'sommervejr', 'varme aftener', 'varme sommeraftener', 'lune aftener', 'lune sommeraftener', 'udendørs muligheder', 'udendørs servering', 'udeservering', 'udeservering åbner', 'udeservering aktiveres', 'åben udeservering', 'al fresco', 'lokker gæster til udendørs', 'lokker til udendørs']
+      : [];
+    
     // Catches both classic "er/var et Xte" and "til et Xte" (e.g. "gør stedet til et planlagte besøg")
     const brokenAgreementRx = /\b(?:er|var|til|som)\s+(?:et|en)\s+[a-zæøå]+te\b/i;
 
-    const checkQuality = (headline: string, overview: string) => {
+    const checkQuality = (headline: string, overview: string, businessAdvantage?: string) => {
       const body = (headline || '').replace(/^Uge \d+:\s*/i, '').toLowerCase();
       const headlineBanned = headlineContainsBannedWord(body);
       const grammarFail  = brokenAgreementRx.test(overview || '');
       const phraseFail   = BLOCKED_OVERVIEW_PHRASES.some(p => (overview || '').toLowerCase().includes(p));
-      return { headlineBanned, grammarFail, phraseFail, anyFail: headlineBanned || grammarFail || phraseFail };
+      
+      // Check for weather hallucinations across headline, overview, and business_advantage
+      const allText = `${headline || ''} ${overview || ''} ${businessAdvantage || ''}`.toLowerCase();
+      // Check for forbidden specific outdoor terms (always prohibited)
+      const forbiddenOutdoorTermFail = FORBIDDEN_OUTDOOR_TERMS.some(term => allText.includes(term.toLowerCase()));
+      const weatherHallucinationFail = RAINY_WEEK_HALLUCINATIONS.some(phrase => allText.includes(phrase.toLowerCase()));
+      
+      return { 
+        headlineBanned, 
+        grammarFail, 
+        phraseFail, 
+        weatherHallucinationFail,
+        forbiddenOutdoorTermFail,
+        anyFail: headlineBanned || grammarFail || phraseFail || weatherHallucinationFail || forbiddenOutdoorTermFail
+      };
     };
 
     // Phase 1 fallback: built directly from strategic brief data — no AI call
@@ -549,13 +619,16 @@ Svar KUN med JSON:
       });
     };
 
-    const pass1 = checkQuality(narrative.headline || '', narrative.overview || '');
-
+    const businessAdv = narrative?.detailed_sections?.business_advantage || '';
+    const pass1 = checkQuality(narrative.headline || '', narrative.overview || '', businessAdv);
+        
     if (pass1.anyFail) {
       console.warn('[Phase 2c] Pass 1 quality check failed — retrying:', {
         headlineBanned: pass1.headlineBanned,
         grammarFail:    pass1.grammarFail,
         phraseFail:     pass1.phraseFail,
+        weatherHallucinationFail: pass1.weatherHallucinationFail,
+        forbiddenOutdoorTermFail: pass1.forbiddenOutdoorTermFail,
         headline:       (narrative.headline || '').substring(0, 80),
       });
       try {
@@ -568,7 +641,8 @@ Svar KUN med JSON:
         if (!retried) {
           applyPhase1Fallback('rerun returned no parsed output');
         } else {
-          const pass2 = checkQuality(retried.headline || '', retried.overview || '');
+          const retriedBusinessAdv = retried?.detailed_sections?.business_advantage || '';
+          const pass2 = checkQuality(retried.headline || '', retried.overview || '', retriedBusinessAdv);
           if (pass2.anyFail) {
             // Rerun also failed — use Phase 1 data for headline + overview
             applyPhase1Fallback('rerun still failed checks');

@@ -41,6 +41,8 @@ export interface BusinessProfileAnalysis {
   openingHours?: {
     [key: string]: { open: string; close: string; closed?: boolean }
   }
+  openingHoursReviewRequired?: boolean
+  openingHoursReviewReasons?: string[]
   offerings?: {
     categories?: string[]  // Legacy format (may still be used)
     signatureItems?: string[]  // Legacy format
@@ -51,6 +53,7 @@ export interface BusinessProfileAnalysis {
     }>
     dietaryOptions?: string[]
   }
+  keyOfferings?: string
   contact?: {
     phone?: string
     email?: string
@@ -68,6 +71,7 @@ export interface BusinessProfileAnalysis {
   wifi?: boolean | null
   powerOutlets?: boolean | null
   parking?: boolean | null
+  kidsMenu?: boolean | null
   establishmentType?: 'FSE' | 'SBO' | null  // FSE = Full-Service Establishment, SBO = Specialized Beverage Outlet
   menuUrl?: string
   bookingUrl?: string

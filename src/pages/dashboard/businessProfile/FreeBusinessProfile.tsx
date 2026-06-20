@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createClient } from '@supabase/supabase-js'
 import { useConnectionsStore } from '../../../stores/connectionsStore'
+import { resolveEffectiveVertical } from '../../../config/businessVerticals'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -38,6 +39,7 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
   const [city, setCity] = useState('')
   const defaultCountry = t('ui.country.default_name')
   const [country, setCountry] = useState(defaultCountry)
+  const [localLocationReference, setLocalLocationReference] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [isFetchingCity, setIsFetchingCity] = useState(false)
@@ -58,7 +60,7 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
         // Get user's business
         const { data: business, error: businessError } = await supabase
           .from('businesses')
-          .select('id, name, vertical, has_table_seating, menus, service_model')
+          .select('id, name, vertical, has_table_seating, menus, service_model, local_location_reference')
           .eq('owner_id', user.id)
           .maybeSingle()
 
@@ -71,10 +73,31 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
         if (business) {
           setBusinessId(business.id as string)
           setBusinessName((business.name as string) || '')
-            setBusinessType((business.vertical as string) || '')
             setHasTableSeating(Boolean((business as any).has_table_seating))
             setMenus((business as any).menus || [])
             setServiceModel((business as any).service_model || '')
+            setLocalLocationReference((business as any).local_location_reference || '')
+
+          const { data: brandProfile } = await supabase
+            .from('business_brand_profile')
+            .select('business_character, business_identity_persona, identity_keywords, brand_profile_v5')
+            .eq('business_id', business.id)
+            .maybeSingle()
+
+          const businessCharacter =
+            (brandProfile as any)?.brand_profile_v5?.layer_0_intelligence?.business_identity?.system_persona ||
+            (brandProfile as any)?.business_identity_persona ||
+            (brandProfile as any)?.business_character ||
+            ''
+          const identityKeywords = Array.isArray((brandProfile as any)?.identity_keywords)
+            ? (brandProfile as any).identity_keywords
+            : []
+
+          setBusinessType(resolveEffectiveVertical(
+            (business.vertical as string) || 'cafe',
+            businessCharacter,
+            identityKeywords,
+          ))
 
           // Get location data
           const { data: location } = await supabase
@@ -169,6 +192,7 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
           has_table_seating: hasTableSeating,
           menus: menus && menus.length > 0 ? menus : null,
           service_model: serviceModel || null,
+          local_location_reference: localLocationReference.trim() || null,
           updated_at: new Date().toISOString()
         })
         .eq('id', businessId)
@@ -276,25 +300,6 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
               />
             </div>
 
-            {/* Business Type */}
-            <div>
-              <label htmlFor="businessType" className="block text-sm font-medium text-slate-700 mb-1">
-                {t('businessProfile.businessType')}
-              </label>
-              <select
-                id="businessType"
-                value={businessType}
-                onChange={(e) => setBusinessType(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-              >
-                <option value="">Select type</option>
-                <option value="café">Café/Restaurant</option>
-                <option value="retail">Retail</option>
-                <option value="service">Service</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-
             {/* Capabilities (table seating, menus, service model) */}
             <div className="grid grid-cols-1 gap-4">
               <div className="flex items-center gap-3">
@@ -361,6 +366,24 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
                   required
                 />
               </div>
+            </div>
+
+            {/* Local Location Reference */}
+            <div>
+              <label htmlFor="localLocationReference" className="block text-sm font-medium text-slate-700 mb-1">
+                Lokal betegnelse (valgfri)
+              </label>
+              <input
+                id="localLocationReference"
+                type="text"
+                value={localLocationReference}
+                onChange={(e) => setLocalLocationReference(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="f.eks. 'ved åen', 'Nyhavn', 'i Vesterbro'"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Hvordan omtaler lokale din placering? (f.eks. "ved åen" i stedet for "ved vandet")
+              </p>
             </div>
 
             {/* Country */}

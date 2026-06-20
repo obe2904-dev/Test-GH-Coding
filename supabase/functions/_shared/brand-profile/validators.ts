@@ -8,6 +8,7 @@
 import type { BrandProfile, BrandVariable, DataSources, ImagePreferencesValue, ThingsToAvoidValue, LanguageConfig } from './types.ts'
 import { extractStructuredWebsiteData } from './signal-extractor.ts'
 import { detectWebsitePresence, logWebsitePresence } from './website-presence.ts'
+import { validateBrandEssenceQuality } from './quality-validators.ts'
 
 // Deno global type declaration for TypeScript
 declare const Deno: {
@@ -115,8 +116,8 @@ export function validateBrandProfileOutput(sections: any, analysis: any, dataSou
     const groups: Array<{ name: string; re: RegExp }> = [
       // Food / service
       { name: 'food', re: /\b(brunch|frokost|middag|aften|kaffe|menu|retter|mad|servering|køkken|cocktail|vin|øl)\b/i },
-      // Atmosphere / interior / vibe
-      { name: 'atmosphere', re: /\b(stemning|atmosfære|vibe|interiør|indretning|lys|belysning|musik|bar|aftenlys|candle|hygge)\b/i },
+      // Atmosphere / interior / outdoor vibe
+      { name: 'atmosphere', re: /\b(stemning|atmosfære|vibe|interiør|indretning|lys|belysning|musik|bar|aftenlys|candle|hygge|oplevelse|udendørs|udeservering|terrasse|terasse|åen|haven|vand|miljø|rum)\b/i },
       // People / moments / tempo
       { name: 'people', re: /\b(mennesker|gæster|team|kok|barista|værter|øjeblik|momenter|tempo|hverdag|fredag|venner|date|familie)\b/i },
       // Transitions / story / BTS
@@ -364,25 +365,10 @@ export function validateBrandProfileOutput(sections: any, analysis: any, dataSou
   }
   const normalizedRefs = Array.from(new Set(referencePool.map(normalize))).filter(r => r.length >= 4)
   
-  // Build allowed proof tokens (Fix #4)
-  const locationData = (dataSources as any)?.location
-  const locationPhraseProof = locationData?.enrichment?.micro?.area_type === 'waterfront' ? 'ved åen'
-    : locationData?.enrichment?.micro?.area_type === 'transit_hub' ? 'ved stationen'
-    : locationData?.enrichment?.micro?.area_type === 'shopping_street' ? 'på gågaden'
-    : ''
-  const cityProof = locationData?.enrichment?.macro?.city || ''
-  const canonicalLocationHookProof = locationPhraseProof && cityProof ? `${locationPhraseProof} i ${cityProof}` : ''
-  
-  const ALLOWED_PROOF_TOKENS = [
-    canonicalLocationHookProof,
-    'BOOK DIT BORD',
-    'PARISERBØF',
-    'ÆGGEKAGE',
-    'BØF & BEARNAISE',
-    'FAUST GRYDE',
-    'ved åen',
-    'åen'
-  ].filter(Boolean).map(t => normalize(t))
+  // Build allowed proof tokens dynamically from analysis and dataSources
+  // This includes: menu items, CTAs, location phrases, hook labels, etc.
+  // (Previously had hardcoded Cafe Faust items — now business-agnostic)
+  const ALLOWED_PROOF_TOKENS = buildAllowedProofTokens(analysis, dataSources)
   
   const proofReferencesSomethingReal = (proof: string[]): boolean => {
     if (normalizedRefs.length === 0 && ALLOWED_PROOF_TOKENS.length === 0) return true
@@ -591,6 +577,15 @@ export function validateBrandProfileOutput(sections: any, analysis: any, dataSou
       }
       if (offeringCandidates.length > 0 && !includesAny(be, offeringCandidates)) {
         errors.push('brand_essence must include an offering cue (e.g., brunch/frokost/aften, cocktails, coffee)')
+      }
+
+      // QUALITY VALIDATION: Emotional positioning, forbidden patterns, sensory grounding, factual accuracy
+      // This ensures AI output has emotional positioning (not just structural completeness)
+      // Triggers deterministic fallback if quality checks fail
+      const qualityResult = validateBrandEssenceQuality(be, dataSources)
+      if (!qualityResult.passed) {
+        // Add all quality errors to validation errors (triggers fallback in index.ts line 433)
+        errors.push(...qualityResult.errors)
       }
     }
 
@@ -1040,6 +1035,89 @@ export function validateBrandProfileOutput(sections: any, analysis: any, dataSou
 }
 
 /**
+ * Check for feature over-representation across brand profile fields (v4.12.1)
+ * Returns warnings when single feature appears in too many fields.
+ * 
+ * Prevents seasonal/physical features from dominating the brand profile,
+ * ensuring year-round voice relevance.
+ * 
+ * @param brandProfile - The brand profile to check for feature diversity
+ * @returns Array of warning messages
+ */
+export function validateFeatureDiversity(brandProfile: BrandProfile): string[] {
+  const warnings: string[] = []
+  
+  // Extract text from all major fields
+  const fields: string[] = [
+    brandProfile.business_character,
+    brandProfile.brand_essence?.value,
+    brandProfile.brand_essence_elaboration?.value,
+    brandProfile.tone_of_voice?.value,
+    brandProfile.voice_rationale,
+    JSON.stringify(brandProfile.content_strategy || {}),
+    JSON.stringify(brandProfile.voice_examples || []),
+  ].filter((text): text is string => Boolean(text))
+  
+  const totalFields = fields.length
+  if (totalFields === 0) return warnings
+  
+  // Extract keywords (≥4 chars, not common words)
+  const extractKeywords = (text: string): string[] => {
+    const matches = text.match(/\b[\wæøåÆØÅ]{4,}\b/gi) || []
+    const commonWords = new Set([
+      'café', 'restaurant', 'bar', 'sted', 'stedet', 'deres', 'vores', 
+      'ikke', 'også', 'være', 'eller', 'have', 'hvor', 'denne', 'dette',
+      'menu', 'mad', 'drikke', 'serverer', 'gæster', 'være', 'kommer'
+    ])
+    return matches
+      .map(w => w.toLowerCase())
+      .filter(w => !commonWords.has(w))
+  }
+  
+  // Count keyword occurrences across fields (once per field)
+  const keywordCounts = new Map<string, number>()
+  
+  fields.forEach(field => {
+    const keywords = extractKeywords(field)
+    const uniqueKeywords = new Set(keywords) // Count once per field
+    uniqueKeywords.forEach(kw => {
+      keywordCounts.set(kw, (keywordCounts.get(kw) || 0) + 1)
+    })
+  })
+  
+  // Flag keywords appearing in >40% of fields
+  const threshold = totalFields * 0.4
+  
+  keywordCounts.forEach((count, keyword) => {
+    const percentage = Math.round((count / totalFields) * 100)
+    if (count > threshold) {
+      warnings.push(
+        `⚠️ Feature over-representation: "${keyword}" appears in ${count}/${totalFields} fields (${percentage}%) — should be <40%`
+      )
+    }
+  })
+  
+  // Check for seasonal feature dominance
+  const seasonalKeywords = ['terrasse', 'udendørs', 'outdoor', 'åen', 'waterfront', 'udsigt', 'havudsigt']
+  let seasonalMentions = 0
+  
+  fields.forEach(field => {
+    if (seasonalKeywords.some(kw => new RegExp(`\\b${kw}`, 'i').test(field))) {
+      seasonalMentions++
+    }
+  })
+  
+  if (seasonalMentions > totalFields * 0.3) {
+    const percentage = Math.round((seasonalMentions / totalFields) * 100)
+    warnings.push(
+      `⚠️ Seasonal feature over-emphasis: Outdoor/waterfront features in ${seasonalMentions}/${totalFields} fields (${percentage}%) — may reduce year-round relevance`
+    )
+  }
+  
+  return warnings
+}
+
+/**
  * Final validation on BrandProfile before saving.
  * Runs on the parsed BrandProfile object to catch any meta-text that slipped through.
  * Automatically cleans issues when possible.
@@ -1252,6 +1330,34 @@ export function validateFinalBrandProfile(brandProfile: BrandProfile): {
     }
   }
   
+  // v4.12.1: Enforce REQUIRED fields (voice_rationale, business_character)
+  // These fields MUST be populated per schema requirement and user request (transparency)
+  
+  // 1) voice_rationale — AI's explanation of how voice was derived from data
+  if (!brandProfile.voice_rationale || typeof brandProfile.voice_rationale !== 'string' || brandProfile.voice_rationale.trim().length === 0) {
+    errors.push('[FINAL] 🚫 HARD ERROR: voice_rationale is required (must explain how voice was derived from data sources)')
+  } else if (brandProfile.voice_rationale.trim().length < 50) {
+    errors.push('[FINAL] ⚠️ voice_rationale too short (minimum 50 chars, needs 3-6 sentences explaining data sources, text quality, and observed vs assessed)')
+  }
+  
+  // 2) business_character — Required in schema line 515
+  if (!brandProfile.business_character || typeof brandProfile.business_character !== 'string' || brandProfile.business_character.trim().length === 0) {
+    errors.push('[FINAL] 🚫 HARD ERROR: business_character is required (schema line 515)')
+  }
+  
+  // v4.12.1: Log validation results for debugging
+  console.log(`[FINAL VALIDATION] voice_rationale: ${brandProfile.voice_rationale ? 'populated (' + brandProfile.voice_rationale.length + ' chars)' : 'NULL'}`)
+  console.log(`[FINAL VALIDATION] business_character: ${brandProfile.business_character ? 'populated (' + brandProfile.business_character.length + ' chars)' : 'NULL'}`)
+  
+  // v4.12.1: Check for feature over-representation (voice over-indexing fix)
+  const diversityWarnings = validateFeatureDiversity(brandProfile)
+  if (diversityWarnings.length > 0) {
+    errors.push(...diversityWarnings)
+    console.log(`[FINAL VALIDATION] Feature diversity warnings:`, diversityWarnings)
+  }
+  
+  console.log(`[FINAL VALIDATION] Total errors: ${errors.length}`, errors)
+  
   if (errors.length > 0) {
     console.log(`⚠️ Final validation found ${errors.length} meta-text issues (auto-cleaned):`, errors)
   }
@@ -1285,6 +1391,9 @@ export async function repairBrandProfile(
   dataSources?: any
 ): Promise<any> {
   const errorReport = errors.join('\n- ')
+  
+  // Derive target language name from the language config (same values as examplesByLanguage keys)
+  const targetLanguage = language.name || 'English'
   
   // v4.8.8 Task 1: Extract banned word violations for specific repair instructions
   const bannedWordViolations = errors.filter(e => e.includes('🚫 BANNED WORD INCONSISTENCY'))

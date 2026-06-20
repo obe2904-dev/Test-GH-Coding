@@ -304,9 +304,10 @@ export const StrategyGeneratedDisplay: React.FC<StrategyGeneratedDisplayProps> =
             <p className="text-[#4B5563]">
               <span className="font-semibold">{strategicIdea.title}</span> • {strategicIdea.contentType}
             </p>
-            <p className="text-[#6B7280]">
+            {/* Rationale hidden - shown in popup instead */}
+            {/* <p className="text-[#6B7280]">
               💡 {strategicIdea.rationale}
-            </p>
+            </p> */}
           </div>
         )}
       </div>

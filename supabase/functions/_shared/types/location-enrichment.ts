@@ -42,6 +42,7 @@ export type LocationEnrichment = {
       | "campus"
       | "unknown"
     nearby_signals: string[] // Short labels only (e.g., "ved åen", "nær banegård", "i centrum")
+    waterfront_term?: string // Specific waterfront term when area_type is "waterfront" (e.g., "ved åen", "ved fjorden", "ved søen")
     confidence: "high" | "medium" | "low"
   }
   

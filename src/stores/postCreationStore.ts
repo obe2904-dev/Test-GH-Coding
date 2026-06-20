@@ -69,6 +69,7 @@ export interface WeeklyPlanSuggestion {
   captionBase?: string     // copy brief (menu: menuItemDescription; non-menu: empty — guestMoment carries the occasion)
   source: 'weekly_plan'
   contentType?: string     // 'menu_item' | 'atmosphere' | 'behind_scenes' | 'seasonal' | 'product_menu'
+  menuItemId?: string      // UUID for menu_items_normalized (ID-based lookup)
   menuItemName?: string    // DB item name (when menu post)
   menuItemDescription?: string  // DB item description (when menu post)
   rationale?: string       // Phase 2b strategic rationale — displayed in UI only, NOT passed to copy AI
@@ -86,6 +87,10 @@ export interface WeeklyPlanSuggestion {
   selectionRationale?: string   // PostSpec.selectionRationale — why this post was chosen for this week
   captionFirstLine?: string     // caption.firstLine — soft opening line seed
   holidayContext?: string       // "[name] – [strategic_angle] – [marketing_hook]" when post day is a public holiday
+  drinkPairing?: string         // Phase 2b drink pairing suggestion (e.g. "Negroni", "husets øl")
+  strategyBrief?: string         // Phase 2b compact directive: what caption should achieve + weather/timing/role context
+  mediaDirection?: string        // Phase 2b photo/scene direction — what to photograph and how
+  sceneSpec?: string              // Phase 2b scene specification — who/action/setting for experience posts
 }
 
 export interface PhotoAdjustments {
@@ -132,6 +137,10 @@ export interface MediaItem {
   duration?: number // Video duration in seconds
   canAnalyze?: boolean // Whether video is short enough for AI analysis (≤30s)
   analysisCache?: Record<string, unknown> // AI analysis results keyed by context (path:ideaId)
+  slideCaption?: string // Pro carousel: optional overlay text per slide
+  aiSkipSuggested?: boolean // Set by AI Organise when slide is flagged for removal
+  coverCandidates?: string[] // Video: 3 candidate cover frame URLs (public storage URLs)
+  selectedCoverUrl?: string // Video: user-chosen cover frame — passed to Graph API Reels publish as cover_url
 }
 
 export interface PhotoContent {
@@ -139,6 +148,11 @@ export interface PhotoContent {
   selectedMedia: string | null
   isOriginal: boolean
   photoAdjustments: PhotoAdjustments | null
+  // Carousel mode fields (Smart + Pro)
+  carouselMode: boolean
+  carouselTheme?: 'new_item' | 'todays_special' | 'brunch' | 'cozy' | 'team'
+  carouselCoverIndex?: number
+  carouselGoal?: 'sell' | 'cozy_brand' | 'trust' | 'drive_traffic'
 }
 
 type ContentStep = 'generate' | 'create' | 'publish'
@@ -169,6 +183,15 @@ interface PostCreationState {
   aiIdeerPhotoIdea: string
   setAiIdeerPhotoIdea: (idea: string) => void
   // weeklyPlanPhotoIdea is the shared photoIdea field (written by handleDirectTransfer)
+
+  // ── Per-path photo content (each path has its own slot) ──
+  writeSelfPhotoContent: PhotoContent | null
+  setWriteSelfPhotoContent: (content: PhotoContent | null) => void
+  aiIdeerPhotoContent: PhotoContent | null
+  setAiIdeerPhotoContent: (content: PhotoContent | null) => void
+  // AI Ideas: per-suggestion photo map (each Quick Suggestion has its own photo slot)
+  aiIdeasPhotoDraftMap: Record<string, PhotoContent | null>
+  setAiIdeasPhotoDraftEntry: (suggestionId: string, content: PhotoContent | null) => void
 
   // Platform selection
   selectedPlatforms: string[]
@@ -215,6 +238,10 @@ interface PostCreationState {
   // Per-idea draft cache for multi-idea Weekly Plan flow (NOT cleared on reset — survives idea switching)
   draftMap: Record<number, PostContent | null>
   setDraftMapEntry: (index: number, content: PostContent | null) => void
+  
+  // Per-idea photo cache for multi-idea Weekly Plan flow (parallel to draftMap)
+  photoDraftMap: Record<number, PhotoContent | null>
+  setPhotoDraftMapEntry: (index: number, photoContent: PhotoContent | null) => void
   clearDraftMap: () => void
 
   // Strategic idea context (for AI auto-fill from weekly strategy)
@@ -274,6 +301,15 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
       path === 'write' ? state.writeSelfPhotoIdea
       : path === 'ai-ideas' ? state.aiIdeerPhotoIdea
       : state.photoIdea, // weekly-plan: handleDirectTransfer sets it
+    // Switch photoContent to the path-specific slot (persists photos across path changes)
+    photoContent:
+      path === 'write' ? state.writeSelfPhotoContent
+      : path === 'ai-ideas'
+        // For AI Ideas: restore from per-suggestion map if a suggestion is selected
+        ? (state.selectedSuggestionData?.id && state.aiIdeasPhotoDraftMap[state.selectedSuggestionData.id] !== undefined
+            ? state.aiIdeasPhotoDraftMap[state.selectedSuggestionData.id]
+            : state.aiIdeerPhotoContent)
+        : null, // weekly-plan uses photoDraftMap instead
     // Clear weekly-plan-specific fields when leaving the weekly-plan path
     ...(path !== 'weekly-plan' ? { weeklyPlanPost: null, strategicIdea: null, postCta: null } : {}),
   })),
@@ -325,7 +361,24 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
   
   // Selected suggestion data
   selectedSuggestionData: null,
-  setSelectedSuggestionData: (data) => set({ selectedSuggestionData: data }),
+  setSelectedSuggestionData: (data) => set((state) => {
+    const updates: any = { selectedSuggestionData: data }
+    
+    // When selecting a new AI suggestion, restore its photos from the map
+    if (data?.id && state.activePath === 'ai-ideas') {
+      const savedPhoto = state.aiIdeasPhotoDraftMap[data.id]
+      if (savedPhoto !== undefined) {
+        updates.photoContent = savedPhoto
+      }
+    }
+    
+    // When clearing selection (data === null), also clear photoContent if on AI Ideas path
+    if (!data && state.activePath === 'ai-ideas') {
+      updates.photoContent = null
+    }
+    
+    return updates
+  }),
 
   postCta: null,
   setPostCta: (cta) => set({ postCta: cta }),
@@ -352,24 +405,56 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
   setWeeklyContentPlan: (plan) => set((state) => {
     // When loading a plan, restore any previously saved post drafts from localStorage
     const restoredDraftMap: Record<number, any> = { ...state.draftMap }
+    const restoredPhotoDraftMap: Record<number, any> = { ...state.photoDraftMap }
     const planId = (plan as any)?.id
     const MAX_AGE = 7 * 24 * 60 * 60 * 1000
     if (planId && plan?.posts) {
       plan.posts.forEach((_: any, index: number) => {
-        // Don't overwrite if we already have a draft for this index in memory
-        if (restoredDraftMap[index]) return
-        try {
-          const raw = localStorage.getItem(`p2g_draft_plan_${planId}_${index}`)
-          if (raw) {
-            const entry = JSON.parse(raw)
-            if (Date.now() - entry.savedAt <= MAX_AGE) {
-              restoredDraftMap[index] = entry.data
+        // Restore text draft
+        if (!restoredDraftMap[index]) {
+          try {
+            const raw = localStorage.getItem(`p2g_draft_plan_${planId}_${index}`)
+            if (raw) {
+              const entry = JSON.parse(raw)
+              if (Date.now() - entry.savedAt <= MAX_AGE) {
+                restoredDraftMap[index] = entry.data
+              }
             }
-          }
-        } catch { /* ignore */ }
+          } catch { /* ignore */ }
+        }
+        // Restore photo draft
+        if (!restoredPhotoDraftMap[index]) {
+          try {
+            const raw = localStorage.getItem(`p2g_draft_plan_${planId}_${index}_photos`)
+            if (raw) {
+              const entry = JSON.parse(raw)
+              if (Date.now() - entry.savedAt <= MAX_AGE) {
+                const photoMedia = entry.data
+                if (photoMedia && photoMedia.length) {
+                  restoredPhotoDraftMap[index] = {
+                    uploadedMedia: photoMedia.map((m: any) => ({
+                      id: m.id,
+                      file: null as any, // No File object when restoring from draft - will use URL instead
+                      url: m.originalUrl || m.url,
+                      originalUrl: m.originalUrl,
+                      adjustedUrl: m.adjustedUrl,
+                      type: m.type || 'image',
+                      selectedVersionForPost: m.selectedVersionForPost || 'original',
+                      analysisCache: m.analysisCache,
+                    })),
+                    selectedMedia: null,
+                    isOriginal: true,
+                    photoAdjustments: null,
+                    carouselMode: false,
+                  }
+                }
+              }
+            }
+          } catch { /* ignore */ }
+        }
       })
     }
-    return { weeklyContentPlan: plan, draftMap: restoredDraftMap }
+    return { weeklyContentPlan: plan, draftMap: restoredDraftMap, photoDraftMap: restoredPhotoDraftMap }
   }),
   weeklyPlanPostIndex: 0,
   setWeeklyPlanPostIndex: (index) => set({ weeklyPlanPostIndex: index }),
@@ -399,7 +484,43 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
       return { draftMap: { ...state.draftMap, [index]: content } }
     }),
   clearDraftMap: () => set({ draftMap: {} }),
+  
+  photoDraftMap: {},
+  setPhotoDraftMapEntry: (index, photoContent) =>
+    set((state) => {
+      // Persist photos to localStorage (serialize as URL-only stubs, File objects can't be stringified)
+      const planId = (state.weeklyContentPlan as any)?.id
+      if (planId && photoContent) {
+        try {
+          const photoMedia = photoContent.uploadedMedia?.map(m => ({
+            id: m.id,
+            url: m.originalUrl || m.url,
+            originalUrl: m.originalUrl,
+            adjustedUrl: m.adjustedUrl,
+            type: m.type,
+            selectedVersionForPost: m.selectedVersionForPost,
+            analysisCache: m.analysisCache,
+          })) ?? []
+          localStorage.setItem(
+            `p2g_draft_plan_${planId}_${index}_photos`,
+            JSON.stringify({ data: photoMedia, savedAt: Date.now() })
+          )
+        } catch { /* quota exceeded — fail silently */ }
+      }
+      return { photoDraftMap: { ...state.photoDraftMap, [index]: photoContent } }
+    }),
+  clearPhotoDraftMap: () => set({ photoDraftMap: {} }),
 
+  // Per-path photo content
+  writeSelfPhotoContent: null,
+  setWriteSelfPhotoContent: (content) => set({ writeSelfPhotoContent: content }),
+  aiIdeerPhotoContent: null,
+  setAiIdeerPhotoContent: (content) => set({ aiIdeerPhotoContent: content }),  // AI Ideas: per-suggestion photo map (keyed by suggestion ID)
+  aiIdeasPhotoDraftMap: {},
+  setAiIdeasPhotoDraftEntry: (suggestionId, content) =>
+    set((state) => ({
+      aiIdeasPhotoDraftMap: { ...state.aiIdeasPhotoDraftMap, [suggestionId]: content },
+    })),
   // Strategic idea
   strategicIdea: null,
   setStrategicIdea: (idea) => set({ strategicIdea: idea }),
@@ -410,7 +531,24 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
 
   // Photo step
   photoContent: null,
-  setPhotoContent: (content) => set({ photoContent: content }),
+  setPhotoContent: (content) => set((state) => {
+    const updates: any = {
+      photoContent: content,
+      // Mirror to per-path slot so path switching restores correctly
+      writeSelfPhotoContent: state.activePath === 'write' ? content : state.writeSelfPhotoContent,
+      aiIdeerPhotoContent: state.activePath === 'ai-ideas' ? content : state.aiIdeerPhotoContent,
+    }
+
+    // For AI Ideas: also save to per-suggestion photo map (keyed by suggestion ID)
+    if (state.activePath === 'ai-ideas' && state.selectedSuggestionData?.id) {
+      updates.aiIdeasPhotoDraftMap = {
+        ...state.aiIdeasPhotoDraftMap,
+        [state.selectedSuggestionData.id]: content,
+      }
+    }
+
+    return updates
+  }),
 
   // Reset store (weeklyContentPlan + weeklyPlanSessionDone intentionally preserved for back/forth nav)
   reset: () => set({
@@ -432,6 +570,9 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
     weeklyPlanSuggestion: null,
     strategicIdea: null,
     photoIdea: '',
-    photoContent: null
+    photoContent: null,
+    writeSelfPhotoContent: null,
+    aiIdeerPhotoContent: null,
+    aiIdeasPhotoDraftMap: {},
   })
 }))

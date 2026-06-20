@@ -65,7 +65,7 @@ export async function callGemini(
       temperature: options.temperature ?? 0.3,
       maxOutputTokens,  // Explicit token limit
       ...(options.jsonMode && { responseMimeType: 'application/json' }),
-      ...(options.thinkingConfig && { thinkingConfig: options.thinkingConfig }),  // NEW: Thinking mode
+      thinkingConfig: options.thinkingConfig ?? { thinkingBudget: 0 },  // Default: disable thinking to avoid billing surprise
     },
   };
 

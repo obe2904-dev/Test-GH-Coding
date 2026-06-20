@@ -64,7 +64,7 @@ export async function computeSourceHashes(dataSources: {
   const businessSnapshot = dataSources.business ? {
     name: dataSources.business.name,
     description: dataSources.business.description,
-    venue_type: dataSources.business.venue_type,
+    vertical: dataSources.business.vertical,
     primary_language: dataSources.business.primary_language,
     country: dataSources.business.country
   } : null

@@ -26,18 +26,13 @@ const Sparkles = ({ className }: { className?: string }) => (
   </svg>
 )
 
-const Camera = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-    <circle cx="12" cy="13" r="4"/>
-  </svg>
-)
 
 
 interface PostContent {
   headline: string
   text: string
   hashtags: Array<{ tag: string; enabled: boolean }>
+  includeHashtags?: boolean
   adjustments: {
     includeHashtags: boolean
     includeEmojis: boolean
@@ -55,14 +50,14 @@ interface PlatformPreviewProps {
   uploadedMedia: MediaItem[]
   selectedMediaIndex: number
   onMediaIndexChange: (index: number) => void
-  onPhotoUpload?: (event: React.ChangeEvent<HTMLInputElement>) => void
-  onRemovePhoto?: (index: number) => void
   onSelectVersionForPost?: (version: 'original' | 'adjusted') => void
   currentTier: string
   businessName?: string
-  /** Called when the user clicks the "Rediger tekst" button. Only shown for smart/pro tiers. */
+  /** Called when the user clicks the "Rediger tekst" button. */
   onEditCaption?: () => void
   platformFormat?: string
+  /** Whether carousel mode is active for Instagram dot indicator rendering */
+  carouselMode?: boolean
 }
 
 function getPreviewUrl(media: MediaItem): string {
@@ -80,17 +75,15 @@ export function PlatformPreview({
   uploadedMedia,
   selectedMediaIndex,
   onMediaIndexChange,
-  onPhotoUpload,
-  onRemovePhoto,
   onSelectVersionForPost,
   currentTier,
   businessName: businessNameProp,
   onEditCaption,
   platformFormat: _platformFormat,
+  carouselMode = false,
 }: PlatformPreviewProps) {
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const [businessName, setBusinessName] = useState<string>(businessNameProp || '')
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const autoDefaultedMediaIdsRef = useRef<Set<string>>(new Set())
   
   const hasPhoto = uploadedMedia && uploadedMedia.length > 0
@@ -139,6 +132,7 @@ export function PlatformPreview({
 
   const showBusinessLabel = normalizedBusinessName.length > 0 && !displayTextStartsWithBusinessName
   const showFallbackLabel = normalizedBusinessName.length === 0
+  const includeHashtags = content.includeHashtags ?? content.adjustments?.includeHashtags ?? true
   
   // Fetch business name from profile
   useEffect(() => {
@@ -299,7 +293,7 @@ export function PlatformPreview({
                   {content.text}
                 </p>
               )}
-              {onEditCaption && currentTier !== 'free' && (
+              {onEditCaption && (
                 <button
                   onClick={onEditCaption}
                   className="mt-2 flex items-center gap-1 text-xs font-medium text-cta hover:text-cta-text transition-colors"
@@ -311,7 +305,7 @@ export function PlatformPreview({
                   {t('editCaption', 'Rediger tekst')}
                 </button>
               )}
-              {content.adjustments.includeHashtags && content.hashtags && content.hashtags.length > 0 && (
+              {includeHashtags && content.hashtags && content.hashtags.length > 0 && (
                 <p className="text-sm text-blue-600 mt-1">
                   {content.hashtags.filter((h: any) => h.enabled).map((h: any) => h.tag).join(' ')}
                 </p>
@@ -346,17 +340,6 @@ export function PlatformPreview({
                     style={{ maxHeight: '420px', objectFit: 'contain' }}
                   />
                 </>
-              )}
-
-              {/* Remove Photo Button */}
-              {onRemovePhoto && (
-                <button
-                  onClick={() => onRemovePhoto(selectedMediaIndex)}
-                  className="absolute top-3 right-3 z-20 px-2 py-0.5 bg-white/95 text-red-600 rounded-full shadow-md text-xs font-semibold hover:bg-white transition-colors border border-white/70"
-                  title={t('create.remove')}
-                >
-                  {t('create.remove')}
-                </button>
               )}
 
               {/* Multiple Photos Navigation */}
@@ -396,15 +379,8 @@ export function PlatformPreview({
               )}
             </div>
           ) : (
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className="relative bg-slate-50 aspect-[1.91/1] overflow-hidden flex items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors"
-            >
-              <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-cta hover:bg-cta-surface transition-colors">
-                <Camera className="w-8 h-8 text-slate-400" />
-                <p className="text-slate-700 text-sm font-medium">{t('preview.uploadTitle')}</p>
-                <p className="text-slate-500 text-xs">{t('preview.uploadSubtitle')}</p>
-              </div>
+            <div className="relative bg-slate-50 aspect-[1.91/1] overflow-hidden flex items-center justify-center">
+              <p className="text-xs text-slate-400">{t('preview.noPhotoYet', 'Upload et billede i venstre kolonne')}</p>
             </div>
           )}
 
@@ -495,17 +471,6 @@ export function PlatformPreview({
                 </>
               )}
               
-              {/* Remove Photo Button */}
-              {onRemovePhoto && (
-                <button
-                  onClick={() => onRemovePhoto(selectedMediaIndex)}
-                  className="absolute top-3 right-3 z-20 px-2 py-0.5 bg-white/95 text-red-600 rounded-full shadow-md text-xs font-semibold hover:bg-white transition-colors border border-white/70"
-                  title={t('create.remove')}
-                >
-                  {t('create.remove')}
-                </button>
-              )}
-
               {/* Multiple Photos Indicator */}
               {uploadedMedia.length > 1 && (
                 <>
@@ -529,20 +494,35 @@ export function PlatformPreview({
                   >
                     <ChevronRight />
                   </IconButton>
-                  <div className="absolute top-3 left-3 flex gap-1">
+
+                  {/* Carousel icon (stacked squares) — Instagram carousel indicator */}
+                  {carouselMode && (
+                    <div className="absolute top-2 right-2 z-20 pointer-events-none">
+                      <svg className="w-5 h-5 text-white drop-shadow" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                        <rect x="7" y="3" width="14" height="14" rx="2"/>
+                        <path d="M3 7v11a2 2 0 002 2h11"/>
+                      </svg>
+                    </div>
+                  )}
+
+                  {/* Slide counter badge when not in carousel mode, just a count */}
+                  {!carouselMode && (
+                    <div className="absolute top-2 right-2 z-20 px-1.5 py-0.5 bg-black/60 text-white text-[10px] font-semibold rounded pointer-events-none">
+                      {selectedMediaIndex + 1}/{uploadedMedia.length}
+                    </div>
+                  )}
+
+                  {/* Dot indicators — bottom center (carousel style) */}
+                  <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1 z-20 pointer-events-none">
                     {uploadedMedia.map((_, index) => (
-                      <button
+                      <div
                         key={index}
-                        aria-label={`Select photo ${index + 1}`}
-                        onClick={() => onMediaIndexChange(index)}
-                        className="w-10 h-10 flex items-center justify-center"
-                      >
-                        <div
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            index === selectedMediaIndex ? 'bg-white' : 'bg-white/50'
-                          }`}
-                        />
-                      </button>
+                        className={`rounded-full transition-all ${
+                          index === selectedMediaIndex
+                            ? 'w-2 h-2 bg-white'
+                            : 'w-1.5 h-1.5 bg-white/50'
+                        }`}
+                      />
                     ))}
                   </div>
                 </>
@@ -558,15 +538,8 @@ export function PlatformPreview({
               )}
             </div>
           ) : (
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className="relative bg-slate-50 aspect-square overflow-hidden flex items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors"
-            >
-              <div className="bg-white border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center gap-2 hover:border-cta hover:bg-cta-surface transition-colors">
-                <Camera className="w-8 h-8 text-slate-400" />
-                <p className="text-slate-700 text-sm font-medium">{t('preview.uploadTitle')}</p>
-                <p className="text-slate-500 text-xs">{t('preview.uploadSubtitle')}</p>
-              </div>
+            <div className="relative bg-slate-50 aspect-square overflow-hidden flex items-center justify-center">
+              <p className="text-xs text-slate-400">{t('preview.noPhotoYet', 'Upload et billede i venstre kolonne')}</p>
             </div>
           )}
 
@@ -616,13 +589,13 @@ export function PlatformPreview({
                   {displayText}
                 </span>
               )}
-              {content.adjustments.includeHashtags && content.hashtags && content.hashtags.length > 0 && (
+              {includeHashtags && content.hashtags && content.hashtags.length > 0 && (
                 <span className="text-blue-900">
                   {' '}{content.hashtags.filter((h: any) => h.enabled).map((h: any) => h.tag).join(' ')}
                 </span>
               )}
             </div>
-            {onEditCaption && currentTier !== 'free' && (
+            {onEditCaption && (
               <button
                 onClick={onEditCaption}
                 className="mt-2 flex items-center gap-1 text-xs font-medium text-cta hover:text-cta-text transition-colors"
@@ -642,17 +615,6 @@ export function PlatformPreview({
       </>
       )}
 
-      {/* Hidden File Input */}
-      {onPhotoUpload && (
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*,video/*"
-          multiple
-          onChange={onPhotoUpload}
-          className="hidden"
-        />
-      )}
     </div>
   )
 }

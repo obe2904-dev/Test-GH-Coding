@@ -1082,7 +1082,7 @@ async function generateContextualFallback(
     }
   } else if (contentType === 'atmosphere_experience') {
     if (business?.location?.waterfront) {
-      subject = '🌊 Udsigten → Vores placering ved vandet, terrassen'
+      subject = '🌊 Udsigten → Vores placering ved åen, terrassen'  // Changed from "ved vandet" to "ved åen" (specific Danish waterfront term)
     } else if (business?.location?.city_center) {
       subject = '🏙️ Beliggenhed → Midt i byen, vores hyggelige hjørne'
     } else {

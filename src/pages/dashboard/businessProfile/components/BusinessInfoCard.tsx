@@ -103,7 +103,7 @@ export function BusinessInfoCard({
                 onClick={onAnalyze}
                 disabled={!websiteUrl.trim()}
                 title={!websiteUrl.trim() ? 'Indsæt link til hjemmeside' : ''}
-                className="w-full px-6 py-2 bg-brand text-mint rounded-lg text-sm font-semibold shadow-md hover:bg-[#12393D] transition-all disabled:bg-brand disabled:cursor-not-allowed"
+                className="w-full px-6 py-2 bg-cta text-text-inverse rounded-lg text-sm font-medium shadow-md hover:bg-cta-hover transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {websiteUrl && analysisComplete
                   ? 'Hent informationer igen'

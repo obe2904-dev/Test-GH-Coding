@@ -50,7 +50,7 @@ export const CustomIdeasMode: React.FC<CustomIdeasModeProps> = ({
         <button
           onClick={onAnalyzeWebsite}
           disabled={isGenerating || !websiteUrl.trim()}
-          className="px-4 py-2 bg-brand text-mint rounded-lg hover:bg-[#12393D] disabled:opacity-50 transition-all text-sm font-medium shadow-md flex items-center gap-2 justify-center whitespace-nowrap"
+          className="px-4 py-2 bg-cta text-text-inverse rounded-lg hover:bg-cta-hover disabled:opacity-40 transition-all text-sm font-medium shadow-md flex items-center gap-2 justify-center whitespace-nowrap"
         >
           {isGenerating ? (
             <>

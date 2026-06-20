@@ -253,3 +253,33 @@ export function verticalHasCapability(
   const config = VERTICAL_CONFIGS[vertical]
   return config?.dataSchema[capability] || false
 }
+
+/**
+ * Resolve an effective operational vertical from richer identity signals.
+ *
+ * The signup vertical is often too coarse for hybrid venues, so prompts should
+ * prefer a more specific operational type when the brand profile clearly signals it.
+ */
+export function resolveEffectiveVertical(
+  vertical: string,
+  businessCharacter: string,
+  identityKeywords: string | string[]
+): BusinessVertical {
+  const keywordsStr = Array.isArray(identityKeywords)
+    ? identityKeywords.join(' ')
+    : (identityKeywords || '')
+
+  const combined = [vertical, businessCharacter, keywordsStr].join(' ').toLowerCase()
+
+  const isBar = /\bbar\b|cocktailbar|cocktail.?bar|vinbar|wine.?bar|tapasbar|tapas\b|drinksmenu|drinksbar|natklub|nightclub/.test(combined)
+  const isBakery = /\bbageri\b|\bbakery\b|patisserie|konditori|brød.?bagning|artisan.?ba(k|g)/.test(combined)
+  const isCoffee = /\bkaffebar\b|coffee.?shop|coffeeshop|\bespresso\b|specialkaffe|kafferi\b|coffee.?bar/.test(combined)
+  const isFoodTruck = /food.?truck|street.?food|madvogn|vogn\b|truck\b/.test(combined)
+
+  if (isBar) return 'bar'
+  if (isBakery) return 'bakery'
+  if (isCoffee) return 'cafe'
+  if (isFoodTruck) return 'food_truck'
+
+  return (VERTICAL_CONFIGS[vertical as BusinessVertical] ? vertical : 'cafe') as BusinessVertical
+}

@@ -3,6 +3,8 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 // @ts-ignore - Deno ESM import with specific version
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 import { parseMenuPeriods } from '../_shared/menuPeriodParser.ts'
+import { validatePublicUrl, looksLikeLoginPage } from '../_shared/url-security.ts'
+import { normalizeProgrammeName } from '../_shared/content-planning/service-period-detector.ts'
 
 // @ts-ignore - Deno global
 declare const Deno: any
@@ -15,7 +17,7 @@ const corsHeaders = {
 
 const FETCH_TIMEOUT_MS = 12_000
 const MAX_HTML_BYTES = 1_200_000
-const MAX_EDGE_LLM_CHARS = 22_000
+const MAX_EDGE_LLM_CHARS = 60_000
 const MAX_PDF_BYTES = 5_000_000 // 5 MB — fast path PDFs only; larger files fall back to Cloud Run
 
 function _stripContentType(ct: string | null): string {
@@ -268,7 +270,7 @@ function cleanHtmlTextForLlm(text: string, maxChars: number): string {
     .map(l => l.trim())
     .filter(Boolean)
 
-  const priceRe = /(\b\d{1,4}\s*(?:[\.,]\d{1,2})?\s*(?:kr\b|kroner\b|dkk\b)\b|\b\d{1,4}\s*[-–—]?\s*[\.,]-\b|\b\d{1,4}\s*[\.,]-\b)/i
+  const priceRe = /(\b\d{1,4}\s*(?:[\.,]\d{1,2})?\s*(?:kr\b|kroner\b|dkk\b)\b|\b\d{1,4}\s*[-–—]?\s*[\.,]-(?=\s|$)|\b\d{1,4}\s*[\.,]-(?=\s|$))/i
   const keepAlways = (ln: string) => ln.startsWith('-') || priceRe.test(ln)
   const dropRe = /(cookie|privacy|privatliv|persondata|gdpr|terms|vilkår|scroll to top|facebook|instagram|tiktok|youtube|newsletter|copyright|all rights reserved)/i
 
@@ -284,12 +286,21 @@ function cleanHtmlTextForLlm(text: string, maxChars: number): string {
   }
 
   const finalLines = cleaned.length < 20 ? lines : cleaned
-  const seen = new Set<string>()
+  const seen = new Map<string, number>()
   const outLines: string[] = []
   for (const ln of finalLines) {
     const key = ln.toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
+    const count = seen.get(key) ?? 0
+    // Category/section headers (short ALL-CAPS lines) may legitimately appear in both
+    // site navigation and in the menu content body. Allow up to 2 occurrences so the
+    // actual section header is never silently dropped.
+    const isLikelyHeader = ln.length <= 40 && ln === ln.toUpperCase() && /[A-ZÆØÅ]/.test(ln)
+    // Price-only lines (e.g. "125,-", "95 kr", "109 DKK") are contextually unique —
+    // each occurrence belongs to the item immediately above it. Deduplicating them
+    // would silently drop prices for items that share the same price value. Never cap them.
+    const isPriceOnly = priceRe.test(ln) && ln.replace(priceRe, '').trim() === ''
+    if (count >= (isLikelyHeader ? 2 : isPriceOnly ? 999 : 1)) continue
+    seen.set(key, count + 1)
     outLines.push(ln)
   }
 
@@ -297,6 +308,11 @@ function cleanHtmlTextForLlm(text: string, maxChars: number): string {
   return out.length > maxChars ? out.slice(0, maxChars) : out
 }
 
+/**
+ * DEPRECATED: No longer used for HTML extraction decision logic
+ * We now always try Edge extraction for HTML pages instead of pre-filtering
+ * Kept for reference - may be useful for future optimizations
+ */
 function hasMenuSignal(text: string): boolean {
   if (!text) return false
   const lower = text.toLowerCase()
@@ -390,7 +406,13 @@ CRITICAL RULES:
     - If currency is implied (e.g., "95,-" in Denmark), set to "DKK"
 13) **Multi-line items**: Name → Description → Price = ONE item
 14) **Extras/Add-ons**: Lines like "Ekstra X +20,-" or "Tilvalg Y +15,-" are separate items
-15) **Kids menu**: "BØRNEMENU" or similar = separate category
+15) **Kids menu**: "BØRNEMENU" or similar = always its own top-level category. Even if it appears as a single line item inside another section, hoist it out as its own category. Item names containing "børnemenu", "børnemad", "kids menu", "children" should trigger this.
+16) **Day-restricted sections**: If a category header is followed by text like "fra onsdag til lørdag", "kun weekender", "mandag-fredag", "hverdage" etc., capture that in the category's "availabilityDays" field. Examples: "TAPAS / FRA ONSDAG TIL LØRDAG" → availabilityDays: "onsdag-lørdag". "FROKOST (hverdage)" → availabilityDays: "mandag-fredag".
+17) **Fixed-price packages**: Lines like "3 RETTERS MENU 395,-", "VINMENU 3 glas 150,-", "AD LIBITUM øl, vin og vand 2 timer 295,-" are menu packages/deals. Create a category called "PAKKER" (or "FAST MENU" if that label is present) and capture each package as an item with its price.
+18) **PRICE ALWAYS BELONGS TO THE ITEM ABOVE IT** - A line containing ONLY a number with ",-", "kr" or "DKK" (e.g. "125,-", "109 DKK", "189 kr") is ALWAYS the price of the immediately preceding item. It is NEVER the start of a new item. Even if there is a blank line between the item description and the price, the price still belongs to that item.
+19) **Items without a visible price** - If an item has no price line following it before the next item name or category header begins, set price to null. Do NOT borrow a price from a neighbouring item.
+20) **TAPAS section with component list + single price** - A TAPAS section (or similar sharing board) may list many individual ingredients as bullet points, followed by a single price for the entire board. In that case, create ONE item named "TAPAS" (or the section name) with a description listing all components and the single board price.
+21) **Variant items (UDEN/MED, WITH/WITHOUT)** - Lines like "UDEN KYLLING" or "MED KYLLING" following a dish description are separate price variants of the same dish. Create separate items for each variant, each with its own price from the line immediately following it.
 
 EXAMPLE INPUT:
 "BRUNCH MENU
@@ -405,7 +427,26 @@ med Angus hakkebøf, ost...
 
 HANGOVER BURGER
 med 2 x Angus...
-239 DKK"
+239 DKK
+
+CONFITERET GRIS
+Confiteret nakkefilet af gris, tomat kompot, syltede løg
+
+TAPAS
+FRA ONSDAG TIL LØRDAG / min. 2 pers.
+Serrano skinke reserva
+Oliven
+Paté med cornichoner
+Aioli
+199,-
+
+NACHOS / SNACKS
+Sprøde majschips med salsa, guacamole, creme fraiche
+UDEN KYLLING
+125,-
+
+MED KYLLING
+149,-"
 
 EXPECTED OUTPUT:
 {
@@ -418,16 +459,48 @@ EXPECTED OUTPUT:
       "name": "BURGERE",
       "categoryDescription": "Vores signature burgere med pommes frites",
       "timeRange": null,
+      "availabilityDays": null,
       "items": [
         {"name": "FAUSTBURGER", "description": "med Angus hakkebøf, ost...", "price": "199", "currency": "DKK"},
-        {"name": "HANGOVER BURGER", "description": "med 2 x Angus...", "price": "239", "currency": "DKK"}
+        {"name": "HANGOVER BURGER", "description": "med 2 x Angus...", "price": "239", "currency": "DKK"},
+        {"name": "CONFITERET GRIS", "description": "Confiteret nakkefilet af gris, tomat kompot, syltede løg", "price": null, "currency": null}
+      ]
+    },
+    {
+      "name": "TAPAS",
+      "categoryDescription": "FRA ONSDAG TIL LØRDAG / min. 2 pers.",
+      "timeRange": null,
+      "availabilityDays": "onsdag-lørdag",
+      "items": [
+        {"name": "TAPAS", "description": "Serrano skinke reserva, Oliven, Paté med cornichoner, Aioli", "price": "199", "currency": "DKK"}
+      ]
+    },
+    {
+      "name": "NACHOS / SNACKS",
+      "categoryDescription": "Sprøde majschips med salsa, guacamole, creme fraiche",
+      "timeRange": null,
+      "availabilityDays": null,
+      "items": [
+        {"name": "NACHOS UDEN KYLLING", "description": "Sprøde majschips med salsa, guacamole, creme fraiche", "price": "125", "currency": "DKK"},
+        {"name": "NACHOS MED KYLLING", "description": "Sprøde majschips med salsa, guacamole, creme fraiche", "price": "149", "currency": "DKK"}
       ]
     }
   ]
 }
 
+LANGUAGE DETECTION (REQUIRED):
+You MUST detect and return the primary language of the menu content:
+- Analyze DESCRIPTIVE TEXT (descriptions, category names, instructions)
+- IGNORE international dish names ("Club Sandwich", "Burger", "Moules Mariniers")
+- Return ISO 639-1 code in "detected_language" field
+- Examples:
+  * "Serveret med pommes frites og aioli" → "da" (Danish words)
+  * "Served with french fries and aioli" → "en" (English words)
+  * "Dampede blåmuslinger" vs "Steamed mussels" → check descriptions!
+
 Return ONLY valid JSON in this schema:
 {
+  "detected_language": "da" | "en" | "de" | "fr" | "es",  ← REQUIRED FIELD
   "menuTitle": "string|null",
   "menuSubtitle": "string|null",
   "availabilityTime": "string|null",
@@ -437,6 +510,7 @@ Return ONLY valid JSON in this schema:
       "name": "string",
       "categoryDescription": "string|null",
       "timeRange": "string|null",
+      "availabilityDays": "string|null",
       "items": [
         {
           "name": "string",
@@ -450,7 +524,7 @@ Return ONLY valid JSON in this schema:
 }
 
 If no menu title, subtitle, availability time/days, or category description is found, set them to null.
-If no category-specific timeRange is found, set to null.
+If no category-specific timeRange or availabilityDays is found, set to null.
 If no currency is detected, attempt to infer from context (DKK for Denmark, EUR for Europe, etc.) or set to null.
 
 Content to analyze:
@@ -465,7 +539,7 @@ ${extractedText}`
     body: JSON.stringify({
       model: 'gpt-4o-mini',
       temperature: 0.0,
-      max_tokens: 8000,
+      max_tokens: 12000,
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -539,7 +613,13 @@ CRITICAL RULES:
 11) Capture ALL prices AND currency. Danish: 95,- | 95 kr | 95 DKK → price "95", currency "DKK"
 12) Multi-line items: Name → Description → Price = ONE item.
 13) Extras/Add-ons (e.g. "Ekstra X +20,-") are separate items.
-14) Kids menu: "BØRNEMENU" or similar = separate category.
+14) Kids menu: "BØRNEMENU", "børnemad", "kids menu", "children" = always a separate category. If it appears as a line item inside another section, still hoist it out as its own category.
+15) Day-restricted sections: If a category header is followed by text like "fra onsdag til lørdag", "kun weekender", "mandag-fredag", "hverdage" etc., capture that in the category's "availabilityDays" field. Example: "TAPAS / FRA ONSDAG TIL LØRDAG" → availabilityDays: "onsdag-lørdag".
+16) Fixed-price packages: Lines like "3 RETTERS MENU 395,-", "VINMENU 3 glas 150,-", "AD LIBITUM øl, vin og vand 2 timer 295,-" are menu packages. Create a category called "PAKKER" and capture each package as an item with its price.
+17) PRICE ALWAYS BELONGS TO THE ITEM ABOVE IT - A line containing ONLY a number with ",-", "kr" or "DKK" is ALWAYS the price of the immediately preceding item. Even if there is a blank line between description and price, the price still belongs to that item.
+18) Items without a visible price - If no price line follows before the next item name or category header, set price to null.
+19) TAPAS section with component list + single price - A TAPAS section may list many individual ingredients followed by a single price for the entire board. Create ONE item with a description listing all components and that single price.
+20) Variant items (UDEN/MED) - Lines like "UDEN KYLLING" or "MED KYLLING" following a dish description are separate price variants. Create separate items for each variant with the price from the line immediately following.
 
 Return ONLY valid JSON in this schema:
 {
@@ -552,6 +632,7 @@ Return ONLY valid JSON in this schema:
       "name": "string",
       "categoryDescription": "string|null",
       "timeRange": "string|null",
+      "availabilityDays": "string|null",
       "items": [
         { "name": "string", "description": "string|null", "price": "string|null", "currency": "string|null" }
       ]
@@ -573,7 +654,7 @@ If no categories can be found, return {"categories": []}.`
       body: JSON.stringify({
         model: 'gpt-4o-mini',
         temperature: 0,
-        max_tokens: 8000,
+        max_tokens: 12000,
         response_format: { type: 'json_object' },
         messages: [
           {
@@ -629,6 +710,92 @@ function normalizeLanguageCode(input: unknown): string {
   if (low === 'da' || low.startsWith('da-')) return 'da'
   if (low === 'en' || low === 'en-us' || low === 'en_us') return 'en-US'
   return trimmed
+}
+
+/**
+ * Fallback language detection based on URL patterns + keyword analysis
+ * Used when AI doesn't return detected_language field
+ */
+function detectLanguageFromText(structured: any, sourceUrl?: string): string {
+  // STRATEGY 1: Check URL path (strongest signal)
+  if (sourceUrl) {
+    if (sourceUrl.includes('/english-menu/') || sourceUrl.includes('/en/')) {
+      console.log(`🔍 Language detected from URL: English (${sourceUrl})`)
+      return 'en'
+    }
+    if (sourceUrl.includes('/da/') || sourceUrl.includes('/dansk/')) {
+      console.log(`🔍 Language detected from URL: Danish (${sourceUrl})`)
+      return 'da'
+    }
+  }
+  
+  // STRATEGY 2: Keyword analysis
+  // Collect text from descriptions and category names
+  const textSamples: string[] = []
+  
+  if (structured.menuTitle) textSamples.push(structured.menuTitle)
+  if (structured.menuSubtitle) textSamples.push(structured.menuSubtitle)
+  
+  if (structured.categories && Array.isArray(structured.categories)) {
+    structured.categories.forEach((cat: any) => {
+      if (cat.name) textSamples.push(cat.name)
+      if (cat.categoryDescription) textSamples.push(cat.categoryDescription)
+      if (cat.items && Array.isArray(cat.items)) {
+        cat.items.forEach((item: any) => {
+          if (item.description) textSamples.push(item.description)
+        })
+      }
+    })
+  }
+  
+  const combinedText = textSamples.join(' ').toLowerCase()
+  
+  // Check for cocktail menu (international names are normal, doesn't indicate English)
+  const isCocktailMenu = (structured.menuTitle || '').toLowerCase().includes('cocktail') ||
+                         (structured.categories || []).some((cat: any) => 
+                           (cat.name || '').toLowerCase().includes('cocktail'))
+  
+  // Danish patterns (focus on sentence structure, not single words)
+  const danishPatterns = [
+    'serveret med', 'serveres med', 'tilberedt med', ' og ', ' af ', ' på ',
+    'hjemmelavet', 'grillet ', 'stegt ', 'kogt ', 'dampet ', 'ovnbagt'
+  ]
+  
+  // English patterns (focus on sentence structure)
+  const englishPatterns = [
+    'served with', 'served in', ' with ', ' and ', 'fresh baked',
+    'fried egg', 'scrambled egg', 'boiled potatoes', 'grilled lemon',
+    'homemade ', 'topped with', 'garnished with'
+  ]
+  
+  let danishScore = 0
+  let englishScore = 0
+  
+  danishPatterns.forEach(pattern => {
+    if (combinedText.includes(pattern)) danishScore++
+  })
+  
+  englishPatterns.forEach(pattern => {
+    if (combinedText.includes(pattern)) englishScore++
+  })
+  
+  console.log(`🔍 Language pattern scores: Danish=${danishScore}, English=${englishScore}, isCocktailMenu=${isCocktailMenu}`)
+  
+  // If cocktail menu, default to Danish (international names don't mean English)
+  if (isCocktailMenu && englishScore <= danishScore + 2) {
+    console.log(`🔍 Detected cocktail menu with similar scores → defaulting to Danish`)
+    return 'da'
+  }
+  
+  // If English score is clearly higher, it's English
+  if (englishScore > danishScore + 3) {
+    console.log(`🔍 English patterns dominate → English`)
+    return 'en'
+  }
+  
+  // Default to Danish (Denmark-based business)
+  console.log(`🔍 No clear signal → defaulting to Danish`)
+  return 'da'
 }
 
 async function userHasBusinessAccess(
@@ -692,11 +859,20 @@ async function generateMenuSummary(
     const itemLines: string[] = []
     for (const cat of categories) {
       const catName: string = cat.name || 'Øvrigt'
-      const names: string[] = ((cat.items || cat.dishes || []) as any[])
-        .slice(0, 8)
-        .map((i: any) => i.name || i.title)
-        .filter(Boolean)
-      if (names.length > 0) itemLines.push(`${catName}: ${names.join(', ')}`)
+      const items = ((cat.items || cat.dishes || []) as any[]).slice(0, 15)
+      
+      for (const item of items) {
+        const name = item.name || item.title
+        const desc = item.description
+        if (name) {
+          // Include description if available to show actual dishes
+          if (desc && desc.trim().length > 0) {
+            itemLines.push(`${name}: ${desc}`)
+          } else {
+            itemLines.push(name)
+          }
+        }
+      }
     }
     if (itemLines.length === 0) return null
 
@@ -705,7 +881,200 @@ async function generateMenuSummary(
       languageCode === 'en' ? 'engelsk' :
       languageCode
 
-    const prompt = `Du er ekspert i restaurantmarkedsføring.\nMenu: "${menuTitle}" (${sourceUrl})\nKategorier og eksempel-retter:\n${itemLines.join('\n')}\n\nLav en overordnet opsummering i max 5 korte bullet points.\nKrav:\n- Maks. 5 bullets\n- Beskriv menuen overordnet – hvad tilbyder den, hvem henvender den sig til\n- Nævn gerne 1-3 karakteristiske retter som eksempel\n- Ingen individuelle priser\n- Professionel formulering på ${langWord}\n- Brug • som bullet-tegn\nReturner KUN bullet-listen, intet andet.`
+    const systemPrompt = languageCode === 'da'
+      ? `Du er gastronomisk konsulent med indsigt i kulinariske trends og menupositionering.
+
+OPGAVE: Beskriv menuens kulinariske karakter og identitet.
+
+Identificer:
+- Hvilke madkulturer eller stile kombineres?
+- Hvilke signatur-elementer eller unikke tilbud?
+- Traditionel eller moderne tilgang?
+
+Illustrer ALTID med konkrete retnavne i parentes (ikke ingredienser).
+
+GODT: "Dansk madkultur (smørrebrød, pariserbøf) møder café-retter (falafel, eggs benedict)"
+DÅRLIGT: "Moderne brunch med klassiske elementer (bacon, avocado)"
+
+REGLER:
+- Faktuel analyse - ingen subjektive ord
+- Konkrete retnavne (smørrebrød, eggs benedict) - IKKE ingredienser (bacon, avocado)
+- Returner 3-5 naturlige observationer som bullet-liste med •
+- Start DIREKTE med første bullet - ingen introduktion eller forklaring`
+      : `You are a gastronomic consultant with insight into culinary trends and menu positioning.
+
+TASK: Describe the menu's culinary character and identity.
+
+Identify:
+- Which food cultures or styles are combined?
+- What signature elements or unique offerings?
+- Traditional or modern approach?
+
+ALWAYS illustrate with concrete dish names in parentheses (not ingredients).
+
+GOOD: "Danish cuisine (smørrebrød, traditional mains) meets café dishes (falafel, eggs benedict)"
+BAD: "Modern brunch with classic elements (bacon, avocado)"
+
+RULES:
+- Factual analysis - no subjective words
+- Concrete dish names (smørrebrød, eggs benedict) - NOT ingredients (bacon, avocado)
+- Return 3-5 natural observations as bullet list with •
+- Start DIRECTLY with first bullet - no introduction or explanation`
+
+    const userPrompt = languageCode === 'da'
+      ? `Menu: "${menuTitle}"
+${itemLines.join('\n')}
+
+Beskriv kulinarisk karakter.`
+      : `Menu: "${menuTitle}"
+${itemLines.join('\n')}
+
+Describe culinary character.`
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 400,
+      }),
+    })
+    
+    if (!resp.ok) {
+      const errorText = await resp.text()
+      console.error('GPT-4o API error:', resp.status, errorText)
+      return null
+    }
+    
+    const data = await resp.json()
+    const text = data.choices?.[0]?.message?.content?.trim()
+    return text || null
+  } catch (err) {
+    console.error('Menu summary generation error:', err)
+    return null
+  }
+}
+
+// selectRepresentativeDishes — selects 1-3 representative dishes via GPT-4o
+// Called once at extraction time; result stored in menu_results_v2.representative_dishes
+// Enhancement 2: Pre-select signature/main dishes for voice profile generation
+// ---------------------------------------------------------------------------
+async function selectRepresentativeDishes(
+  structuredData: any,
+  languageCode: string,
+): Promise<any | null> {
+  try {
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
+    if (!openaiApiKey) return null
+
+    const categories: any[] =
+      structuredData?.categories || structuredData?.menuStructure || []
+    if (categories.length === 0) return null
+
+    // Build item list with category context
+    const itemsWithContext: Array<{name: string; description: string; category: string; price: string | null}> = []
+    for (const cat of categories) {
+      const catName: string = cat.name || 'Øvrigt'
+      const items = (cat.items || cat.dishes || []) as any[]
+      
+      for (const item of items) {
+        const name = item.name || item.title
+        const desc = item.description || ''
+        const price = item.price || null
+        if (name && name.trim().length > 0) {
+          itemsWithContext.push({
+            name: name.trim(),
+            description: desc.trim(),
+            category: catName,
+            price: price
+          })
+        }
+      }
+    }
+
+    if (itemsWithContext.length === 0) return null
+
+    const systemPrompt = languageCode === 'da'
+      ? `Du er menukonsulent med ekspertise i gastronomisk positionering.
+
+OPGAVE: Vælg 1-3 repræsentative retter fra denne menu.
+
+PRIORITET (vælg i denne rækkefølge):
+1. SIGNATUR-RETTER - Unikke, karakteristiske retter der definerer stedet
+2. HOVEDRETTER - Main courses (IKKE tilbehør, drikkevarer, eller sides)
+3. IDENTITETS-RETTER - Retter der viser menuens kulinariske karakter (fusion, klassisk, etc.)
+
+REGLER:
+- Vælg 1-3 retter (hellere færre gode end mange gennemsnitlige)
+- UNDGÅ: Drikkevarer, tilbehør (pommes frites), børnemenu, pakker/deals
+- Prioriter retter med gode beskrivelser
+- Søg variation i kategori hvis muligt
+
+RETURNER JSON:
+{
+  "dishes": [
+    {
+      "name": "Ret-navn (præcis som i menu)",
+      "description": "Original beskrivelse fra menu",
+      "category": "Kategori-navn",
+      "price": 199,
+      "currency": "DKK",
+      "selection_reason": "signature" | "main_course" | "identity"
+    }
+  ]
+}
+
+Hvis ingen egnede retter findes, returner {"dishes": []}.`
+      : `You are a menu consultant with expertise in gastronomic positioning.
+
+TASK: Select 1-3 representative dishes from this menu.
+
+PRIORITY (select in this order):
+1. SIGNATURE DISHES - Unique, characteristic dishes that define the place
+2. MAIN COURSES - Main dishes (NOT sides, drinks, or add-ons)
+3. IDENTITY DISHES - Dishes showing the menu's culinary character (fusion, classic, etc.)
+
+RULES:
+- Select 1-3 dishes (prefer fewer good ones over many average)
+- AVOID: Beverages, sides (french fries), kids menu, packages/deals
+- Prioritize dishes with good descriptions
+- Seek variety in category if possible
+
+RETURN JSON:
+{
+  "dishes": [
+    {
+      "name": "Dish name (exact as in menu)",
+      "description": "Original description from menu",
+      "category": "Category name",
+      "price": 199,
+      "currency": "DKK",
+      "selection_reason": "signature" | "main_course" | "identity"
+    }
+  ]
+}
+
+If no suitable dishes found, return {"dishes": []}.`
+
+    const itemsText = itemsWithContext.map((item, i) => {
+      const parts = [`${i + 1}. ${item.name}`]
+      if (item.description) parts.push(`   Beskrivelse: ${item.description}`)
+      parts.push(`   Kategori: ${item.category}`)
+      if (item.price) parts.push(`   Pris: ${item.price} DKK`)
+      return parts.join('\n')
+    }).join('\n\n')
+
+    const userPrompt = languageCode === 'da'
+      ? `Vælg 1-3 repræsentative retter:\n\n${itemsText}`
+      : `Select 1-3 representative dishes:\n\n${itemsText}`
 
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -715,15 +1084,30 @@ async function generateMenuSummary(
       },
       body: JSON.stringify({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
         temperature: 0.3,
-        max_tokens: 400,
+        max_tokens: 800,
+        response_format: { type: 'json_object' }
       }),
     })
-    if (!resp.ok) return null
+
+    if (!resp.ok) {
+      const errorText = await resp.text()
+      console.error('GPT-4o-mini API error (dish selection):', resp.status, errorText)
+      return null
+    }
+
     const data = await resp.json()
-    return data.choices?.[0]?.message?.content?.trim() || null
-  } catch {
+    const content = data.choices?.[0]?.message?.content
+    if (!content) return null
+
+    const parsed = JSON.parse(content)
+    return parsed.dishes && parsed.dishes.length > 0 ? parsed : null
+  } catch (err) {
+    console.error('Representative dish selection error:', err)
     return null
   }
 }
@@ -798,6 +1182,30 @@ serve(async (req: Request) => {
 
     const resultId = resultData.id as string
 
+    // Validate URL safety BEFORE fetching - protect against SSRF and internal networks
+    try {
+      validatePublicUrl(url)
+    } catch (urlError) {
+      console.error('❌ URL validation failed:', urlError)
+      await supabaseService
+        .from('menu_results_v2')
+        .update({
+          status: 'error',
+          error_message: `URL blocked: ${urlError instanceof Error ? urlError.message : 'Invalid URL'}`,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', resultId)
+      
+      return new Response(
+        JSON.stringify({
+          success: false,
+          resultId,
+          error: `URL blocked: ${urlError instanceof Error ? urlError.message : 'Invalid URL'}`,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Decision rule:
     // - If URL resolves to a PDF: leave queued for Cloud Run.
     // - If HTML contains strong "menu signal": parse directly in Edge and mark done.
@@ -812,6 +1220,30 @@ serve(async (req: Request) => {
           'Range': 'bytes=0-4095',
         },
       }, FETCH_TIMEOUT_MS)
+
+      // Validate HTTP status - reject auth-required or not-found pages
+      if (!probeResp.ok) {
+        const statusError = probeResp.status === 401 || probeResp.status === 403
+          ? 'Menu URL requires authentication - cannot access'
+          : probeResp.status === 404
+          ? 'Menu URL not found (404)'
+          : `Failed to fetch menu: HTTP ${probeResp.status}`
+        
+        console.error('❌ HTTP status error:', statusError)
+        await supabaseService
+          .from('menu_results_v2')
+          .update({
+            status: 'error',
+            error_message: statusError,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', resultId)
+        
+        return new Response(
+          JSON.stringify({ success: false, resultId, error: statusError }),
+          { status: probeResp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
       const probeCt = _stripContentType(probeResp.headers.get('content-type'))
       const probeBytes = await readAtMostBytes(probeResp, 4096)
@@ -888,32 +1320,53 @@ serve(async (req: Request) => {
             if (structured?.categories && Array.isArray(structured.categories)) {
               menuPeriods = parseMenuPeriods(structured.categories, businessHours, menuAvailabilityTime)
             }
-            const enrichedStructured = { ...structured, menuPeriods }
+            const menuStartTime = menuAvailabilityTime ? (menuPeriods[0]?.startTime ?? null) : null
+            const menuEndTime = menuAvailabilityTime ? (menuPeriods[menuPeriods.length - 1]?.endTime ?? null) : null
+            const enrichedStructured = { ...structured, menuPeriods, startTime: menuStartTime, endTime: menuEndTime }
 
-            // Infer service periods from menu title
+            // Infer service periods from menu title and normalize to canonical taxonomy
             const menuTitle = structured.menuTitle || structured.categories?.[0]?.name || ''
-            const menuTitleLower = menuTitle.toLowerCase()
-            let servicePeriods: string[]
-            let servicePeriodName: string
-            if (menuTitleLower.includes('brunch')) {
-              servicePeriods = ['brunch']; servicePeriodName = 'brunch'
-            } else if (menuTitleLower.includes('frokost') || menuTitleLower.includes('lunch')) {
-              servicePeriods = ['lunch']; servicePeriodName = 'lunch'
-            } else if (menuTitleLower.includes('aften') || menuTitleLower.includes('dinner') || menuTitleLower.includes('aftensmad')) {
-              servicePeriods = ['dinner']; servicePeriodName = 'dinner'
+            let rawPeriodName: string
+            
+            // Extract raw period name from menu title or time
+            if (menuTitle.toLowerCase().includes('brunch') || menuTitle.toLowerCase().includes('morgenmad')) {
+              rawPeriodName = 'brunch'
+            } else if (menuTitle.toLowerCase().includes('frokost') || menuTitle.toLowerCase().includes('lunch')) {
+              rawPeriodName = 'frokost'
+            } else if (menuTitle.toLowerCase().includes('aften') || menuTitle.toLowerCase().includes('dinner') || menuTitle.toLowerCase().includes('aftensmad')) {
+              rawPeriodName = 'aften'
+            } else if (menuTitle.toLowerCase().includes('bar') || menuTitle.toLowerCase().includes('cocktail') || menuTitle.toLowerCase().includes('drink')) {
+              rawPeriodName = 'bar'
             } else if (menuPeriods.length > 0) {
-              const startHour = parseInt(menuPeriods[0].startTime?.split(':')[0] || '12')
-              if (startHour < 11) { servicePeriods = ['brunch']; servicePeriodName = 'brunch' }
-              else if (startHour >= 17) { servicePeriods = ['dinner']; servicePeriodName = 'dinner' }
-              else { servicePeriods = ['lunch']; servicePeriodName = 'lunch' }
+              // Check if this is an all-day menu (00:00-23:59 or similar)
+              const firstPeriod = menuPeriods[0]
+              const isAllDay = (firstPeriod.startTime === '00:00' && firstPeriod.endTime === '23:59') ||
+                               firstPeriod.type === 'all_day' ||
+                               firstPeriod.type === 'other'
+              
+              if (isAllDay) {
+                rawPeriodName = 'all_day'
+              } else {
+                // Infer from time for specific service periods
+                const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
+                if (startHour < 11) rawPeriodName = 'brunch'
+                else if (startHour >= 17) rawPeriodName = 'dinner'
+                else rawPeriodName = 'lunch'
+              }
             } else {
-              servicePeriods = ['lunch', 'dinner']; servicePeriodName = 'lunch'
+              rawPeriodName = 'lunch'
             }
+            
+            // Normalize to canonical taxonomy (brunch, lunch, dinner, all_day)
+            const servicePeriodName = normalizeProgrammeName(rawPeriodName)
+            const servicePeriods = [servicePeriodName]
+            
+            console.log(`📅 Service period: "${rawPeriodName}" → normalized to "${servicePeriodName}"`)
 
             const isSignature =
-              menuTitleLower.includes('signatur') ||
-              menuTitleLower.includes('specialit') ||
-              menuTitleLower.includes('klassiker') ||
+              menuTitle.toLowerCase().includes('signatur') ||
+              menuTitle.toLowerCase().includes('specialit') ||
+              menuTitle.toLowerCase().includes('klassiker') ||
               structured.categories?.some((cat: any) =>
                 cat.name?.toLowerCase().includes('signatur') ||
                 cat.name?.toLowerCase().includes('klassiker') ||
@@ -922,7 +1375,16 @@ serve(async (req: Request) => {
 
             const establishmentType = classifyEstablishmentType(structured)
 
-            await supabaseService
+            // Extract detected language from AI response (Enhancement 1)
+            // Validate that AI actually detected language - if not, analyze text manually
+            let detectedLanguage = structured.detected_language
+            if (!detectedLanguage || detectedLanguage.trim() === '') {
+              console.warn(`⚠️ AI did not return detected_language, analyzing text manually...`)
+              detectedLanguage = detectLanguageFromText(structured, url)
+            }
+            console.log(`🌐 Language detected: ${detectedLanguage} (AI: ${structured.detected_language || 'not detected, used fallback'})`)
+
+            const { error: updateError } = await supabaseService
               .from('menu_results_v2')
               .update({
                 status: 'done',
@@ -934,12 +1396,19 @@ serve(async (req: Request) => {
                 service_periods: servicePeriods,
                 service_period_name: servicePeriodName,
                 is_signature: isSignature,
+                language_code: detectedLanguage, // ✨ NEW: AI-detected language
               })
               .eq('id', resultId)
+            
+            if (updateError) {
+              console.error('❌ Failed to update menu_results_v2 to done (PDF):', updateError)
+              throw new Error(`Failed to mark extraction as done: ${updateError.message}`)
+            }
+            console.log('✅ Menu extraction marked as done (PDF)')
 
             // Generate and store AI summary (non-blocking)
             try {
-              const aiSummary = await generateMenuSummary(enrichedStructured, url, languageCode)
+              const aiSummary = await generateMenuSummary(enrichedStructured, url, detectedLanguage)
               if (aiSummary) {
                 await supabaseService.from('menu_results_v2')
                   .update({ ai_summary: aiSummary }).eq('id', resultId)
@@ -947,6 +1416,20 @@ serve(async (req: Request) => {
               }
             } catch (summaryErr) {
               console.warn('⚠️ Menu summary skipped (PDF):', summaryErr)
+            }
+
+            // ✨ Enhancement 2: Select representative dishes for voice generation
+            try {
+              const representativeDishes = await selectRepresentativeDishes(enrichedStructured, detectedLanguage)
+              if (representativeDishes && representativeDishes.dishes?.length > 0) {
+                await supabaseService.from('menu_results_v2')
+                  .update({ representative_dishes: representativeDishes }).eq('id', resultId)
+                console.log(`✅ Representative dishes selected (PDF): ${representativeDishes.dishes.map((d: any) => d.name).join(', ')}`)
+              } else {
+                console.log('⚠️ No representative dishes selected (PDF)')
+              }
+            } catch (dishErr) {
+              console.warn('⚠️ Dish selection skipped (PDF):', dishErr)
             }
 
             if (establishmentType && businessId) {
@@ -1041,30 +1524,87 @@ serve(async (req: Request) => {
           },
         }, FETCH_TIMEOUT_MS)
 
+        // Validate HTML fetch succeeded
+        if (!htmlResp.ok) {
+          const statusError = htmlResp.status === 401 || htmlResp.status === 403
+            ? 'Menu URL requires authentication - cannot access'
+            : htmlResp.status === 404
+            ? 'Menu URL not found (404)'
+            : `Failed to fetch menu: HTTP ${htmlResp.status}`
+          
+          console.error('❌ HTML fetch failed:', statusError)
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'error',
+              error_message: statusError,
+              completed_at: new Date().toISOString(),
+            })
+            .eq('id', resultId)
+          
+          return new Response(
+            JSON.stringify({ success: false, resultId, error: statusError }),
+            { status: htmlResp.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
         const htmlCt = _stripContentType(htmlResp.headers.get('content-type'))
         if (htmlCt.includes('html')) {
           const htmlBytes = await readAtMostBytes(htmlResp, MAX_HTML_BYTES)
           const html = new TextDecoder('utf-8').decode(htmlBytes)
-          const rawText = htmlToText(html)
-          const llmText = cleanHtmlTextForLlm(rawText, MAX_EDGE_LLM_CHARS)
-
-          if (hasMenuSignal(llmText)) {
-            // Mark processing so Cloud Run won't claim it.
+          
+          // Detect login/authentication pages - prevent extracting password forms
+          if (looksLikeLoginPage(html, url)) {
+            console.error('❌ URL appears to be a login/admin page')
             await supabaseService
               .from('menu_results_v2')
               .update({
-                status: 'processing',
-                claimed_at: new Date().toISOString(),
-                attempts: 1,
-                extraction_method: 'edge_html',
+                status: 'error',
+                error_message: 'URL appears to be a login or admin page - not a public menu',
+                completed_at: new Date().toISOString(),
               })
               .eq('id', resultId)
+            
+            return new Response(
+              JSON.stringify({
+                success: false,
+                resultId,
+                error: 'URL appears to be a login or admin page - not a public menu',
+              }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          
+          const rawText = htmlToText(html)
+          const llmText = cleanHtmlTextForLlm(rawText, MAX_EDGE_LLM_CHARS)
 
-            try {
-              const structured = await parseMenuWithOpenAI(llmText, languageCode)
+          // ALWAYS try Edge parsing for HTML (removed signal check)
+          // GPT-4o-mini is cheap and fast - better to try and fail than pre-filter
+          console.log(`🔍 Attempting Edge extraction for HTML (${llmText.length} chars)`)
+          
+          // Mark processing so Cloud Run won't claim it.
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'processing',
+              claimed_at: new Date().toISOString(),
+              attempts: 1,
+              extraction_method: 'edge_html',
+            })
+            .eq('id', resultId)
 
-              // Fetch business opening hours to constrain menu periods
-              const { data: businessData } = await supabaseService
+          try {
+            const structured = await parseMenuWithOpenAI(llmText, languageCode)
+            
+            // Validate that we actually got menu data
+            if (!structured?.categories || structured.categories.length === 0) {
+              throw new Error('No menu categories extracted from HTML')
+            }
+            
+            console.log(`✅ Extracted ${structured.categories.length} categories from HTML`)
+
+            // Fetch business opening hours to constrain menu periods
+            const { data: businessData } = await supabaseService
                 .from('businesses')
                 .select('opening_hours')
                 .eq('id', businessId)
@@ -1097,9 +1637,9 @@ serve(async (req: Request) => {
 
               // Parse menu periods from extracted categories
               let menuPeriods = []
+              const menuAvailabilityTime = structured?.availabilityTime || null
               if (structured?.categories && Array.isArray(structured.categories)) {
                 // Use menu-level availabilityTime if present (e.g., "@ 17.30 – 21.30")
-                const menuAvailabilityTime = structured.availabilityTime || null
                 if (menuAvailabilityTime) {
                   console.log(`📋 Menu has availability time: ${menuAvailabilityTime}`)
                 }
@@ -1112,50 +1652,59 @@ serve(async (req: Request) => {
               // Add menuPeriods to structured data
               const enrichedStructured = {
                 ...structured,
-                menuPeriods
+                menuPeriods,
+                startTime: menuAvailabilityTime ? (menuPeriods[0]?.startTime ?? null) : null,
+                endTime: menuAvailabilityTime ? (menuPeriods[menuPeriods.length - 1]?.endTime ?? null) : null,
               }
 
-              // ✨ NEW: Determine service periods from menu title/structure
+              // ✨ NEW: Determine service periods from menu title/structure and normalize to canonical taxonomy
               const menuTitle = structured.menuTitle || structured.categories?.[0]?.name || ''
-              let servicePeriods: string[] = []
-              let servicePeriodName = 'lunch' // default
+              let rawPeriodName: string
               
-              // Map menu title to service period
-              const menuTitleLower = menuTitle.toLowerCase()
-              if (menuTitle === 'Brunch' || menuTitle === 'BRUNCH' || menuTitleLower.includes('brunch')) {
-                servicePeriods = ['brunch']
-                servicePeriodName = 'brunch'
-              } else if (menuTitle === 'FROKOST' || menuTitle === 'Frokost' || menuTitle === 'LUNCH' || menuTitleLower.includes('frokost') || menuTitleLower.includes('lunch')) {
-                servicePeriods = ['lunch']
-                servicePeriodName = 'lunch'
-              } else if (menuTitle === 'AFTEN' || menuTitle === 'Aften' || menuTitle === 'DINNER' || menuTitleLower.includes('aften') || menuTitleLower.includes('dinner') || menuTitleLower.includes('aftensmad')) {
-                servicePeriods = ['dinner']
-                servicePeriodName = 'dinner'
+              // Extract raw period name from menu title or time
+              if (menuTitle.toLowerCase().includes('brunch') || menuTitle.toLowerCase().includes('morgenmad')) {
+                rawPeriodName = 'brunch'
+              } else if (menuTitle.toLowerCase().includes('frokost') || menuTitle.toLowerCase().includes('lunch')) {
+                rawPeriodName = 'frokost'
+              } else if (menuTitle.toLowerCase().includes('aften') || menuTitle.toLowerCase().includes('dinner') || menuTitle.toLowerCase().includes('aftensmad')) {
+                rawPeriodName = 'aften'
+              } else if (menuTitle.toLowerCase().includes('bar') || menuTitle.toLowerCase().includes('cocktail') || menuTitle.toLowerCase().includes('drink')) {
+                rawPeriodName = 'bar'
               } else if (menuPeriods && menuPeriods.length > 0) {
-                // Use timing from parsed menu periods to infer service type
+                // Check if this is an all-day menu (00:00-23:59 or similar)
                 const firstPeriod = menuPeriods[0]
-                const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
-                if (startHour < 11) {
-                  servicePeriods = ['brunch']
-                  servicePeriodName = 'brunch'
-                } else if (startHour >= 17) {
-                  servicePeriods = ['dinner']
-                  servicePeriodName = 'dinner'
+                const isAllDay = (firstPeriod.startTime === '00:00' && firstPeriod.endTime === '23:59') ||
+                                 firstPeriod.type === 'all_day' ||
+                                 firstPeriod.type === 'other'
+                
+                if (isAllDay) {
+                  rawPeriodName = 'all_day'
                 } else {
-                  servicePeriods = ['lunch']
-                  servicePeriodName = 'lunch'
+                  // Use timing from parsed menu periods to infer service type
+                  const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
+                  if (startHour < 11) {
+                    rawPeriodName = 'brunch'
+                  } else if (startHour >= 17) {
+                    rawPeriodName = 'dinner'
+                  } else {
+                    rawPeriodName = 'lunch'
+                  }
                 }
               } else {
-                // Unknown - assume available for lunch and dinner
-                servicePeriods = ['lunch', 'dinner']
-                servicePeriodName = 'lunch'
+                rawPeriodName = 'lunch'
               }
+              
+              // Normalize to canonical taxonomy (brunch, lunch, dinner, all_day)
+              const servicePeriodName = normalizeProgrammeName(rawPeriodName)
+              const servicePeriods = [servicePeriodName]
+              
+              console.log(`📅 Service period (worker): "${rawPeriodName}" → normalized to "${servicePeriodName}"`)
 
               // Detect signature dishes (look for special menu titles or categories)
               const isSignature = 
-                menuTitleLower.includes('signatur') ||
-                menuTitleLower.includes('specialit') ||
-                menuTitleLower.includes('klassiker') ||
+                menuTitle.toLowerCase().includes('signatur') ||
+                menuTitle.toLowerCase().includes('specialit') ||
+                menuTitle.toLowerCase().includes('klassiker') ||
                 structured.categories?.some((cat: any) => 
                   cat.name?.toLowerCase().includes('signatur') ||
                   cat.name?.toLowerCase().includes('klassiker') ||
@@ -1165,10 +1714,19 @@ serve(async (req: Request) => {
               console.log(`🏷️ Tagged menu with service periods: ${servicePeriods.join(', ')} (primary: ${servicePeriodName})`, 
                 isSignature ? '⭐ SIGNATURE' : '')
 
+              // Extract detected language from AI response (Enhancement 1)
+              // Validate that AI actually detected language - if not, analyze text manually
+              let detectedLanguage = structured.detected_language
+              if (!detectedLanguage || detectedLanguage.trim() === '') {
+                console.warn(`⚠️ AI did not return detected_language, analyzing text manually...`)
+                detectedLanguage = detectLanguageFromText(structured, url)
+              }
+              console.log(`🌐 Language detected: ${detectedLanguage} (AI: ${structured.detected_language || 'not detected, used fallback'})`)
+
               // Classify establishment type based on menu structure
               const establishmentType = classifyEstablishmentType(structured)
               
-              await supabaseService
+              const { error: updateError } = await supabaseService
                 .from('menu_results_v2')
                 .update({
                   status: 'done',
@@ -1180,12 +1738,19 @@ serve(async (req: Request) => {
                   service_periods: servicePeriods, // ✨ NEW
                   service_period_name: servicePeriodName, // ✨ NEW
                   is_signature: isSignature, // ✨ NEW
+                  language_code: detectedLanguage, // ✨ NEW: AI-detected language
                 })
                 .eq('id', resultId)
+              
+              if (updateError) {
+                console.error('❌ Failed to update menu_results_v2 to done (HTML):', updateError)
+                throw new Error(`Failed to mark extraction as done: ${updateError.message}`)
+              }
+              console.log('✅ Menu extraction marked as done (HTML)')
 
               // Generate and store AI summary (non-blocking)
               try {
-                const aiSummary = await generateMenuSummary(enrichedStructured, url, languageCode)
+                const aiSummary = await generateMenuSummary(enrichedStructured, url, detectedLanguage)
                 if (aiSummary) {
                   await supabaseService.from('menu_results_v2')
                     .update({ ai_summary: aiSummary }).eq('id', resultId)
@@ -1193,6 +1758,20 @@ serve(async (req: Request) => {
                 }
               } catch (summaryErr) {
                 console.warn('⚠️ Menu summary skipped (HTML):', summaryErr)
+              }
+
+              // ✨ Enhancement 2: Select representative dishes for voice generation
+              try {
+                const representativeDishes = await selectRepresentativeDishes(enrichedStructured, detectedLanguage)
+                if (representativeDishes && representativeDishes.dishes?.length > 0) {
+                  await supabaseService.from('menu_results_v2')
+                    .update({ representative_dishes: representativeDishes }).eq('id', resultId)
+                  console.log(`✅ Representative dishes selected (HTML): ${representativeDishes.dishes.map((d: any) => d.name).join(', ')}`)
+                } else {
+                  console.log('⚠️ No representative dishes selected (HTML)')
+                }
+              } catch (dishErr) {
+                console.warn('⚠️ Dish selection skipped (HTML):', dishErr)
               }
 
               // Save establishment type to business_operations if classified
@@ -1226,17 +1805,46 @@ serve(async (req: Request) => {
                 { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
               )
             } catch (edgeErr) {
-              console.error('❌ Edge fast-path parse failed; falling back to Cloud Run:', edgeErr)
-              await supabaseService
-                .from('menu_results_v2')
-                .update({
-                  status: 'queued',
-                  claimed_at: null,
-                  extraction_method: 'cloudrun_fallback',
-                })
-                .eq('id', resultId)
+              console.error('❌ Edge HTML extraction failed:', edgeErr)
+              
+              // Check if it's truly unreadable or just no menu content
+              const errorMsg = (edgeErr as Error).message || 'Unknown error'
+              const isNoMenuFound = errorMsg.includes('No menu categories')
+              
+              if (isNoMenuFound) {
+                // Mark as error - no menu content found
+                await supabaseService
+                  .from('menu_results_v2')
+                  .update({
+                    status: 'error',
+                    error_message: 'No menu content found on this page',
+                    completed_at: new Date().toISOString(),
+                  })
+                  .eq('id', resultId)
+                
+                console.log('⚠️ No menu found - marked as error')
+                
+                return new Response(
+                  JSON.stringify({
+                    success: false,
+                    resultId,
+                    error: 'No menu content found on this page',
+                  }),
+                  { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                )
+              } else {
+                // Parsing error or API issue - fall back to Cloud Run as last resort
+                console.error('Edge parsing error; falling back to Cloud Run:', edgeErr)
+                await supabaseService
+                  .from('menu_results_v2')
+                  .update({
+                    status: 'queued',
+                    claimed_at: null,
+                    extraction_method: 'cloudrun_fallback',
+                  })
+                  .eq('id', resultId)
+              }
             }
-          }
         }
       }
     } catch (e) {

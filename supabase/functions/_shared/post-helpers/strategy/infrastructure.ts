@@ -155,7 +155,28 @@ export async function callGeminiWithRetry(
       const cleaned = rawText.replace(/```json|```/g, '').trim();
       let parsed: any;
       try {
-        parsed = JSON.parse(cleaned);
+        // First try direct parse
+        let jsonToParse = cleaned;
+        try {
+          parsed = JSON.parse(jsonToParse);
+        } catch (_directError) {
+          // Try sanitizing literal control characters inside JSON strings
+          // (Gemini sometimes outputs raw \n, \r, \t inside string values)
+          let inStr = false, esc = false, sanitized = '';
+          for (let ci = 0; ci < cleaned.length; ci++) {
+            const ch = cleaned[ci];
+            if (esc) { sanitized += ch; esc = false; continue; }
+            if (ch === '\\') { sanitized += ch; esc = true; continue; }
+            if (ch === '"') { inStr = !inStr; sanitized += ch; continue; }
+            if (inStr) {
+              if (ch === '\n') { sanitized += '\\n'; continue; }
+              if (ch === '\r') { sanitized += '\\r'; continue; }
+              if (ch === '\t') { sanitized += '\\t'; continue; }
+            }
+            sanitized += ch;
+          }
+          parsed = JSON.parse(sanitized);
+        }
       } catch (parseError) {
         retryReason = 'json_parse_error';
         console.error(`[${phase}] JSON parse error on attempt ${attempt}:`, parseError);

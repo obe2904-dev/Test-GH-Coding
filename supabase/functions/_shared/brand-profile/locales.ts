@@ -65,7 +65,7 @@ export const LOCALES: Record<string, LocaleConfig> = {
       cta_book: 'BOOK DIT BORD',
       cta_order: 'BESTIL NU',
       cta_menu: 'SE MENU',
-      location_waterfront: 'ved vandet',  // Generic Danish waterfront
+      location_waterfront: 'ved åen',  // Specific Danish waterfront - "vandet" only for open sea
       location_transit: 'ved stationen'
     },
     formalityLevel: 'informal',

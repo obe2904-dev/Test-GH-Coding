@@ -21,7 +21,7 @@ export const BRAND_PROFILE_SCHEMA = {
       properties: {
         value: {
           type: "string",
-          description: "ONE sentence: venue type + location + offering category + EXACTLY ONE behavioral hook (flow/duration/tempo). Pattern: '[Venue] [location] hvor [offerings] kan nydes [hook].' Example: 'Café ved åen i Aarhus hvor mad og oplevelser kan nydes i roligt tempo.' Hook must describe flow/tempo/duration — NOT a menu item, NOT location alone. BANNED: 'lækker', 'hyggelig', 'afslappet', 'autentisk', 'unik'. NOTE: this field is post-processed — focus your energy on other fields.",
+          description: "ONE sentence: HVORFOR vælger en gæst dette sted frem for nabocafén 100m væk? Svar på 'hvad gør dette sted ved dig', ikke 'hvad er dette sted'. Skal indeholde lokationsfrasen naturligt. For hybrid venues: antyd tidsbredden med ét udtryk ('fra morgenkaffe til natøl') — IKKE en liste over programmer ('serverer X om dagen og skifter til Y om aftenen'). FORBUDT i dette felt: 'serverer', 'skifter til', 'om dagen', 'om aftenen', 'lækker', 'hyggelig', 'afslappet', 'autentisk', 'unik'. NOTE: this field is post-processed — focus energy on behavioral hook accuracy.",
           maxLength: 500,
           pattern: ".*(ved åen|ved stationen|på gågaden|i centrum|i kvarteret|ved [A-ZÆØÅ][a-zæøå]+|i turistområdet).*"
         },
@@ -63,7 +63,7 @@ export const BRAND_PROFILE_SCHEMA = {
     },
     business_character: {
       type: "string",
-      description: "1–2 sentences of plain factual text describing what this business actually is. Cover: (1) all venue types or roles when a hybrid — list each e.g. 'café, restaurant og bar'; (2) defining physical features that create content opportunities e.g. 'med stor udendørs terrasse', 'med havudsigt', 'i en gammel fabrikshal'; (3) key temporal formats or transitions if relevant. Not marketing language. Must let an AI infer content priorities without any other context. Example 1: 'Café, restaurant og bar med udendørs siddepladser, der serverer kaffe og brunch om dagen og skifter til mad og drinks om aftenen.' Example 2: 'Klassisk dansk restaurant med fokus på smørrebrød til frokost og moderne aftenmenu.' Example 3: 'Specialty kaffebar med travl morgenstemning og rolig eftermiddagskarakter — primær take-away men med få indeplær en.'" ,
+      description: "1–2 sentences of plain factual text describing what this business actually is. Cover: (1) all venue types or roles when a hybrid — list each e.g. 'café, restaurant og bar'; (2) defining physical features that create content opportunities e.g. 'med udendørs servering', 'med havudsigt', 'i en gammel fabrikshal' (ONLY use 'terrasse' if the business explicitly calls it that); (3) key temporal formats or transitions if relevant. Not marketing language. Must let an AI infer content priorities without any other context. Example 1: 'Café, restaurant og bar med udendørs siddepladser. Brunch og frokost fra åbning, aftensmad og drinks fra middag og fremefter.' Example 2: 'Klassisk dansk restaurant med fokus på smørrebrød til frokost og moderne aftenmenu.' Example 3: 'Specialty kaffebar med travl morgenstemning og rolig eftermiddagskarakter — primær take-away men med få indepladser.'" ,
       maxLength: 350
     },
     tone_of_voice: {
@@ -97,23 +97,23 @@ export const BRAND_PROFILE_SCHEMA = {
         writing_rules: {
           type: "array",
           items: { type: "string", maxLength: 150 },
-          minItems: 3,
+          minItems: 2,
           maxItems: 8,
-          description: "3-8 actionable writing rules about STYLE ONLY — sentence rhythm, tone register, punctuation, du/vi/man usage, sentence length. FORBIDDEN: dish names, location markers, specific menu items (e.g. 'carpaccio', 'ved åen'). Rules must apply to ANY business of this type, not just this one. Keep between 3-8."
+          description: "2-8 actionable writing rules about STYLE ONLY — sentence rhythm, tone register, punctuation, du/vi/man usage, sentence length. FORBIDDEN: dish names, location markers, specific menu items (e.g. 'carpaccio', 'ved åen'). Rules must apply to ANY business of this type, not just this one. Keep between 3-8."
         },
         good_examples: {
           type: "array",
           items: { type: "string", maxLength: 150 },
-          minItems: 2,
+          minItems: 1,
           maxItems: 6,
-          description: "2-6 example phrases that DEMONSTRATE WRITING STYLE ONLY — rhythm, sentence length, and register. FORBIDDEN: dish names, location markers, specific menu items, prices. A reader should not be able to identify the business from these examples alone. Keep between 2-6."
+          description: "1-6 example phrases that DEMONSTRATE WRITING STYLE ONLY — rhythm, sentence length, and register. FORBIDDEN: dish names, location markers, specific menu items, prices. A reader should not be able to identify the business from these examples alone. Keep between 2-6."
         },
         avoid_examples: {
           type: "array",
           items: { type: "string", maxLength: 150 },
-          minItems: 2,
+          minItems: 1,
           maxItems: 6,
-          description: "2-6 example phrases to avoid with brief reason. Keep between 2-6."
+          description: "1-6 example phrases to avoid with brief reason. Keep between 1-6."
         },
         formality: {
           type: "string",
@@ -138,7 +138,7 @@ export const BRAND_PROFILE_SCHEMA = {
       properties: {
         value: {
           type: "string",
-          description: "MULTI-AUDIENCE behavioral format. Write 2-4 occasions using 'Når gæster...' phrasing, drawing from BOTH usage_occasions AND concurrent visitor types (category_scores ≥40 each earn one clause). ALLOWED: 'børn kan spise med', 'mellem møder', 'med god tid'. Score-gated: 'besøgende' only if tourist_strength=secondary/primary in data. ALWAYS BANNED: 'familier', 'par', 'venner', 'lokale', 'unge'. Pattern: 'Når gæster [behavior], når [situation], samt når [transition]'. Min 2, max 4 occasions.",
+          description: "MUST start with 'Når gæster'. Write 2-4 occasion clauses separated by newlines, each starting with 'Når gæster'. Base ONLY on usage_occasions and meal arc (brunch → frokost → middag → cocktails). BANNED words/phrases as subject: 'studerende', 'turister', 'unge', 'byboere', 'par', 'familier', 'Primær:', 'Sekundær:'. ONLY describe situations/times/behaviors. Example of VALID output: 'Når gæster vil starte weekenden med brunch ved åen.\\nNår frokostpausen skal holdes udenfor.\\nNår aftenen skal sluttes med cocktails og god stemning.' Each clause = 1 sentence, max 15 words, starts with 'Når gæster'. Min 2, max 4.",
           maxLength: 500
         },
         proof: {
@@ -156,7 +156,7 @@ export const BRAND_PROFILE_SCHEMA = {
       properties: {
         value: {
           type: "string",
-          description: "Bulleted list: 3 meal CATEGORY anchors (e.g. 'Brunch med klassiske morgenmadsretter', 'Frokost og smørrebrød', 'Middagsmenuer') + 2 experience/service anchors (e.g. 'Udendørs terrasse', 'Take away'). Use MEAL CATEGORIES — NOT specific dish names or menu item names from the menu. Each bullet should describe a CATEGORY of offering, not a specific item.",
+          description: "Bulleted list: 3 meal CATEGORY anchors (e.g. 'Brunch med klassiske morgenmadsretter', 'Frokost og smørrebrød', 'Middagsmenuer') + 2 experience/service anchors (e.g. 'Udendørs servering', 'Take away'). Use MEAL CATEGORIES — NOT specific dish names or menu item names from the menu. Each bullet should describe a CATEGORY of offering, not a specific item. ONLY use 'terrasse' if business explicitly calls it that.",
           maxLength: 800
         },
         proof: {
@@ -366,12 +366,54 @@ export const BRAND_PROFILE_SCHEMA = {
       required: ["primary_goal", "goal_blend", "footfall_signals", "brand_anchors", "loyalty_hooks", "content_category_weights"],
       additionalProperties: false
     },
+    posting_occasions: {
+      type: "array",
+      description: "4–8 posting occasions selected from the canonical occasion library. Each entry represents one recurring occasion type that is commercially relevant for this specific business. Phase 0 reads this list weekly and resolves it into concrete post slots with timing.",
+      minItems: 4,
+      maxItems: 8,
+      items: {
+        type: "object",
+        properties: {
+          occasion_id: {
+            type: "string",
+            description: "Exact occasion ID from the occasion library (e.g. 'saturday_strongest_post', 'friday_book_table')"
+          },
+          priority_weight: {
+            type: "number",
+            minimum: 1,
+            maximum: 5,
+            description: "How central is this occasion to THIS business? 5 = must always be in plan. 1 = nice-to-have."
+          },
+          default_slot_count: {
+            type: "number",
+            enum: [1, 2],
+            description: "How many post slots per week this occasion typically occupies for this business."
+          },
+          business_customizations: {
+            type: "array",
+            items: { type: "string", maxLength: 150 },
+            minItems: 0,
+            maxItems: 3,
+            description: "Short strings describing how this occasion is adapted for this specific business."
+          },
+          conditional_modifiers: {
+            type: "array",
+            items: { type: "string", maxLength: 150 },
+            minItems: 0,
+            maxItems: 2,
+            description: "Business-specific boost/dampen conditions (e.g. 'boost when December', 'dampen if Monday closed')."
+          }
+        },
+        required: ["occasion_id", "priority_weight", "default_slot_count", "business_customizations", "conditional_modifiers"],
+        additionalProperties: false
+      }
+    },
     recognizable_interior_identity: {
       type: "object",
       properties: {
         value: {
           type: "string",
-          description: "CONDITIONAL: Only populate if explicit visual evidence exists (interior photos, labeled images). Include: murals, wall art, iconic figures, distinctive interior elements. Leave EMPTY if no verified evidence.",
+          description: "CONDITIONAL: Only populate if explicit visual evidence exists (interior photos, labeled images). Write as a dry physical inventory of concretely visible elements: furniture types and materials, floor/wall surfaces, window count/size as structural facts, distinctive decor (murals, wall art, iconic fixtures). Write like a property surveyor — NOT like a copywriter. Do NOT describe atmosphere, mood, light quality, or sensory impressions (cozy, inviting, warm, airy, natural light fills). Leave EMPTY if no verified evidence.",
           maxLength: 600
         },
         proof: {
@@ -473,7 +515,8 @@ export const BRAND_PROFILE_SCHEMA = {
     "business_character", "voice_rationale",
     "tone_of_voice", "tone_model", "target_audience", "core_offerings",
     "content_focus", "content_pillars", "image_preferences", "things_to_avoid",
-    "voice_constraints", "cta_style", "communication_goal", "content_strategy", "recognizable_interior_identity",
+    "voice_constraints", "cta_style", "communication_goal", "content_strategy",
+    "recognizable_interior_identity",
     "social_style", "voice_examples", "internal_notes", "clarifications_needed"
   ],
   additionalProperties: false

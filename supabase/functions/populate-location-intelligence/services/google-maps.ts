@@ -118,6 +118,65 @@ export class GoogleMapsService {
   }
 
   /**
+   * Find hospitality venues (restaurants, cafes, bars) within a tight radius.
+   * Uses a dedicated Places API call with only hospitality types so all 20
+   * result slots are reserved for these venues — not shared with museums, transit, etc.
+   */
+  async findHospitalityVenues(latitude: number, longitude: number, radius: number = 300): Promise<NearbyPlace[]> {
+    const url = `https://places.googleapis.com/v1/places:searchNearby`;
+
+    const requestBody = {
+      includedTypes: ['restaurant', 'cafe', 'bar', 'night_club'],
+      maxResultCount: 20,
+      locationRestriction: {
+        circle: {
+          center: { latitude, longitude },
+          radius,
+        },
+      },
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': this.apiKey,
+          'X-Goog-FieldMask': 'places.displayName,places.types,places.location,places.rating,places.userRatingCount,places.id',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`⚠️ findHospitalityVenues failed (${response.status}): ${errorText}`);
+        return [];
+      }
+
+      const data = await response.json();
+      const places: NearbyPlace[] = (data.places || []).map((place: any) => {
+        const placeLocation = place.location;
+        const distance = this.calculateDistance(latitude, longitude, placeLocation.latitude, placeLocation.longitude);
+        return {
+          name: place.displayName?.text || 'Unknown',
+          type: place.types?.[0] || 'restaurant',
+          distance_meters: Math.round(distance),
+          walking_minutes: Math.round(distance / 80),
+          rating: place.rating || undefined,
+          user_ratings_total: place.userRatingCount || undefined,
+          place_id: place.id || undefined,
+        };
+      });
+
+      console.log(`🍽️ findHospitalityVenues: ${places.length} venues within ${radius}m`);
+      return places.sort((a, b) => a.distance_meters - b.distance_meters);
+    } catch (error) {
+      console.warn('⚠️ findHospitalityVenues error:', error);
+      return [];
+    }
+  }
+
+  /**
    * Places API (New) - More efficient single request
    */
   private async findNearbyPlacesNew(latitude: number, longitude: number, radius: number): Promise<NearbyPlace[]> {

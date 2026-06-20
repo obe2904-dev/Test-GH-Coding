@@ -10,6 +10,7 @@
 
 import type { StrategicBrief, Platform } from '../../types/strategy-types.ts';
 import { callGeminiWithRetry } from '../infrastructure.ts';
+import { BusinessRulesEngine, type WeekContext, type DayAllocationRule } from '../../business-rules-engine.ts';
 
 export async function generateContentPlan2a(
   strategicBrief: StrategicBrief,
@@ -19,6 +20,8 @@ export async function generateContentPlan2a(
   contentCategoryWeights?: Record<string, number>,
   previousFlexibleDows?: number[],      // DOWs used by Slot D in last 2 weeks (Change B)
   events?: Array<{ name?: string; date: string; date_end?: string | null; days_away: number; type: string; commercial_weight?: number | null }>, // for event-pin (Change C)
+  categoryOverrides?: Array<{ content_type: string; type_rationale: string }>, // Phase C: analytics type only (not template routing)
+  revenueDrivers?: any, // Revenue drivers from business_brand_profile
 ): Promise<Array<{ id: number; type: string; angle_focus: string; suggested_day: string; platforms: Platform[]; goal_mode?: string; content_category?: string; slot_id?: string }>> {
 
   const t0 = performance.now();
@@ -35,9 +38,19 @@ export async function generateContentPlan2a(
   const maxMenuPosts = Math.max(1, Math.min(rawMenuMax, targetPostCount - 1));
   const minExperiencePosts = targetPostCount - maxMenuPosts;
 
+  // Extract strategic narrative for intelligent day clustering
+  const weekSummary = strategicBrief.week_summary || '';
+  const competitiveAdvantage = strategicBrief.competitive_advantage || '';
+  
+  // Build strategic context for AI day selection
+  const strategicContext = weekSummary 
+    ? `\n\nSTRATEGISK KONTEKST:\n"${weekSummary}"\n${competitiveAdvantage ? `\nKoncurrencefordel: "${competitiveAdvantage}"\n` : ''}\n⚠️ KRITISK: Vælg dage der understøtter denne strategi. Hvis strategien fokuserer på weekend, cluster posts torsdag-søndag. Hvis strategien handler om hverdage, brug mandag-fredag. Skab et narrativ-flow med posts der bygger på hinanden.`
+    : '';
+
   const prompt = `Du er marketing-chef. Fordel ${targetPostCount} posts over ugen.
 
 FOKUS-OMRÅDER: ${anglesSummary}
+${strategicContext}
 
 TILGÆNGELIGE DAGE: ${availableDays.join(', ')}
 
@@ -50,14 +63,13 @@ INDHOLDSTYPER:
 - "seasonal": Vis sæson-stemning uden specifik ret
 
 REGLER:
-1. Præcis ${targetPostCount} posts
-2. Max ${maxMenuPosts} menu_item, resten atmosphere/behind_scenes/seasonal
-3. Fordel posts jævnt over dagene (max 1 per dag)
-4. Fordel angle_focus efter vægtning (højere vægt = flere posts)
-5. Brug PRÆCIS de fokus-navne der er givet ovenfor
-6. KRITISK: Ingen to posts af SAMME type (fx atmosphere) må dele angle_focus — hvert par (type + angle_focus) skal være unikt i arrayet
+• Præcis ${targetPostCount} posts, max ${maxMenuPosts} menu_item
+• 1 post/dag, fordel efter vægtning
+• Brug EKSAKTE fokus-navne
+• ⚠️ Unikt (type + angle_focus) for hver post
+• Vælg suggested_day baseret på strategisk timing (byg narrativ-momentum mod hovedfokus)
 
-Svar KUN med JSON-array:
+Svar KUN med JSON:
 [
   { "id": 1, "type": "menu_item", "angle_focus": "eksakt_fokus_navn", "suggested_day": "2026-02-17", "platforms": ["facebook", "instagram"] },
   { "id": 2, "type": "atmosphere", "angle_focus": "eksakt_fokus_navn", "suggested_day": "2026-02-18", "platforms": ["facebook", "instagram"] }
@@ -81,7 +93,68 @@ Svar KUN med JSON-array:
   // timing_window for each post based on goal_blend weights. We use those here
   // instead of a hardcoded SLOT_ORDER, so the slot distribution really reflects
   // the business's Post Strategi.
-  const phase1Slots = strategicBrief.angles.slice(0, targetPostCount);
+  //
+  // CRITICAL: If Phase 1 provides fewer slots than targetPostCount, we need to
+  // expand the slots to match. This happens when the strategic brief has limited
+  // angles but we need more posts for better week coverage.
+  let phase1Slots = strategicBrief.angles.slice(0, targetPostCount);
+  
+  if (phase1Slots.length < targetPostCount) {
+    console.log(`[Phase 2a] Expanding ${phase1Slots.length} Phase 1 slots to ${targetPostCount} total slots`);
+    
+    // Replicate slots cyclically, but mark them as flexible ("any" timing)
+    // so they can be assigned to any available day. Give them unique focus values
+    // to prevent Gemini's angle_focus from matching multiple expanded slots.
+    const expandedSlots = [];
+    for (let i = 0; i < targetPostCount; i++) {
+      const baseSlot = phase1Slots[i % phase1Slots.length];
+      if (i < phase1Slots.length) {
+        // Original slots keep their timing windows
+        expandedSlots.push(baseSlot);
+      } else {
+        // Expanded slots become flexible (any timing) with unique focus to prevent duplicate matching
+        expandedSlots.push({
+          ...baseSlot,
+          focus: `__expanded_slot_${i}__`,  // Unique focus that won't match Gemini's output
+          timing_window: 'any',
+          slot_id: `${baseSlot.slot_id}_exp${i}`
+        });
+      }
+    }
+    phase1Slots = expandedSlots;
+  }
+
+  // ── BUSINESS RULES ENGINE: Revenue-driven day allocation ──
+  // If brand profile has revenue_drivers, generate allocation rules from business logic
+  // instead of using pure calendar templates. Revenue driver posts get PRIORITY assignment
+  // before calendar-first spread logic.
+  let businessRules: DayAllocationRule[] = [];
+  
+  if (revenueDrivers) {
+    try {
+      const weekContext: WeekContext = {
+        week_start_date: availableDays[0],
+        week_end_date: availableDays[availableDays.length - 1],
+        week_type: events && events.length > 0 ? 'event' : 'normal',
+        events: events?.map(e => ({
+          name: e.name || e.type,
+          date: e.date.split('T')[0],
+          category: e.type
+        })) || [],
+        post_count: targetPostCount
+      };
+      
+      const rulesEngine = new BusinessRulesEngine(revenueDrivers);
+      businessRules = rulesEngine.generateWeeklyAllocationRules(weekContext);
+      
+      console.log(`[Phase 2a] Business Rules Engine: Generated ${businessRules.length} allocation rules from revenue_drivers`);
+      businessRules.forEach(rule => {
+        console.log(`  - ${rule.business_moment}: priority ${rule.priority}, days ${rule.post_days.join(', ')}`);
+      });
+    } catch (err) {
+      console.warn('[Phase 2a] Business Rules Engine failed, falling back to calendar logic:', err);
+    }
+  }
 
   // ── Deterministically assign suggested_day from timing_window ──
   //
@@ -104,18 +177,32 @@ Svar KUN med JSON-array:
   };
 
   // Returns DOW preference list for a timing_window + goal_mode pair.
-  // Fixed windows (Mon/Wed/Thu) keep their canonical DOW preference.
-  // 'any' windows use the goal_mode day guardrail.
+  // Returns DOW preference list for a timing_window + goal_mode pair.
+  // Parses ALL named days in the window string so "Tue-Wed 11:00" correctly
+  // returns [2, 3] rather than stopping at the first match.
+  // 'any' windows fall back to the goal_mode day guardrail.
+  const DAY_NAMES: Array<[RegExp, number]> = [
+    [/\bMon\b/, 1],
+    [/\bTue\b/, 2],
+    [/\bWed\b/, 3],
+    [/\bThu\b/, 4],
+    [/\bFri\b/, 5],
+    [/\bSat\b/, 6],
+    [/\bSun\b/, 0],
+  ];
   const preferredDowsForWindow = (w: string, goalMode?: string): number[] => {
-    if (/\bMon\b/.test(w))  return [1];
-    if (/\bTue\b/.test(w))  return [2];
-    if (/\bWed\b/.test(w))  return [3, 4];
-    if (/\bThu\b/.test(w))  return [4, 5];
-    // Fri-Sat window: prefer Sat first — Saturday has higher commercial footfall for restaurants
-    if (/\bFri\b/.test(w) && /\bSat\b/.test(w))  return [6, 5];
-    if (/\bFri\b/.test(w))  return [5, 6];
-    if (/\bSat\b/.test(w))  return [6, 0];
-    // 'any' — use goal_mode day guardrail
+    if (!w || w === 'any') {
+      if (goalMode && goalModePreferredDows[goalMode]) return goalModePreferredDows[goalMode];
+      return [1, 2, 3, 4, 5, 6, 0];
+    }
+    // Collect all DOWs mentioned in the window string (preserves declaration order = priority)
+    const matched = DAY_NAMES.filter(([re]) => re.test(w)).map(([, dow]) => dow);
+    if (matched.length > 0) {
+      // Special case: Fri-Sat window prefers Sat first (higher commercial footfall)
+      if (matched.includes(5) && matched.includes(6)) return [6, 5];
+      return matched;
+    }
+    // No named day found → treat as 'any'
     if (goalMode && goalModePreferredDows[goalMode]) return goalModePreferredDows[goalMode];
     return [1, 2, 3, 4, 5, 6, 0];
   };
@@ -200,10 +287,90 @@ Svar KUN med JSON-array:
   }));
   slotsWithIndex.sort((a, b) => a.sortKey - b.sortKey);
 
-  // Assign days greedily in calendar order
+  // ── REVENUE DRIVER PRE-ASSIGNMENT ──
+  // Before calendar greedy allocation, pre-assign days for revenue driver rules.
+  // These get PRIORITY over calendar-first logic to ensure business moments are covered.
   const usedDays = new Set<string>();
   const dayByOriginalIndex: Record<number, string> = {};
+  const revenueDriverSlotIndices = new Set<number>(); // Track which slots were revenue-assigned
+  
+  if (businessRules.length > 0) {
+    const DAY_NAME_TO_DOW: Record<string, number> = {
+      'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3,
+      'Thursday': 4, 'Friday': 5, 'Saturday': 6
+    };
+    
+    console.log(`[Phase 2a] Starting revenue driver assignment:`, {
+      total_rules: businessRules.length,
+      total_slots: slotsWithIndex.length,
+      available_days_count: availableDays.length,
+      available_days: availableDays.map(d => `${d} (${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][getDayOfWeek(d)]})`).join(', ')
+    });
+    
+    // Sort business rules by priority (lowest number = highest priority)
+    const sortedRules = [...businessRules].sort((a, b) => a.priority - b.priority);
+    console.log(`[Phase 2a] Processing ${sortedRules.length} rules in priority order`);
+    
+    // For each rule, find ANY available slot and assign its recommended day
+    // (Not just drive_footfall - preferred_day_pattern covers all revenue moments)
+    for (const rule of sortedRules) {
+      if (rule.priority >= 10) continue; // Skip flexible slots (priority 10+)
+      
+      console.log(`[Phase 2a] Processing rule ${rule.rule_id}, priority ${rule.priority}, days: ${rule.post_days.join(', ')}`);
+      
+      // Find any unused slot (ANY goal_mode works)
+      const slotMatch = slotsWithIndex.find(({ s, i }) => {
+        return !revenueDriverSlotIndices.has(i); // Just check not already assigned
+      });
+      
+      if (!slotMatch) {
+        console.log(`[Phase 2a] ❌ No available slot for rule ${rule.rule_id} - ${businessRules.length} rules, ${revenueDriverSlotIndices.size} assigned, ${slotsWithIndex.length} total slots`);
+        continue; // No available slots
+      }
+      
+      console.log(`[Phase 2a]   Found available slot ${slotMatch.i} for rule ${rule.rule_id}`);
+      
+      // Find best day from rule's recommended days that's available
+      let assignedDay: string | undefined;
+      for (const dayName of rule.post_days) {
+        const dow = DAY_NAME_TO_DOW[dayName];
+        if (dow === undefined) {
+          console.log(`[Phase 2a]   ⚠️ Unknown day name: ${dayName}`);
+          continue;
+        }
+        
+        console.log(`[Phase 2a]   Looking for ${dayName} (dow=${dow}) in availableDays`);
+        const candidate = availableDays.find(d => 
+          !usedDays.has(d) && getDayOfWeek(d) === dow
+        );
+        if (candidate) {
+          assignedDay = candidate;
+          console.log(`[Phase 2a]   ✓ Found candidate: ${candidate}`);
+          break;
+        } else {
+          const matchingDows = availableDays.filter(d => getDayOfWeek(d) === dow);
+          const usedMatchingDows = matchingDows.filter(d => usedDays.has(d));
+          console.log(`[Phase 2a]   ✗ No candidate for ${dayName}: matching days=${matchingDows.length}, already used=${usedMatchingDows.length}`);
+        }
+      }
+      
+      if (assignedDay) {
+        usedDays.add(assignedDay);
+        dayByOriginalIndex[slotMatch.i] = assignedDay;
+        revenueDriverSlotIndices.add(slotMatch.i);
+        console.log(`[Phase 2a] ✅ Preferred day pattern: ${rule.business_moment} → ${assignedDay} (slot ${slotMatch.i}, priority ${rule.priority})`);
+      } else {
+        console.log(`[Phase 2a] ❌ No available day found for rule ${rule.rule_id} (checked: ${rule.post_days.join(', ')})`);
+      }
+    }
+    console.log(`[Phase 2a] Revenue driver assignment complete: ${revenueDriverSlotIndices.size}/${businessRules.length} rules applied to ${slotsWithIndex.length} slots`);
+    console.log(`[Phase 2a] Used days: ${Array.from(usedDays).sort().join(', ')}`);
+  }
+  // ── Calendar greedy allocation for remaining slots ──
+  // Revenue driver slots already assigned above; skip them here.
   for (const { s, i } of slotsWithIndex) {
+    if (dayByOriginalIndex[i]) continue; // Already assigned by revenue driver logic
+    
     const timingWindow = (s as any)?.timing_window ?? 'any';
     const goalMode   = (s as any)?.goal_mode ?? 'retain_loyalty';
     const isAnySlot  = timingWindow === 'any';
@@ -261,9 +428,10 @@ Svar KUN med JSON-array:
   }
 
   // ── Consecutive-days guard (max 2 days in a row) ─────────────────────────
-  // Walk sorted assignment list; if a run of ≥3 consecutive calendar days is found
-  // AND there is still an unused available day AND one of the ≥3rd slots has
-  // timing_window='any' (flexible), move it to the best spread-maximising unused day.
+  // Walk sorted assignment list; if a run of ≥3 consecutive calendar days is found,
+  // try to move the most flexible slot to break the run.
+  // Priority: any-window slots first, then fixed-window slots that have alternative
+  // days available within the same window (e.g. Thu-Fri on Thu → move to Fri).
   // Repeats up to 5 times until no run of ≥3 remains or no move is possible.
   for (let iter = 0; iter < 5; iter++) {
     const sorted = Object.entries(dayByOriginalIndex)
@@ -283,19 +451,49 @@ Svar KUN med JSON-array:
     }
     if (runStartI === -1) break; // no ≥3 run, done
 
-    const unused = availableDays.filter(d => !usedDays.has(d));
-    if (unused.length === 0) break;
+    // Early exit: if every day is already used, nothing can move
+    if (availableDays.every(d => usedDays.has(d))) break;
 
-    // Try to move the 3rd+ slot in the run (most flexible first = timing_window='any')
+    // Try to break the run. Priority order:
+    // 1. any-window slots (fully flexible — can go anywhere)
+    // 2. fixed-window slots with >1 allowed DOW (can shift within window, e.g. Thu→Fri)
     let moved = false;
-    for (let k = runStartI + 2; k <= runEndI && !moved; k++) {
+
+    // Build candidate moves: for each slot in the run from position 3 onwards,
+    // determine which days are valid for it and not yet used.
+    const candidateMoves: Array<{ k: number; idx: number; validDays: string[] }> = [];
+    for (let k = runStartI + 2; k <= runEndI; k++) {
       const { idx } = sorted[k];
       const slotTw = (phase1Slots[idx] as any)?.timing_window ?? 'any';
-      if (slotTw !== 'any') continue;
+      const gm = (phase1Slots[idx] as any)?.goal_mode ?? 'retain_loyalty';
+      const allowedDows = new Set(preferredDowsForWindow(slotTw, gm));
 
-      const gm = phase1Slots[idx]?.goal_mode ?? 'retain_loyalty';
-      // Find an unused day that does NOT create a new ≥3 consecutive run
-      const candidateDay = unused.find(d => {
+      // Candidates: available days within the slot's window, not already used by another slot
+      const isAny = slotTw === 'any';
+      const currentDay = sorted[k].date;
+      const validDays = availableDays.filter(d => {
+        if (d === currentDay) return false; // same day — no change
+        if (usedDays.has(d)) return false;  // taken by another slot
+        if (!isAny && !allowedDows.has(getDayOfWeek(d))) return false; // outside window
+        return true;
+      });
+
+      if (validDays.length > 0) candidateMoves.push({ k, idx, validDays });
+    }
+
+    // Sort: prefer any-window slots first, then multi-day fixed windows
+    candidateMoves.sort((a, b) => {
+      const twA = (phase1Slots[a.idx] as any)?.timing_window ?? 'any';
+      const twB = (phase1Slots[b.idx] as any)?.timing_window ?? 'any';
+      const isAnyA = twA === 'any' ? 0 : 1;
+      const isAnyB = twB === 'any' ? 0 : 1;
+      if (isAnyA !== isAnyB) return isAnyA - isAnyB;
+      return b.validDays.length - a.validDays.length; // more options = more flexibility
+    });
+
+    for (const { k, validDays } of candidateMoves) {
+      // Pick the valid day that breaks the consecutive run without creating a new one
+      const candidateDay = validDays.find(d => {
         const updatedDates = sorted
           .filter((_, si) => si !== k)
           .map(s => s.date)
@@ -311,11 +509,14 @@ Svar KUN med JSON-array:
       });
 
       if (candidateDay) {
+        const { idx } = candidateMoves.find(m => m.k === k)!;
+        const slotTw = (phase1Slots[idx] as any)?.timing_window ?? 'any';
         usedDays.delete(sorted[k].date);
         usedDays.add(candidateDay);
         dayByOriginalIndex[idx] = candidateDay;
         moved = true;
-        console.log(`[Phase 2a] Consecutive guard: moved slot ${idx} from ${sorted[k].date} → ${candidateDay} (broke ≥3-day run)`);
+        console.log(`[Phase 2a] Consecutive guard: moved slot ${idx} (${slotTw}) from ${sorted[k].date} → ${candidateDay} (broke ≥3-day run)`);
+        break;
       }
     }
     if (!moved) break; // can't improve further
@@ -339,16 +540,125 @@ Svar KUN med JSON-array:
     usedPhase1Indices.add(slotIdx);
 
     const phase1Slot = phase1Slots[slotIdx];
-    const assignedDay = dayByOriginalIndex[slotIdx] ?? availableDays[planIdx] ?? availableDays[0];
+    const slotPreferredDay = dayByOriginalIndex[slotIdx] ?? availableDays[planIdx] ?? availableDays[0];
+    
+    // STRATEGY-AWARE DAY SELECTION:
+    // For footfall slots (A/B): trust AI's strategic day choice — it may cluster
+    // Thu-Fri for conversion, which is intentional.
+    // For brand/loyalty slots (C/D): enforce early-week placement regardless of
+    // what the AI picks. The AI tends to cluster everything on Thu-Fri because
+    // the angle names ("torsdag-fredag") bleed into its day choice.
+    const aiDay = p.suggested_day;
+    const isAiDayValid = aiDay && availableDays.includes(aiDay);
+    const slotGoalMode = phase1Slot?.goal_mode ?? 'drive_footfall';
+
+    // Day-of-week ranges that count as "late week" (Thu=4, Fri=5, Sat=6, Sun=0)
+    const LATE_WEEK_DOWS = new Set([0, 4, 5, 6]);
+    const aiDOW = aiDay ? new Date(aiDay + 'T00:00:00').getDay() : -1;
+    const aiIsLateWeek = LATE_WEEK_DOWS.has(aiDOW);
+
+    let finalDay: string;
+    const slotTimingWindow = (phase1Slot as any)?.timing_window ?? 'any';
+    const slotAllowedDows = slotTimingWindow !== 'any'
+      ? new Set(preferredDowsForWindow(slotTimingWindow, slotGoalMode))
+      : null; // null = no restriction
+
+    if (!isAiDayValid) {
+      // AI gave invalid day → use slot preference
+      finalDay = slotPreferredDay;
+    } else if (slotGoalMode === 'build_brand' && aiIsLateWeek) {
+      // Brand slot must be early week (Mon-Wed) — override AI Thu-Sun choice
+      finalDay = slotPreferredDay;
+      console.log(`[Phase 2a] Day-spread override: "${p.angle_focus}" build_brand AI chose ${aiDay} (late week) → enforcing slot preference ${slotPreferredDay}`);
+    } else if (slotGoalMode === 'retain_loyalty' && LATE_WEEK_DOWS.has(aiDOW) && aiDOW !== 4) {
+      // Loyalty slot allows Thu but not Fri/Sat/Sun
+      finalDay = slotPreferredDay;
+      console.log(`[Phase 2a] Day-spread override: "${p.angle_focus}" retain_loyalty AI chose ${aiDay} (Fri/Sat/Sun) → enforcing slot preference ${slotPreferredDay}`);
+    } else if (slotAllowedDows && !slotAllowedDows.has(aiDOW)) {
+      // AI's day falls outside Phase 1's timing window for this slot — enforce slot preference.
+      // e.g. slot B is "Tue-Wed" but AI chose Thu → use Tue or Wed.
+      finalDay = slotPreferredDay;
+      console.log(`[Phase 2a] Day-spread override: "${p.angle_focus}" (${slotTimingWindow}) AI chose ${aiDay} (DOW ${aiDOW} outside window) → enforcing slot preference ${slotPreferredDay}`);
+    } else {
+      finalDay = aiDay;
+      if (aiDay !== slotPreferredDay) {
+        console.log(`[Phase 2a] AI chose ${aiDay} for "${p.angle_focus}" (slot preference was ${slotPreferredDay}) - trusting strategic clustering`);
+      }
+    }
+    
+    // Phase C provides analytics content_type (PRODUCT/EXPERIENCE/OCCASION/RETENTION).
+    // It must NEVER override content_category — that controls Phase 2b template routing
+    // and is correctly set by Phase 1's slot assignment + Phase 2a's type mapping below.
+    const phaseCOverride = categoryOverrides && categoryOverrides[planIdx];
+
+    // Derive content_category from Phase 2a's post type (atmosphere → craving_visual, etc.)
+    // This is the template router for Phase 2b. Phase C must not touch this.
+    const PHASE2A_TYPE_TO_CATEGORY: Record<string, string> = {
+      menu_item:      'product_menu',
+      atmosphere:     'craving_visual',
+      behind_scenes:  'behind_scenes',
+      seasonal:       'craving_visual',
+      occasion:       'craving_visual',
+    };
+    const derivedCategory = PHASE2A_TYPE_TO_CATEGORY[p.type] ?? phase1Slot?.content_category ?? 'product_menu';
+
+    if (phaseCOverride) {
+      console.log(`[Phase 2a] Post ${planIdx + 1}: Phase C type → ${phaseCOverride.content_type} (keeps category: ${derivedCategory}) — ${phaseCOverride.type_rationale}`);
+    }
+    
     return {
       ...p,
       goal_mode:        phase1Slot?.goal_mode        ?? 'drive_footfall',
-      content_category: phase1Slot?.content_category ?? 'product_menu',
+      content_category: derivedCategory, // Phase 2b template router — from post type, never from Phase C
+      content_type:     phaseCOverride?.content_type ?? undefined, // Phase C analytics label (PRODUCT/EXPERIENCE/etc.)
+      type_rationale:   phaseCOverride?.type_rationale ?? undefined,
       slot_id:          phase1Slot?.slot_id          ?? 'A',
       timing_window:    (phase1Slot as any)?.timing_window ?? 'any', // forward to phase2b for canonical-time resolution
-      suggested_day:    assignedDay, // calendar-aware, overrides AI pick
+      suggested_day:    finalDay, // Trust AI's strategic clustering when valid
     };
   });
+
+  // ── CRITICAL: Enforce one post per day ──
+  // If duplicate days exist (e.g., due to Gemini returning duplicate angle_focus values),
+  // reassign duplicates to other available days to ensure maximum day spread.
+  const dayUsageCount = new Map<string, number>();
+  enrichedPlan.forEach((p: any) => {
+    dayUsageCount.set(p.suggested_day, (dayUsageCount.get(p.suggested_day) || 0) + 1);
+  });
+  
+  const duplicateDays = Array.from(dayUsageCount.entries())
+    .filter(([_, count]) => count > 1)
+    .map(([day, _]) => day);
+  
+  if (duplicateDays.length > 0) {
+    console.log(`[Phase 2a] ⚠️ Duplicate day assignments detected: ${duplicateDays.join(', ')} - redistributing...`);
+    
+    const usedDaysSet = new Set<string>();
+    const reassigned: Array<{postIdx: number; oldDay: string; newDay: string}> = [];
+    
+    enrichedPlan.forEach((p: any, idx: number) => {
+      if (usedDaysSet.has(p.suggested_day)) {
+        // This day is already used - find an alternative
+        const alternative = availableDays.find(d => !usedDaysSet.has(d));
+        if (alternative) {
+          reassigned.push({postIdx: idx, oldDay: p.suggested_day, newDay: alternative});
+          p.suggested_day = alternative;
+          usedDaysSet.add(alternative);
+          console.log(`[Phase 2a]   Post ${idx + 1}: ${p.angle_focus} → moved from ${reassigned[reassigned.length - 1].oldDay} to ${alternative}`);
+        } else {
+          // No alternative available - keep duplicate (shouldn't happen with proper slot count)
+          usedDaysSet.add(p.suggested_day);
+          console.warn(`[Phase 2a]   Post ${idx + 1}: No alternative day available, keeping duplicate ${p.suggested_day}`);
+        }
+      } else {
+        usedDaysSet.add(p.suggested_day);
+      }
+    });
+    
+    if (reassigned.length > 0) {
+      console.log(`[Phase 2a] ✅ Redistributed ${reassigned.length} posts to ensure one post per day`);
+    }
+  }
 
   // Sort by calendar date so Phase 2b processes posts in chronological order.
   // This ensures menu dedup and rationale-theme exclusions fire in the right sequence.

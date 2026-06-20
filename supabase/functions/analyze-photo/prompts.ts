@@ -2,6 +2,71 @@
 // Extracted from index.ts so the handler stays readable.
 // Each function returns { systemPrompt, userPrompt } ready for Gemini.
 
+import { loadLanguageConfig, type Language } from '../_shared/prompts/utils/prompt-loader.ts'
+
+// ── ATMOSPHERE EXTRACTION ────────────────────────────────────────────────────
+// Called silently after the main QA analysis when the photo passes the gate:
+//   - contentMatch rating is excellent or good (text and image are consistent)
+//   - caption text signals interior / atmosphere / behind-the-scenes content
+//   - recommendation is not retake
+// Result is stored in photo_atmosphere_log and used to progressively enrich
+// business_brand_profile (venue_scene, visual_character).
+
+export type AtmosphereContentType = 'interior' | 'atmosphere' | 'behind_the_scenes'
+
+export function buildAtmosphereExtractionPrompt(
+  contentType: AtmosphereContentType
+): { systemPrompt: string; userPrompt: string } {
+  const systemPrompt = `You are a visual atmosphere analyst for hospitality venues.
+Extract two things from this ${contentType === 'behind_the_scenes' ? 'behind-the-scenes' : 'interior/atmosphere'} photo.
+
+FIELD 1 — venue_scene:
+Write 2–3 sentences describing the perceptual qualities of the space: quality and direction of light, material contrasts (warm wood vs. cool glass, matte vs. reflective), spatial openness or intimacy.
+RULE: Zero object names. No furniture, no items. Pure sensory language about light, materials and spatial feel.
+WRONG: "There are wooden tables and black chairs."
+RIGHT: "Soft daylight filters through floor-to-ceiling glass, casting a warm tone against cool steel surfaces. The space feels open and unhurried."
+
+FIELD 2 — visual_character:
+A short concept label, max 6 words. Captures the venue's overall register from observable visual signals.
+Examples: "Casual moderne café", "Nordisk bistro med industriel kant", "Lyst og uformelt spisested".
+
+Return ONLY valid JSON — no markdown, no extra text:
+{
+  "venue_scene": "...",
+  "visual_character": "..."
+}`
+
+  const userPrompt = `Extract atmosphere data from this ${contentType.replace('_', ' ')} photo.`
+
+  return { systemPrompt, userPrompt }
+}
+
+// ── SYNTHESIS ────────────────────────────────────────────────────────────────
+// Called once 10 qualifying extractions exist for a business.
+// Produces a single consolidated venue_scene and visual_character.
+
+export function buildAtmosphereSynthesisPrompt(
+  scenes: string[],
+  characters: string[]
+): { systemPrompt: string; userPrompt: string } {
+  const systemPrompt = `You are synthesizing atmosphere descriptions from multiple photos of the same venue.
+
+Produce one consolidated venue_scene (2–3 sentences, same style as the inputs: light, materials, spatial feel — zero object names) and one visual_character label (max 6 words).
+
+Return ONLY valid JSON:
+{
+  "venue_scene": "...",
+  "visual_character": "..."
+}`
+
+  const sceneList = scenes.map((s, i) => `${i + 1}. ${s}`).join('\n')
+  const charList = characters.filter(Boolean).map((c, i) => `${i + 1}. ${c}`).join('\n')
+
+  const userPrompt = `Venue scene descriptions from ${scenes.length} photos:\n${sceneList}\n\nConcept labels:\n${charList}\n\nSynthesize into one authoritative description.`
+
+  return { systemPrompt, userPrompt }
+}
+
 export interface PaidPromptParams {
   postText?: string
   businessType?: string
@@ -12,10 +77,28 @@ export interface PaidPromptParams {
 
 // ── PAID TIER ────────────────────────────────────────────────────────────────
 
-export function buildPaidPrompt(
+export async function buildPaidPrompt(
   language: string,
   { postText, businessType, imageWidth, imageHeight, mediaType }: PaidPromptParams = {}
-): { systemPrompt: string; userPrompt: string } {
+): Promise<{ systemPrompt: string; userPrompt: string }> {
+  // Load language-specific system opener and closer
+  const lang = language as Language
+  const result = await loadLanguageConfig(lang, 'photo-analysis-paid-system')
+  
+  let systemOpener: string
+  let systemCloser: string
+  
+  if (!result.success || !result.prompt) {
+    console.warn(`Failed to load ${lang} photo-analysis-paid system prompt, using inline version`)
+    systemOpener = language === 'da' 
+      ? 'Du er en social media-rådgiver for lokale caféer og restauranter.\nDin opgave er at vurdere om et foto er godt nok til et opslag på sociale medier.\nDin standard er ikke professionelt fotografering — din standard er: ville ejeren af en travl lokal café eller restaurant være tryg ved at poste dette billede i dag?'
+      : 'You are a social media advisor for local cafés and restaurants.\nYour job is to assess whether a photo is good enough to post on social media.\nYour standard is not professional photography — your standard is: would the owner of a busy local café or restaurant feel comfortable posting this image today?'
+    systemCloser = ''
+  } else {
+    systemOpener = result.prompt.system
+    systemCloser = result.prompt.closer
+  }
+  
   const videoNoteDA = mediaType === 'video'
     ? `\n\nVIGTIGT: DETTE ER EN VIDEO, IKKE ET STILLBILLEDE.\n— Brug "videoen"/"videoklippet" i stedet for "billedet" i ALLE outputfelter.\n— suggestions SKAL altid være [] — crop, clean og color kan ikke anvendes på video.\n— Evaluer videoen på stemning, indhold og tekstmatch, præcis som du ville et billede.`
     : ''
@@ -23,9 +106,7 @@ export function buildPaidPrompt(
     ? `\n\nIMPORTANT: THIS IS A VIDEO, NOT A STILL IMAGE.\n— Use "the video"/"the footage" instead of "the image" in ALL output fields.\n— suggestions MUST always be [] — crop, clean and colour adjustments cannot be applied to video.\n— Evaluate the video on atmosphere, content and text match, exactly as you would an image.`
     : ''
   const systemPrompt = language === 'da'
-    ? `Du er en social media-rådgiver for lokale caféer og restauranter.
-Din opgave er at vurdere om et foto er godt nok til et opslag på sociale medier.
-Din standard er ikke professionelt fotografering — din standard er: ville ejeren af en travl lokal café eller restaurant være tryg ved at poste dette billede i dag?${videoNoteDA}
+    ? `${systemOpener}${videoNoteDA}
 
 ════ GENNEMGANG I TO ADSKILTE PAS ════
 
@@ -83,8 +164,10 @@ Eks 4 — ret genuint ude af fokus: recommendation = "retake", suggestions = [].
 Eks 5 — god dessert + bøftekst: recommendation = "good-enough", contentMatch.rating = "poor", actionNeeded = "choice", rewriteSuggestion = omskrevet tekst om dessert, reshootGuidance = "Fotografer en bøf...". ALDRIG retake.
 Eks 6 — god rettebillede + let misvisende caption (forkert emoji): recommendation = "post-it" eller "good-enough", contentMatch.rating = "fair", actionNeeded = "rewrite", rewriteSuggestion = rettet caption. ALDRIG retake.
 Eks 7 — levende farvet dessert i skål (klart synlig og appetitlig), dæmpet restaurantlys, telefon på bordet, dessertske ved skålen, vinglas rundt om: recommendation = "quick-fix", 1 suggestion remove_object (mobiltelefon). Dessertsken er serveringsredskab — den hører til retten og er aldrig en kandidat. Pletter på skålens overflade listes selvstændigt i Trin 1 og vurderes i Trin 2 uafhængigt af skeens position. ALDRIG retake — retten er synlig og indbydende; telefon kan fjernes.
-Eks 8 — dessert + rødvin i tekst, teksten nævner "Forkæl dig selv ved åen" og indeholder 🌊, men billedet viser indendørs bordmiljø med sorbet og vin: contentMatch.rating = "excellent", feedback = "Teksten handler om sorbet dessert med rødvin — billedet viser netop dette.", rewriteSuggestion = null, actionNeeded = "none". emojiMatch = null. Lokation og 🌊 er stedskontekst og må aldrig nævnes i hverken contentMatch eller emojiMatch.`
-    : `You are a social media advisor for local cafés and restaurants.
+Eks 8 — dessert + rødvin i tekst, teksten nævner "Forkæl dig selv ved åen" og indeholder 🌊, men billedet viser indendørs bordmiljø med sorbet og vin: contentMatch.rating = "excellent", feedback = "Teksten handler om sorbet dessert med rødvin — billedet viser netop dette.", rewriteSuggestion = null, actionNeeded = "none". emojiMatch = null. Lokation og 🌊 er stedskontekst og må aldrig nævnes i hverken contentMatch eller emojiMatch.
+
+${systemCloser}`
+    : `${systemOpener}${videoNoteEN}
 Your job is to assess whether a photo is good enough to post on social media.
 Your standard is not professional photography — your standard is: would the owner of a busy local café or restaurant feel comfortable posting this image today?${videoNoteEN}
 
@@ -144,7 +227,9 @@ Ex 4 — dish genuinely out of focus: recommendation = "retake", suggestions = [
 Ex 5 — good dessert + steak text: recommendation = "good-enough", contentMatch.rating = "poor", actionNeeded = "choice", rewriteSuggestion = rewritten text about dessert, reshootGuidance = "Photograph a steak...". NEVER retake.
 Ex 6 — good dish + slightly off caption (wrong emoji): recommendation = "post-it" or "good-enough", contentMatch.rating = "fair", actionNeeded = "rewrite", rewriteSuggestion = corrected caption. NEVER retake.
 Ex 7 — vivid-coloured dessert in a bowl (clearly visible and appetising), dim restaurant light, phone on the table, dessert spoon at the bowl, wine glasses around it: recommendation = "quick-fix", 1 suggestion remove_object (phone). The dessert spoon is serving ware — it belongs to the dish and is never a candidate. Marks on the bowl surface are listed independently in Step 1 and evaluated in Step 2 on their own, regardless of the spoon's position. NEVER retake — the dish is visible and inviting; the phone is removable.
-Ex 8 — dessert + red wine in text, text says "Treat yourself by the river" and contains 🌊, but image shows an indoor table setting with sorbet and wine: contentMatch.rating = "excellent", feedback = "The text is about sorbet dessert with red wine — the image shows exactly this.", rewriteSuggestion = null, actionNeeded = "none". emojiMatch = null. Location and 🌊 are setting context and must never appear in either contentMatch or emojiMatch.`
+Ex 8 — dessert + red wine in text, text says "Treat yourself by the river" and contains 🌊, but image shows an indoor table setting with sorbet and wine: contentMatch.rating = "excellent", feedback = "The text is about sorbet dessert with red wine — the image shows exactly this.", rewriteSuggestion = null, actionNeeded = "none". emojiMatch = null. Location and 🌊 are setting context and must never appear in either contentMatch or emojiMatch.
+
+${systemCloser}`
 
   const userPrompt = language === 'da'
     ? `Analyser dette café-${mediaType === 'video' ? 'video' : 'billede'} til social media.
@@ -182,7 +267,12 @@ generalFeedback: KUN fotografiske styrker. Nævn ALDRIG et problem her.
 rewriteSuggestion: Konkret omskrevet caption på SAMME SPROG som teksten, der matcher billedets indhold. null hvis actionNeeded = "none".
 reshootGuidance: Kort beskrivelse af hvad der skal fotograferes for at matche den originale tekst. null medmindre actionNeeded = "choice".
 actionNeeded: "none" hvis rating excellent/good. "rewrite" hvis rating fair. "choice" hvis rating poor.
-recommendationText: Skal referere til den vigtigste konkrete rettelse ved navn — aldrig en generisk formulering. Eks: "Fjern vandkaraffen — billedet er opdagsklar." eller "Varm farvetonerne lidt op, og retten springer ud." Maks 15 ord.
+recommendationText: STRUKTUR AFHÆNGER AF RECOMMENDATION-NIVEAU:
+  • "post-it": Opmuntrende bekræftelse. Eks: "Post det! Maden ser indbydende ud."
+  • "good-enough": Validerende konstatering. Eks: "Et troværdigt restaurantbillede klar til opslag."
+  • "quick-fix": Konstruktiv anerkendelse først, derefter specifik forbedring. STRUKTUR: "[Hvad der er stærkt] — [konkret forbedring]". Eks: "Stærkt udgangspunkt — små forbedringer løfter det yderligere." eller "God stemning — fjern vandkaraffen og det er opdagsklar."
+  • "retake": Empatisk men klar anbefaling. Eks: "Retten er for uklar til et opslag. Prøv med naturligt lys fra siden."
+Maks 15 ord.
 ⛔ ALDRIG: "Små justeringer vil løfte billedet." eller "Med et par rettelser er billedet klar." — disse er for generiske og forbudne.
 
 SUGGESTION FORMAT:
@@ -199,7 +289,7 @@ EKSEMPEL B – bøf med dæmpet lys, bokeh, vinglas — god stemning, IKKE retak
 { "contentMatch": { "rating": "excellent", "feedback": "Billedet og teksten matcher.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "suggestions": [], "recommendation": "good-enough", "recommendationText": "Et troværdigt restaurantbillede klar til opslag.", "generalFeedback": "Bøffen er tydelig og skarp med smukt fremhævet fedtmarmorering. Den varme, dæmpede belysning er en styrke.", "whatWorks": ["Bøffens fedtmarmorering er klar og appetitvækkende", "Bokeh-baggrunden understøtter restaurantstemningen"], "emojiMatch": null, "humanSuggestions": [] }
 
 EKSEMPEL C – brugbart billede med ét fremmed objekt (vandkaraffel):
-{ "contentMatch": { "rating": "excellent", "feedback": "Teksten og billedet er i god overensstemmelse.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "suggestions": [{ "id": "remove_carafe", "category": "cleaning", "title": "Fjern vandkaraffel", "reason": "Trækker øjet væk fra retten", "location": "Vandkaraffel til venstre for retten", "action": "remove_object" }], "recommendation": "quick-fix", "recommendationText": "Fjern vandkaraffen, og billedet er opdagsklar.", "generalFeedback": "Rettens farver og anretning er indbydende og veltilberedt.", "whatWorks": ["Anretningen er klar og appetitvækkende", "Lyset fremhæver rettens farver naturligt"], "emojiMatch": null, "humanSuggestions": [] }
+{ "contentMatch": { "rating": "excellent", "feedback": "Teksten og billedet er i god overensstemmelse.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "suggestions": [{ "id": "remove_carafe", "category": "cleaning", "title": "Fjern vandkaraffel", "reason": "Trækker øjet væk fra retten", "location": "Vandkaraffel til venstre for retten", "action": "remove_object" }], "recommendation": "quick-fix", "recommendationText": "God anretning — fjern vandkaraffen og det er opdagsklar.", "generalFeedback": "Rettens farver og anretning er indbydende og veltilberedt.", "whatWorks": ["Anretningen er klar og appetitvækkende", "Lyset fremhæver rettens farver naturligt"], "emojiMatch": null, "humanSuggestions": [] }
 
 EKSEMPEL D – retten er genuint uidentificerbar (teknisk fejl — dette er retake):
 { "contentMatch": { "rating": "good", "feedback": "Beskrivelsen matcher hvad der forsøges vist.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "suggestions": [], "recommendation": "retake", "recommendationText": "Retten er for uklar til et opslag. Prøv med naturligt lys fra siden.", "generalFeedback": "Billedet er taget med engagement. Stemningen er der — men den tekniske udførelse kræver endnu et forsøg.", "whatWorks": ["Borddækning og servering ser omhyggelig ud"], "emojiMatch": null, "humanSuggestions": [] }
@@ -254,7 +344,12 @@ generalFeedback: Strengths only. NEVER name a problem here.
 rewriteSuggestion: Concrete rewritten caption in the SAME LANGUAGE as the original text, matching the image content. null if actionNeeded = "none".
 reshootGuidance: Brief description of what to photograph to match the original text. null unless actionNeeded = "choice".
 actionNeeded: "none" if rating is excellent/good. "rewrite" if rating is fair. "choice" if rating is poor.
-recommendationText: Must reference the most important specific finding by name — never a generic phrase. E.g.: "Remove the carafe and this shot is ready." or "Warm the tones slightly and this dish will pop." Max 15 words.
+recommendationText: STRUCTURE DEPENDS ON RECOMMENDATION LEVEL:
+  • "post-it": Encouraging affirmation. E.g.: "Post it! The food looks inviting."
+  • "good-enough": Validating statement. E.g.: "A credible restaurant shot ready to post."
+  • "quick-fix": Constructive acknowledgment first, then specific improvement. STRUCTURE: "[What's strong] — [specific improvement]". E.g.: "Strong starting point — small improvements will lift it further." or "Good mood — remove the carafe and it's ready."
+  • "retake": Empathetic but clear recommendation. E.g.: "The dish is too unclear for a post. Try natural light from the side."
+Max 15 words.
 ⛔ NEVER: "A few adjustments will lift this image." or "With a couple of tweaks this is ready." — these are too generic and are forbidden.
 
 SUGGESTION FORMAT:
@@ -271,7 +366,7 @@ EXAMPLE B – steak with dim lighting, bokeh, wine glass — good atmosphere, NO
 { "contentMatch": { "rating": "excellent", "feedback": "The image and text match.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "suggestions": [], "recommendation": "good-enough", "recommendationText": "A credible restaurant shot ready to post.", "generalFeedback": "The steak is sharp and clearly visible with beautiful fat marbling. The warm, dim lighting is a strength.", "whatWorks": ["The steak's fat marbling is clear and appetising", "Bokeh background supports the restaurant atmosphere"], "emojiMatch": null, "humanSuggestions": [] }
 
 EXAMPLE C – usable image with one foreign object (water carafe):
-{ "contentMatch": { "rating": "excellent", "feedback": "The text and image are in good alignment.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "suggestions": [{ "id": "remove_carafe", "category": "cleaning", "title": "Remove water carafe", "reason": "Pulls the eye away from the dish", "location": "Water carafe to the left of the dish", "action": "remove_object" }], "recommendation": "quick-fix", "recommendationText": "Remove the carafe and this shot is ready.", "generalFeedback": "The dish colours and plating are inviting and well-prepared.", "whatWorks": ["Plating is clear and appetising", "Light enhances the dish colours naturally"], "emojiMatch": null, "humanSuggestions": [] }
+{ "contentMatch": { "rating": "excellent", "feedback": "The text and image are in good alignment.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "suggestions": [{ "id": "remove_carafe", "category": "cleaning", "title": "Remove water carafe", "reason": "Pulls the eye away from the dish", "location": "Water carafe to the left of the dish", "action": "remove_object" }], "recommendation": "quick-fix", "recommendationText": "Good plating — remove the carafe and it's ready.", "generalFeedback": "The dish colours and plating are inviting and well-prepared.", "whatWorks": ["Plating is clear and appetising", "Light enhances the dish colours naturally"], "emojiMatch": null, "humanSuggestions": [] }
 
 EXAMPLE D – dish is genuinely unidentifiable (technical flaw — this is retake):
 { "contentMatch": { "rating": "good", "feedback": "The description matches what is being shown.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "suggestions": [], "recommendation": "retake", "recommendationText": "The dish is too unclear to post. Try natural side light from a window.", "generalFeedback": "The image is taken with passion and intention. The atmosphere is there — but the technical execution needs another attempt.", "whatWorks": ["Table setting and serving look carefully done"], "emojiMatch": null, "humanSuggestions": [] }
@@ -302,13 +397,41 @@ EXAMPLE H — sorbet dessert + red wine, headline is "Treat yourself by the rive
 // Previous version of this prompt is preserved below as buildSimplePromptV1().
 // Same return shape as buildPaidPrompt — drop-in replacement.
 
-export function buildSimplePrompt(
+export async function buildSimplePrompt(
   language: string,
   { postText, businessType, imageWidth, imageHeight }: PaidPromptParams = {}
-): { systemPrompt: string; userPrompt: string } {
+): Promise<{ systemPrompt: string; userPrompt: string }> {
+
+  // Load language-specific system opener and closer
+  const lang = language as Language
+  const result = await loadLanguageConfig(lang, 'photo-analysis-simple-system')
+  
+  let systemOpener: string
+  let systemCloser: string
+  
+  if (!result.success || !result.prompt) {
+    console.warn(`Failed to load ${lang} photo-analysis-simple system prompt, using inline version`)
+    systemOpener = language === 'da'
+      ? 'Du vurderer et foto til sociale medier for en lokal virksomhed i food & beverage branchen (café, restaurant, bar, kaffebar, vinbar, takeaway eller bageri).\n\nSvar kort, konkret og handlingsorienteret. Undgå teknisk fotosprog.\n\nMålet er at hjælpe en travl ejer med at forstå:\n• om fotoet er godt nok til opslag\n• hvad der hurtigt kan forbedres\n• om det er bedre at tage et nyt foto'
+      : 'You are evaluating a photo for social media for a local food & beverage business (café, restaurant, bar, coffee shop, wine bar, takeaway or bakery).\n\nKeep responses concise, specific and action-oriented. Avoid technical photography jargon.\n\nThe goal is to help a busy owner understand:\n• whether the photo is good enough to post\n• what can be quickly improved\n• whether it\'s better to take a new photo'
+    systemCloser = ''
+  } else {
+    systemOpener = result.prompt.system
+    systemCloser = result.prompt.closer
+  }
 
   const systemPrompt = language === 'da'
-    ? `Du vurderer et foto til sociale medier for en lokal virksomhed i food & beverage branchen (café, restaurant, bar, kaffebar, vinbar, takeaway eller bageri).
+    ? `${systemOpener}
+
+⚠️ VIGTIG INSTRUKTION:
+Du skal vurdere FOTO-KVALITET til sociale medier.
+Du skal IKKE lave objekt-detektion.
+Du skal IKKE returnere bounding boxes.
+Du skal IKKE returnere koordinater eller labels.
+
+Din opgave er KUN at bedømme om fotoet er godt nok til et opslag.
+
+---
 
 Svar kort, konkret og handlingsorienteret. Undgå teknisk fotosprog.
 
@@ -375,8 +498,20 @@ Lokationsætninger ("ved åen", "på terrassen" osv.) er stedsbeskrivelse — ik
 
 ---
 
-Tone ved retake skal altid være tryg og opmuntrende.`
-    : `You are evaluating a photo for social media for a local food & beverage business (café, restaurant, bar, coffee bar, wine bar, takeaway or bakery).
+Tone ved retake skal altid være tryg og opmuntrende.
+
+${systemCloser}`
+    : `${systemOpener}
+
+⚠️ CRITICAL INSTRUCTION:
+You are evaluating PHOTO QUALITY for social media.
+You are NOT performing object detection.
+Do NOT return bounding boxes.
+Do NOT return coordinates or labels.
+
+Your task is ONLY to assess if the photo is good enough to post.
+
+---
 
 Respond concisely and action-oriented. Avoid technical photography jargon.
 
@@ -398,7 +533,9 @@ Atmosphere and location emojis (🌊 ☀️ 🌙 🌿 🌟 ✨ 🎵 🏡 etc.) a
 NEVER write "emoji matches" or "emoji is visible" — only null.
 CONTENT MATCH: Ignore emojis. Location phrases ("by the river", "on the terrace" etc.) are setting context — not visual requirements.
 
-Retake tone must be warm and encouraging.`
+Retake tone must be warm and encouraging.
+
+${systemCloser}`
 
   const userPrompt = language === 'da'
     ? `Analyser dette foto til sociale medier.
@@ -406,10 +543,15 @@ Retake tone must be warm and encouraging.`
 ${postText ? `Teksten siger: "${postText}"` : 'Ingen tekst inkluderet.'}
 ${businessType ? `Virksomhedstype: ${businessType}` : ''}
 
-Returner KUN valid JSON uden markdown eller ekstra tekst.
+⚠️ OUTPUT FORMAT - OBLIGATORISK:
+Returner KUN valid JSON som et OBJEKT (starter med {, IKKE [).
+Ingen markdown.
+Ingen bounding boxes.
+Ingen objekt-detektion.
 
 Alle felter SKAL altid være til stede.
 
+KREVET FORMAT (kopier denne struktur nøjagtigt):
 {
   "contentMatch": { "rating": "excellent|good|fair|poor", "feedback": "1-2 sætninger i én ubrudt linje." },
   "emojiMatch": null,
@@ -419,6 +561,12 @@ Alle felter SKAL altid være til stede.
   "recommendation": "post-it|good-enough|quick-fix|retake",
   "recommendationText": "kort sætning maks 15 ord"
 }
+
+RETURNER IKKE:
+- Arrays med bounding boxes
+- Objekt-koordinater
+- Labels eller detections
+- Andre formater end ovenstående
 
 FORMATREGLER:
 • Ingen linjeskift inde i strengfelter
@@ -437,8 +585,15 @@ SUGGESTION FORMAT:
 ${postText ? `The text says: "${postText}"` : 'No text included.'}
 ${businessType ? `Business type: ${businessType}` : ''}
 
-Return ONLY valid JSON. All fields must always be present.
+⚠️ OUTPUT FORMAT - REQUIRED:
+Return ONLY valid JSON as an OBJECT (starts with {, NOT [).
+No markdown.
+No bounding boxes.
+No object detection.
 
+All fields must always be present.
+
+REQUIRED FORMAT (copy this structure exactly):
 {
   "contentMatch": { "rating": "excellent|good|fair|poor", "feedback": "1-2 sentences in one line." },
   "emojiMatch": null,
@@ -466,10 +621,10 @@ Use the defined suggestion structure.`
 // Identical reasoning to buildPaidPrompt but AI suggestions stripped out.
 // Call 2 (below) handles suggestion generation with Call 1 context as input.
 
-export function buildCall1Prompt(
+export async function buildCall1Prompt(
   language: string,
   { postText, businessType, imageWidth, imageHeight, mediaType }: PaidPromptParams = {}
-): { systemPrompt: string; userPrompt: string } {
+): Promise<{ systemPrompt: string; userPrompt: string }> {
   const videoNoteDA = mediaType === 'video'
     ? `\n\nVIGTIGT: DETTE ER EN VIDEO, IKKE ET STILLBILLEDE.\n— Brug "videoen"/"videoklippet" i stedet for "billedet" i ALLE outputfelter.\n— Evaluer videoen på stemning, indhold og tekstmatch, præcis som du ville et billede.`
     : ''
@@ -477,10 +632,26 @@ export function buildCall1Prompt(
     ? `\n\nIMPORTANT: THIS IS A VIDEO, NOT A STILL IMAGE.\n— Use "the video"/"the footage" instead of "the image" in ALL output fields.\n— Evaluate the video on atmosphere, content and text match, exactly as you would an image.`
     : ''
 
+  // Load language-specific system opener and closer
+  const lang = language as Language
+  const result = await loadLanguageConfig(lang, 'photo-analysis-call1-system')
+  
+  let systemOpener: string
+  let systemCloser: string
+  
+  if (!result.success || !result.prompt) {
+    console.warn(`Failed to load ${lang} photo-analysis-call1 system prompt, using inline version`)
+    systemOpener = language === 'da'
+      ? 'Du er en social media-rådgiver for lokale caféer og restauranter.\nDin opgave er at vurdere om et foto er godt nok til et opslag på sociale medier.\nDin standard er ikke professionelt fotografering — din standard er: ville ejeren af en travl lokal café eller restaurant være tryg ved at poste dette billede i dag?'
+      : 'You are a social media advisor for local cafés and restaurants.\nYour job is to assess whether a photo is good enough to post on social media.\nYour standard is not professional photography — your standard is: would the owner of a busy local café or restaurant feel comfortable posting this image today?'
+    systemCloser = ''
+  } else {
+    systemOpener = result.prompt.system
+    systemCloser = result.prompt.closer
+  }
+
   const systemPrompt = language === 'da'
-    ? `Du er en social media-rådgiver for lokale caféer og restauranter.
-Din opgave er at vurdere om et foto er godt nok til et opslag på sociale medier.
-Din standard er ikke professionelt fotografering — din standard er: ville ejeren af en travl lokal café eller restaurant være tryg ved at poste dette billede i dag?${videoNoteDA}
+    ? `${systemOpener}${videoNoteDA}
 
 ════ GENNEMGANG I TO ADSKILTE PAS ════
 
@@ -651,8 +822,10 @@ EKSEMPEL G – bøf med sauce, teksten nævner "cremet bearnaise" men billedet v
 
 EKSEMPEL H — sorbet + rødvin, overskriften er "Forkæl dig selv ved åen", 🌊 i teksten, INDENDØRS billede, telefon på bordet:
 { "contentMatch": { "rating": "excellent", "feedback": "Teksten handler om sorbet dessert med rødvin — billedet viser præcis dette.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "whatWorks": ["Sorbetens farve er livlig og iøjnefaldende", "Den varme, dæmpede belysning skaber en hyggelig aftenstemning"], "generalFeedback": "Sorbetens levende farver og varme aftenstemning giver billedet et stærkt visuelt udtryk.", "emojiMatch": null, "humanSuggestions": [], "recommendation": "quick-fix", "recommendationText": "Fjern mobiltelefonen — desserten er klar til opslag." }
-↑ contentMatch = excellent (lokation og 🌊 ignoreres). recommendation = "quick-fix" (telefon er kandidat). AI-forslag returneres separat.`
-    : `Analyze this café ${mediaType === 'video' ? 'video' : 'image'} for social media.
+↑ contentMatch = excellent (lokation og 🌊 ignoreres). recommendation = "quick-fix" (telefon er kandidat). AI-forslag returneres separat.
+
+${systemCloser}`
+    : `${systemOpener}${videoNoteEN}
 
 ${postText ? `The text says: "${postText}"` : 'No text included.'}
 ${businessType ? `Business type: ${businessType}` : ''}
@@ -715,7 +888,9 @@ EXAMPLE G – steak with sauce, text mentions creamy béarnaise but image shows 
 
 EXAMPLE H — sorbet + red wine, headline "Treat yourself by the river", 🌊 in text, INDOOR setting, phone on table:
 { "contentMatch": { "rating": "excellent", "feedback": "The text is about sorbet dessert with red wine — the image shows exactly this.", "rewriteSuggestion": null, "reshootGuidance": null, "actionNeeded": "none" }, "whatWorks": ["Sorbet colour is vivid and eye-catching", "Warm dim lighting creates a welcoming atmosphere"], "generalFeedback": "The sorbet's vivid colours and warm evening atmosphere give the image strong visual impact.", "emojiMatch": null, "humanSuggestions": [], "recommendation": "quick-fix", "recommendationText": "Remove the phone and this shot is ready to post." }
-↑ contentMatch = excellent (location and 🌊 ignored). recommendation = "quick-fix" (phone is a candidate). AI suggestion returned separately.`
+↑ contentMatch = excellent (location and 🌊 ignored). recommendation = "quick-fix" (phone is a candidate). AI suggestion returned separately.
+
+${systemCloser}`
 
   return { systemPrompt, userPrompt }
 }
@@ -735,11 +910,31 @@ export interface Call2PromptParams extends PaidPromptParams {
 export function buildCall2Prompt(
   language: string,
   { postText, businessType, mediaType, call1Assessment }: Call2PromptParams
-): { systemPrompt: string; userPrompt: string } {
-  const whatWorksText = call1Assessment.whatWorks.join(' • ')
+): Promise<{ systemPrompt: string; userPrompt: string }> {
+  return (async () => {
+    const whatWorksText = call1Assessment.whatWorks.join(' • ')
 
-  const systemPrompt = language === 'da'
-    ? `Du er en AI-billedredigeringsrådgiver for sociale medier for lokale caféer og restauranter.
+    // Load language-specific system opener and closer
+    const lang = language as Language
+    const result = await loadLanguageConfig(lang, 'photo-analysis-call2-system')
+    
+    let systemOpener: string
+    let systemCloser: string
+    
+    if (!result.success || !result.prompt) {
+      console.warn(`Failed to load ${lang} photo-analysis-call2 system prompt, using inline version`)
+      systemOpener = language === 'da'
+        ? 'Du er en AI billedredigeringsassistent for lokale caféer og restauranter.\nDin opgave er at foreslå realistiske, automatiserede billedforbedringer der kan udføres af AI.'
+        : 'You are an AI photo editing assistant for local cafés and restaurants.\nYour task is to suggest realistic, automated photo improvements that can be executed by AI.'
+      systemCloser = ''
+    } else {
+      systemOpener = result.prompt.system
+      systemCloser = result.prompt.closer
+    }
+
+    const systemPrompt = language === 'da'
+      ? `${systemOpener}
+
 En grundig vurdering af dette foto er allerede gennemført. Din eneste opgave er at identificere hvilke konkrete elementer AI-billedredigering sikkert og naturligt kan fjerne eller justere.
 
 KONTEKST FRA VURDERING:
@@ -775,8 +970,11 @@ ACTION↔CATEGORY (ALDRIG kryds):
   remove_object / reduce_clutter / reduce_smudge → category: "cleaning"
   adjust_temperature_warm / adjust_temperature_cool / fix_exposure → category: "color"
 
-Ingen kandidater → returner { "suggestions": [] }`
-    : `You are an AI image-editing advisor for social media for local cafés and restaurants.
+Ingen kandidater → returner { "suggestions": [] }
+
+${systemCloser}`
+    : `${systemOpener}
+
 A thorough assessment of this photo has already been completed. Your only task is to identify which specific elements AI image editing can safely and naturally remove or adjust.
 
 CONTEXT FROM ASSESSMENT:
@@ -812,9 +1010,11 @@ ACTION↔CATEGORY (NEVER cross):
   remove_object / reduce_clutter / reduce_smudge → category: "cleaning"
   adjust_temperature_warm / adjust_temperature_cool / fix_exposure → category: "color"
 
-No candidates → return { "suggestions": [] }`
+No candidates → return { "suggestions": [] }
 
-  const userPrompt = language === 'da'
+${systemCloser}`
+
+    const userPrompt = language === 'da'
     ? `Identificer AI-forbedringsmuligheder på dette café-${mediaType === 'video' ? 'video' : 'billede'}.
 
 ${postText ? `Teksten siger: "${postText}"` : ''}
@@ -836,7 +1036,8 @@ Return ONLY valid JSON without markdown or extra text:
 Or with suggestions:
 { "suggestions": [{ "id": "unique_id", "category": "cleaning|color", "title": "Max 6 words", "reason": "Max 12 words", "location": "Precise spatial description with proportional framing, e.g. 'upper-left quarter of the frame', 'bottom-right corner approx. 15% of image', or relative to hero subject: 'directly left of the dish'", "action": "remove_object|reduce_clutter|reduce_smudge|adjust_temperature_warm|adjust_temperature_cool|fix_exposure" }] }`
 
-  return { systemPrompt, userPrompt }
+    return { systemPrompt, userPrompt }
+  })()
 }
 
 // ── SIMPLE PROMPT V1 (backup) ────────────────────────────────────────────────

@@ -6,6 +6,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { silentCorrect } from '../_shared/utils/silent-correct.ts'
+import { getHospitalityRegisterBlock } from '../_shared/utils/hospitality-register.ts'
+import { buildPlatformHashtagSets } from '../_shared/hashtags/platform-hashtags.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,6 +54,7 @@ async function detectMenuItemInText(
       .from('menu_items_normalized')
       .select('item_name, item_description')
       .eq('business_id', businessId)
+      .eq('is_active', true)
       .ilike('item_name', `%${token}%`)
       .limit(1)
       .maybeSingle()
@@ -77,7 +80,7 @@ async function fetchBrandVoice(
 ): Promise<Record<string, any>> {
   const { data } = await supabase
     .from('business_brand_profile')
-    .select('brand_essence, tone_of_voice, tone_model, voice_constraints, things_to_avoid, signature_phrases, voice_examples, voice_rationale, recognizable_interior_identity, business_character, identity_keywords, content_strategy, typical_closings')
+    .select('brand_profile_v5, brand_essence, tone_of_voice, tone_model, voice_constraints, things_to_avoid, signature_phrases, voice_examples, voice_rationale, recognizable_interior_identity, business_character, identity_keywords, content_strategy, typical_closings')
     .eq('business_id', businessId)
     .maybeSingle()
   return data || {}
@@ -101,8 +104,16 @@ async function fetchLocationIntelligence(
 
 // ── extractBrandTone ────────────────────────────────────────────────────
 // Normalise tone_of_voice and tone_model into a flat brand tone string + writing rules array.
+// V5-first fallback chains for all brand voice fields.
 // deno-lint-ignore no-explicit-any
-function extractBrandTone(brandVoice: Record<string, any>): { brandTone: string; writingRules: string[]; goodExamples: string[]; preferVocab: string[]; avoidVocab: string[]; sigPhrases: string[]; thingsToAvoid: string; voiceConstraints: string; venueIdentity: string; businessCharacter: string; emojiInstruction: string } {
+function extractBrandTone(brandVoice: Record<string, any>): { brandTone: string; writingRules: string[]; goodExamples: string[]; preferVocab: string[]; avoidVocab: string[]; sigPhrases: string[]; thingsToAvoid: string; voiceConstraints: string; venueIdentity: string; businessCharacter: string; emojiInstruction: string; typicalClosings: string[] } {
+  // Extract V5 profile sections
+  const v5 = brandVoice.brand_profile_v5
+  const v5Identity = v5?.identity
+  const v5Voice = v5?.voice
+  const v5WritingExamples = v5?.writing_examples
+  const v5Guardrails = v5?.guardrails
+
   let brandTone = ''
   let writingRules: string[] = []
   let goodExamples: string[] = []
@@ -114,81 +125,172 @@ function extractBrandTone(brandVoice: Record<string, any>): { brandTone: string;
   let venueIdentity = ''
   let businessCharacter = ''
   let emojiInstruction = '1-2 emojis naturligt placeret'
+  let typicalClosings: string[] = []
 
-  const tov = brandVoice.tone_of_voice
-  if (tov) {
-    if (typeof tov === 'object' && typeof tov.value === 'string' && tov.value.trim().length > 10) {
-      brandTone = tov.value.trim()
-    } else if (typeof tov === 'object') {
-      const parts: string[] = []
-      if (tov.primary_tone) parts.push(tov.primary_tone)
-      if (Array.isArray(tov.attributes)) parts.push(tov.attributes.join(', '))
-      if (tov.formality_level) parts.push(`formalitet: ${tov.formality_level}`)
-      brandTone = parts.join(' · ')
-    } else if (typeof tov === 'string') {
-      brandTone = tov
-    }
-  }
-  if (!brandTone && brandVoice.brand_essence) {
+  // V5 FALLBACK 1: Brand essence
+  // V5-first: use v5Identity.brand_essence, fallback to legacy brand_essence
+  if (v5Identity?.brand_essence) {
+    brandTone = v5Identity.brand_essence.trim().slice(0, 200)
+  } else if (brandVoice.brand_essence) {
     const be = brandVoice.brand_essence
     brandTone = typeof be === 'object' && be?.value ? String(be.value).slice(0, 200) : String(be || '').slice(0, 200)
   }
 
-  const tm = brandVoice.tone_model
-  if (typeof tm === 'object' && tm !== null) {
-    if (Array.isArray(tm.writing_rules)) writingRules = tm.writing_rules.filter((s: unknown) => typeof s === 'string').slice(0, 5)
-    if (Array.isArray(tm.good_examples)) goodExamples = tm.good_examples.filter((s: unknown) => typeof s === 'string').slice(0, 3)
-    const emojiLevel = tm.emoji_level || (tov as any)?.emoji_frequency || 'moderate'
-    emojiInstruction = emojiLevel === 'none' ? 'Brug INGEN emojis'
-      : emojiLevel === 'minimal' || emojiLevel === 'low' ? '0-1 emoji maksimum'
-      : emojiLevel === 'frequent' || emojiLevel === 'high' ? '2-3 emojis naturligt placeret'
-      : '1-2 emojis naturligt placeret'
+  // V5 FALLBACK 2: Tone rules (writing rules)
+  // V5-first: use v5Voice.tone_rules, fallback to tone_model.writing_rules or tone_of_voice
+  if (v5Voice?.tone_rules && Array.isArray(v5Voice.tone_rules)) {
+    writingRules = v5Voice.tone_rules.filter((s: unknown) => typeof s === 'string').slice(0, 5)
+  } else {
+    const tov = brandVoice.tone_of_voice
+    if (tov && !brandTone) {
+      if (typeof tov === 'object' && typeof tov.value === 'string' && tov.value.trim().length > 10) {
+        brandTone = tov.value.trim()
+      } else if (typeof tov === 'object') {
+        const parts: string[] = []
+        if (tov.primary_tone) parts.push(tov.primary_tone)
+        if (Array.isArray(tov.attributes)) parts.push(tov.attributes.join(', '))
+        if (tov.formality_level) parts.push(`formalitet: ${tov.formality_level}`)
+        brandTone = parts.join(' · ')
+      } else if (typeof tov === 'string') {
+        brandTone = tov
+      }
+    }
+
+    const tm = brandVoice.tone_model
+    if (typeof tm === 'object' && tm !== null) {
+      if (Array.isArray(tm.writing_rules)) writingRules = tm.writing_rules.filter((s: unknown) => typeof s === 'string').slice(0, 5)
+    }
+  }
+
+  // V5 FALLBACK 3: Emoji level
+  // V5-first: use v5Voice.emoji_level, fallback to tone_model.emoji_level or tone_of_voice.emoji_frequency
+  const v5EmojiLevel = v5Voice?.emoji_level
+  const legacyEmojiLevel = brandVoice.tone_model?.emoji_level || (brandVoice.tone_of_voice as any)?.emoji_frequency
+  const emojiLevel = v5EmojiLevel || legacyEmojiLevel || 'moderate'
+  emojiInstruction = emojiLevel === 'none' ? 'Brug INGEN emojis'
+    : emojiLevel === 'minimal' || emojiLevel === 'low' ? '0-1 emoji maksimum'
+    : emojiLevel === 'frequent' || emojiLevel === 'high' ? '2-3 emojis naturligt placeret'
+    : '1-2 emojis naturligt placeret'
+
+  // V5 FALLBACK 4: Good examples
+  // V5-first: use v5WritingExamples.good_examples, fallback to tone_model.good_examples
+  if (v5WritingExamples?.good_examples && Array.isArray(v5WritingExamples.good_examples)) {
+    goodExamples = v5WritingExamples.good_examples.filter((s: unknown) => typeof s === 'string').slice(0, 3)
+  } else if (brandVoice.tone_model?.good_examples && Array.isArray(brandVoice.tone_model.good_examples)) {
+    goodExamples = brandVoice.tone_model.good_examples.filter((s: unknown) => typeof s === 'string').slice(0, 3)
   }
 
   // Dedup: tone_of_voice.value and tone_model.writing_rules are from same pipeline pass
   if (writingRules.length >= 3 && brandTone) brandTone = ''
 
-  const ve = brandVoice.voice_examples
-  if (ve && typeof ve === 'object') {
-    if (Array.isArray(ve.vocabulary?.prefer)) preferVocab = ve.vocabulary.prefer.filter((s: unknown) => typeof s === 'string').slice(0, 6)
-    if (Array.isArray(ve.vocabulary?.avoid)) avoidVocab = ve.vocabulary.avoid.filter((s: unknown) => typeof s === 'string').slice(0, 6)
-  }
-
-  const sp = brandVoice.signature_phrases
-  if (Array.isArray(sp)) sigPhrases = sp.filter((s: unknown) => typeof s === 'string').slice(0, 4)
-
-  const ta = brandVoice.things_to_avoid
-  if (ta) {
-    if (typeof ta === 'object') {
-      const parts: string[] = []
-      if (Array.isArray(ta.language_constraints)) parts.push(...ta.language_constraints)
-      if (Array.isArray(ta.banned_phrases)) parts.push(...ta.banned_phrases)
-      if (Array.isArray(ta.tone_constraints)) parts.push(...ta.tone_constraints)
-      thingsToAvoid = parts.join(', ')
-    } else {
-      thingsToAvoid = String(ta)
+  // V5 FALLBACK 5: Prefer vocabulary
+  // V5-first: use v5WritingExamples.prefer_vocabulary, fallback to voice_examples.vocabulary.prefer
+  if (v5WritingExamples?.prefer_vocabulary && Array.isArray(v5WritingExamples.prefer_vocabulary)) {
+    preferVocab = v5WritingExamples.prefer_vocabulary.filter((s: unknown) => typeof s === 'string').slice(0, 6)
+  } else {
+    const ve = brandVoice.voice_examples
+    if (ve && typeof ve === 'object' && Array.isArray(ve.vocabulary?.prefer)) {
+      preferVocab = ve.vocabulary.prefer.filter((s: unknown) => typeof s === 'string').slice(0, 6)
     }
   }
 
-  const vc = brandVoice.voice_constraints
-  if (vc) {
-    voiceConstraints = typeof vc === 'string' ? vc
-      : (typeof vc === 'object' && typeof vc.value === 'string') ? vc.value : ''
+  // V5 FALLBACK 6: Avoid vocabulary
+  // V5-first: use v5WritingExamples.avoid_vocabulary, fallback to voice_examples.vocabulary.avoid
+  if (v5WritingExamples?.avoid_vocabulary && Array.isArray(v5WritingExamples.avoid_vocabulary)) {
+    avoidVocab = v5WritingExamples.avoid_vocabulary.filter((s: unknown) => typeof s === 'string').slice(0, 6)
+  } else {
+    const ve = brandVoice.voice_examples
+    if (ve && typeof ve === 'object' && Array.isArray(ve.vocabulary?.avoid)) {
+      avoidVocab = ve.vocabulary.avoid.filter((s: unknown) => typeof s === 'string').slice(0, 6)
+    }
   }
 
+  // V5 FALLBACK 7: Signature phrases
+  // V5-first: use v5WritingExamples.signature_phrases, fallback to legacy signature_phrases
+  if (v5WritingExamples?.signature_phrases && Array.isArray(v5WritingExamples.signature_phrases)) {
+    sigPhrases = v5WritingExamples.signature_phrases.filter((s: unknown) => typeof s === 'string').slice(0, 4)
+  } else if (Array.isArray(brandVoice.signature_phrases)) {
+    sigPhrases = brandVoice.signature_phrases.filter((s: unknown) => typeof s === 'string').slice(0, 4)
+  }
+
+  // V5 FALLBACK 8: Things to avoid (avoid_examples)
+  // V5-first: use v5Voice.avoid_examples, fallback to legacy things_to_avoid
+  if (v5Voice?.avoid_examples && Array.isArray(v5Voice.avoid_examples)) {
+    thingsToAvoid = v5Voice.avoid_examples.join(', ')
+  } else {
+    const ta = brandVoice.things_to_avoid
+    if (ta) {
+      if (typeof ta === 'object') {
+        const parts: string[] = []
+        if (Array.isArray(ta.language_constraints)) parts.push(...ta.language_constraints)
+        if (Array.isArray(ta.banned_phrases)) parts.push(...ta.banned_phrases)
+        if (Array.isArray(ta.tone_constraints)) parts.push(...ta.tone_constraints)
+        thingsToAvoid = parts.join(', ')
+      } else {
+        thingsToAvoid = String(ta)
+      }
+    }
+  }
+
+  // V5 FALLBACK 9: Voice constraints (register_guidance)
+  // V5-first: use v5Voice.register_guidance, fallback to legacy voice_constraints
+  if (v5Voice?.register_guidance) {
+    voiceConstraints = v5Voice.register_guidance
+  } else {
+    const vc = brandVoice.voice_constraints
+    if (vc) {
+      voiceConstraints = typeof vc === 'string' ? vc
+        : (typeof vc === 'object' && typeof vc.value === 'string') ? vc.value : ''
+    }
+  }
+
+  // V5 FALLBACK 10: Business character (business_description)
+  // V5-first: use v5Identity.business_description, fallback to legacy business_character
+  if (v5Identity?.business_description) {
+    businessCharacter = v5Identity.business_description.trim()
+  } else {
+    const bc = brandVoice.business_character
+    if (bc) {
+      businessCharacter = typeof bc === 'string' ? bc.trim()
+        : (typeof bc === 'object' && bc.value) ? String(bc.value).trim() : ''
+    }
+  }
+
+  // V5 FALLBACK 10b: Water term prohibition (NEW - V5.1 structured location_identity)
+  // V5-first: use v5Identity.location_identity.water_proximity, fallback to legacy regex parsing
+  if (v5Identity?.location_identity?.water_proximity) {
+    const waterTerm = v5Identity.location_identity.water_proximity;
+    writingRules = [...writingRules, `Brug ALDRIG 'vandet' om dette steds placering — brug altid det præcise ord '${waterTerm}'`];
+  } else if (businessCharacter) {
+    // Legacy fallback: parse businessCharacter for water terms
+    const daWaterMatch = businessCharacter.match(/\\bved\\s+(åen|bugten|havet|søen|fjorden|kanalen|havnen|stranden|kysten|vigen)\\b/i)
+    const svWaterMatch = businessCharacter.match(/\\bvid\\s+(ån|havet|sjön|viken|kanalen|hamnen|stranden|kusten|fjorden)\\b/i)
+    const deWaterMatch = businessCharacter.match(/\\bam\\s+(Fluss|Meer|See|Kanal|Hafen|Strand|Bach|Fjord)\\b/i)
+    const waterMatch = daWaterMatch || svWaterMatch || deWaterMatch
+    if (waterMatch) {
+      const waterTerm = waterMatch[1].toLowerCase();
+      writingRules = [...writingRules, `Brug ALDRIG 'vandet' om dette steds placering — brug altid det præcise ord '${waterTerm}'`];
+    }
+  }
+
+  // V5 FALLBACK 11: Venue identity (recognizable_interior_identity)
+  // This is venue context, not brand voice - intentionally kept as legacy-only
+  // (not part of V5 brand profile, comes from venue analysis)
   const rii = brandVoice.recognizable_interior_identity
   if (rii) {
     venueIdentity = typeof rii === 'string' ? rii.trim()
       : (typeof rii === 'object' && typeof rii.value === 'string') ? rii.value.trim() : ''
   }
 
-  const bc = brandVoice.business_character
-  if (bc) {
-    businessCharacter = typeof bc === 'string' ? bc.trim()
-      : (typeof bc === 'object' && bc.value) ? String(bc.value).trim() : ''
+  // V5 FALLBACK 12: Typical closings (brand-specific CTAs)
+  // V5-first: use v5WritingExamples.typical_closings, fallback to legacy typical_closings
+  if (Array.isArray(v5WritingExamples?.typical_closings)) {
+    typicalClosings = v5WritingExamples.typical_closings.filter((s: unknown) => typeof s === 'string').slice(0, 5)
+  } else if (Array.isArray(brandVoice.typical_closings)) {
+    typicalClosings = brandVoice.typical_closings.filter((s: unknown) => typeof s === 'string').slice(0, 5)
   }
 
-  return { brandTone, writingRules, goodExamples, preferVocab, avoidVocab, sigPhrases, thingsToAvoid, voiceConstraints, venueIdentity, businessCharacter, emojiInstruction }
+  return { brandTone, writingRules, goodExamples, preferVocab, avoidVocab, sigPhrases, thingsToAvoid, voiceConstraints, venueIdentity, businessCharacter, emojiInstruction, typicalClosings }
 }
 
 // ── buildEnhancePrompt ──────────────────────────────────────────────────
@@ -199,7 +301,7 @@ function buildEnhancePrompt(opts: {
   originalText: string
   headline: string
   businessName: string
-  city: string
+  locationText: string
   language: string
   isPaid: boolean
   // brand voice (paid only)
@@ -214,6 +316,7 @@ function buildEnhancePrompt(opts: {
   venueIdentity: string
   businessCharacter: string
   emojiInstruction: string
+  typicalClosings: string[]
   // menu (optional)
   detectedDishName: string
   detectedDishDescription: string
@@ -227,13 +330,12 @@ function buildEnhancePrompt(opts: {
   platforms: string[]
   clarificationContext: string | null
 }): string {
-  const { originalText, headline, businessName, city, language, isPaid,
+  const { originalText, headline, businessName, locationText, language, isPaid,
     brandTone, writingRules, goodExamples, preferVocab, avoidVocab, sigPhrases,
-    thingsToAvoid, voiceConstraints, venueIdentity, businessCharacter, emojiInstruction,
+    thingsToAvoid, voiceConstraints, venueIdentity, businessCharacter, emojiInstruction, typicalClosings,
     detectedDishName, detectedDishDescription, neighborhood, neighborhoodCharacter, locationHooks,
     includeHashtags, platforms, clarificationContext } = opts
 
-  const isInstagram = platforms.includes('instagram')
   const hasBrandVoice = !!(brandTone || writingRules.length > 0)
   const hasDish = !!detectedDishName
   const hasLocation = !!neighborhood || locationHooks.length > 0
@@ -252,6 +354,7 @@ function buildEnhancePrompt(opts: {
     if (sigPhrases.length) brandBlock += `\nBrandets fraser — brug KUN hvis det passer naturligt: ${sigPhrases.join(' · ')}`
     if (thingsToAvoid) brandBlock += `\n🚫 Undgå altid: ${thingsToAvoid}`
     if (venueIdentity) brandBlock += `\nInteriørmærker (faktuel venue-beskrivelse): ${venueIdentity}`
+    if (typicalClosings.length) brandBlock += `\nBrand-specifikke call-to-actions (brug KUN hvis de passer naturligt til teksten): ${typicalClosings.join(' · ')}`
     brandBlock += '\n'
   }
 
@@ -281,16 +384,6 @@ function buildEnhancePrompt(opts: {
     ? `\nEKSTRA KONTEKST FRA BRUGEREN: ${clarificationContext}\n`
     : ''
 
-  // ── HASHTAG INSTRUCTION ─────────────────────────────────────────────
-  let hashtagInstruction = ''
-  if (includeHashtags) {
-    if (isInstagram) {
-      hashtagInstruction = `\nHASHTAGS: Generer 8-12 relevante hashtags. Returner i JSON som: "hashtags": [...], "hashtag_groups": {"primary": [...], "local": [...], "foodie": [...], "extras": [...]}\n`
-    } else {
-      hashtagInstruction = `\nHASHTAGS: Generer 3-5 brede hashtags (ikke niche). Returner i JSON som: "hashtags": [...]\n`
-    }
-  }
-
   // ── FAKTAFORBUD ─────────────────────────────────────────────────────
   const faktaforbud = `\n🚫 FAKTAFORBUD
 - Bevar KUN de faktuelle oplysninger der er i brugerens tekst — tilføj ingen steder, åbningstider, retter eller fakta der ikke allerede er der
@@ -303,7 +396,9 @@ function buildEnhancePrompt(opts: {
   // ── FULL PROMPT ─────────────────────────────────────────────────────
   return `OPGAVE
 Du er en erfaren social media-redaktør der forbedrer en virksomheds opslag.
-Virksomhed: ${businessName}${city ? ` i ${city}` : ''}
+Virksomhed: ${businessName}${locationText ? ` ${locationText}` : ''}
+
+${getHospitalityRegisterBlock(language)}
 
 ORIGINALTEXT (brugerens udkast):
 """
@@ -313,16 +408,14 @@ ${brandBlock}${dishBlock}${locationBlock}${clarificationBlock}${faktaforbud}
 INSTRUKTIONER
 1. Bevar den overordnede intention og de konkrete fakta fra originalteksten
 2. Omskriv i ${isPaid ? 'brandets stemme (jf. BRANDSTEMME ovenfor)' : 'en naturlig, engagerende tone for en dansk virksomhed'}
-3. ${hasDish ? 'Tilføj ét konkret sanseindtryk (syn/smag/tekstur) for den nævnte ret baseret på RET-blokken ovenfor' : 'Gør teksten mere levende og konkret'}
-4. Fjern generiske sætninger og AI-klichéer ("lækker oplevelse", "kom og nyd", "tag med os")
+3. ${hasDish ? 'Nævn mindst ét konkret element fra RET-blokken ovenfor (en ingrediens, tilberedning eller tekstur — f.eks. "frisk parmesan", "sprøde croutoner", "kylling") — brug det præcise ord fra listen, opfind intet' : 'Gør teksten mere levende og konkret'}
+4. Fjern generiske sætninger og AI-klichéer ("lækker oplevelse", "kom og nyd", "tag med os", "lækker", "hyggelig")
 5. Slut med en naturlig call-to-action der passer til indholdet
 6. Længde: 280-420 tegn inkl. emojis
 7. ${emojiInstruction}
-${qualityNote}${hashtagInstruction}
+${qualityNote}
 OUTPUT — returner KUN dette JSON på én linje (ingen markdown, ingen forklaring):
-${includeHashtags
-  ? `{"text":"<forbedret tekst>","headline":"<overskrift eller tom streng>","hashtags":[...]${isInstagram ? ',"hashtag_groups":{"primary":[...],"local":[...],"foodie":[...],"extras":[...]}' : ''}}`
-  : `{"text":"<forbedret tekst>","headline":"<overskrift eller tom streng>"}`
+{"text":"<forbedret tekst>","headline":"<overskrift eller tom streng>"}
 }`
 }
 
@@ -412,15 +505,22 @@ serve(async (req) => {
     // ── RESOLVE BUSINESS IDENTITY ──────────────────────────────────────
     let businessName = businessProfile?.business_name || 'din virksomhed'
     let city = businessProfile?.city || ''
+    let businessVertical = businessProfile?.business_vertical || businessProfile?.business_category || ''
+    let localLocationReference: string | null = null
 
     if (businessId) {
       const [bizResult, locResult] = await Promise.all([
-        supabase.from('businesses').select('name').eq('id', businessId).maybeSingle(),
+        supabase.from('businesses').select('name, vertical, local_location_reference').eq('id', businessId).maybeSingle(),
         supabase.from('business_locations').select('city').eq('business_id', businessId).eq('is_primary', true).maybeSingle()
       ])
       if (bizResult.data?.name) businessName = bizResult.data.name
+      if (bizResult.data?.vertical) businessVertical = bizResult.data.vertical
       if (locResult.data?.city) city = locResult.data.city
+      localLocationReference = bizResult.data?.local_location_reference || null
     }
+
+    // Compute location text: use authentic local reference if available, fallback to city
+    const locationText = localLocationReference || (city ? `i ${city}` : '')
 
     // ── PAID TIER: FETCH ENRICHMENT DATA ──────────────────────────────
     let brandTone = ''
@@ -434,6 +534,7 @@ serve(async (req) => {
     let venueIdentity = ''
     let businessCharacter = ''
     let emojiInstruction = includeEmojis ? '1-2 emojis naturligt placeret' : 'Brug INGEN emojis'
+    let typicalClosings: string[] = []
     let detectedDishName = ''
     let detectedDishDescription = ''
     let neighborhood = ''
@@ -459,6 +560,7 @@ serve(async (req) => {
       venueIdentity = extracted.venueIdentity
       businessCharacter = extracted.businessCharacter
       emojiInstruction = extracted.emojiInstruction
+      typicalClosings = extracted.typicalClosings
       if (!includeEmojis) emojiInstruction = 'Brug INGEN emojis'
 
       // Menu item detection
@@ -488,6 +590,8 @@ serve(async (req) => {
       hasBrandVoice: !!(brandTone || writingRules.length),
       detectedDish: detectedDishName || 'none',
       hasLocationIntel: !!neighborhood,
+      localLocationReference: localLocationReference || 'none',
+      locationText: locationText || 'none',
       textLength: text.length,
     })
 
@@ -513,7 +617,7 @@ serve(async (req) => {
       originalText: text,
       headline,
       businessName,
-      city,
+      locationText,
       language,
       isPaid,
       brandTone,
@@ -527,6 +631,7 @@ serve(async (req) => {
       venueIdentity,
       businessCharacter,
       emojiInstruction,
+      typicalClosings,
       detectedDishName,
       detectedDishDescription,
       neighborhood,
@@ -539,7 +644,7 @@ serve(async (req) => {
     })
 
     // ── GENERATE ───────────────────────────────────────────────────────
-    const { text: enhancedText, headline: enhancedHeadline, hashtags, hashtagGroups } = await callOpenAI(model, prompt, OPENAI_API_KEY)
+    const { text: enhancedText, headline: enhancedHeadline } = await callOpenAI(model, prompt, OPENAI_API_KEY)
 
     if (!enhancedText) {
       throw new Error('No text returned from OpenAI')
@@ -557,6 +662,21 @@ serve(async (req) => {
         }
       }
     }
+
+    const hashtagSets = includeHashtags
+      ? buildPlatformHashtagSets({
+          city,
+          businessName,
+          businessCharacter,
+          vertical: businessVertical,
+          contentType: detectedDishName ? 'menu_item' : 'atmosphere',
+          text: finalText,
+          detectedDishName,
+          detectedDishDescription,
+        })
+      : { facebook: [], instagram: [] }
+
+    const combinedHashtags = Array.from(new Set([...hashtagSets.facebook, ...hashtagSets.instagram]))
 
     // ── PHOTO IDEA (optional, paid only) ──────────────────────────────
     let photoIdea = ''
@@ -586,17 +706,25 @@ serve(async (req) => {
     const result: Record<string, unknown> = {
       text: finalText,
       headline: enhancedHeadline,
-      hashtags,
-      hashtag_groups: hashtagGroups,
+      hashtags: combinedHashtags,
+      facebookHashtags: hashtagSets.facebook,
+      instagramHashtags: hashtagSets.instagram,
+      hashtag_groups: {
+        facebook: hashtagSets.facebook,
+        instagram: hashtagSets.instagram,
+      },
     }
     if (photoIdea) result.photoIdea = photoIdea
 
     console.log('✅ ai-enhance complete:', {
       model, tier: userTier,
       textLength: finalText.length,
-      hashtagCount: hashtags.length,
+      hashtagCount: combinedHashtags.length,
+      facebookHashtagCount: hashtagSets.facebook.length,
+      instagramHashtagCount: hashtagSets.instagram.length,
       menuDetected: !!detectedDishName,
-      locationUsed: !!neighborhood,
+      locationUsed: !!neighborhood || !!localLocationReference,
+      localLocationReferenceUsed: !!localLocationReference,
     })
 
     return new Response(JSON.stringify(result), {

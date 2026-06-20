@@ -9,6 +9,8 @@ interface VisualIdentity {
   photography_style: any;
   platform_visuals: any;
   recognizable_interior_identity: string;
+  venue_character: string;
+  venue_scene: string;
   signature_visual_elements: string[];
   primary_colors: any[];
 }
@@ -36,6 +38,8 @@ export class DatabaseSaver {
       photography_style: identity.photography_style,
       platform_visuals: identity.platform_visuals,
       recognizable_interior_identity: identity.recognizable_interior_identity,
+      venue_character: identity.venue_character,
+      venue_scene: identity.venue_scene,
       signature_visual_elements: identity.signature_visual_elements,
       primary_colors: identity.primary_colors,
     };

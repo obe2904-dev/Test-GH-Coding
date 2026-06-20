@@ -67,25 +67,17 @@
     ],
     "unique_differentiator": "Deres evne til at levere en fuldendt spiseoplevelse – fra casual brunch til fine dining – udelukkende i en udendørs setting ved Aarhus Å, komplet med bordservice."
   },
-  "brand_essence": "Lækker mad og unikke udendørs oplevelser ved åen i Aarhus",
-  "tone_of_voice": "{\"primary_tone\":\"Varm, indbydende og kvalitetsbevidst\",\"attributes\":[\"Gæstfri\",\"Engagerende\",\"Autentisk\"],\"formality_level\":\"professional casual\"}",
+  "brand_essence": "Brunch, frokost og kaffe ved åen i Aarhus i roligt tempo",
+  "tone_of_voice": "{\"primary_tone\":\"Varm, indbydende og tydelig\",\"attributes\":[\"Gæstfri\",\"Engagerende\",\"Autentisk\"],\"formality_level\":\"professional casual\"}",
   "things_to_avoid": "[\"fantastisk (overbrugt, tomt marketingsprog)\",\"perfekt (medmindre det beskriver en menuret fra kontekst, ellers for generelt)\",\"amazing (ikke dansk, overbrugt)\"]",
-  "core_offerings": "Café Faust positionerer sig som en dynamisk udendørs café ved Aarhus Å, der tilbyder en bred vifte af kulinariske oplevelser fra brunch til delikate 3-retters menuer, alt sammen med bordservice i en hyggelig atmosfære.",
-  "content_focus": "[{\"hook\":\"Unikke oplevelser ved åen i Aarhus\",\"usage\":\"Generel branding, tiltrække turister og lokale, fremhæve stemning.\"},{\"hook\":\"Alt fra brunch til delikate 3-retters menuer\",\"usage\":\"Fremhæve det brede madudbud, appelere til forskellige anledninger og tidspunkter.\"},{\"hook\":\"Udeservering ved Åboulevarden\",\"usage\":\"Fremhæve den unikke udendørs placering og stemning, især i varmere måneder.\"},{\"hook\":\"Café-kultur og aftenliv ved vandet\",\"usage\":\"Appellere til sociale sammenkomster, fremhæve atmosfæren både dag og aften.\"}]",
+  "core_offerings": "Café Faust er en udendørs café ved Aarhus Å med brunch, frokost, kaffe og 3-retters menuer serveret med bordservice.",
+  "content_focus": "[{\"hook\":\"Brunch ved åen i Aarhus\",\"usage\":\"Generel branding med tydelig lokation og roligt tempo.\"},{\"hook\":\"Fra brunch til delikate 3-retters menuer\",\"usage\":\"Fremhæve det brede madudbud til forskellige tidspunkter på dagen.\"},{\"hook\":\"Udeservering ved Åboulevarden\",\"usage\":\"Fremhæve udendørs placering og stemning i sæsonen.\"},{\"hook\":\"Café-kultur ved vandet\",\"usage\":\"Appellere til sociale sammenkomster med afslappet atmosfære.\"}]",
   "cta_style": null,
-  "communication_goal": "{\"differentiators\":[\"Den komplette udendørs spiseoplevelse med bordservice ved Aarhus Å (0 indendørs siddepladser for gæster)\",\"Bredt menukort fra afslappet brunch til delikate 3-retters menuer\",\"Positionering som både café og aftenrestaurant\"],\"key_advantages\":[\"Attraktiv og central beliggenhed ved åen\",\"Fleksibilitet i udbud, der appellerer til mange forskellige gæster og anledninger\",\"Fokus på 'unikke oplevelser' udover blot maden\"]}",
+  "communication_goal": "{\"differentiators\":[\"Udendørs servering med bordservice ved Aarhus Å\",\"Bredt menukort fra brunch til delikate 3-retters menuer\",\"Positionering som både café og aftenrestaurant\"],\"key_advantages\":[\"Central beliggenhed ved åen\",\"Fleksibelt udbud til forskellige tidspunkter og behov\",\"Tydelig kombination af mad, service og lokation\"]}",
   "image_preferences": null,
   "last_edited_by": null,
   "last_edited_at": null,
-  "target_audience": {
-    "primary": "Lokale og turister i Aarhus, der søger en hyggelig og kvalitetsbevidst spiseoplevelse ved vandet.",
-    "characteristics": [
-      "Værdsætter god mad og stemning",
-      "Søger sociale mødesteder",
-      "Nyder udendørs café-kultur",
-      "Åben for både casual brunch og mere formelle middage"
-    ]
-  },
+  "target_audience": "Gæster der søger brunch, frokost eller kaffe ved vandet i roligt tempo med tydelig service.",
   "signature_phrases": [
     "ved åen",
     "unikke oplevelser",

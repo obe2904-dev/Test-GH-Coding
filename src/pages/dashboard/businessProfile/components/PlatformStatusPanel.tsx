@@ -4,6 +4,13 @@ interface PlatformStatusPanelProps {
   onToggleDirectPosting: (platform: 'facebook' | 'instagram') => void
 }
 
+const PlatformStatusIcon = () => (
+  <svg className="w-5 h-5 inline-block align-[-0.18em] mr-1.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.8">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L10.5 5.43" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M14 11a5 5 0 0 0-7.07 0L4.8 13.12a5 5 0 0 0 7.07 7.07l1.63-1.63" />
+  </svg>
+)
+
 export function PlatformStatusPanel({
   isConnected,
   directPostingConnected,
@@ -11,9 +18,12 @@ export function PlatformStatusPanel({
 }: PlatformStatusPanelProps) {
   return (
     <div>
-      <h3 className="text-lg font-bold text-gray-900 mb-4">🔗 Platformstatus</h3>
+      <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
+        <PlatformStatusIcon />
+        <span>Platformstatus</span>
+      </h3>
       <p className="text-sm text-gray-600 mb-4">
-        Her kan du se, hvilke platforme du har valgt, og om de er klar til direkte posting.
+        Her kan du se, hvilke platforme du har aktiveret i onboarding, og om de er klar til direkte posting.
       </p>
 
       <div className="space-y-3">
@@ -32,11 +42,11 @@ export function PlatformStatusPanel({
                 Facebook
               </p>
               {isConnected('facebook') ? (
-                <p className="text-xs text-gray-600">✅ Du bruger denne platform</p>
+                <p className="text-xs text-gray-600">✅ Platformen er aktiveret</p>
               ) : (
                 <p className="text-xs text-gray-500 flex items-center gap-1">
                   <span className="text-gray-400">○</span>
-                  Du bruger ikke denne platform
+                  Platformen er ikke aktiveret
                 </p>
               )}
             </div>
@@ -70,11 +80,11 @@ export function PlatformStatusPanel({
                 Instagram
               </p>
               {isConnected('instagram') ? (
-                <p className="text-xs text-gray-600">✅ Du bruger denne platform</p>
+                <p className="text-xs text-gray-600">✅ Platformen er aktiveret</p>
               ) : (
                 <p className="text-xs text-gray-500 flex items-center gap-1">
                   <span className="text-gray-400">○</span>
-                  Du bruger ikke denne platform
+                  Platformen er ikke aktiveret
                 </p>
               )}
             </div>

@@ -3,7 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import CountrySelector from '../CountrySelector'
 import { useAuthStore } from '../../stores/authStore'
-import PlanSwitcher from '../tier/PlanSwitcher'
+import { useBusinessData } from '../../hooks/useBusinessData'
+import { useAllPublishedPosts, useManualPostingCount } from '../../hooks/usePublishedPosts'
+import { useConnectionsStore } from '../../stores/connectionsStore'
+import { useTierStore } from '../../stores/tierStore'
 
 interface TopBarProps {
   className?: string
@@ -59,10 +62,21 @@ const LogOutIcon = ({ className }: { className?: string }) => (
   </svg>
 )
 
+const MenuIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+    <path d="M4 6h16M4 12h16M4 18h16" />
+  </svg>
+)
+
 export function TopBar({ className = '' }: TopBarProps) {
   const { user, signOut } = useAuthStore()
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { business } = useBusinessData()
+  const { posts } = useAllPublishedPosts(business?.id ?? null)
+  const { isConnected } = useConnectionsStore()
+  const manualPostCount = useManualPostingCount(posts, isConnected)
+  const currentTier = useTierStore((state) => state.currentTier)
 
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
@@ -88,7 +102,6 @@ export function TopBar({ className = '' }: TopBarProps) {
     name: displayName,
     email: displayEmail,
     initials: getInitials(),
-    plan: (user?.user_metadata as any)?.plan as string | undefined,
   }
 
   const toggleNotifications = () => {
@@ -112,14 +125,18 @@ export function TopBar({ className = '' }: TopBarProps) {
   }
 
   return (
-    <header className={`bg-white border-b border-slate-200 px-4 flex items-center justify-between ${className}`} style={{ height: '64px' }}>
-      {/* Left Side - Tier Switcher for Testing */}
-      <div className="flex items-center">
-        <PlanSwitcher source="supabase" writeBack={true} className="text-sm" />
-      </div>
+    <header className={`w-full bg-white border-b border-slate-200 px-4 flex items-center ${className}`} style={{ height: '64px' }}>
+      {/* Left Side - Dashboard Link */}
+      <button
+        onClick={() => navigate('/dashboard')}
+        className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition-all"
+      >
+        <MenuIcon className="w-5 h-5 text-slate-500" />
+        <span>{t('navigation.mainMenu')}</span>
+      </button>
 
       {/* Right Side - Language, Notifications, User Menu */}
-      <div className="flex items-center gap-3">
+      <div className="ml-auto flex items-center gap-3">
         {/* Country Selector (drives UI language) */}
         <CountrySelector />
 
@@ -130,40 +147,94 @@ export function TopBar({ className = '' }: TopBarProps) {
             className="flex items-center gap-2 px-3 py-2 hover:bg-slate-100 rounded-lg transition-all relative"
           >
             <BellIcon className="w-5 h-5 text-slate-600" />
-            <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+            {manualPostCount > 0 && (
+              <span className="absolute top-0.5 right-0.5 min-w-[20px] h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1.5 border-2 border-white">
+                {manualPostCount}
+              </span>
+            )}
           </button>
 
           {/* Notification Dropdown */}
           {notificationOpen && (
-            <div className="absolute right-0 mt-1 w-80 bg-white rounded-lg shadow-lg border border-slate-200 p-3 z-50">
+            <div className="absolute right-0 mt-1 w-96 bg-white rounded-lg shadow-lg border border-slate-200 p-3 z-50">
               <div className="px-2 py-2 border-b border-slate-200 mb-2">
                 <h3 className="text-sm font-bold text-slate-800">
                   {t('notifications.title', 'Notifikationer')}
                 </h3>
+                {posts.filter(p => p.status === 'scheduled').length > 0 && (
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    {posts.filter(p => p.status === 'scheduled').length} planlagte opslag
+                    {manualPostCount > 0 && (
+                      <span className="text-amber-700"> · {manualPostCount} behøver manuel posting</span>
+                    )}
+                  </p>
+                )}
               </div>
               <div className="space-y-2 max-h-96 overflow-y-auto">
-                <div className="px-3 py-2.5 hover:bg-slate-50 rounded transition-all">
-                  <div className="text-sm font-medium text-slate-800">
-                    {t('notifications.postScheduled', 'Nyt opslag planlagt')}
+                {/* All scheduled posts - sorted by date */}
+                {posts
+                  .filter(p => p.status === 'scheduled')
+                  .sort((a, b) => {
+                    const dateA = a.scheduledFor ?? a.postedAt
+                    const dateB = b.scheduledFor ?? b.postedAt
+                    return dateA.getTime() - dateB.getTime()
+                  })
+                  .slice(0, 10)
+                  .map(post => {
+                    const date = post.scheduledFor ?? post.postedAt
+                    const dateStr = date.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short' })
+                    const timeStr = date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })
+                    const title = post.menuItemName || post.contentType || 'Opslag'
+                    const needsManualPosting = !isConnected(post.platform.toLowerCase())
+                    
+                    return (
+                      <button
+                        key={post.id}
+                        onClick={() => {
+                          setNotificationOpen(false)
+                          navigate('/dashboard/calendar')
+                        }}
+                        className={`w-full px-3 py-2.5 hover:bg-opacity-80 rounded transition-all text-left border ${
+                          needsManualPosting 
+                            ? 'border-amber-200 bg-amber-50/50 hover:bg-amber-50' 
+                            : 'border-indigo-200 bg-indigo-50/30 hover:bg-indigo-50/50'
+                        }`}
+                      >
+                        <div className={`text-sm font-medium flex items-center gap-2 ${
+                          needsManualPosting ? 'text-amber-900' : 'text-indigo-900'
+                        }`}>
+                          <span>{needsManualPosting ? '⚠️' : '🤖'}</span>
+                          {post.platform} - {title}
+                        </div>
+                        <div className={`text-xs mt-1 ${
+                          needsManualPosting ? 'text-amber-700' : 'text-indigo-700'
+                        }`}>
+                          Planlagt til {dateStr} {timeStr} {needsManualPosting ? '- Manuel posting påkrævet' : '- Planlagt auto-post'}
+                        </div>
+                      </button>
+                    )
+                  })}
+                
+                {posts.filter(p => p.status === 'scheduled').length === 0 && (
+                  <div className="px-3 py-6 text-center">
+                    <div className="text-3xl mb-2">📅</div>
+                    <p className="text-sm text-slate-600">
+                      Ingen planlagte opslag
+                    </p>
                   </div>
-                  <div className="text-xs text-slate-600 mt-1">
-                    {t('notifications.postScheduledDesc', 'Dit opslag er planlagt til i morgen kl. 10:00')}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1.5">
-                    {t('notifications.time.hoursAgo', 'For 2 timer siden')}
-                  </div>
-                </div>
-                <div className="px-3 py-2.5 hover:bg-slate-50 rounded transition-all">
-                  <div className="text-sm font-medium text-slate-800">
-                    {t('notifications.performanceUpdate', 'Performance opdatering')}
-                  </div>
-                  <div className="text-xs text-slate-600 mt-1">
-                    {t('notifications.performanceDesc', 'Dit seneste opslag har 234 visninger')}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1.5">
-                    {t('notifications.time.yesterday', 'I går')}
-                  </div>
-                </div>
+                )}
+                
+                {posts.filter(p => p.status === 'scheduled').length > 10 && (
+                  <button
+                    onClick={() => {
+                      setNotificationOpen(false)
+                      navigate('/dashboard/calendar')
+                    }}
+                    className="w-full px-3 py-2 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  >
+                    Se alle {posts.filter(p => p.status === 'scheduled').length} planlagte opslag →
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -220,7 +291,7 @@ export function TopBar({ className = '' }: TopBarProps) {
                     <UsersIcon className="w-4 h-4" />
                     {t('navigation.team', 'Team & Brugere')}
                   </div>
-                  {userData.plan && userData.plan !== 'Premium' && <span className="text-xs">⭐</span>}
+                  {currentTier !== 'premium' && <span className="text-xs">⭐</span>}
                 </button>
                 <button 
                   onClick={() => navigate('/dashboard/settings')}

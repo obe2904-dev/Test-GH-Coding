@@ -35,6 +35,7 @@ interface MenuCard {
   average_price?: number
   item_count?: number
   ai_summary?: string
+  is_social_lead?: boolean
   created_at: string
 }
 
@@ -63,9 +64,12 @@ function MenuPage() {
   
   // Pricing state
   const [priceLevel, setPriceLevel] = useState<string>('')
-  const [averageCheck, setAverageCheck] = useState<string>('')
   const [isEditingPricing, setIsEditingPricing] = useState(false)
   const [isSavingPricing, setIsSavingPricing] = useState(false)
+
+  // Normalized item flags (is_signature toggle)
+  // keyed by item_name.toLowerCase() → { id, is_signature }
+  const [normalizedItems, setNormalizedItems] = useState<Map<string, { id: string; is_signature: boolean }>>(new Map())
   
   // Store polling intervals for cleanup
   const pollIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
@@ -130,6 +134,7 @@ function MenuPage() {
 
         await loadMenuCards((businessData as any).id)
         await loadPricingData((businessData as any).id)
+        await loadNormalizedItems((businessData as any).id)
       } finally {
         if (isActive) setIsLoading(false)
       }
@@ -256,6 +261,7 @@ function MenuPage() {
           average_price: averagePrice,
           item_count: itemCount,
           ai_summary: result?.ai_summary || undefined,
+          is_social_lead: !!(source as any).is_social_lead,
           created_at: source.created_at
         }
       })
@@ -516,7 +522,8 @@ function MenuPage() {
 
               // Reload cards
               await loadMenuCards(businessId)
-            } else if (jobResult.status === 'queued' || jobResult.status === 'processing') {
+            } else if (jobResult.status === 'error') {
+              // Extraction failed
               clearInterval(pollInterval)
               pollIntervalsRef.current.delete(cardId)
               setActiveExtractions(prev => {
@@ -529,12 +536,13 @@ function MenuPage() {
                 .from('menu_sources')
                 .update({ 
                   status: 'error',
-                  error_message: jobResult?.error_message || 'Timeout'
+                  error_message: jobResult?.error_message || 'Extraction failed'
                 })
                 .eq('id', cardId)
 
               await loadMenuCards(businessId)
             }
+            // If status is 'queued' or 'processing', keep polling (do nothing here)
           } catch (pollError) {
             console.error('Polling error:', pollError)
             // Don't stop polling on error unless max attempts reached
@@ -605,7 +613,7 @@ function MenuPage() {
 
       // Keywords to identify drink menus (case-insensitive)
       const drinkKeywords = ['cocktail', 'wine', 'vin', 'øl', 'beer', 'bar', 'drikkevarer', 'drink', 'beverage']
-      const kidsKeywords = ['børn', 'kids', 'children', 'child', 'junior', 'lille']
+      const kidsKeywords = ['børnemenu', 'børnemad', 'børn', 'kids', 'children', 'child', 'junior', 'lille']
 
       // Filter out drink menus and collect prices from food menus
       const allPrices: number[] = []
@@ -627,13 +635,21 @@ function MenuPage() {
           return
         }
 
-        // Check for kids menu in categories
+        // Check for kids menu in category names AND item names
         data.categories.forEach((cat: any) => {
           const catName = (cat.name || '').toLowerCase()
           if (kidsKeywords.some(kw => catName.includes(kw))) {
             hasKidsMenu = true
-            console.log(`👶 Kids menu detected: ${cat.name}`)
+            console.log(`👶 Kids menu detected in category: ${cat.name}`)
           }
+          // Also scan item names — børnemenu often appears as a sub-item
+          cat.items?.forEach((item: any) => {
+            const itemName = (typeof item === 'string' ? item : (item.name || '')).toLowerCase()
+            if (kidsKeywords.some(kw => itemName.includes(kw))) {
+              hasKidsMenu = true
+              console.log(`👶 Kids menu detected in item: ${typeof item === 'string' ? item : item.name}`)
+            }
+          })
         })
 
         // Extract prices from this food menu
@@ -673,9 +689,7 @@ function MenuPage() {
       // Use upsert to avoid race conditions when multiple extractions complete simultaneously
       const opsData = {
         business_id: businessId,
-        average_check_per_person: Math.round(averagePrice),
         price_level: priceLevel,
-        currency: 'DKK',
         has_kids_menu: hasKidsMenu
       }
 
@@ -728,7 +742,6 @@ function MenuPage() {
         menu_type: detectMenuType(url),
         label: detectMenuLabel(url),
         created_by: userId,
-        created_at: new Date().toISOString()
       })
 
       setNewMenuInput('')
@@ -787,11 +800,25 @@ function MenuPage() {
     if (!confirm(t('menu.delete.confirm'))) return
 
     try {
-      // Delete source
-      await supabase.from('menu_sources').delete().eq('id', cardId)
+      // Soft-delete normalized menu items (set is_active = false)
+      // This preserves menu data for historical analysis and potential recovery
+      const { error: normalizedError } = await supabase
+        .from('menu_items_normalized')
+        .update({ is_active: false })
+        .eq('menu_url', sourceUrl)
       
-      // Delete corresponding extraction results
-      await supabase.from('menu_results_v2').delete().eq('source_url', sourceUrl)
+      if (normalizedError) {
+        console.error('Error soft-deleting normalized items:', normalizedError)
+      }
+      
+      // Hard-delete extraction results (metadata no longer needed)
+      await supabase
+        .from('menu_results_v2')
+        .delete()
+        .eq('source_url', sourceUrl)
+      
+      // Hard-delete source (user explicitly removed this URL)
+      await supabase.from('menu_sources').delete().eq('id', cardId)
       
       // Remove from selected URLs if present
       setSelectedUrls(prev => {
@@ -807,6 +834,48 @@ function MenuPage() {
       if (businessId) await loadMenuCards(businessId)
     } catch (error) {
       console.error('Error deleting card:', error)
+    }
+  }
+
+  const handleExtractSelected = async () => {
+    if (!businessId || selectedUrls.size === 0) return
+
+    const { data: authData } = await supabase.auth.getUser()
+    const userId = authData?.user?.id
+
+    // Find which selected URLs are NOT yet in menu_sources
+    const currentMenuCardUrlSet = new Set(menuCards.map(c => c.source_url))
+    const urlsToAdd = Array.from(selectedUrls).filter(url => !currentMenuCardUrlSet.has(url))
+
+    // Insert new URLs into menu_sources
+    if (urlsToAdd.length > 0) {
+      await supabase.from('menu_sources').insert(
+        urlsToAdd.map(url => ({
+          business_id: businessId,
+          source_url: url,
+          source_type: 'url',
+          source_origin: 'ai_detected',
+          status: 'pending',
+          menu_type: detectMenuType(url),
+          label: detectMenuLabel(url),
+          created_by: userId,
+        }))
+      )
+    }
+
+    // Query all menu_sources for selected URLs to get their IDs (fresh from DB)
+    const { data: sources } = await supabase
+      .from('menu_sources')
+      .select('id, source_url')
+      .eq('business_id', businessId)
+      .in('source_url', Array.from(selectedUrls))
+
+    // Reload menu cards to reflect newly inserted sources
+    await loadMenuCards(businessId)
+
+    // Trigger extraction for each selected source
+    for (const source of (sources || [])) {
+      handleExtractMenu(source.id, source.source_url)
     }
   }
 
@@ -865,13 +934,12 @@ function MenuPage() {
     try {
       const { data } = await (supabase as any)
         .from('business_operations')
-        .select('price_level, average_check_per_person')
+        .select('price_level')
         .eq('business_id', bizId)
         .maybeSingle()
 
       if (data) {
         setPriceLevel(data.price_level || '')
-        setAverageCheck(data.average_check_per_person ? String(data.average_check_per_person) : '')
       }
     } catch (error) {
       console.error('Error loading pricing:', error)
@@ -889,7 +957,6 @@ function MenuPage() {
         .upsert({
           business_id: businessId,
           price_level: priceLevel || null,
-          average_check_per_person: averageCheck ? parseFloat(averageCheck) : null,
           updated_at: new Date().toISOString()
         }, {
           onConflict: 'business_id'
@@ -903,6 +970,75 @@ function MenuPage() {
       alert(t('menu.savePricingFailed'))
     } finally {
       setIsSavingPricing(false)
+    }
+  }
+
+  const loadNormalizedItems = async (bizId: string) => {
+    try {
+      const { data } = await supabase
+        .from('menu_items_normalized')
+        .select('id, item_name, is_signature')
+        .eq('business_id', bizId)
+        .eq('is_active', true) // Only load active items
+      if (data) {
+        const map = new Map<string, { id: string; is_signature: boolean }>()
+        for (const row of data as any[]) {
+          if (row.item_name) map.set(row.item_name.toLowerCase(), { id: row.id, is_signature: !!row.is_signature })
+        }
+        setNormalizedItems(map)
+      }
+    } catch (err) {
+      console.error('Error loading normalized items:', err)
+    }
+  }
+
+  const toggleSocialLead = async (cardId: string) => {
+    const card = menuCards.find(c => c.id === cardId)
+    if (!card) return
+    const newVal = !card.is_social_lead
+    // If setting a new social lead, clear all others first (only one at a time)
+    setMenuCards(prev => prev.map(c => ({
+      ...c,
+      is_social_lead: c.id === cardId ? newVal : (newVal ? false : c.is_social_lead)
+    })))
+    if (newVal) {
+      // Clear all others in DB
+      await supabase.from('menu_sources').update({ is_social_lead: false }).eq('business_id', businessId!)
+    }
+    const { error: updateErr } = await supabase
+      .from('menu_sources')
+      .update({ is_social_lead: newVal })
+      .eq('id', cardId)
+    if (updateErr) {
+      // Revert
+      await loadMenuCards(businessId!)
+      console.error('Failed to toggle is_social_lead:', updateErr)
+    }
+  }
+
+  const toggleSignature = async (itemName: string) => {
+    const key = itemName.toLowerCase()
+    const entry = normalizedItems.get(key)
+    if (!entry) return
+    const newVal = !entry.is_signature
+    // Optimistic update
+    setNormalizedItems(prev => {
+      const next = new Map(prev)
+      next.set(key, { ...entry, is_signature: newVal })
+      return next
+    })
+    const { error: updateErr } = await supabase
+      .from('menu_items_normalized')
+      .update({ is_signature: newVal })
+      .eq('id', entry.id)
+    if (updateErr) {
+      // Revert
+      setNormalizedItems(prev => {
+        const next = new Map(prev)
+        next.set(key, entry)
+        return next
+      })
+      console.error('Failed to toggle is_signature:', updateErr)
     }
   }
 
@@ -1094,7 +1230,7 @@ function MenuPage() {
                               </>
                             )}
                             <h3 className="text-sm font-semibold text-brand">
-                              {menuCard?.extracted_data?.menuTitle || menuCard?.label || t('menu.sources.defaultTitle')}
+                              {menuCard?.extracted_data?.menuTitle || menuCard?.label || detectMenuLabel(item.url)}
                             </h3>
                             {menuCard?.extracted_data?.menuTitle && menuCard?.label && 
                              menuCard.extracted_data.menuTitle !== menuCard.label && (
@@ -1128,6 +1264,19 @@ function MenuPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-2">
+                          {menuCard?.status === 'extracted' && (
+                            <button
+                              onClick={() => menuCard && toggleSocialLead(menuCard.id)}
+                              title={menuCard?.is_social_lead ? 'Fjern som social-fokus-menu' : 'Markér som den menu I vil fremhæve socialt'}
+                              className={`px-2 py-1.5 text-sm rounded border transition-colors ${
+                                menuCard?.is_social_lead
+                                  ? 'bg-warning text-white border-warning font-medium'
+                                  : 'text-text-muted border-border hover:border-warning hover:text-warning'
+                              }`}
+                            >
+                              {menuCard?.is_social_lead ? '📢 Fremhævet socialt' : '📢'}
+                            </button>
+                          )}
                           {menuCard?.status === 'extracted' && menuCard.extracted_data && (
                             <button
                               onClick={() => menuCard && toggleExpand(menuCard.id)}
@@ -1209,21 +1358,39 @@ function MenuPage() {
                               </div>
                               <div className="space-y-2">
                                 {category.items && category.items.length > 0 ? (
-                                  category.items.map((item: any, itemIdx: number) => (
-                                    <div key={itemIdx} className="flex justify-between text-sm">
-                                      <div className="flex-1">
-                                        <span className="text-text">{item.name}</span>
-                                        {item.description && (
-                                          <p className="text-xs text-text-secondary mt-0.5">{item.description}</p>
+                                  category.items.map((item: any, itemIdx: number) => {
+                                    const normEntry = normalizedItems.get((item.name || '').toLowerCase())
+                                    const isSig = normEntry?.is_signature ?? false
+                                    return (
+                                    <div key={itemIdx} className="flex items-start justify-between text-sm gap-2">
+                                      <div className="flex items-start gap-1.5 flex-1 min-w-0">
+                                        {normEntry && (
+                                          <button
+                                            onClick={() => toggleSignature(item.name)}
+                                            title={isSig ? 'Fjern signaturret-markering' : 'Markér som signaturret'}
+                                            className={`mt-0.5 shrink-0 text-base leading-none transition-colors ${isSig ? 'text-warning' : 'text-text-muted hover:text-warning'}`}
+                                          >
+                                            {isSig ? '★' : '☆'}
+                                          </button>
                                         )}
+                                        <div className="flex-1 min-w-0">
+                                          <span className={`text-text${isSig ? ' font-medium' : ''}`}>{item.name}</span>
+                                          {isSig && (
+                                            <span className="ml-1.5 text-xs text-warning font-normal">Signaturret</span>
+                                          )}
+                                          {item.description && (
+                                            <p className="text-xs text-text-secondary mt-0.5">{item.description}</p>
+                                          )}
+                                        </div>
                                       </div>
                                       {item.price && (
-                                        <span className="text-text-secondary font-medium ml-4 whitespace-nowrap">
+                                        <span className="text-text-secondary font-medium whitespace-nowrap">
                                           {item.price}{item.currency ? ` ${item.currency}` : ''}
                                         </span>
                                       )}
                                     </div>
-                                  ))
+                                    )
+                                  })
                                 ) : (
                                   <p className="text-xs text-text-muted italic py-2">{t('menu.sources.emptyCategory')}</p>
                                 )}
@@ -1243,6 +1410,21 @@ function MenuPage() {
               })}
             </div>
 
+          {/* Extract Selected Button */}
+          {selectedUrls.size > 0 && (
+            <div className="flex justify-end">
+              <button
+                onClick={handleExtractSelected}
+                disabled={activeExtractions.size > 0 || isProcessingQueue}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-cta text-text-inverse text-sm font-semibold rounded-lg hover:bg-cta-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {activeExtractions.size > 0 || isProcessingQueue
+                  ? t('menu.sources.processing', { count: selectedUrls.size })
+                  : t('menu.sources.fetchSelected', { count: selectedUrls.size })}
+              </button>
+            </div>
+          )}
+
           {/* Pricing Section */}
           <div className="bg-surface rounded-lg border border-border p-4">
             <div className="flex items-start justify-between gap-4">
@@ -1250,13 +1432,8 @@ function MenuPage() {
                 <h3 className="text-sm font-semibold text-brand mb-1">{t('menu.pricing.heading')}</h3>
                 {!isEditingPricing && (
                   <p className="text-sm text-text-secondary">
-                    {priceLevel || averageCheck
-                      ? [
-                          priceLevel && t('menu.pricing.levelLabel', { level: priceLevel }),
-                          averageCheck && t('menu.pricing.avgLabel', { avg: averageCheck })
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')
+                    {priceLevel
+                      ? t('menu.pricing.levelLabel', { level: priceLevel })
                       : t('menu.pricing.notSet')}
                   </p>
                 )}
@@ -1289,21 +1466,6 @@ function MenuPage() {
                     <option value="upscale">{t('menu.pricing.upscale')}</option>
                     <option value="fine_dining">{t('menu.pricing.fineDining')}</option>
                   </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-text-secondary mb-1">
-                    {t('menu.pricing.avgCheckLabel')}
-                  </label>
-                  <input
-                    type="number"
-                    value={averageCheck}
-                    onChange={(e) => setAverageCheck(e.target.value)}
-                    placeholder="250"
-                    min="0"
-                    step="10"
-                    className="w-full px-3 py-2 border border-border rounded text-sm"
-                  />
                 </div>
 
                 <button
@@ -1616,6 +1778,50 @@ function MenuPage() {
           </div>
           )}
 
+          {/* Add Manual Text Section — primary path for businesses with inaccessible menus */}
+          <div className="bg-surface rounded-lg border border-border px-4 py-3">
+            {!showAddText && (
+              <button
+                onClick={() => setShowAddText(true)}
+                className="flex items-center gap-2 text-sm font-medium text-cta hover:text-cta-text"
+              >
+                <span>+</span>
+                <span>{t('menu.addManualText')}</span>
+              </button>
+            )}
+
+            {showAddText && (
+              <div className="space-y-2">
+                <p className="text-xs text-text-secondary">Indsæt jeres menu som tekst — f.eks. kopieret fra jeres kassesystem, PDF eller eget dokument.</p>
+                <textarea
+                  value={newTextInput}
+                  onChange={(e) => setNewTextInput(e.target.value)}
+                  placeholder={t('ui.menu.placeholder.example_list')}
+                  className="w-full px-3 py-2 border border-border rounded text-sm min-h-[120px]"
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAddManualText}
+                    disabled={!newTextInput.trim()}
+                    className="px-3 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt"
+                  >
+                    {t('menu.add.analyze')}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowAddText(false)
+                      setNewTextInput('')
+                    }}
+                    className="px-3 py-2 text-sm font-medium text-text-secondary border border-border rounded hover:bg-surface-alt"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Add Link Section */}
           <div className="bg-surface rounded-lg border border-border px-4 py-3">
             {!showAddLink && (
@@ -1650,49 +1856,6 @@ function MenuPage() {
                     onClick={() => {
                       setShowAddLink(false)
                       setNewMenuInput('')
-                    }}
-                    className="px-3 py-2 text-sm font-medium text-text-secondary border border-border rounded hover:bg-surface-alt"
-                  >
-                    {t('common.cancel')}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Add Manual Text Section */}
-          <div className="bg-surface rounded-lg border border-border px-4 py-3">
-            {!showAddText && (
-              <button
-                onClick={() => setShowAddText(true)}
-                className="flex items-center gap-2 text-sm font-medium text-cta hover:text-cta-text"
-              >
-                <span>+</span>
-                <span>{t('menu.addManualText')}</span>
-              </button>
-            )}
-
-            {showAddText && (
-              <div className="space-y-2">
-                <textarea
-                  value={newTextInput}
-                  onChange={(e) => setNewTextInput(e.target.value)}
-                  placeholder={t('ui.menu.placeholder.example_list')}
-                  className="w-full px-3 py-2 border border-border rounded text-sm min-h-[120px]"
-                  autoFocus
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddManualText}
-                    disabled={!newTextInput.trim()}
-                    className="px-3 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt"
-                  >
-                    {t('menu.add.analyze')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowAddText(false)
-                      setNewTextInput('')
                     }}
                     className="px-3 py-2 text-sm font-medium text-text-secondary border border-border rounded hover:bg-surface-alt"
                   >

@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { getUserIdFromAuth, getUserQuota, incrementQuota } from '../_shared/quota-utils.ts'
-import { buildSimplePrompt, buildCall1Prompt, buildCall2Prompt } from './prompts.ts'
+import { buildSimplePrompt, buildCall1Prompt, buildCall2Prompt, buildAtmosphereExtractionPrompt, buildAtmosphereSynthesisPrompt, type AtmosphereContentType } from './prompts.ts'
 import { SUPPORTED_AI_EDIT_ACTIONS } from '../_shared/ai-actions.ts'
 import { resizeForGemini } from '../_shared/resize-image.ts'
 
@@ -18,6 +19,7 @@ interface AnalyzePhotoRequest {
   duration?: number // Video duration in seconds (for videos only)
   imageWidth?: number  // Client-detected pixel width (more reliable than server-side JPEG parsing)
   imageHeight?: number // Client-detected pixel height
+  businessId?: string  // Optional — enables silent atmosphere extraction when present
 }
 
 type SuggestionCategory = 'cleaning' | 'color'
@@ -118,55 +120,373 @@ async function callGemini(
   base64Image: string,
   mimeType: string
 ): Promise<string> {
-  let response: Response
-  try {
-    response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [
-              { text: `${systemPrompt}\n\n${userPrompt}` },
-              { inline_data: { mime_type: mimeType, data: base64Image } }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.4,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 4000,
-            responseMimeType: 'application/json'
-          }
-        })
+  const maxRetries = 3
+  const baseDelayMs = 1000 // Start with 1 second
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let response: Response
+    try {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              role: 'user',
+              parts: [
+                { text: `${systemPrompt}\n\n${userPrompt}` },
+                { inline_data: { mime_type: mimeType, data: base64Image } }
+              ]
+            }],
+            generationConfig: {
+              temperature: 0.5,  // Slightly higher to avoid default behaviors
+              topK: 40,
+              topP: 0.95,
+              maxOutputTokens: 4000,
+              responseMimeType: 'application/json',
+              thinkingConfig: { thinkingBudget: 0 }
+            }
+          })
+        }
+      )
+    } catch (fetchError) {
+      throw new Error(`Failed to connect to Gemini API: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`)
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      
+      // Log the full error for debugging
+      console.error(`❌ Gemini API Error (status ${response.status}):`, errorText)
+      
+      // Handle rate limiting with exponential backoff
+      if (response.status === 429 && attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt) // 1s, 2s, 4s
+        console.warn(`⚠️ Gemini API rate limit hit (attempt ${attempt + 1}/${maxRetries + 1}). Retrying in ${delayMs}ms...`)
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+        continue // Retry
       }
-    )
-  } catch (fetchError) {
-    throw new Error(`Failed to connect to Gemini API: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`)
+      
+      // Rate limit exhausted - provide user-friendly message
+      if (response.status === 429) {
+        console.error('❌ Rate limit exhausted after 3 retries')
+        throw new Error('Rate limit exceeded. Please wait a moment before analyzing another photo.')
+      }
+      
+      // Non-retryable error or retries exhausted
+      throw new Error(`Gemini API request failed: ${response.status} - ${errorText}`)
+    }
+
+    const data = await response.json()
+    const parts = data.candidates?.[0]?.content?.parts
+    const text = Array.isArray(parts) ? parts.map((p: any) => p?.text ?? '').join('') : undefined
+    if (!text) throw new Error('No response from Gemini')
+    return text
   }
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`Gemini API request failed: ${response.status} - ${errorText}`)
+
+  // Should never reach here, but TypeScript needs a return
+  throw new Error('Gemini API retries exhausted')
+}
+
+// Helper: Detect if response is object detection instead of photo analysis
+function isObjectDetectionResponse(text: string): boolean {
+  const indicators = ['box_2d', 'bounding_box', '"label":', 'coordinates', 'detection']
+  const lowerText = text.toLowerCase()
+  return indicators.some(indicator => lowerText.includes(indicator.toLowerCase()))
+}
+
+// Helper: Validate photo analysis response structure
+function validatePhotoAnalysisResponse(parsed: any): { valid: boolean; error?: string } {
+  if (!parsed || typeof parsed !== 'object') {
+    return { valid: false, error: 'Response is not an object' }
   }
-  const data = await response.json()
-  const parts = data.candidates?.[0]?.content?.parts
-  const text = Array.isArray(parts) ? parts.map((p: any) => p?.text ?? '').join('') : undefined
-  if (!text) throw new Error('No response from Gemini')
-  return text
+  
+  // Check if it's an array (likely object detection)
+  if (Array.isArray(parsed)) {
+    return { valid: false, error: 'Response is an array (likely object detection output)' }
+  }
+  
+  // Check for object detection fields
+  if (parsed.box_2d || parsed.bounding_box || (Array.isArray(parsed.detections))) {
+    return { valid: false, error: 'Response contains object detection fields' }
+  }
+  
+  // Check for required photo analysis fields
+  const requiredFields = ['recommendation', 'generalFeedback', 'whatWorks']
+  const missingFields = requiredFields.filter(field => !(field in parsed))
+  
+  if (missingFields.length > 0) {
+    return { valid: false, error: `Missing required fields: ${missingFields.join(', ')}` }
+  }
+  
+  return { valid: true }
 }
 
 function extractJson(text: string): any {
   let jsonString = text.trim()
+  
+  // Pre-check: Detect object detection response before parsing
+  if (isObjectDetectionResponse(jsonString)) {
+    console.error('🔴 DETECTED OBJECT DETECTION RESPONSE', {
+      preview: jsonString.substring(0, 200),
+      indicators: ['box_2d', 'bounding_box', 'label'].filter(i => jsonString.includes(i))
+    })
+    throw new Error('Gemini returned object detection output instead of photo analysis. This is a model interpretation error.')
+  }
+  
+  // Extract from markdown code blocks
   const codeBlockMatch = jsonString.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
   if (codeBlockMatch) jsonString = codeBlockMatch[1].trim()
+  
+  // Find JSON object boundaries
   const jsonStart = jsonString.indexOf('{')
   const jsonEnd = jsonString.lastIndexOf('}')
+  
+  // Check if response starts with array (object detection pattern)
+  if (jsonString.trim().startsWith('[')) {
+    console.error('🔴 RESPONSE STARTS WITH ARRAY', {
+      preview: jsonString.substring(0, 200)
+    })
+    throw new Error('Response is an array (likely object detection). Expected photo analysis object.')
+  }
+  
   if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
     jsonString = jsonString.substring(jsonStart, jsonEnd + 1)
   }
-  return JSON.parse(jsonString)
+  
+  // Parse with error handling
+  let parsed: any
+  try {
+    parsed = JSON.parse(jsonString)
+  } catch (parseError) {
+    console.error('🔴 JSON PARSE FAILED', {
+      error: parseError instanceof Error ? parseError.message : String(parseError),
+      jsonPreview: jsonString.substring(0, 300),
+      fullLength: jsonString.length
+    })
+    throw new Error(`Failed to parse JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`)
+  }
+  
+  // Validate structure
+  const validation = validatePhotoAnalysisResponse(parsed)
+  if (!validation.valid) {
+    console.error('🔴 INVALID PHOTO ANALYSIS STRUCTURE', {
+      error: validation.error,
+      receivedKeys: Object.keys(parsed),
+      preview: JSON.stringify(parsed).substring(0, 300)
+    })
+    throw new Error(`Invalid photo analysis response: ${validation.error}`)
+  }
+  
+  return parsed
+}
+
+// ─── Atmosphere extraction helpers ──────────────────────────────────────────
+
+// Detect content type from caption text — used to gate atmosphere extraction.
+// Returns null for food/product captions (no useful atmosphere data).
+function detectAtmosphereContentType(postText: string): AtmosphereContentType | null {
+  const t = postText.toLowerCase()
+  const bts = ['bag scenen', 'bag kulisserne', 'bag om', 'klargøring', 'inden vi åbner',
+    'klar til åbning', 'behind the scene', 'backstage', 'before we open', 'bts',
+    'teamet er klar', 'vores team', 'i dag starter vi']
+  const interior = ['udeservering', 'terrasse', 'vores lokale', 'interiør', 'indretning',
+    'glasvægge', 'vores café', 'vores restaurant', 'vores plads', 'kom ind',
+    'her sidder', 'our café', 'our space', 'our terrace', 'outdoor seating', 'our restaurant']
+  const atmosphere = ['stemning', 'atmosfære', 'hygge', 'en aften hos', 'en dag hos',
+    'hos os i dag', 'vores sted', 'atmosphere', 'vibe', 'mood', 'den gode stemning']
+
+  if (bts.some(k => t.includes(k))) return 'behind_the_scenes'
+  if (interior.some(k => t.includes(k))) return 'interior'
+  if (atmosphere.some(k => t.includes(k))) return 'atmosphere'
+  return null
+}
+
+// SHA-256 hex of a string — used to deduplicate photo URLs in the log table.
+async function sha256Hex(input: string): Promise<string> {
+  const encoded = new TextEncoder().encode(input)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded)
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// Run silent atmosphere extraction and store result. Triggers synthesis when
+// the business reaches 10 qualifying entries.
+async function runAtmosphereExtraction(opts: {
+  businessId: string
+  imageUrl: string
+  base64Image: string
+  mimeType: string
+  contentType: AtmosphereContentType
+  apiKey: string
+  model: string
+  supabaseUrl: string
+  supabaseServiceKey: string
+}): Promise<void> {
+  const { businessId, imageUrl, base64Image, mimeType, contentType, apiKey, model, supabaseUrl, supabaseServiceKey } = opts
+  const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+  // Gate 3: deduplication — skip if this photo was already analysed for this business
+  const urlHash = await sha256Hex(imageUrl)
+  const { data: existing } = await supabase
+    .from('photo_atmosphere_log')
+    .select('id')
+    .eq('business_id', businessId)
+    .eq('photo_url_hash', urlHash)
+    .maybeSingle()
+  if (existing) {
+    console.log('⏭️ Atmosphere extraction skipped — photo already analysed')
+    return
+  }
+
+  // Run atmosphere extraction
+  const { systemPrompt, userPrompt } = buildAtmosphereExtractionPrompt(contentType)
+  let extractedText: string
+  try {
+    extractedText = await callGemini(apiKey, model, systemPrompt, userPrompt, base64Image, mimeType)
+  } catch (err) {
+    console.warn('⚠️ Atmosphere extraction Gemini call failed:', err)
+    return
+  }
+
+  let parsed: { venue_scene: string; visual_character?: string }
+  try {
+    parsed = extractJson(extractedText)
+    if (!parsed?.venue_scene || typeof parsed.venue_scene !== 'string') return
+  } catch {
+    console.warn('⚠️ Atmosphere extraction — could not parse JSON')
+    return
+  }
+
+  // Store extraction
+  const { error: insertError } = await supabase
+    .from('photo_atmosphere_log')
+    .insert({
+      business_id: businessId,
+      photo_url_hash: urlHash,
+      content_type: contentType,
+      venue_scene: parsed.venue_scene,
+      visual_character: parsed.visual_character ?? null,
+    })
+
+  if (insertError) {
+    if (insertError.code === '23505') {
+      // Unique violation — race condition, ignore
+      console.log('⏭️ Atmosphere extraction — duplicate insert ignored')
+    } else {
+      console.warn('⚠️ Atmosphere extraction insert failed:', insertError.message)
+    }
+    return
+  }
+
+  console.log(`✅ Atmosphere extraction stored for business ${businessId} (type: ${contentType})`)
+
+  // Check if synthesis threshold is reached (10 entries)
+  const { count } = await supabase
+    .from('photo_atmosphere_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('business_id', businessId)
+
+  if ((count ?? 0) < 10) return
+
+  // Check if brand profile already has a confident venue_scene (avoid re-synthesis on every new photo)
+  const { data: profile } = await supabase
+    .from('business_brand_profile')
+    .select('venue_scene, atmosphere_confidence_level')
+    .eq('business_id', businessId)
+    .maybeSingle()
+
+  // Only synthesise if no venue_scene yet, or confidence level is not yet 'high'
+  const confidenceLevel: string = (profile as any)?.atmosphere_confidence_level ?? 'none'
+  if (confidenceLevel === 'high') {
+    console.log('⏭️ Synthesis skipped — already at high confidence')
+    return
+  }
+
+  // Fetch the 10 most recent qualifying entries for synthesis
+  const { data: entries } = await supabase
+    .from('photo_atmosphere_log')
+    .select('venue_scene, visual_character')
+    .eq('business_id', businessId)
+    .order('created_at', { ascending: false })
+    .limit(10)
+
+  if (!entries || entries.length < 10) return
+
+  const scenes = entries.map((e: any) => e.venue_scene as string)
+  const characters = entries.map((e: any) => e.visual_character as string).filter(Boolean)
+
+  const { systemPrompt: synSys, userPrompt: synUser } = buildAtmosphereSynthesisPrompt(scenes, characters)
+  let synthText: string
+  try {
+    // Synthesis is text-only with retry logic for rate limits
+    const maxRetries = 3
+    const baseDelayMs = 1000
+    let response: Response | null = null
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: `${synSys}\n\n${synUser}` }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 500, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } }
+          })
+        }
+      )
+
+      // Handle rate limiting with exponential backoff
+      if (response.status === 429 && attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt)
+        console.warn(`⚠️ Gemini API rate limit hit during synthesis (attempt ${attempt + 1}/${maxRetries + 1}). Retrying in ${delayMs}ms...`)
+        await new Promise(resolve => setTimeout(resolve, delayMs))
+        continue
+      }
+
+      // Success or non-retryable error
+      break
+    }
+
+    if (!response?.ok) {
+      throw new Error(`Gemini API returned ${response?.status}`)
+    }
+
+    const data = await response.json()
+    const parts = data.candidates?.[0]?.content?.parts
+    synthText = Array.isArray(parts) ? parts.map((p: any) => p?.text ?? '').join('') : ''
+  } catch (err) {
+    console.warn('⚠️ Atmosphere synthesis Gemini call failed:', err)
+    return
+  }
+
+  let synth: { venue_scene: string; visual_character?: string }
+  try {
+    synth = extractJson(synthText)
+    if (!synth?.venue_scene || typeof synth.venue_scene !== 'string') return
+  } catch {
+    console.warn('⚠️ Atmosphere synthesis — could not parse JSON')
+    return
+  }
+
+  const upsertData: Record<string, string> = {
+    business_id: businessId,
+    venue_scene: synth.venue_scene,
+    atmosphere_confidence_level: 'high',
+    venue_data_source: 'photo_analysis',
+  }
+  if (synth.visual_character) upsertData.visual_character = synth.visual_character
+
+  const { error: upsertError } = await supabase
+    .from('business_brand_profile')
+    .upsert(upsertData, { onConflict: 'business_id' })
+
+  if (upsertError) {
+    console.warn('⚠️ Atmosphere synthesis upsert failed:', upsertError.message)
+  } else {
+    console.log(`✅ Atmosphere synthesis written to brand profile for business ${businessId}`)
+  }
 }
 
 serve(async (req) => {
@@ -189,7 +509,12 @@ serve(async (req) => {
 
     // Check daily quota (photo analysis counts as AI generation)
     const dailyQuota = await getUserQuota(userId, 'aiGenerations', 'daily')
-    if (!dailyQuota.allowed) {
+    
+    // TEMPORARY: Skip quota check for development/testing
+    const isDevelopment = Deno.env.get('SKIP_QUOTA_CHECK') === 'true'
+    
+    if (!dailyQuota.allowed && !isDevelopment) {
+      console.warn(`⚠️ Quota exceeded for user ${userId}: ${dailyQuota.current}/${dailyQuota.limit}`)
       return new Response(
         JSON.stringify({ 
           error: 'Daily quota exceeded',
@@ -202,7 +527,7 @@ serve(async (req) => {
       )
     }
 
-    const { imageUrl, postText, businessType, language = 'da', mediaType = 'image', duration, imageWidth: clientWidth, imageHeight: clientHeight }: AnalyzePhotoRequest = await req.json()
+    const { imageUrl, postText, businessType, language = 'da', mediaType = 'image', duration, imageWidth: clientWidth, imageHeight: clientHeight, businessId }: AnalyzePhotoRequest = await req.json()
     const tier = dailyQuota.tier
 
     if (!imageUrl) {
@@ -248,6 +573,17 @@ serve(async (req) => {
       console.error('❌ GEMINI_API_KEY not configured in environment')
       return new Response(
         JSON.stringify({ error: 'Gemini API key not configured. Please add GEMINI_API_KEY to your Supabase project secrets.' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Verify API key format
+    const keyPrefix = GEMINI_API_KEY.substring(0, 10)
+    console.log('🔑 API Key prefix:', keyPrefix)
+    if (!GEMINI_API_KEY.startsWith('AIza')) {
+      console.error('❌ GEMINI_API_KEY has wrong format - should start with AIza')
+      return new Response(
+        JSON.stringify({ error: 'Gemini API key appears to be invalid (wrong format)' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -332,10 +668,44 @@ serve(async (req) => {
     let call1Suggestions: Suggestion[] = []
 
     if (useSimple) {
-      const { systemPrompt, userPrompt } = buildSimplePrompt(language, promptParams)
+      const { systemPrompt, userPrompt } = await buildSimplePrompt(language, promptParams)
+      console.log(`📤 Sending simple prompt to Gemini (preview):`, systemPrompt.substring(0, 200))
       const responseText = await callGemini(GEMINI_API_KEY, model, systemPrompt, userPrompt, base64Image, mimeType)
-      console.log(`🔍 Simple response (first 300 chars):`, responseText.substring(0, 300))
-      rawParsed = extractJson(responseText)
+      console.log(`🔍 Simple response (first 500 chars):`, responseText.substring(0, 500))
+      
+      // Parse and validate response
+      try {
+        rawParsed = extractJson(responseText)
+      } catch (extractError) {
+        console.error(`❌ Error analyzing photo:`, extractError)
+        
+        // Return graceful fallback instead of 500 error
+        return new Response(
+          JSON.stringify({
+            contentMatch: { 
+              rating: 'fair', 
+              feedback: language === 'da' 
+                ? 'Kan ikke analysere billedet lige nu - prøv venligst igen'
+                : 'Unable to analyze photo right now - please try again'
+            },
+            emojiMatch: null,
+            whatWorks: [],
+            generalFeedback: language === 'da'
+              ? 'Analysen er midlertidigt utilgængelig. Dit billede er gemt og du kan uploade det alligevel.'
+              : 'Analysis temporarily unavailable. Your photo is saved and you can upload it anyway.',
+            suggestions: [],
+            humanSuggestions: [],
+            recommendation: 'good-enough',
+            recommendationText: language === 'da' 
+              ? 'Analysen fejlede - du kan stadig bruge billedet'
+              : 'Analysis failed - you can still use the photo',
+            _error: 'parsing_failed',
+            _errorDetails: extractError instanceof Error ? extractError.message : String(extractError)
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
       const suggestionsRaw = Array.isArray(rawParsed.suggestions) ? rawParsed.suggestions : []
       call1Suggestions = suggestionsRaw
         .filter((s: any) => s && typeof s === 'object')
@@ -354,7 +724,7 @@ serve(async (req) => {
         .slice(0, suggestionCap)
     } else {
       // ── Paid path: CALL 1 — Assessment ──────────────────────────────────────
-      const { systemPrompt: sys1, userPrompt: user1 } = buildCall1Prompt(language, promptParams)
+      const { systemPrompt: sys1, userPrompt: user1 } = await buildCall1Prompt(language, promptParams)
       const call1Text = await callGemini(GEMINI_API_KEY, model, sys1, user1, base64Image, mimeType)
       console.log(`🔍 Call 1 response (first 300 chars):`, call1Text.substring(0, 300))
       rawParsed = extractJson(call1Text)
@@ -371,7 +741,7 @@ serve(async (req) => {
           whatWorks: Array.isArray(rawParsed.whatWorks) ? rawParsed.whatWorks : [],
           generalFeedback: rawParsed.generalFeedback ?? '',
         }
-        const { systemPrompt: sys2, userPrompt: user2 } = buildCall2Prompt(language, {
+        const { systemPrompt: sys2, userPrompt: user2 } = await buildCall2Prompt(language, {
           ...promptParams,
           call1Assessment,
         })
@@ -488,6 +858,38 @@ serve(async (req) => {
 
       // ✅ INCREMENT USAGE AFTER SUCCESSFUL ANALYSIS (not on parse failure)
       await incrementQuota(userId, 'aiGenerations')
+
+      // ── Silent atmosphere extraction ────────────────────────────────────────
+      // Gate 1: content match must be excellent or good (text and photo are consistent)
+      // Gate 2: caption must signal atmosphere/interior/BTS content
+      // Gate 3: not a retake (deduplication + no useful scene data)
+      // Gate 4: businessId must be present and media must be an image
+      const contentMatchRating2 = analysisResult.contentMatch.rating
+      const atmosphereContentType = postText ? detectAtmosphereContentType(postText) : null
+      if (
+        businessId &&
+        mediaType !== 'video' &&
+        (contentMatchRating2 === 'excellent' || contentMatchRating2 === 'good') &&
+        normalizedRec !== 'retake' &&
+        atmosphereContentType !== null
+      ) {
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        if (supabaseUrl && supabaseServiceKey) {
+          // Fire without awaiting — does not block the response
+          runAtmosphereExtraction({
+            businessId,
+            imageUrl,
+            base64Image,
+            mimeType,
+            contentType: atmosphereContentType,
+            apiKey: GEMINI_API_KEY,
+            model,
+            supabaseUrl,
+            supabaseServiceKey,
+          }).catch(err => console.warn('⚠️ Atmosphere extraction background task failed:', err))
+        }
+      }
 
     } catch (parseError) {
       console.error('❌ Failed to parse/normalise analysis result:', parseError)

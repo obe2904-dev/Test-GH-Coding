@@ -4,17 +4,23 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../../stores/authStore'
+import { useTierStore } from '../../../stores/tierStore'
 import { supabase } from '../../../lib/supabase'
 import { WeeklyPlanOverview } from '../../../components/weekly-plan/WeeklyPlanOverview'
 import { PostDetailModal } from '../../../components/weekly-plan/PostDetailModal'
 import { usePostCreationStore } from '../../../stores/postCreationStore'
+import { useSubscriptionTier } from '../../../hooks/useSubscriptionTier'
+import { useCommittedSuggestions } from '../../../hooks/useCommittedSuggestions'
 import type { WeeklyContentPlan, PostSpecification } from '../../../types/weekly-plan'
 
 export default function AIWeeklyPlanPage() {
   const { t } = useTranslation(undefined, { keyPrefix: 'weeklyPlan' })
   const user = useAuthStore((state) => state.user)
   const navigate = useNavigate()
-  const { setActivePath, setStrategicIdea, setWeeklyPlanPost, setWeeklyContentPlan, setWeeklyPlanPostIndex, setWeeklyPlanStep, weeklyPlanSessionDone, weeklyPlanStep, weeklyPlanPost } = usePostCreationStore()
+  const currentTier = useTierStore((state) => state.currentTier)
+  const isFree = currentTier === 'free'
+  const { isPro } = useSubscriptionTier()
+  const { setActivePath, setStrategicIdea, setWeeklyPlanPost, setWeeklyContentPlan, setWeeklyPlanPostIndex, setWeeklyPlanStep, weeklyPlanSessionDone, weeklyPlanStep, weeklyPlanPost, clearDraftMap } = usePostCreationStore()
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyContentPlan | null>(null)
@@ -23,6 +29,15 @@ export default function AIWeeklyPlanPage() {
   const [existingPlanFound, setExistingPlanFound] = useState(false)
   const [showRegenerateWarning, setShowRegenerateWarning] = useState(false)
   const [ownerNote, setOwnerNote] = useState('')
+  const { committedWeeklyPlanIdeaIds } = useCommittedSuggestions(weeklyPlan?.businessId ?? null)
+
+  // Weather snapshot TTL configuration (matches backend WEATHER_THRESHOLDS)
+  const WEATHER_TTL_MS = {
+    FRESH: 6 * 60 * 60 * 1000,      // 6 hours - no refresh needed
+    STALE: 12 * 60 * 60 * 1000,     // 12 hours - suggest refresh
+    EXPIRED: 24 * 60 * 60 * 1000,   // 24 hours - force refresh
+  }
+  const AUTO_REFRESH_DAYS = [0, 4, 5, 6] as const // Sunday, Thu, Fri, Sat
 
   // Format a Date as local YYYY-MM-DD (avoids UTC shift for CET users)
   const toLocalISO = (d: Date) => {
@@ -71,36 +86,59 @@ export default function AIWeeklyPlanPage() {
     }
   }, [user])
 
-  // Auto-refresh weather when viewing next week on Thu/Fri/Sat/Sun and a plan is loaded.
-  // Falls back to showing the manual-refresh alert only if auto-trigger is already in-flight.
+  // Auto-refresh weather when viewing next week based on TTL + day of week
+  // Checks snapshot age and triggers refresh on Thu-Sun when stale (>12h old)
   useEffect(() => {
     if (!weeklyPlan || viewingWeek !== 'next') { setWeatherStaleAlert(null); setWeatherAssessment(null); return }
+    
     // If the user already refreshed weather for this plan in this session, skip entirely.
     const alreadyRefreshed = sessionStorage.getItem(`weather_refreshed_${weeklyPlan.id}`) !== null
     if (alreadyRefreshed) return
+    
+    // Calculate weather snapshot age from plan generation time
+    const snapshotAge = weeklyPlan.generatedAt 
+      ? Date.now() - new Date(weeklyPlan.generatedAt).getTime() 
+      : 0
+    
+    // Expired snapshot (>24h): always show refresh prompt
+    if (snapshotAge > WEATHER_TTL_MS.EXPIRED) {
+      setWeatherStaleAlert('Weather data is more than 24 hours old. Refresh recommended.')
+      return
+    }
+    
+    // Stale snapshot (>12h): auto-refresh on Thu-Sun when planning next week
     const day = new Date().getDay()
-    if (day === 4 || day === 5 || day === 6 || day === 0) {
+    const isAutoRefreshDay = AUTO_REFRESH_DAYS.includes(day as any)
+    
+    if (snapshotAge > WEATHER_TTL_MS.STALE && isAutoRefreshDay) {
       // Guard against double-triggering when the effect fires more than once
       if (autoRefreshedPlansRef.current.has(String(weeklyPlan.id))) return
       autoRefreshedPlansRef.current.add(String(weeklyPlan.id))
+      
       // Auto-refresh silently — setTimeout 0 ensures handleRefreshWeather is in scope
+      console.log(`[WeatherRefresh] Auto-refreshing stale weather (age: ${Math.round(snapshotAge / 1000 / 60 / 60)}h)`)
       setTimeout(() => handleRefreshWeather(), 0)
+    } else if (snapshotAge > WEATHER_TTL_MS.STALE) {
+      // Stale but not auto-refresh day: show manual refresh suggestion
+      setWeatherStaleAlert(`Weather forecast is ${Math.round(snapshotAge / 1000 / 60 / 60)} hours old. Consider refreshing for latest forecast.`)
     } else {
+      // Fresh weather: clear any alerts
       setWeatherStaleAlert(null)
       setWeatherAssessment(null)
     }
-  }, [weeklyPlan?.id, viewingWeek])
+  }, [weeklyPlan?.id, weeklyPlan?.generatedAt, viewingWeek])
 
   // Look up strategy + weather + context summary by business + week
   const fetchStrategyData = async (businessId: string, weekStart: string): Promise<{
     narrative?: { headline: string; overview: string; strategy_reasoning?: { primary_angle: string } }
+    strategicRationale?: string | null
     weatherDays?: { date: string; temp_min: number; temp_max: number; condition: 'sunny' | 'partly_cloudy' | 'cloudy' | 'rain' | 'snow' | 'fog'; precipitation_chance: number; wind_speed: number }[]
-    weekSummary?: { archetype?: string; primaryOccasion?: string; weatherOpportunity?: string; economicSignal?: string; topPriority?: string }
+    weekSummary?: { archetype?: string; primaryOccasion?: string; weatherOpportunity?: string; economicSignal?: string; topPriority?: string; ctaMode?: string; bookingNudgeWarranted?: boolean }
     calendarEvents?: { name: string; date: string; date_end: string | null; type: string; commercial_weight: number | null }[]
   }> => {
     const { data: strat } = await supabase
       .from('weekly_strategies')
-      .select('narrative, week_context_snapshot')
+      .select('narrative, strategy_rationale, week_context_snapshot, post_ideas')
       .eq('business_id', businessId)
       .eq('week_start', weekStart)
       .order('generated_at', { ascending: false })
@@ -109,12 +147,30 @@ export default function AIWeeklyPlanPage() {
     const narrative = strat?.narrative as { headline: string; overview: string; strategy_reasoning?: { primary_angle: string } } | undefined
     const ctx = strat?.week_context_snapshot as any
     const weatherDays = ctx?.weather?.days as { date: string; temp_min: number; temp_max: number; condition: 'sunny' | 'partly_cloudy' | 'cloudy' | 'rain' | 'snow' | 'fog'; precipitation_chance: number; wind_speed: number }[] | undefined
+    // Override weatherOpportunity from live weather days — the snapshot value can be stale.
+    // If ≥50% of the week's days have rain/snow/fog, treat it as 'constrained', not 'strong'.
+    const liveWeatherOpportunity = (() => {
+      if (!weatherDays || weatherDays.length === 0) return ctx?.week_modifiers?.weather_opportunity as string | undefined
+      const badDays = weatherDays.filter(d => d.condition === 'rain' || d.condition === 'snow' || d.condition === 'fog').length
+      const goodDays = weatherDays.filter(d => d.condition === 'sunny' || d.condition === 'partly_cloudy').length
+      if (badDays >= Math.ceil(weatherDays.length / 2)) return 'constrained'
+      if (goodDays >= Math.ceil(weatherDays.length / 2)) return 'strong'
+      return 'neutral'
+    })()
+    // Extract CTA mode and booking nudge status for FIX C
+    const ctaMode = ctx?.cta_rules?.mode as string | undefined
+    const postIdeas = strat?.post_ideas as any[] | undefined
+    const bookingNudgeWarranted = postIdeas?.some((idea: any) => 
+      idea.content_category === 'booking_nudge' || idea.booking_nudge_warranted === true
+    )
     const weekSummary = ctx ? {
       archetype: ctx.business_archetype as string | undefined,
       primaryOccasion: (ctx.core_guest_occasions as any[] | undefined)?.find((o: any) => o.primary)?.occasion as string | undefined,
-      weatherOpportunity: ctx.week_modifiers?.weather_opportunity as string | undefined,
+      weatherOpportunity: liveWeatherOpportunity,
       economicSignal: ctx.week_modifiers?.economic_signal as string | undefined,
       topPriority: (ctx.strategic_priority_candidates as string[] | undefined)?.[0],
+      ctaMode,
+      bookingNudgeWarranted,
     } : undefined
     // Compute the last day of the 7-day week
     const [wy, wm, wd] = weekStart.split('-').map(Number)
@@ -135,7 +191,7 @@ export default function AIWeeklyPlanPage() {
       type: e.event_type as string,
       commercial_weight: (e.commercial_weight as number | null) ?? null,
     })) ?? undefined
-    return { narrative, weatherDays, weekSummary, calendarEvents }
+    return { narrative, strategicRationale: strat?.strategy_rationale as string | null | undefined, weatherDays, weekSummary, calendarEvents }
   }
 
   // Fetch saved plan row for a given week (or null if none)
@@ -156,6 +212,7 @@ export default function AIWeeklyPlanPage() {
   // Hydrate state from a DB plan row — fetches strategy data then calls setWeeklyPlan
   const hydrateWeeklyPlan = async (row: any): Promise<void> => {
     const strategyData = await fetchStrategyData(row.business_id, row.week_start)
+    clearDraftMap()  // Clear old drafts when loading a different plan
     setWeeklyPlan({
       id: row.id,
       userId: row.user_id,
@@ -169,6 +226,7 @@ export default function AIWeeklyPlanPage() {
       learningData: row.learning_data,
       strategyId: row.strategy_id,
       strategyNarrative: strategyData.narrative,
+      strategicRationale: strategyData.strategicRationale,
       weatherDays: strategyData.weatherDays,
       weekSummary: strategyData.weekSummary,
       calendarEvents: strategyData.calendarEvents,
@@ -300,28 +358,103 @@ export default function AIWeeklyPlanPage() {
         return { ...day, temp_min: d.minT, temp_max: d.maxT, condition: mapWMO(d.wmo) as any, precipitation_chance: d.precipProb, wind_speed: d.wind }
       })
 
-      // ── Weather change assessment ────────────────────────────────────────
-      // Classify conditions into good/bad buckets for meaningful comparison.
-      const isGood = (c: string) => c === 'sunny' || c === 'partly_cloudy'
-      const isBad  = (c: string) => c === 'rain' || c === 'snow' || c === 'fog'
-
-      // Find days where the quality bucket flipped (good↔bad), ignoring cloudy↔cloudy noise.
-      const flippedDates = new Set<string>()
+      // ── Weather change assessment using Comfort Tier System ──────────────
+      // Only mark as "substantial change" if outdoor comfort tiers shift.
+      // Uses the same weighted scoring logic as strategy generation.
+      
+      type ComfortTier = 'premium' | 'viable' | 'marginal' | 'unviable'
+      
+      // Calculate comfort tier using weighted scoring (0-100 scale)
+      const assessComfortTier = (day: any): { tier: ComfortTier; score: number } => {
+        const feelsLike = day.feels_like ?? day.temp_max
+        const precipProb = day.precipitation_chance ?? 0
+        const windSpeed = day.wind_speed ?? 0
+        const condition = day.condition ?? 'cloudy'
+        
+        // Hard blockers (instant Unviable)
+        if (feelsLike < 13) return { tier: 'unviable', score: 0 }
+        if (windSpeed > 9.8) return { tier: 'unviable', score: 0 }
+        
+        // Active rain check
+        const isRainSnow = condition === 'rain' || condition === 'snow'
+        if (condition === 'snow') return { tier: 'unviable', score: 0 }
+        if (isRainSnow && precipProb > 70) return { tier: 'unviable', score: 0 }
+        if (precipProb > 80) return { tier: 'unviable', score: 0 }
+        
+        // Cloud cover estimation from condition
+        const cloudCover = condition === 'sunny' ? 5 
+          : condition === 'partly_cloudy' ? 25 
+          : condition === 'cloudy' ? 75 
+          : condition === 'fog' ? 100 
+          : 50
+        
+        // Weighted scoring (0-100 scale)
+        let score = 0
+        
+        // Temperature (50 points) - feels-like temp
+        if (feelsLike >= 24) score += 50
+        else if (feelsLike >= 20) score += 40
+        else if (feelsLike >= 16) score += 30
+        else if (feelsLike >= 13) score += 20
+        else score += 10
+        
+        // Cloud cover (20 points)
+        const cloudScore = Math.round(20 * (1 - cloudCover / 100))
+        score += cloudScore
+        
+        // Wind speed (20 points)
+        if (windSpeed <= 2.5) score += 20
+        else if (windSpeed <= 5.0) score += 15
+        else if (windSpeed <= 7.0) score += 10
+        else if (windSpeed <= 9.8) score += 5
+        
+        // Rain probability (10 points)
+        if (precipProb <= 10) score += 10
+        else if (precipProb <= 30) score += 7
+        else if (precipProb <= 50) score += 4
+        else if (precipProb <= 70) score += 2
+        
+        // Assign tier based on score
+        let tier: ComfortTier
+        if (score >= 85) tier = 'premium'
+        else if (score >= 65) tier = 'viable'
+        else if (score >= 45) tier = 'marginal'
+        else tier = 'unviable'
+        
+        return { tier, score }
+      }
+      
+      // Compare old vs new tiers to find substantial changes
+      const tierShiftDates = new Set<string>()
+      const tierChanges: Array<{ date: string; oldTier: ComfortTier; newTier: ComfortTier; oldScore: number; newScore: number }> = []
+      
       updatedDays.forEach((newDay) => {
-        const old = oldDays.find(o => o.date === newDay.date)
-        if (!old) return
-        const wasGood = isGood(old.condition), wasB = isBad(old.condition)
-        const nowGood = isGood(newDay.condition), nowB = isBad(newDay.condition)
-        if ((wasGood && nowB) || (wasB && nowGood)) flippedDates.add(newDay.date)
+        const oldDay = oldDays.find(o => o.date === newDay.date)
+        if (!oldDay) return
+        
+        const oldAssessment = assessComfortTier(oldDay)
+        const newAssessment = assessComfortTier(newDay)
+        
+        // Substantial change = tier category shift (Premium→Viable, Viable→Marginal, etc.)
+        if (oldAssessment.tier !== newAssessment.tier) {
+          tierShiftDates.add(newDay.date)
+          tierChanges.push({
+            date: newDay.date,
+            oldTier: oldAssessment.tier,
+            newTier: newAssessment.tier,
+            oldScore: oldAssessment.score,
+            newScore: newAssessment.score,
+          })
+        }
       })
-
-      // Check if any posts fall on a flipped date AND are weather-sensitive.
+      
+      // Check if any posts fall on a tier-shifted date AND are weather-sensitive
       const OUTDOOR_KW = ['udend', 'terrasse', 'udeserv', 'solskin', 'soldag', 'cejtlig', 'udeplace', 'outdoor']
       const impactedPosts: string[] = []
-      if (flippedDates.size > 0) {
+      if (tierShiftDates.size > 0) {
         ;(weeklyPlan.posts as any[]).forEach((post: any) => {
           const postDate: string = post.timing?.date ?? ''
-          if (!postDate || !flippedDates.has(postDate)) return
+          if (!postDate || !tierShiftDates.has(postDate)) return
           const isWeatherDep = post.strategicContext?.weather_dependent === true
           const title: string = (post.contentSubject?.dish ?? post.caption?.text ?? '').toLowerCase()
           const hook: string  = (post.caption?.firstLine ?? '').toLowerCase()
@@ -332,8 +465,16 @@ export default function AIWeeklyPlanPage() {
           }
         })
       }
-
-      const changed = flippedDates.size > 0
+      
+      // Only mark as "changed" if there are actual tier shifts (substantial change)
+      const changed = tierShiftDates.size > 0
+      
+      // Log tier changes for debugging
+      if (changed && tierChanges.length > 0) {
+        console.log('[WeatherRefresh] Substantial tier changes detected:', tierChanges)
+      } else {
+        console.log('[WeatherRefresh] No substantial changes - comfort tiers remain the same')
+      }
       setWeatherAssessment({ changed, impactedPosts })
       setWeeklyPlan({ ...weeklyPlan, weatherDays: updatedDays })
       setWeatherStaleAlert(null)
@@ -395,7 +536,7 @@ export default function AIWeeklyPlanPage() {
             body: JSON.stringify({
               business_id: bizData.id,
               week_start: weekStartLocal,
-              regenerate: forceRegenerate,
+              regenerate: forceRegenerate || !!ownerNote.trim(),
               owner_note: ownerNote.trim() || undefined,
             }),
           })
@@ -403,6 +544,18 @@ export default function AIWeeklyPlanPage() {
           if (strategyResponse.ok) {
             const strategyData = await strategyResponse.json()
             strategyId = strategyData.strategy_id
+            
+            // Check if regeneration was blocked due to unchanged weather
+            if (strategyData.regeneration_blocked && strategyData.block_reason === 'weather_unchanged') {
+              console.log('[regeneration blocked] Weather unchanged - returning cached strategy')
+              setGenerating(false)
+              setShowRegenerateWarning(false)
+              // Refresh the page data to show cached strategy (user might not see it yet)
+              fetchWeeklyPlan()
+              // Show informational message (not an error - this is expected behavior)
+              setError('Planen er ikke ændret. Vejret har ikke ændret sig væsentligt siden sidste generering, så den eksisterende plan gælder stadig.')
+              return
+            }
 
             if (strategyData.status === 'pending' && strategyId) {
               // Generation is running in background — poll weekly_strategies row for completion
@@ -564,7 +717,7 @@ export default function AIWeeklyPlanPage() {
       const functionUrl = `${(supabase as any).supabaseUrl}/functions/v1/generate-weekly-plan`
       const planBody = JSON.stringify({
         weekStart: weekStartLocal,
-        regenerate: forceRegenerate,
+        regenerate: forceRegenerate || !!ownerNote.trim(),
         strategy_id: strategyId,
       })
 
@@ -697,9 +850,11 @@ export default function AIWeeklyPlanPage() {
         // ── Legacy sync path (200 response — kept for safety) ──────────────────
         console.log('Setting weekly plan (sync) with', data.plan.posts?.length || 0, 'posts')
         const strategyData = await fetchStrategyData(data.plan.businessId, data.plan.weekStart)
+        clearDraftMap()  // Clear old drafts when setting a new plan
         setWeeklyPlan({
           ...data.plan,
           strategyNarrative: data.plan.strategyNarrative || strategyData.narrative,
+          strategicRationale: strategyData.strategicRationale,
           weatherDays: strategyData.weatherDays,
           weekSummary: strategyData.weekSummary,
           calendarEvents: strategyData.calendarEvents,
@@ -744,6 +899,9 @@ export default function AIWeeklyPlanPage() {
       (p) => p.timing.date === post.timing.date && p.timing.time === post.timing.time
     )
     setWeeklyPlanPostIndex(idx >= 0 ? idx : 0)
+    // Clear in-memory draft cache from any previous plan — DB-backed drafts will
+    // restore content for this slot if the user has already worked on it.
+    clearDraftMap()
     navigate('/dashboard/create')
   }
 
@@ -788,6 +946,166 @@ export default function AIWeeklyPlanPage() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cta mx-auto"></div>
           <p className="mt-4 text-slate-600">{t('loading')}</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Free tier locked state - show realistic preview with actual layout
+  if (isFree) {
+    // Generate dummy plan data that matches the actual structure
+    const getNextMonday = () => {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      today.setDate(today.getDate() + ((1 + 7 - today.getDay()) % 7 || 7))
+      return today
+    }
+    
+    const nextMonday = getNextMonday()
+    const toISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    
+    const dummyPlan: WeeklyContentPlan = {
+      id: 'preview',
+      weekStart: toISO(nextMonday),
+      weekNumber: Math.ceil(((nextMonday.getTime() - new Date(nextMonday.getFullYear(), 0, 1).getTime()) / 86400000 + 1) / 7),
+      strategyNarrative: {
+        headline: 'Forårsstemning og friske retter',
+        overview: 'Fokus på sæsonens bedste råvarer og venlige atmosfære.\nVejret inviterer til udeservering.\nIdeal uge til at fremhæve brunch og frokost.',
+      },
+      weatherDays: Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(nextMonday)
+        d.setDate(d.getDate() + i)
+        return {
+          date: toISO(d),
+          temp_min: 12 + Math.floor(Math.random() * 3),
+          temp_max: 18 + Math.floor(Math.random() * 5),
+          condition: (['sunny', 'partly_cloudy', 'cloudy'] as const)[Math.floor(Math.random() * 3)],
+          precipitation_chance: Math.floor(Math.random() * 30),
+          wind_speed: 3 + Math.floor(Math.random() * 4),
+        }
+      }),
+      posts: [
+        {
+          timing: { date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate())), time: '09:00' },
+          postType: { category: 'menu_item', format: 'single_image' },
+          contentSubject: { dish: 'Morgenmad med friske croissanter' },
+          caption: { text: '', ctaType: 'awareness', isAIGenerated: true },
+          approval: { status: 'draft' },
+          productionNotes: { estimatedTime: '5-10 min' },
+          strategicContext: {},
+        },
+        {
+          timing: { date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate() + 2)), time: '12:00' },
+          postType: { category: 'menu_item', format: 'single_image' },
+          contentSubject: { dish: 'Frokostspecial: Laksesalat' },
+          caption: { text: '', ctaType: 'booking', isAIGenerated: true },
+          approval: { status: 'draft' },
+          productionNotes: { estimatedTime: '10-15 min' },
+          strategicContext: { drink_pairing: 'Hvidvin' },
+        },
+        {
+          timing: { date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate() + 4)), time: '17:00' },
+          postType: { category: 'atmosphere', format: 'single_image' },
+          contentSubject: { dish: 'Weekend stemning ved åen' },
+          caption: { text: '', ctaType: 'engagement', isAIGenerated: true },
+          approval: { status: 'draft' },
+          productionNotes: { estimatedTime: '5 min' },
+          strategicContext: {},
+        },
+      ],
+      calendarEvents: [],
+    }
+
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Upgrade Banner - Pro-tint card treatment */}
+          <div style={{ background: '#F0EEFE', border: '2px solid #6B5CE7', borderRadius: '12px', padding: '24px' }} className="mb-8">
+            <div className="max-w-3xl">
+              <div className="flex items-start gap-4">
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  {/* AI Sparkles Icon */}
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6B5CE7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                    <path d="M5 3v4" />
+                    <path d="M19 17v4" />
+                    <path d="M3 5h4" />
+                    <path d="M17 19h4" />
+                  </svg>
+                  {/* Calendar Week Icon */}
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6B5CE7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z" />
+                    <path d="M8 11h2v2H8zm0 4h2v2H8zm4-4h2v2h-2zm0 4h2v2h-2z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h2 style={{ fontSize: '18px', fontWeight: '500', color: '#1C1648' }} className="mb-2">
+                    AI Ugentlig Plan
+                  </h2>
+                  <p style={{ color: '#3D339A', fontSize: '14px', lineHeight: '1.6' }} className="mb-4">
+                    Planlæg en hel uge med AI-genererede opslag baseret på din menu, vejret og specielle events
+                  </p>
+                  <div className="flex flex-wrap gap-2 mb-6">
+                    <div style={{ background: '#F0EEFE', border: '0.5px solid #C7BAF7', color: '#3D339A', borderRadius: '100px', padding: '4px 12px', fontSize: '12px', fontWeight: '500' }} className="inline-flex items-center gap-1.5">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B5CE7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a10 10 0 1 0 10 10" />
+                        <path d="m9 12 2 2 4-4" />
+                      </svg>
+                      <span>7-dages content plan</span>
+                    </div>
+                    <div style={{ background: '#F0EEFE', border: '0.5px solid #C7BAF7', color: '#3D339A', borderRadius: '100px', padding: '4px 12px', fontSize: '12px', fontWeight: '500' }} className="inline-flex items-center gap-1.5">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B5CE7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a10 10 0 1 0 10 10" />
+                        <path d="m9 12 2 2 4-4" />
+                      </svg>
+                      <span>Vejr-integration</span>
+                    </div>
+                    <div style={{ background: '#F0EEFE', border: '0.5px solid #C7BAF7', color: '#3D339A', borderRadius: '100px', padding: '4px 12px', fontSize: '12px', fontWeight: '500' }} className="inline-flex items-center gap-1.5">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B5CE7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a10 10 0 1 0 10 10" />
+                        <path d="m9 12 2 2 4-4" />
+                      </svg>
+                      <span>Fuld menu-analyse</span>
+                    </div>
+                    <div style={{ background: '#F0EEFE', border: '0.5px solid #C7BAF7', color: '#3D339A', borderRadius: '100px', padding: '4px 12px', fontSize: '12px', fontWeight: '500' }} className="inline-flex items-center gap-1.5">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B5CE7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a10 10 0 1 0 10 10" />
+                        <path d="m9 12 2 2 4-4" />
+                      </svg>
+                      <span>Brand voice tilpasset</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => navigate('/dashboard/settings')}
+                    style={{ background: '#6B5CE7', color: '#FFFFFF', borderRadius: '8px', padding: '10px 20px', fontWeight: '500', fontSize: '14px' }}
+                    className="inline-flex items-center gap-2 hover:opacity-90 transition-opacity"
+                  >
+                    Opgrader til Smart eller Pro
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M5 12h14" />
+                      <path d="m12 5 7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Realistic Preview with Actual Component (Blurred & Locked) */}
+          <div className="relative rounded-lg overflow-hidden">
+            {/* Slim fade-out lock bar at bottom */}
+            <div className="absolute bottom-0 left-0 right-0 h-20 z-10 pointer-events-none" style={{ background: 'linear-gradient(transparent, #F0EEFE)' }} />
+            
+            {/* Actual WeeklyPlanOverview Component (for realistic preview) */}
+            <div className="pointer-events-none select-none" style={{ filter: 'blur(3px)' }}>
+              <WeeklyPlanOverview
+                plan={dummyPlan}
+                onPostClick={() => {}}
+                onGenerateNew={() => {}}
+                showGenerateButton={false}
+              />
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -905,19 +1223,57 @@ export default function AIWeeklyPlanPage() {
                 }
               </p>
 
-              <div className="mb-5 text-left">
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  {t('ownerNote.label')}
-                </label>
-                <textarea
-                  value={ownerNote}
-                  onChange={e => setOwnerNote(e.target.value)}
-                  placeholder={t('ownerNote.placeholder')}
-                  maxLength={400}
-                  rows={3}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-cta focus:border-transparent placeholder:text-slate-400"
-                />
-              </div>
+              {/* Owner Note Input - Pro Only */}
+              {isPro ? (
+                <div className="mb-5 text-left">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    {t('ownerNote.label')}
+                  </label>
+                  <textarea
+                    value={ownerNote}
+                    onChange={e => setOwnerNote(e.target.value)}
+                    placeholder={t('ownerNote.placeholder')}
+                    maxLength={400}
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-cta focus:border-transparent placeholder:text-slate-400"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">{t('ownerNote.hint')}</p>
+                </div>
+              ) : (
+                <div className="mb-5 text-left bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 mt-0.5">
+                      <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                        <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                        <path d="M5 3v4" />
+                        <path d="M19 17v4" />
+                        <path d="M3 5h4" />
+                        <path d="M17 19h4" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-slate-900 mb-1">
+                        📝 Vil du tilføje særlige events?
+                      </p>
+                      <p className="text-xs text-slate-600 mb-3">
+                        Opgrader til Pro for at guide AI'en med dine egne prioriteter som "Happy hour fredag 16-18" eller "Ny brunchret lørdag"
+                      </p>
+                      <button
+                        onClick={() => {
+                          // TODO: Navigate to upgrade page
+                          console.log('Navigate to Pro upgrade')
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs font-semibold rounded-md hover:from-purple-700 hover:to-blue-700 transition-all"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                        Opgrader til Pro
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               {existingPlanFound ? (
                 <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -1037,11 +1393,6 @@ export default function AIWeeklyPlanPage() {
         {weeklyPlan && !generating && (
           <div className="bg-white border border-slate-200 rounded-lg px-4 py-3 mb-4 flex flex-wrap gap-2 items-center">
             {weeklyPlan.weekSummary && <span className="text-slate-400 text-xs font-medium uppercase tracking-wide mr-1">{t('context.label')}</span>}
-            {weeklyPlan.weekSummary && weeklyPlan.weekSummary.archetype && t(`archetype.${weeklyPlan.weekSummary.archetype}`, '') && (
-              <span className="bg-surface-alt text-text-muted border border-border rounded-full px-3 py-1 text-xs font-medium">
-                {t(`archetype.${weeklyPlan.weekSummary.archetype}`)}
-              </span>
-            )}
             {weeklyPlan.weekSummary?.primaryOccasion && (
               <span className="bg-surface-alt text-text-muted border border-border rounded-full px-3 py-1 text-xs font-medium">
                 👥 {weeklyPlan.weekSummary.primaryOccasion}
@@ -1057,11 +1408,33 @@ export default function AIWeeklyPlanPage() {
               <span className="bg-green-50 text-green-700 border border-green-200 rounded-full px-3 py-1 text-xs font-medium">{t('context.payPeriod')}</span>
             )}
 {/* Only show topPriority chip when it doesn't contain banned/abstract phrases from the Phase 0 raw snapshot */}
-            {weeklyPlan.weekSummary?.topPriority && !/(hygge|fristed|oase|stemning|atmosf.re|refugium|ro og|forkælelse)/i.test(weeklyPlan.weekSummary.topPriority) && (
+            {weeklyPlan.weekSummary?.topPriority && !/(hygge|fristed|oase|stemning|atmosf.re|refugium|ro og|forkælelse|terrasse)/i.test(weeklyPlan.weekSummary.topPriority) && (
               <span className="bg-warning-surface text-warning-text border border-warning rounded-full px-3 py-1 text-xs font-medium">
                 🎯 {weeklyPlan.weekSummary.topPriority}
               </span>
             )}
+            {/* CTA Mode Badge (FIX C) */}
+            {weeklyPlan.weekSummary?.ctaMode && (() => {
+              const mode = weeklyPlan.weekSummary.ctaMode
+              const nudgeWarranted = weeklyPlan.weekSummary.bookingNudgeWarranted
+              
+              const badges: Record<string, string> = {
+                'reservation_only': '🔒 Kun booking denne uge',
+                'mixed': nudgeWarranted 
+                  ? '📅 Mixed CTA — booking nudge planlagt' 
+                  : '🚶 Walk-in CTA — booking nudge ikke relevant',
+                'walk_in_only': '🚶 Walk-in CTA — ingen booking link',
+              }
+              
+              const label = badges[mode]
+              if (!label) return null
+              
+              return (
+                <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-3 py-1 text-xs font-medium">
+                  {label}
+                </span>
+              )
+            })()}
             <div className="ml-auto flex bg-slate-100 rounded-md p-0.5">
               <button
                 onClick={() => handleViewingWeekChange('current')}
@@ -1095,7 +1468,8 @@ export default function AIWeeklyPlanPage() {
             onGenerateNew={generateNewPlan}
             sessionDoneIndices={weeklyPlanSessionDone}
             onCreatePost={handleCreatePost}
-            showGenerateButton={viewingWeek === 'next' || !existingPlanFound}
+            lockedIdeaIds={committedWeeklyPlanIdeaIds}
+            showGenerateButton={!existingPlanFound}
             onRefreshWeather={handleRefreshWeather}
             refreshingWeather={refreshingWeather}
             weatherStaleAlert={weatherStaleAlert}
@@ -1132,19 +1506,45 @@ export default function AIWeeklyPlanPage() {
                   </p>
                 </div>
               </div>
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  {t('ownerNote.label')}
-                </label>
-                <textarea
-                  value={ownerNote}
-                  onChange={e => setOwnerNote(e.target.value)}
-                  placeholder={t('ownerNote.placeholder')}
-                  maxLength={400}
-                  rows={3}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-cta focus:border-transparent placeholder:text-slate-400"
-                />
-              </div>
+              {/* Owner Note Input - Pro Only (Regenerate Modal) */}
+              {isPro ? (
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    {t('ownerNote.label')}
+                  </label>
+                  <textarea
+                    value={ownerNote}
+                    onChange={e => setOwnerNote(e.target.value)}
+                    placeholder={t('ownerNote.placeholder')}
+                    maxLength={400}
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-cta focus:border-transparent placeholder:text-slate-400"
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">{t('ownerNote.hint')}</p>
+                </div>
+              ) : (
+                <div className="mt-4 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 mt-0.5">
+                      <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                        <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                        <path d="M5 3v4" />
+                        <path d="M19 17v4" />
+                        <path d="M3 5h4" />
+                        <path d="M17 19h4" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-slate-900 mb-1">
+                        📝 Pro: Tilføj særlige events
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        Guide AI'en med specifikke events som "Happy hour fredag" eller "Ny brunchret lørdag"
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-col-reverse sm:flex-row gap-3 mt-6">
                 <button
                   onClick={() => setShowRegenerateWarning(false)}

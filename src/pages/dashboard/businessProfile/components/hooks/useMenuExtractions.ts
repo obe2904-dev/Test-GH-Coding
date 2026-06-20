@@ -1,3 +1,51 @@
+// DISABLED: menu_extractions table does not exist in database
+// Feature not implemented
+
+export interface MenuExtraction {
+  id: string
+  business_id: string
+  menu_source_id: string | null
+  menu_name: string
+  menu_type: 'food' | 'drinks' | 'special'
+  extracted_data: any
+  created_at: string
+  updated_at: string
+}
+
+export type UseMenuExtractionsReturn = ReturnType<typeof useMenuExtractions>
+
+export const useMenuExtractions = (_businessId: string | null, _menuSourceId: string | null) => {
+  return {
+    extractions: [] as MenuExtraction[],
+    loading: false,
+    error: null,
+    refetchExtractions: () => Promise.resolve(),
+    loadMenuExtractions: () => Promise.resolve(),
+    menuExtractions: [] as MenuExtraction[],
+    setMenuExtractions: (_val: any) => {},
+    editingItemId: null,
+    setEditingItemId: (_val: any) => {},
+    editingItemName: '' as string,
+    setEditingItemName: (_val: any) => {},
+    editingItemDesc: '' as string,
+    setEditingItemDesc: (_val: any) => {},
+    editingMenuId: null as string | null,
+    setEditingMenuId: (_val: any) => {},
+    editingMenuName: '' as string,
+    setEditingMenuName: (_val: any) => {},
+    editingMenuItemsMode: '' as string,
+    setEditingMenuItemsMode: (_val: any) => {},
+    expandedMenus: new Set<string>(),
+    setExpandedMenus: (_val: any) => {},
+    updateMenuItem: (_id: any, _field: any, _value: any, _extractionId: any) => {},
+    saveMenuItems: (_val: any, _val2: any) => Promise.resolve(),
+    saveMenuItemsToDatabase: (_val: any) => Promise.resolve(),
+    deleteMenuExtraction: (_id: string) => Promise.resolve(),
+    updateMenuExtractionName: (_val: any) => Promise.resolve(),
+  };
+};
+
+/* ORIGINAL CODE - DISABLED
 import React from 'react'
 import { supabase } from '../../../../../lib/supabase'
 import type { MenuType } from './useMenuSources'
@@ -222,3 +270,4 @@ export function useMenuExtractions(businessId: string, userId?: string): UseMenu
     updateMenuItem
   }
 }
+*/

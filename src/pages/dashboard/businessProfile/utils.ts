@@ -16,7 +16,12 @@ export const parseBusinessOfferings = (
     return null
   }
 
-  return Array.isArray(value.categories) ? value : null
+  // Type guard for business_offerings JSONB structure
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && 'categories' in value) {
+    return value as BusinessOfferingsProfile
+  }
+
+  return null
 }
 
 export const parseOpeningHours = (
@@ -29,8 +34,13 @@ export const parseOpeningHours = (
   const requiredKeys: Array<keyof WeekSchedule> = ['man', 'tir', 'ons', 'tor', 'fre', 'lør', 'søn']
   const schedule = createEmptyWeekSchedule()
 
+  // Type guard for opening_hours JSONB structure
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null
+  }
+
   for (const key of requiredKeys) {
-    const entry = value[key]
+    const entry = (value as any)[key]
     schedule[key] = {
       open: entry?.open ?? '',
       close: entry?.close ?? ''

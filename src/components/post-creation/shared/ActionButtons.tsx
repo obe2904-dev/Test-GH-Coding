@@ -43,7 +43,7 @@ export function ActionButtons({
         className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all shadow-sm ${
           enhanceDisabled
             ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-            : 'bg-brand text-mint hover:bg-[#12393D]'
+            : 'bg-cta text-text-inverse hover:bg-cta-hover'
         }`}
       >
         {isEnhancing ? (

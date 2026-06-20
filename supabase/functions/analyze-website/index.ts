@@ -9,9 +9,10 @@ declare const Deno: any;
 // Import shared utilities
 import { htmlToCleanText } from '../_shared/html-parser.ts'
 import { extractStructuredData } from '../_shared/structured-data-extractor.ts'
-import { extractOpeningHours } from '../_shared/opening-hours-extractor.ts'
+import { extractOpeningHours, extractKitchenCloseTime } from '../_shared/opening-hours-extractor.ts'
 import { extractMetadata } from '../_shared/metadata-extractor.ts'
 import { extractTextFromPdf } from '../_shared/pdf-parser.ts'
+import { validatePublicUrl, looksLikeLoginPage } from '../_shared/url-security.ts'
 
 // Import AI extractors
 import { extractBasicInfo } from '../_shared/ai-extractors/basic-info-extractor.ts'
@@ -20,7 +21,6 @@ import { extractKeywords } from '../_shared/ai-extractors/keywords-extractor.ts'
 import { extractMenu } from '../_shared/ai-extractors/menu-extractor.ts'
 import { extractVenueHooks } from '../_shared/ai-extractors/venue-hooks-extractor.ts'
 import { extractExperiencePillars } from '../_shared/ai-extractors/experience-pillars-extractor.ts'
-import { extractVisualVenueHooks } from '../_shared/ai-extractors/visual-venue-hooks-extractor.ts'
 import { extractMenuSignal } from '../_shared/ai-extractors/menu-signal-extractor.ts'
 import { extractToneOfVoice, formatToneAsText } from '../_shared/ai-extractors/tone-of-voice-extractor.ts'
 
@@ -31,7 +31,6 @@ import { getExtractorModel } from '../_shared/ai-config.ts'
 // Import HTML helpers
 import {
   extractImageSignals,
-  extractImageUrls,
   isHospitalityBusiness,
   isVisualPageCandidate,
   extractHeroSignalsFromCleanText,
@@ -76,6 +75,19 @@ serve(async (req: any) => {
       console.error('❌ Missing URL in request')
       return new Response(
         JSON.stringify({ error: 'Missing required field: url' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
+    // Validate URL safety BEFORE any fetching - protect against SSRF and internal networks
+    try {
+      validatePublicUrl(url)
+    } catch (urlError) {
+      console.error('❌ URL validation failed:', urlError)
+      return new Response(
+        JSON.stringify({
+          error: `URL blocked: ${urlError instanceof Error ? urlError.message : 'Invalid URL'}`,
+        }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -181,6 +193,9 @@ serve(async (req: any) => {
     let structuredData: any[] = [] // Declare in outer scope for prompt access
     let metadata: { description?: string; title?: string; image?: string } = {} // Declare in outer scope
     let extractedHours: any = null // Declare in outer scope
+    let openingHoursReviewRequired = false
+    let openingHoursReviewReasons: string[] = []
+    let kitchenCloseTime: string | null = null // Declare in outer scope for later persistence/debug output
     let homepageAboutCandidate = '' // Declare in outer scope for persistence
     let htmlLang: string | null = null // Detected from <html lang="..."> for language-aware extraction
     let classifiedLinks: Array<{type: string; href: string; text: string; ariaLabel: string; title: string; hostname: string; isInternal: boolean}> = [] // Declare in outer scope for persistence
@@ -205,6 +220,17 @@ serve(async (req: any) => {
         workerToken
       })).html
       
+      // Detect login/authentication pages - prevent extracting password forms
+      if (looksLikeLoginPage(homepageHtml, url)) {
+        console.error('❌ Homepage appears to be a login/admin page')
+        return new Response(
+          JSON.stringify({
+            error: 'URL appears to be a login or admin page - not a public business website',
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
       // Extract HTML lang attribute for language detection (before truncation)
       const langMatch = homepageHtml.match(/<html[^>]*\slang=["']([a-zA-Z-]+)["']/i)
       if (langMatch) {
@@ -226,16 +252,87 @@ serve(async (req: any) => {
       // Extract metadata
       metadata = extractMetadata(homepageHtml)
 
-      // Extract "about block" candidate from homepage for better description
+      // Build a richer homepage summary so Om os can use the homepage even when
+      // there is no explicit about section.
+      const cleanHomepageText = htmlToCleanText(homepageHtml, true)
+      const heroSignals = extractHeroSignalsFromCleanText(cleanHomepageText)
+
+      const structuredDataHighlights = structuredData
+        .flatMap((entry) => {
+          const highlights: string[] = []
+          const name = typeof entry?.name === 'string' ? entry.name.trim() : ''
+          const headline = typeof entry?.headline === 'string' ? entry.headline.trim() : ''
+          const description = typeof entry?.description === 'string' ? entry.description.trim() : ''
+          if (name) highlights.push(`name: ${name}`)
+          if (headline) highlights.push(`headline: ${headline}`)
+          if (description) highlights.push(`description: ${description}`)
+          return highlights
+        })
+        .slice(0, 6)
+
+      const homepageSummaryParts: string[] = []
+
+      // Add homepage hero signals so the AI can synthesize a better summary.
+      if (heroSignals) {
+        homepageSummaryParts.push(`HERO SIGNALS:\n${heroSignals}`)
+        console.log('📝 Pre-extracted hero signals available')
+      }
+
+      // Add metadata signals for fallback synthesis.
+      const metadataSignals: string[] = []
+      if (metadata.title) metadataSignals.push(`title: ${metadata.title}`)
+      if (metadata.description) metadataSignals.push(`description: ${metadata.description}`)
+      if (metadata.image) metadataSignals.push(`image: ${metadata.image}`)
+      if (metadataSignals.length > 0) {
+        homepageSummaryParts.push(`META:\n${metadataSignals.join('\n')}`)
+      }
+
+      if (structuredDataHighlights.length > 0) {
+        homepageSummaryParts.push(`STRUCTURED DATA:\n${structuredDataHighlights.map((line) => `- ${line}`).join('\n')}`)
+      }
+
+      // Preserve the explicit about block if it exists, but keep it secondary so
+      // the AI also weighs the rest of the homepage.
       homepageAboutCandidate = extractAboutBlock(homepageHtml)
       if (homepageAboutCandidate) {
+        homepageSummaryParts.push(`ABOUT BLOCK:\n${homepageAboutCandidate}`)
         console.log('📝 Pre-extracted about block:', homepageAboutCandidate.slice(0, 100) + '...')
       }
 
+      homepageAboutCandidate = homepageSummaryParts.join('\n\n').trim()
+
       // Try to extract opening hours before AI processing
-      extractedHours = extractOpeningHours(homepageHtml, structuredData)
+      const openingHoursExtraction = extractOpeningHours(homepageHtml, structuredData)
+      extractedHours = openingHoursExtraction.openingHours
+      openingHoursReviewRequired = openingHoursExtraction.reviewRequired
+      openingHoursReviewReasons = openingHoursExtraction.reviewReasons
       if (extractedHours) {
         console.log('✅ Pre-extracted opening hours:', Object.keys(extractedHours))
+      }
+      if (openingHoursReviewRequired) {
+        console.log('⚠️ Opening hours require manual review:', openingHoursReviewReasons)
+      }
+
+      kitchenCloseTime = extractKitchenCloseTime(homepageHtml)
+
+      if (extractedHours) {
+        const closeCounts = new Map<string, number>()
+        for (const dayHours of Object.values(extractedHours)) {
+          if (dayHours?.closed || !dayHours?.close) continue
+          closeCounts.set(dayHours.close, (closeCounts.get(dayHours.close) || 0) + 1)
+        }
+
+        if (closeCounts.size > 0) {
+          const [mostCommonCloseTime] = [...closeCounts.entries()].sort((a, b) => b[1] - a[1])[0]
+          if (mostCommonCloseTime) {
+            kitchenCloseTime = mostCommonCloseTime
+            console.log('🍳 Derived kitchen close time from opening hours:', kitchenCloseTime)
+          }
+        }
+      }
+
+      if (kitchenCloseTime) {
+        console.log('🍳 Pre-extracted kitchen close time:', kitchenCloseTime)
       }
       
       // Extract logo from HTML
@@ -525,6 +622,14 @@ serve(async (req: any) => {
       for (const link of priorityLinks) {
         try {
           console.log('  → Fetching:', link.href)
+          
+          // Validate URL safety before fetching
+          try {
+            validatePublicUrl(link.href)
+          } catch (urlError) {
+            console.log('  ⚠️ Skipping unsafe URL:', link.href, '-', urlError)
+            continue
+          }
 
           const hrefLower = link.href.toLowerCase()
           const isPdf = hrefLower.endsWith('.pdf')
@@ -706,40 +811,11 @@ serve(async (req: any) => {
     try {
       // Run 3 extractors in parallel (basic, contact, keywords use cheap model)
       // Menu extractor runs separately as it needs the business type from basic info
-      const paidTier = tierConfig.maxPriorityPages >= 3 // standardplus or premium
-      const hospitalityBoost = isHospitalityBusiness(businessType) || isHospitalityBusiness(businessName)
-
-      // Collect a small set of image URLs across crawled pages for optional vision extraction.
-      // We do this only for hospitality + paid tiers to control cost.
-      let imageUrlsForVision: string[] = []
-      if (paidTier && hospitalityBoost) {
-        const all: string[] = []
-        for (const p of crawledPages) {
-          if (!p.html) continue
-          all.push(...extractImageUrls(p.html, p.url))
-          if (all.length >= 30) break
-        }
-        // Prefer same-origin images first; then keep a few extras.
-        const sameOrigin: string[] = []
-        const other: string[] = []
-        for (const u of all) {
-          try {
-            const host = new URL(u).hostname
-            if (host === baseDomainForCrawl) sameOrigin.push(u)
-            else other.push(u)
-          } catch {
-            other.push(u)
-          }
-        }
-        imageUrlsForVision = [...sameOrigin, ...other].slice(0, tierConfig.maxPriorityPages >= 5 ? 6 : 4)
-        console.log('🖼️ Vision image candidates:', imageUrlsForVision.length)
-      }
-
       // Create OpenAI client for tone extraction
       const openaiClient = new OpenAI({ apiKey: openaiApiKey })
       const isPaidTier = tier === 'standardplus' || tier === 'premium'
 
-      const [basicInfo, contactInfo, keywords, venueHooksRaw, experiencePillars, visualVenueHooks, extractedMenuSignal, extractedToneOfVoice] = await Promise.all([
+      const [basicInfo, contactInfo, keywords, venueHooksRaw, experiencePillars, extractedMenuSignal, extractedToneOfVoice] = await Promise.all([
         extractBasicInfo(
           websiteContent,
           metadata,
@@ -770,13 +846,6 @@ serve(async (req: any) => {
           openaiApiKey,
           { businessName: businessName || null, businessType: businessType || null, languageHint: htmlLang || null }
         ),
-        (paidTier && hospitalityBoost && imageUrlsForVision.length > 0)
-          ? extractVisualVenueHooks(
-              imageUrlsForVision,
-              openaiApiKey,
-              { businessName: businessName || null, businessType: businessType || null, languageHint: htmlLang || null }
-            )
-          : Promise.resolve({ uniqueHooks: [] }),
         // NEW: Menu signal extraction (Gemini 2.5 Flash - all tiers)
         extractMenuSignal(
           websiteContent,
@@ -803,7 +872,7 @@ serve(async (req: any) => {
       menuSignal = extractedMenuSignal
       toneOfVoice = extractedToneOfVoice
 
-      console.log('✅ Parallel extraction complete (8/8 extractors)')
+      console.log('✅ Parallel extraction complete (7/7 extractors)')
       console.log('🍽️ Menu signal extracted:', JSON.stringify(menuSignal, null, 2))
       console.log('🎤 Tone of voice extracted:', toneOfVoice ? '✅' : '❌')
 
@@ -835,26 +904,6 @@ serve(async (req: any) => {
       }
 
       const venueHooks = normalizeVenueHooks(venueHooksRaw)
-
-      if (visualVenueHooks?.uniqueHooks?.length) {
-        const existing: any[] = Array.isArray(venueHooks.uniqueHooks) ? venueHooks.uniqueHooks : []
-        const merged = [...existing]
-
-        const seen = new Set<string>(existing.map((h) => String(h?.text || h?.hook || '').toLowerCase().trim()).filter(Boolean))
-        for (const vh of visualVenueHooks.uniqueHooks) {
-          const key = String((vh as any)?.text || (vh as any)?.hook || '').toLowerCase().trim()
-          if (!key || seen.has(key)) continue
-          seen.add(key)
-          merged.push({
-            ...vh,
-            // ensure both keys exist
-            hook: String((vh as any)?.hook || (vh as any)?.text || '').trim(),
-            text: String((vh as any)?.text || (vh as any)?.hook || '').trim(),
-          })
-        }
-
-        venueHooks.uniqueHooks = merged.slice(0, 12)
-      }
 
       // Collect detected menu URLs (for Menukort tab to confirm/edit before extraction)
       const detectedMenuUrls: string[] = []
@@ -945,13 +994,49 @@ serve(async (req: any) => {
                                contentLower.includes('patio') || 
                                contentLower.includes('outside') ||
                                contentLower.includes('al fresco')
-      
+
+      // Detect wifi
+      const hasWifi = contentLower.includes('wifi') ||
+                     contentLower.includes('wi-fi') ||
+                     contentLower.includes('gratis internet') ||
+                     contentLower.includes('free wifi') ||
+                     contentLower.includes('free wi-fi') ||
+                     contentLower.includes('trådløst internet')
+
+      // Detect power outlets
+      const hasPowerOutlets = contentLower.includes('stikkontakt') ||
+                             contentLower.includes('strøm') && contentLower.includes('laptop') ||
+                             contentLower.includes('power outlet') ||
+                             contentLower.includes('power socket') ||
+                             contentLower.includes('charging') ||
+                             contentLower.includes('oplad')
+
+      // Detect parking
+      const hasParking = contentLower.includes('parkering') ||
+                        contentLower.includes('parkeringsplads') ||
+                        contentLower.includes('parking') ||
+                        contentLower.includes('p-plads') ||
+                        contentLower.includes('free parking') ||
+                        contentLower.includes('gratis parkering')
+
+      // Detect kids menu
+      const hasKidsMenu = contentLower.includes('børnemenu') ||
+                         contentLower.includes('børn') && contentLower.includes('menu') ||
+                         contentLower.includes('kids menu') ||
+                         contentLower.includes('children') && contentLower.includes('menu') ||
+                         contentLower.includes('barnmenu') ||
+                         contentLower.includes('familievenlig')
+
       const serviceModel = {
         takeaway: hasTakeaway,
         delivery: hasDelivery,
         hasTableService: hasTableService,
         reservationRequired: reservationRequired,
-        outdoorSeating: hasOutdoorSeating
+        outdoorSeating: hasOutdoorSeating,
+        wifi: hasWifi,
+        powerOutlets: hasPowerOutlets,
+        parking: hasParking,
+        kidsMenu: hasKidsMenu
       }
       console.log('🍽️ Service model detected (restaurant=', isRestaurant, '):', serviceModel)
       
@@ -960,7 +1045,18 @@ serve(async (req: any) => {
         businessName: basicInfo.businessName,
         businessType: basicInfo.businessType, // Now supports hybrid structure
         businessTypeLabel: getBusinessTypeLabel(basicInfo.businessType), // Display label for UI
-        shortDescription: basicInfo.description, // Homepage "about" text for Om forretningen tab
+        shortDescription: (() => {
+          // Terrasse guard: only keep "terrasse" in the description if the scraped content
+          // literally confirms it. AI can hallucinate it from general knowledge.
+          let desc: string | null = basicInfo.description
+          if (desc && /terrasse/i.test(desc) && !contentLower.includes('terrasse')) {
+            desc = desc
+              .replace(/\budendørs\s+terrasse\b/gi, 'udendørs servering')
+              .replace(/\bterrasse\b/gi, 'udendørs servering')
+            console.log('⚠️ short_description terrasse guard: replaced "terrasse" (not confirmed in scrape)')
+          }
+          return desc
+        })(), // Homepage "about" text for Om forretningen tab
         logoUrl: basicInfo.logoUrl,
         
         // Contact info
@@ -979,6 +1075,10 @@ serve(async (req: any) => {
         delivery: serviceModel.delivery || menuExtraction?.delivery || null,
         hasTableService: serviceModel.hasTableService || menuExtraction?.hasTableService || null,
         reservationRequired: serviceModel.reservationRequired || menuExtraction?.reservationRequired || null,
+        wifi: serviceModel.wifi || null,
+        powerOutlets: serviceModel.powerOutlets || null,
+        parking: serviceModel.parking || null,
+        kidsMenu: serviceModel.kidsMenu || null,
         establishmentType: menuExtraction?.establishmentType || null,  // FSE or SBO classification
         
         // Keywords
@@ -993,6 +1093,13 @@ serve(async (req: any) => {
         // Opening hours (pre-extracted)
         openingHours: extractedHours || {},
 
+        // Manual review hint when the homepage exposes conflicting hours blocks
+        openingHoursReviewRequired,
+        openingHoursReviewReasons,
+
+        // Kitchen close time (pre-extracted)
+        kitchenCloseTime: kitchenCloseTime || null,
+
         // NEW: Menu signal (lightweight menu overview - all tiers)
         menuSignal: menuSignal || null,
 
@@ -1003,6 +1110,7 @@ serve(async (req: any) => {
       // DEBUG MODE: Return comprehensive extraction data
       if (debugMode) {
         console.log('🔍 DEBUG MODE: Returning extraction breakdown')
+        const hasMenuContent = detectedMenuUrls.length > 0 || websiteContent.includes('=== PDF Menu')
         
         const debugResult = {
           _debugMode: true,
@@ -1013,9 +1121,12 @@ serve(async (req: any) => {
             structuredData: structuredData,
             metadata: metadata,
             openingHours: extractedHours,
+            openingHoursReviewRequired,
+            openingHoursReviewReasons,
             logoUrl: logoUrl,
             menuUrl: menuUrl,
             bookingUrl: bookingUrl,
+            kitchenCloseTime: kitchenCloseTime,
             detectedPDFs: detectedPDFs
           },
           

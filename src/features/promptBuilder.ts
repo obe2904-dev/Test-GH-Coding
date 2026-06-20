@@ -25,7 +25,7 @@ export function buildVerticalPrompt(
   context: AssembledContext,
   options: PromptBuilderOptions
 ): string {
-  const vertical = context.business.vertical as BusinessVertical
+  const vertical = (context.business.effectiveVertical || context.business.vertical) as BusinessVertical
   const verticalConfig = getVerticalConfig(vertical)
   
   if (!verticalConfig) {

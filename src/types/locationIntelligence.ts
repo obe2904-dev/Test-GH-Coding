@@ -68,10 +68,12 @@ export interface LocationIntelligence {
 
 export interface PopulateLocationRequest {
   business_id: string;
+  force_refresh?: boolean;  // Task 4.5: Bypass 90-day cache and re-analyze
 }
 
 export interface PopulateLocationResponse {
   success: boolean;
   location_intelligence?: LocationIntelligence;
   error?: string;
+  cached?: boolean;  // Task 4.5: Indicates if result came from cache
 }

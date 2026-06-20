@@ -89,10 +89,6 @@ const AIWeeklyPlanPage = lazy(() =>
   import('./app/content/ai-weekly-plan/page').then((module) => ({ default: module.default }))
 )
 
-const PerformancePage = lazy(() =>
-  import('./pages/dashboard/PerformancePage').then((module) => ({ default: module.PerformancePage }))
-)
-
 const TeamPage = lazy(() =>
   import('./pages/dashboard/TeamPage').then((module) => ({ default: module.TeamPage }))
 )
@@ -206,7 +202,6 @@ function App() {
               <Route path="my-profile" element={<MyProfilePage />} />
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="ai-weekly-plan" element={<AIWeeklyPlanPage />} />
-              <Route path="analytics" element={<PerformancePage />} />
               <Route path="team" element={<TeamPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="help" element={<HelpPage />} />

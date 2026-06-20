@@ -8,12 +8,10 @@
  * B) Without strategy (legacy): Layer 5 scoring → Layer 6 timing → Layer 7 format → Layer 8 caption
  */
 
-import { selectWeeklyOpportunities } from './opportunity-selector.ts'
 import { optimizeWeeklySchedule } from './post-slot-optimizer.ts'
-import { selectMediaFormatAndPlatform } from './media-format-selector.ts'
 import { assembleContentBrief } from './content-brief-assembler.ts'
-import { getCurrentSeason } from './menu-scorer.ts'
 import { filterAudienceLabels } from '../utils/audience-filter.ts'
+import { detectServicePeriod } from '../content-planning/service-period-detector.ts'
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3'
 import type { 
   WeeklyStrategy, 
@@ -25,27 +23,6 @@ import type {
   SuggestedMediaType,
   CTAIntent 
 } from './types/strategy-types.ts'
-
-// ============================================================================
-// STRATEGY BRIEF HELPERS
-// ============================================================================
-
-function buildStrategyBriefText(strategy: any): string {
-  if (!strategy) return ''
-  const parts: string[] = []
-  if (strategy.narrative?.headline) parts.push(strategy.narrative.headline)
-  if (strategy.strategic_brief?.week_summary) parts.push(strategy.strategic_brief.week_summary)
-  if (strategy.strategic_brief?.angles?.[0]?.primary_angle)
-    parts.push(`Fokus: ${strategy.strategic_brief.angles[0].primary_angle}`)
-  return parts.join(' ')
-}
-
-function buildTargetAudienceText(brandProfile: any): string {
-  const ta = brandProfile?.target_audience
-  if (!ta) return ''
-  if (typeof ta === 'string') return ta
-  return ta.primary || JSON.stringify(ta)
-}
 
 // ============================================================================
 // TYPES
@@ -61,6 +38,7 @@ export interface PostSpecification {
     date: string
     time: string
     rationale: string
+    timingRationale?: string  // AI timing reasoning from Phase 2b
   }
   
   // Platform & Format
@@ -84,6 +62,7 @@ export interface PostSpecification {
   contentSubject: {
     dish: string
     whyThisDish: string[]
+    menuItemId?: string           // UUID for direct lookup in menu_items_normalized
     menuItemName?: string          // exact DB item name (when menu post)
     menuItemDescription?: string  // DB item description (when menu post)
   }
@@ -100,6 +79,7 @@ export interface PostSpecification {
       recencyPenalty: number
     }
     selectionReason: string
+    timingReason?: string  // AI timing reasoning from Phase 2b
   }
   
   // Caption
@@ -198,6 +178,21 @@ export interface PostSpecification {
     content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people'
     slot_id?: string
     rationale?: string  // raw Phase 2b rationale — used as captionBase in generate-text-from-idea
+    owner_note_applied?: boolean
+    drink_pairing?: string | null
+    strategy_brief?: string | null  // Phase 2b compact directive for caption AI: what to achieve + weather/timing/role context
+    media_direction?: string | null
+    scene_spec?: string | null
+    // Strategic intent — carries the Phase 1 narrative purpose of this post through to
+    // the plan generator and caption prompt so the cross-day booking/occasion logic is
+    // never lost in translation between phases.
+    strategic_intent?: string | null
+    // Booking nudge display metadata (optional — only present on booking nudge posts)
+    // Surfaced in Weekly Plan UI to show why nudge exists and what day it targets
+    nudge_rationale?: string | null
+    peak_day?: string | null                    // ISO date of targeted visit day
+    lead_days_used?: number | null              // 1-5: actual lead time chosen by AI
+    booking_nudge_warranted?: boolean | null    // AI decision this week
   }
 
   // Frontend compatibility fields (flattened for easier access)
@@ -279,21 +274,7 @@ interface GenerationInput {
 
   // ✨ Holiday events from week_context_snapshot (for holiday-aware PostSpecification annotations)
   contextEvents?: Array<{type: string; date: string; date_end?: string; name: string; name_dk: string; strategic_angle: string; marketing_hook?: string}>
-  // ✨ Weather forecast for the week (from OpenWeatherMap via Layer 1)
-  weatherForecast?: Array<{date: string; condition: string; temp: {day: number; min: number; max: number}; description: string}>
 }
-
-// ============================================================================
-// POST COUNT BY BUSINESS TYPE (legacy fallback when no Layer 0)
-// ============================================================================
-
-const POST_COUNT_BY_TYPE = {
-  FSE: 4,  // Fine Dining - focused quality
-  SBO: 4,  // Small Business - manageable volume
-  MFV: 5,  // Multiple Locations - moderate presence
-  MFD: 6,  // Multiple per Day - higher frequency
-  QSR: 7,  // Quick Service - high volume
-} as const
 
 // ============================================================================
 // WEEK CALCULATION
@@ -335,43 +316,6 @@ function convertTimeToCategory(time: string): 'morning' | 'lunch' | 'afternoon' 
   if (hour >= 14 && hour < 17) return 'afternoon'
   if (hour >= 17 && hour < 20) return 'dinner'
   return 'evening'
-}
-
-function calculatePriority(opportunity: any): {
-  priority: 'High' | 'Medium' | 'Low'
-  reasons: string[]
-} {
-  const reasons: string[] = []
-  let score = 0
-  
-  if (opportunity.seasonalScore > 80) {
-    reasons.push('seasonal ingredients')
-    score += 3
-  }
-  
-  if (opportunity.locationScore > 80) {
-    reasons.push('location match')
-    score += 2
-  }
-  
-  if (opportunity.weatherScore > 75) {
-    reasons.push('weather boost')
-    score += 2
-  }
-  
-  if (opportunity.performanceScore > 85) {
-    reasons.push('proven performance')
-    score += 2
-  }
-  
-  if (opportunity.recencyScore > 90) {
-    reasons.push('fresh content')
-    score += 1
-  }
-  
-  if (score >= 7) return { priority: 'High', reasons }
-  if (score >= 4) return { priority: 'Medium', reasons }
-  return { priority: 'Low', reasons }
 }
 
 /**
@@ -419,40 +363,6 @@ function calculatePriorityFromIdea(idea: PostIdea): {
 // ============================================================================
 // ALTERNATIVES GENERATOR
 // ============================================================================
-
-function generateAlternatives(opportunity: any, allOpportunities: any[]): {
-  priority: number
-  description: string
-}[] {
-  const alternatives: { priority: number; description: string }[] = []
-  
-  const sameCategory = allOpportunities.find(opp => 
-    opp.contentType === opportunity.contentType &&
-    opp.subject !== opportunity.subject
-  )
-  if (sameCategory) {
-    alternatives.push({
-      priority: 1,
-      description: `Alternative: ${sameCategory.subject}`,
-    })
-  }
-  
-  if (opportunity.contentType === 'menu_highlight') {
-    alternatives.push({
-      priority: 2,
-      description: `Ingredient story: Focus on key ingredient sourcing`,
-    })
-  }
-  
-  if (opportunity.contentType === 'behind_scenes') {
-    alternatives.push({
-      priority: 3,
-      description: `Behind-scenes: Show preparation process`,
-    })
-  }
-  
-  return alternatives.slice(0, 3)
-}
 
 /**
  * Generate alternatives from Layer 0 ideas (the non-selected ones)
@@ -645,7 +555,7 @@ async function mapIdeaToEnrichedSlot(
   businessId: string,
   supabaseClient: SupabaseClient,
   maxMenuPrice: number | null = null,
-  weatherForecast?: Array<{date: string; condition: string; temp: {day: number}; description: string}>
+  strategy?: any
 ) {
   // Parse as local date to avoid UTC-midnight shift (e.g. "2026-03-02" → UTC midnight = Mar 1 23:00 in UTC+1)
   const [_yr, _mo, _dy] = idea.suggested_day.split('-').map(Number)
@@ -675,11 +585,16 @@ async function mapIdeaToEnrichedSlot(
     6: 'summer', 7: 'summer', 8: 'summer',
     9: 'fall', 10: 'fall', 11: 'fall',
   }
-  const dayForecast = (weatherForecast || []).find(f => f.date === idea.suggested_day)
+  
+  // ✨ Extract weather from strategy snapshot (Open-Meteo) instead of separate OpenWeatherMap fetch
+  // The strategy's week_context_snapshot.weather.days contains detailed forecast for the week
+  const strategyWeatherDays = (strategy as any)?.week_context_snapshot?.weather?.days || []
+  const dayForecast = strategyWeatherDays.find((d: any) => d.date === idea.suggested_day)
+  
   const seasonalContextData = {
     season: seasonMap[month] || 'spring',
     weather: dayForecast?.condition || undefined,
-    temperature: dayForecast ? `${dayForecast.temp?.day}°C` : undefined,
+    temperature: dayForecast ? `${dayForecast.temp_max}°C` : undefined,
   }
 
   // ✨ NEW: Fetch menu item description for menu_item / product_menu content type
@@ -687,44 +602,75 @@ async function mapIdeaToEnrichedSlot(
   // This prevents AI hallucination by providing actual dish details
   let menuItemData: any = undefined
   const behindScenesMenuItemUsed: string = (idea as any).menu_item_used || ''
-  if (idea.content_type === 'menu_item' || idea.content_type === 'product_menu' || behindScenesMenuItemUsed) {
-    // Extract dish name: for menu types use title, for behind_scenes use menu_item_used
-    // Phase 2b titles often follow "Dish Name, med beskrivelse" format — split on comma-description
-    // (comma followed by lowercase) to isolate the actual item name for DB lookup.
-    const rawDishName = behindScenesMenuItemUsed || idea.title
+  if (idea.content_type === 'menu_item' || idea.content_type === 'product_menu' || idea.content_type === 'craving_visual' || behindScenesMenuItemUsed) {
+    // Extract dish name: prefer menu_item_used (original DB name), fall back to title.
+    // menu_item_used is the canonical name from Phase 2b — title may be enriched with category suffix.
+    const rawDishName = behindScenesMenuItemUsed || (idea as any).menu_item_used || idea.title
     const dishName = rawDishName
       .split(/[:\-–]/)[0]
       .split(/,\s+(?=[a-zæøå])/)[0]
       .trim()
     
+    // ── Derive service period from suggested_time for UUID disambiguation ──────────
+    // When multiple menu items share the same name (e.g., lunch vs dinner FAUSTBURGER),
+    // we need service_period filtering to match the correct variant
+    let derivedServicePeriod: string | null = null
+    try {
+      const servicePeriodResult = await detectServicePeriod(supabaseClient, businessId, idea.suggested_time)
+      derivedServicePeriod = servicePeriodResult.currentPeriod
+      console.log(`[WeeklyPlan] 🍽️ Derived service period for "${dishName}" at ${idea.suggested_time}: ${derivedServicePeriod || 'unknown'}`)
+    } catch (err) {
+      console.warn(`[WeeklyPlan] ⚠️ Failed to detect service period for ${idea.suggested_time}:`, err)
+    }
+    
     // Priority cascade: exact (case-insensitive) → starts-with → contains (confidence-gated)
     // Avoids broad substring matches that return wrong dish descriptions (e.g., "Bøf" matching 4 dishes)
-    const menuSelect = 'item_name, item_description, item_price, category_name'
-    const { data: exactMatch } = await supabaseClient
+    // NOW WITH SERVICE PERIOD FILTERING to ensure correct UUID when duplicates exist
+    const menuSelect = 'id, item_name, item_description, item_price, category_name, service_periods'
+    
+    // Helper: add service period filter to query if available
+    const addServicePeriodFilter = (query: any) => {
+      if (derivedServicePeriod) {
+        return query.contains('service_periods', [derivedServicePeriod])
+      }
+      return query
+    }
+    
+    let queryBuilder = supabaseClient
       .from('menu_items_normalized')
       .select(menuSelect)
       .eq('business_id', businessId)
       .ilike('item_name', dishName)
+    queryBuilder = addServicePeriodFilter(queryBuilder)
+    const { data: exactMatch } = await queryBuilder
       .limit(1)
       .maybeSingle()
     if (exactMatch) {
       menuItemData = exactMatch
+      console.log(`[WeeklyPlan] ✅ Exact match with service_period filter: "${dishName}" → "${exactMatch.item_name}" (${derivedServicePeriod || 'no filter'})`)
     } else {
-      const { data: startsWithMatch } = await supabaseClient
+      // Fallback: starts-with match (with service period filter if available)
+      let startsQueryBuilder = supabaseClient
         .from('menu_items_normalized')
         .select(menuSelect)
         .eq('business_id', businessId)
         .ilike('item_name', `${dishName}%`)
+      startsQueryBuilder = addServicePeriodFilter(startsQueryBuilder)
+      const { data: startsWithMatch } = await startsQueryBuilder
         .limit(1)
         .maybeSingle()
       if (startsWithMatch) {
         menuItemData = startsWithMatch
+        console.log(`[WeeklyPlan] ✅ Starts-with match: "${dishName}" → "${startsWithMatch.item_name}" (${derivedServicePeriod || 'no filter'})`)
       } else {
-        const { data: containsMatch } = await supabaseClient
+        // Fallback: contains match (with service period filter if available)
+        let containsQueryBuilder = supabaseClient
           .from('menu_items_normalized')
           .select(menuSelect)
           .eq('business_id', businessId)
           .ilike('item_name', `%${dishName}%`)
+        containsQueryBuilder = addServicePeriodFilter(containsQueryBuilder)
+        const { data: containsMatch } = await containsQueryBuilder
           .limit(1)
           .maybeSingle()
         if (containsMatch) {
@@ -735,10 +681,49 @@ async function mapIdeaToEnrichedSlot(
             console.warn(`[WeeklyPlan] ⚠️ Low-confidence match "${dishName}" → "${containsMatch.item_name}" (ratio ${matchRatio.toFixed(2)}) — ignored`)
           }
         }
+        
+        // Fallback: word-boundary search — dishName as complete word in item_name
+        // Handles "Klassisk Pariserbøf med..." when searching for "Pariserbøf"
+        if (!menuItemData) {
+          let wordQueryBuilder = supabaseClient
+            .from('menu_items_normalized')
+            .select(menuSelect)
+            .eq('business_id', businessId)
+            .or(`item_name.ilike.% ${dishName} %,item_name.ilike.% ${dishName},item_name.ilike.${dishName} %`)
+          wordQueryBuilder = addServicePeriodFilter(wordQueryBuilder)
+          const { data: wordMatch } = await wordQueryBuilder
+            .limit(1)
+            .maybeSingle()
+          if (wordMatch) {
+            menuItemData = wordMatch
+            console.log(`[WeeklyPlan] ✅ Word-boundary match: "${dishName}" → "${wordMatch.item_name}" (${derivedServicePeriod || 'no filter'})`)
+          }
+        }
+        
+        // Fallback: search in description if name matching fails entirely
+        // Handles cases where phase2b used a descriptive title not matching item_name
+        if (!menuItemData) {
+          let descQueryBuilder = supabaseClient
+            .from('menu_items_normalized')
+            .select(menuSelect)
+            .eq('business_id', businessId)
+            .ilike('item_description', `%${dishName}%`)
+          descQueryBuilder = addServicePeriodFilter(descQueryBuilder)
+          const { data: descMatch } = await descQueryBuilder
+            .limit(1)
+            .maybeSingle()
+          if (descMatch) {
+            menuItemData = descMatch
+            console.log(`[WeeklyPlan] ✅ Description match: "${dishName}" found in "${descMatch.item_name}" (${derivedServicePeriod || 'no filter'})`)
+          }
+        }
       }
     }
+    // Log outcome (phase2b fallback data will be used if DB lookup fails — see rawData below)
     if (menuItemData) {
       console.log(`[WeeklyPlan] ✅ Fetched menu description for "${menuItemData.item_name}": ${menuItemData.item_description?.substring(0, 80)}...`)
+    } else if ((idea as any).menu_item_description) {
+      console.log(`[WeeklyPlan] ℹ️ Using phase2b description for "${dishName}" (no DB match, fallback available)`)
     } else {
       console.warn(`[WeeklyPlan] ⚠️ No menu item found for dish name: "${dishName}"`)
     }
@@ -776,6 +761,7 @@ async function mapIdeaToEnrichedSlot(
         // ✨ NEW: Add menu item details for AI caption generation
         // DB lookup is the primary source; idea.menu_item_description (from phase2b AI) is the fallback
         ...(menuItemData ? {
+          itemId: menuItemData.id,  // UUID for ID-based lookup (eliminates name-matching fragility)
           itemName: menuItemData.item_name,
           description: menuItemData.item_description || (idea as any).menu_item_description || '',
           price: menuItemData.item_price || '',
@@ -793,6 +779,7 @@ async function mapIdeaToEnrichedSlot(
     
     // Layer 0 extras (not in legacy format, used for enhanced processing)
     layer0: {
+      id: idea.id,  // ✨ CRITICAL: Preserve idea ID for tracking executed ideas
       cta_intent: idea.cta_intent,
       suggested_media: idea.suggested_media,
       platforms: idea.platforms,
@@ -804,6 +791,15 @@ async function mapIdeaToEnrichedSlot(
       goal_mode: (idea as any).goal_mode,
       content_category: (idea as any).content_category,
       slot_id: (idea as any).slot_id,
+      owner_note_applied: (idea as any).owner_note_applied ?? false,
+      drink_pairing: (idea as any).drink_pairing ?? null,
+      // Strategic intent — carries Phase 1 narrative to caption prompt (booking, occasion, etc.)
+      strategic_intent: (idea as any).strategic_intent ?? null,
+      // Booking nudge display metadata — carried from Phase 1 judgment block
+      nudge_rationale: (idea as any).nudge_rationale ?? null,
+      peak_day: (idea as any).peak_day ?? null,
+      lead_days_used: (idea as any).lead_days_used ?? null,
+      booking_nudge_warranted: (idea as any).booking_nudge_warranted ?? null,
     }
   }
 }
@@ -846,21 +842,18 @@ export async function generateWeeklyPlan(
     console.log('[WeeklyPlan] Recently featured dish keywords:', [...recentlyFeaturedDishes])
   }
 
-  // Determine if we're using Layer 0 strategy or legacy Layer 5
-  const useStrategyPath = !!strategy && strategy.post_ideas.length > 0
-  
-  if (useStrategyPath) {
-    console.log('[WeeklyPlan] 🎯 Using Layer 0 strategy path (Layer 5 skipped)')
-    console.log('[WeeklyPlan] Strategy:', {
-      week_number: strategy.week_number,
-      total_ideas: strategy.post_ideas.length,
-      selected_ids: selectedIdeaIds || 'all',
-      platforms: strategy.platforms,
-      tier: strategy.subscription_tier,
-    })
-  } else {
-    console.log('[WeeklyPlan] ⚡ Using legacy path (Layer 5 scoring)')
+  if (!strategy || !strategy.post_ideas?.length) {
+    throw new Error('[WeeklyPlan] strategy with post_ideas is required — legacy Path B has been removed')
   }
+
+  console.log('[WeeklyPlan] 🎯 Using Layer 0 strategy path')
+  console.log('[WeeklyPlan] Strategy:', {
+    week_number: strategy.week_number,
+    total_ideas: strategy.post_ideas.length,
+    selected_ids: selectedIdeaIds || 'all',
+    platforms: strategy.platforms,
+    tier: strategy.subscription_tier,
+  })
   
   // Calculate week metadata
   const weekNumber = getWeekNumber(weekStart)
@@ -873,119 +866,40 @@ export async function generateWeeklyPlan(
   let enrichedSlots: any[]
   let allIdeas: PostIdea[] = []
   
-  if (useStrategyPath) {
-    // Filter to selected ideas (or use all if no selection)
-    allIdeas = selectedIdeaIds 
-      ? strategy.post_ideas.filter(idea => selectedIdeaIds.includes(idea.id))
-      : strategy.post_ideas
-    
-    if (allIdeas.length === 0) {
-      console.warn('[WeeklyPlan] No ideas selected, falling back to all strategy ideas')
-      allIdeas = strategy.post_ideas
-    }
-    
-    console.log('[WeeklyPlan] Processing', allIdeas.length, 'selected ideas:', 
-      allIdeas.map(i => `#${i.id}: ${i.title}`))
-    
-    // Map Layer 0 ideas to enriched slot format (async to fetch menu descriptions)
-    const _maxMenuPrice = menuItems && menuItems.length > 0
-      ? (menuItems.map((m: any) => parseFloat(m.price || '')).filter((p: number) => !isNaN(p) && p > 0).sort((a: number, b: number) => b - a)[0] ?? null)
-      : null
-    enrichedSlots = await Promise.all(
-      allIdeas.map(idea =>
-        mapIdeaToEnrichedSlot(idea, weekStart, brandProfile, locationIntel, businessId, supabaseClient, _maxMenuPrice, input.weatherForecast)
-      )
-    )
-    
-  // ========================================================================
-  // PATH B: Legacy Layer 5 scoring (no strategy provided)
-  // ========================================================================
+  // Filter to selected ideas (or use all if no selection)
+  allIdeas = selectedIdeaIds 
+    ? strategy.post_ideas.filter(idea => selectedIdeaIds.includes(idea.id))
+    : strategy.post_ideas
   
-  } else {
-    // Determine post count cap for legacy path
-    const tierPostCap = input.subscriptionTier === 'smart'
-      ? 4
-      : input.targetPostCount ?? (POST_COUNT_BY_TYPE[businessType as keyof typeof POST_COUNT_BY_TYPE] || 4)
-
-    console.log('[WeeklyPlan] Calling selectWeeklyOpportunities for business:', businessId,
-      '| tier:', input.subscriptionTier || 'unknown', '| cap:', tierPostCap)
-    
-    let weeklyPlan
-    try {
-      weeklyPlan = await selectWeeklyOpportunities(
-        businessId,
-        weekStart,
-        {
-          minimumScore: 60,
-          businessProfile,
-          businessOps,
-          locationIntel,
-          platforms: platforms || ['instagram'],
-          menuItems,
-          brandProfile,
-        }
-      )
-      console.log('[WeeklyPlan] Got', weeklyPlan.slots.length, 'opportunity slots')
-    } catch (error) {
-      console.error('[WeeklyPlan] Error in selectWeeklyOpportunities:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-      throw new Error(`Failed to select opportunities: ${errorMessage}`)
-    }
-    
-    // Extract and enrich opportunities from slots (original logic)
-    // Cap by tier before AI caption generation to avoid wasted calls
-    enrichedSlots = weeklyPlan.slots
-      .filter(slot => slot.selectedOpportunity !== null)
-      .slice(0, tierPostCap)
-      .map(slot => {
-        const opp = slot.selectedOpportunity!
-        const isMenuItem = 'itemName' in opp
-        
-        // Note: DB columns are area_type (not location_type) and location_marketing_hooks (not location_amplifiers)
-        const rawAreaType2 = (locationIntel?.area_type as string | undefined) || 'city_center'
-        // Derive permitted audience types via shared filter (price-gated, same logic as Brand Profile)
-        const _categoryScores2 = (locationIntel?.category_scores as Record<string, number>) ?? {}
-        const _maxMenuPrice2 = menuItems && menuItems.length > 0
-          ? (menuItems.map((m: any) => parseFloat(m.price || '')).filter((p: number) => !isNaN(p) && p > 0).sort((a: number, b: number) => b - a)[0] ?? null)
-          : null
-        const { permittedKeys: _permittedKeys2 } = filterAudienceLabels(_categoryScores2, _maxMenuPrice2)
-        const _secondaryTypes2 = _permittedKeys2.map(k => k === 'city_centre' ? 'city_center' : k)
-        const locationContextData = {
-          type: (rawAreaType2 === 'city_centre' ? 'city_center' : rawAreaType2) as 'waterfront' | 'city_center' | 'historic' | 'residential' | 'suburban',
-          amplifiers: (locationIntel?.location_marketing_hooks as string[] | undefined) || [],
-          secondary_types: _secondaryTypes2,
-        }
-        
-        const currentSeason = getCurrentSeason(weekStart.getMonth() + 1)
-        const seasonalContextData = {
-          season: (currentSeason === 'autumn' ? 'fall' : currentSeason) as 'spring' | 'summer' | 'fall' | 'winter',
-          weather: undefined,
-          temperature: undefined
-        }
-        
-        return {
-          slotId: slot.slotId,
-          contentType: slot.contentType,
-          platform: slot.platform,
-          dayOfWeek: slot.dayOfWeek,
-          hour: slot.hour,
-          opportunity: {
-            subject: isMenuItem ? opp.itemName : ((opp as any).subject || (opp as any).contentAngle),
-            contentType: slot.contentType,
-            score: isMenuItem ? opp.finalScore : (opp as any).score,
-            reason: isMenuItem ? opp.selectionReason : ((opp as any).subject || (opp as any).contentAngle),
-            brandVoice: deriveBrandVoiceCompat(brandProfile),
-            seasonalContext: seasonalContextData,
-            locationContext: locationContextData,
-            rawData: opp,
-          },
-          // No layer0 extras in legacy path
-          layer0: null,
-        }
-      })
+  // Validate that selected IDs actually matched strategy ideas
+  if (selectedIdeaIds && allIdeas.length === 0) {
+    const availableIds = strategy.post_ideas.map(i => i.id).join(', ')
+    throw new Error(
+      `None of the selected idea IDs matched strategy ideas. ` +
+      `Selected: [${selectedIdeaIds.join(', ')}]. Available: [${availableIds}]`
+    )
   }
   
-  // ========================================================================
+  // Safety check: strategy should never be empty at this point
+  if (allIdeas.length === 0) {
+    throw new Error('[WeeklyPlan] Strategy has no post_ideas to execute')
+  }
+  
+  console.log('[WeeklyPlan] Processing', allIdeas.length, 'selected ideas:', 
+    allIdeas.map(i => `#${i.id}: ${i.title}`))
+  
+  // Map Layer 0 ideas to enriched slot format (async to fetch menu descriptions)
+  const _maxMenuPrice = menuItems && menuItems.length > 0
+    ? (menuItems.map((m: any) => parseFloat(m.price || '')).filter((p: number) => !isNaN(p) && p > 0).sort((a: number, b: number) => b - a)[0] ?? null)
+    : null
+  enrichedSlots = await Promise.all(
+    allIdeas.map(idea =>
+      mapIdeaToEnrichedSlot(idea, weekStart, brandProfile, locationIntel, businessId, supabaseClient, _maxMenuPrice, strategy)
+    )
+  )
+  
+
+    // ========================================================================
   // LAYER 6: Optimize timing (both paths)
   // ========================================================================
   
@@ -1000,9 +914,9 @@ export async function generateWeeklyPlan(
       dayOfWeek: slot.dayOfWeek,
       hour: slot.hour,
       // Pass Layer 0's strategic day through so optimizer doesn't override it
-      layer0Day: slot.layer0 !== null ? slot.dayOfWeek : undefined,
+      layer0Day: slot.dayOfWeek,
       // Pass Layer 0's suggested time so optimizer uses it directly (Step 1)
-      layer0Hour: slot.layer0 !== null ? slot.hour : undefined,
+      layer0Hour: slot.hour,
       // Pass CTA intent so optimizer can apply timing rules when no explicit hour (Step 3)
       ctaIntent: slot.layer0?.cta_intent ?? undefined,
     }))
@@ -1017,53 +931,41 @@ export async function generateWeeklyPlan(
   const posts: PostSpecification[] = []
   const usedOpenersThisPlan: string[] = [] // Anti-repetition: track first-line openers across the plan
   
+  // CRITICAL FIX: Match enrichedSlots to optimizedSlots using originalIndex (preserved before sort)
+  // This prevents day-swapping bug when optimizer sorts slots chronologically
   for (let i = 0; i < enrichedSlots.length; i++) {
     const enrichedSlot = enrichedSlots[i]
     const opportunity = enrichedSlot.opportunity
-    const optimizedSlot = weeklySchedule.slots[i]
-    const layer0 = enrichedSlot.layer0 // null in legacy path
+    const optimizedSlot = weeklySchedule.slots.find((s: any) => s.originalIndex === i)
+    if (!optimizedSlot) {
+      console.error(`[WeeklyPlan] ❌ No optimized slot found for enrichedSlot index ${i}`)
+      continue
+    }
+    const layer0 = enrichedSlot.layer0
     
     const scheduleSlot = {
       day: ['Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag', 'Søndag'][optimizedSlot.dayOfWeek],
       date: optimizedSlot.scheduledDate.toISOString(),
       time: `${optimizedSlot.hour}:00`,
       timeRationale: optimizedSlot.optimizationReason,
+      // NEW: Include AI timing rationale from Phase 2b if available
+      timingRationale: (layer0 as any).timing_rationale || null,
     }
     
     // ------------------------------------------------------------------
-    // LAYER 7: Format & Platform selection
-    // Strategy path: Use Layer 0's suggested_media + platforms directly
-    // Legacy path: Use Layer 7's independent selection
+    // LAYER 7: Format & Platform — from Layer 0 strategy
     // ------------------------------------------------------------------
     
-    let formatSelection: {
-      platform: string
-      format: string
-      platformReason: string
-      formatReason: string
+    // Use the first platform as the canonical key (PLATFORM_LIMITS only accepts single platform names)
+    const primaryPlatform = (layer0.platforms?.[0] || 'instagram') as string;
+    const allPlatformsLabel = layer0.platforms?.join(' + ') || 'instagram';
+    const formatSelection = {
+      platform: primaryPlatform,
+      format: mapMediaTypeToFormat(layer0.suggested_media.type),
+      platformReason: `Valgt via Layer 0 strategi (${allPlatformsLabel})`,
+      formatReason: `${layer0.suggested_media.why} (${layer0.suggested_media.type})`,
     }
-    
-    if (layer0) {
-      // Strategy-driven: Layer 0 already decided format and platform
-      // Use the first platform as the canonical key (PLATFORM_LIMITS only accepts single platform names)
-      const primaryPlatform = (layer0.platforms?.[0] || 'instagram') as string;
-      const allPlatformsLabel = layer0.platforms?.join(' + ') || 'instagram';
-      formatSelection = {
-        platform: primaryPlatform,
-        format: mapMediaTypeToFormat(layer0.suggested_media.type),
-        platformReason: `Valgt via Layer 0 strategi (${allPlatformsLabel})`,
-        formatReason: `${layer0.suggested_media.why} (${layer0.suggested_media.type})`,
-      }
-      console.log(`[WeeklyPlan] L7 override: ${layer0.suggested_media.type} → ${formatSelection.format} on ${allPlatformsLabel}`)
-    } else {
-      // Legacy: Layer 7 decides independently
-      formatSelection = await selectMediaFormatAndPlatform(
-        optimizedSlot,
-        businessId,
-        userId,
-        supabaseClient
-      )
-    }
+    console.log(`[WeeklyPlan] L7 override: ${layer0.suggested_media.type} → ${formatSelection.format} on ${allPlatformsLabel}`)
     
     // ------------------------------------------------------------------
     // Visual direction via assembleContentBrief
@@ -1093,35 +995,23 @@ export async function generateWeeklyPlan(
     // Assemble PostSpecification
     // ------------------------------------------------------------------
     
-    // Priority: strategy-driven vs. legacy scoring
-    const { priority, reasons } = layer0 
-      ? calculatePriorityFromIdea(allIdeas.find(i => i.id === (opportunity.rawData?.layer0_idea?.id))!)
-      : calculatePriority(opportunity)
+    const { priority, reasons } = calculatePriorityFromIdea(allIdeas.find(i => i.id === (opportunity.rawData?.layer0_idea?.id))!)
     
-    // Alternatives: from other strategy ideas vs. other opportunities
-    const alternatives = layer0
-      ? generateAlternativesFromIdeas(
-          opportunity.rawData?.layer0_idea,
-          allIdeas
-        )
-      : generateAlternatives(opportunity, enrichedSlots.map(s => s.opportunity))
+    const alternatives = generateAlternativesFromIdeas(opportunity.rawData?.layer0_idea, allIdeas)
     
-    // Logistics: enhanced with media direction vs. basic
-    const logistics = layer0
-      ? generateLogisticsFromIdea(opportunity.rawData?.layer0_idea)
-      : generateLogistics(opportunity.contentType, formatSelection.format, opportunity.subject)
+    const logistics = generateLogisticsFromIdea(opportunity.rawData?.layer0_idea)
     
-    // CTA type: from Layer 0 intent vs. AI metadata
-    const ctaType = layer0
-      ? mapCTAIntentToType(layer0.cta_intent, layer0.platforms)
-      : 'soft CTA'
+    const ctaType = mapCTAIntentToType(layer0.cta_intent, layer0.platforms)
     
     // Selection rationale — append repetition warning if this dish keyword was featured in a recent plan
     const _dishKeyword = opportunity.subject.toLowerCase().split(/[\s:]/)[0]
     const isDishRepeated = recentlyFeaturedDishes.size > 0 && recentlyFeaturedDishes.has(_dishKeyword)
-    const selectionRationale = layer0
-      ? `Strategisk valgt: ${opportunity.reason}${isDishRepeated ? ' ⚠️ Lignende emne var i nylig plan' : ''}`
-      : buildLegacyRationale(opportunity, priority) + (isDishRepeated ? ' ⚠️ Lignende emne var i nylig plan' : '')
+    // Strip internal dish_index reference from user-facing text
+    const cleanReason = opportunity.reason.replace(/\s*\(dish_index\s+\d+\)/gi, '')
+    const cleanSelectionReason = opportunity.rawData?.selectionReason
+      ? opportunity.rawData.selectionReason.replace(/\s*\(dish_index\s+\d+\)/gi, '')
+      : cleanReason || 'Strategisk valgt'
+    const selectionRationale = `Strategisk valgt: ${cleanReason}${isDishRepeated ? ' ⚠️ Lignende emne var i nylig plan' : ''}`
     
     const slotDate = new Date(scheduleSlot.date)
 
@@ -1147,9 +1037,10 @@ export async function generateWeeklyPlan(
       
       timing: {
         day: scheduleSlot.day,
-        date: formatDate(slotDate),
+        date: formatDateISO(slotDate),
         time: scheduleSlot.time,
         rationale: scheduleSlot.timeRationale,
+        timingRationale: scheduleSlot.timingRationale || undefined, // AI timing reasoning from Phase 2b
       },
       
       platformFormat: {
@@ -1169,9 +1060,8 @@ export async function generateWeeklyPlan(
       
       contentSubject: {
         dish: opportunity.subject,
-        whyThisDish: layer0 
-          ? [opportunity.reason]
-          : (opportunity.reasons || []),
+        whyThisDish: [cleanReason],
+        menuItemId: (opportunity.rawData as any)?.itemId || undefined,  // UUID for direct lookup
         menuItemName: (opportunity.rawData as any)?.itemName || undefined,
         menuItemDescription: (opportunity.rawData as any)?.description || undefined,
       },
@@ -1186,7 +1076,8 @@ export async function generateWeeklyPlan(
           performanceBonus: 0,
           recencyPenalty: 0,
         },
-        selectionReason: opportunity.rawData?.selectionReason || opportunity.reason || 'Strategisk valgt',
+        selectionReason: cleanSelectionReason,
+        timingReason: scheduleSlot.timingRationale || undefined, // AI timing reasoning
       },
       
       caption: {
@@ -1202,9 +1093,7 @@ export async function generateWeeklyPlan(
       },
       
       visualDirection: {
-        subject: layer0 
-          ? layer0.suggested_media.direction 
-          : brief.visualDirection.subject,
+        subject: layer0.suggested_media.direction,
         angle: (brief.visualDirection.directions as any).angle || 'Afbalanceret komposition',
         setting: (brief.visualDirection.directions as any).setting || 'Restaurantmiljø',
         lighting: (brief.visualDirection.directions as any).lighting || 'Naturligt lys',
@@ -1233,23 +1122,35 @@ export async function generateWeeklyPlan(
         editHistory: [],
       },
       
-      // Layer 0 strategic context (only present in strategy path)
-      ...(layer0 ? {
-        idea_id: layer0.id,  // Add idea ID for frontend compatibility
-        strategicContext: {
-          cta_intent: layer0.cta_intent,
-          suggested_media: layer0.suggested_media,
-          strategic_fit: layer0.strategic_fit,
-          weather_dependent: layer0.weather_dependent,
-          weather_flag: layer0.weather_flag,
-          estimated_performance: layer0.estimated_performance,
-          // Goal-mode system — for UI display and DB persistence
-          goal_mode: (layer0 as any).goal_mode,
-          content_category: (layer0 as any).content_category,
-          slot_id: (layer0 as any).slot_id,
-          rationale: opportunity.reason,  // raw Phase 2b rationale for generate-text-from-idea
-        }
-      } : {}),
+      // Layer 0 strategic context
+      idea_id: layer0.id,
+      strategicContext: {
+        cta_intent: layer0.cta_intent,
+        suggested_media: layer0.suggested_media,
+        strategic_fit: layer0.strategic_fit,
+        weather_dependent: layer0.weather_dependent,
+        weather_flag: layer0.weather_flag,
+        estimated_performance: layer0.estimated_performance,
+        // Goal-mode system — for UI display and DB persistence
+        goal_mode: (layer0 as any).goal_mode,
+        content_category: (layer0 as any).content_category,
+        slot_id: (layer0 as any).slot_id,
+        rationale: cleanReason,  // Cleaned Phase 2b rationale for generate-text-from-idea
+        owner_note_applied: (layer0 as any).owner_note_applied ?? false,
+        drink_pairing: (layer0 as any).drink_pairing ?? null,
+        strategy_brief: (layer0 as any).strategy_brief ?? null,
+        media_direction: layer0.suggested_media?.direction ?? null,
+        scene_spec: (layer0 as any).scene_who
+          ? `${(layer0 as any).scene_who} ${(layer0 as any).scene_action} — ${(layer0 as any).scene_setting}`
+          : null,
+        // Strategic intent — Phase 1 narrative purpose for this post (booking driver, occasion, etc.)
+        strategic_intent: (layer0 as any).strategic_intent ?? null,
+        // Booking nudge display metadata — surfaced in UI for transparency
+        nudge_rationale: (layer0 as any).nudge_rationale ?? null,
+        peak_day: (layer0 as any).peak_day ?? null,
+        lead_days_used: (layer0 as any).lead_days_used ?? null,
+        booking_nudge_warranted: (layer0 as any).booking_nudge_warranted ?? null,
+      },
       
       // Flattened fields for frontend compatibility (non-conflicting names)
       title: opportunity.subject || 'Untitled Post',
@@ -1298,12 +1199,9 @@ export async function generateWeeklyPlan(
     weekEnd: formatDateISO(weekEnd),
     generatedAt: new Date().toISOString(),
     
-    // Strategy reference (only in strategy path)
-    ...(useStrategyPath ? {
-      strategyId,
-      strategyNarrative: strategy.narrative,
-      strategicPriorities: strategy.strategic_priorities,
-    } : {}),
+    strategyId,
+    strategyNarrative: strategy!.narrative,
+    strategicPriorities: strategy!.strategic_priorities,
     
     posts,
     summary: {
@@ -1319,27 +1217,6 @@ export async function generateWeeklyPlan(
       platformSwapsCount: 0,
     },
   }
-}
-
-// ============================================================================
-// HELPER: Legacy rationale builder (extracted from original)
-// ============================================================================
-
-function buildLegacyRationale(opportunity: any, priority: string): string {
-  const rationaleComponents: string[] = []
-  if (opportunity.rawData?.scoreBreakdown) {
-    const breakdown = opportunity.rawData.scoreBreakdown
-    if (breakdown.seasonalBonus > 0) rationaleComponents.push(`Sæson +${breakdown.seasonalBonus}`)
-    if (breakdown.weatherBonus > 0) rationaleComponents.push(`Vejr +${breakdown.weatherBonus}`)
-    if (breakdown.locationBonus > 0) rationaleComponents.push(`Lokation +${breakdown.locationBonus}`)
-  }
-  if (priority === 'High') rationaleComponents.push('Høj prioritet')
-  if (opportunity.contentType === 'menu_highlight') rationaleComponents.push('Menu')
-  if (opportunity.contentType === 'weather_opportunity') rationaleComponents.push('Vejr')
-  
-  return rationaleComponents.length > 0
-    ? rationaleComponents.join(' • ')
-    : 'AI-valgt baseret på menu og situation'
 }
 
 // ============================================================================
@@ -1387,31 +1264,131 @@ function generateFallbackHashtags(
 
 export async function saveWeeklyPlan(
   plan: WeeklyContentPlan,
-  supabaseClient: SupabaseClient
+  supabaseClient: SupabaseClient,
+  originalIdeas?: any[] // Optional: original strategy.post_ideas for daily_suggestions
 ): Promise<{ success: boolean; planId?: string; error?: string }> {
   try {
-    const { data, error } = await supabaseClient
+    // ========================================================================
+    // STEP 1: Save complete plan to weekly_content_plans (legacy JSON blob)
+    // Guard against duplicate rows for same business/week by updating latest row.
+    // ========================================================================
+    const { data: existingPlans, error: existingPlanError } = await supabaseClient
       .from('weekly_content_plans')
-      .insert({
-        user_id: plan.userId,
-        business_id: plan.businessId,
-        week_number: plan.weekNumber,
-        week_start: plan.weekStart,
-        week_end: plan.weekEnd,
-        generated_at: plan.generatedAt,
-        strategy_id: plan.strategyId || null,  // NEW: Link to Layer 0 strategy
-        posts: plan.posts,
-        summary: plan.summary,
-        learning_data: plan.learningData,
-      })
       .select('id')
-      .single()
-    
-    if (error) {
-      return { success: false, error: error.message }
+      .eq('business_id', plan.businessId)
+      .eq('week_start', plan.weekStart)
+      .order('generated_at', { ascending: false })
+      .limit(1)
+
+    if (existingPlanError) {
+      return { success: false, error: existingPlanError.message }
+    }
+
+    const existingPlanId = existingPlans?.[0]?.id
+    const payload = {
+      user_id: plan.userId,
+      business_id: plan.businessId,
+      week_number: plan.weekNumber,
+      week_start: plan.weekStart,
+      week_end: plan.weekEnd,
+      generated_at: plan.generatedAt,
+      strategy_id: plan.strategyId || null,
+      posts: plan.posts,
+      summary: plan.summary,
+      learning_data: plan.learningData,
+    }
+
+    let savedPlanId: string | undefined
+
+    if (existingPlanId) {
+      const { data: updated, error: updateError } = await supabaseClient
+        .from('weekly_content_plans')
+        .update(payload)
+        .eq('id', existingPlanId)
+        .select('id')
+        .single()
+
+      if (updateError) {
+        return { success: false, error: updateError.message }
+      }
+      savedPlanId = updated.id
+    } else {
+      const { data: inserted, error: insertError } = await supabaseClient
+        .from('weekly_content_plans')
+        .insert(payload)
+        .select('id')
+        .single()
+
+      if (insertError) {
+        return { success: false, error: insertError.message }
+      }
+      savedPlanId = inserted.id
     }
     
-    return { success: true, planId: data.id }
+    // ========================================================================
+    // STEP 2: Insert individual posts into daily_suggestions
+    // ========================================================================
+    if (originalIdeas && originalIdeas.length > 0) {
+      // Use original strategy.post_ideas which have validation_result and inferred_content_type
+      const perDayPosition = new Map<string, number>()
+      let skippedDueToPositionCap = 0
+
+      const dailySuggestions = originalIdeas
+        .map((idea) => {
+          const date = idea.suggested_day || null
+          if (!date) return null
+
+          const nextPos = (perDayPosition.get(date) || 0) + 1
+          perDayPosition.set(date, nextPos)
+
+          // Live DB constraint still enforces position <= 3.
+          if (nextPos > 3) {
+            skippedDueToPositionCap += 1
+            return null
+          }
+
+          return {
+            business_id: plan.businessId,
+            title: idea.title || 'Untitled Post',
+            rationale: idea.rationale || '',
+            content_type: idea.content_type || 'atmosphere',
+            suggested_time: idea.suggested_time || null,
+            date,
+            position: nextPos,
+            source: 'weekly_plan',
+            status: 'available',
+            menu_item_id: idea.contentSubject?.menuItemId || idea.menuItemId || null,
+            menu_item_name: idea.contentSubject?.menuItemName || idea.menuItemName || null,
+            menu_item_description: idea.contentSubject?.menuItemDescription || idea.menuItemDescription || null,
+            validation_result: idea.validation_result || null,
+            inferred_content_type: idea.inferred_content_type || null,
+          }
+        })
+        .filter(Boolean) as Array<Record<string, unknown>>
+
+      if (skippedDueToPositionCap > 0) {
+        console.warn(`[saveWeeklyPlan] ⚠️ Skipped ${skippedDueToPositionCap} daily_suggestions rows due to live position<=3 constraint`)
+      }
+      
+      if (dailySuggestions.length > 0) {
+        const { error: insertError, count } = await supabaseClient
+          .from('daily_suggestions')
+          .upsert(dailySuggestions, { onConflict: 'business_id,date,position,source,status' })
+        
+        if (insertError) {
+          console.error('[saveWeeklyPlan] Failed to insert daily_suggestions:', insertError)
+          // Don't fail the entire save if daily_suggestions write fails
+        } else {
+          console.log(`[saveWeeklyPlan] ✅ Upserted ${dailySuggestions.length} posts into daily_suggestions (rows affected: ${count})`)
+        }
+      } else {
+        console.warn('[saveWeeklyPlan] ⚠️  No original ideas with valid dates to insert into daily_suggestions')
+      }
+    } else {
+      console.warn('[saveWeeklyPlan] ⚠️  No originalIdeas provided, skipping daily_suggestions insert')
+    }
+    
+    return { success: true, planId: savedPlanId }
   } catch (err) {
     return { success: false, error: (err as Error).message }
   }
@@ -1433,22 +1410,22 @@ export async function loadWeeklyPlan(
     .eq('week_start', weekStart)
     .order('generated_at', { ascending: false })
     .limit(1)
-    .single()
   
-  if (error || !data) return null
+  if (error || !data || data.length === 0) return null
+  const row = data[0]
   
   return {
-    id: data.id,
-    userId: data.user_id,
-    businessId: data.business_id,
-    weekNumber: data.week_number,
-    weekStart: data.week_start,
-    weekEnd: data.week_end,
-    generatedAt: data.generated_at,
-    strategyId: data.strategy_id,  // NEW
-    posts: data.posts,
-    summary: data.summary,
-    learningData: data.learning_data,
+    id: row.id,
+    userId: row.user_id,
+    businessId: row.business_id,
+    weekNumber: row.week_number,
+    weekStart: row.week_start,
+    weekEnd: row.week_end,
+    generatedAt: row.generated_at,
+    strategyId: row.strategy_id,  // NEW
+    posts: row.posts,
+    summary: row.summary,
+    learningData: row.learning_data,
   }
 }
 
@@ -1457,14 +1434,11 @@ export const testHelpers = {
   getWeekNumber,
   getWeekEnd,
   formatDate,
-  calculatePriority,
   calculatePriorityFromIdea,
-  generateAlternatives,
   generateAlternativesFromIdeas,
   generateLogistics,
   generateLogisticsFromIdea,
   mapMediaTypeToFormat,
   mapCTAIntentToType,
   mapIdeaToEnrichedSlot,
-  POST_COUNT_BY_TYPE,
 }

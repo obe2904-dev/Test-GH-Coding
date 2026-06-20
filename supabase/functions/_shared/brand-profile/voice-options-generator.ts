@@ -80,7 +80,7 @@ const WEBSITE_SCHEMA = `{
   "voice_rationale": "<Start with a concrete observation: 'Hjemmesiden bruger...' or '[BusinessName] kommunikerer...'. 2-3 sentences describing what the text actually does. If content was sparse, say so honestly.>",
   "tone_model": {
     "primary_keywords": ["<2-4 tone keywords derived directly from the text>"],
-    "writing_rules": ["<3-5 rules that faithfully replicate the homepage style on social media>"],
+    "writing_rules": ["<3-5 rules that faithfully replicate the homepage style on social media. MANDATORY: at least one rule must explicitly enforce short-form social format — e.g. 'Start with a maximum 6-word opening fragment or statement' or 'Prefer imperative fragments over full sentences'. Never generate rules that encourage full marketing sentences.>"],
     "good_examples": ["<2-3 phrases matching the homepage style>"],
     "avoid_examples": ["<2-3 phrases that break the homepage style>"],
     "formality": "informal",
@@ -98,11 +98,11 @@ const WEBSITE_SCHEMA = `{
 const ENRICHED_SCHEMA = `{
   "label": "<2-4 danske ord der beskriver stemmen — KUN ord der er sande for DENNE virksomhed men ikke for en tilfældig café to gader væk. Brug ALDRIG 'alsidig', 'mangfoldig', 'varieret', 'nærværende', 'indbydende', 'autentisk', 'hyggelig'. Find i stedet ord der peger på stedet konkret: beliggenhed, specifikke retter, åbningstider, koncept.>",
   "tagline": "<én dansk sætning: hvad er det mest specifikke ved denne virksomheds sociale stemme — maks 8 ord>",
-  "voice_rationale": "<Skriv til ejeren som en venlig social medie-rådgiver. 2-3 sætninger i naturligt hverdagsdansk. Forklar hvad der kendetegner STEDET — ikke hvad 'signalerne indikerer'. Brug stedets konkrete træk (retter, beliggenhed, dagsdele, åbningstider). FORBUDTE ORD: perfekt, ideel, ideelle, alsidig, mangfoldig, unik, speciel, fantastisk, navngivningsstil, dagsbue, ejerstemme, aspirationsniveau. Slut med to sætninger: (1) 'Derfor anbefaler vi en [X]-stemme fremfor en [Y]-stemme.' — [X] skal være ét konkret adjektiv der peger på stedets tone, fx: 'kontant og stedstro', 'varm og uformel', 'direkte og åbenlykkelig'. (2) En adfærdssætning der forklarer hvad stemmen GØR: hvilke situationer, tidspunkter eller handlinger den taler til — fx: 'Det betyder at teksten taler direkte til gæsten om hvad der sker, hvornår og hvad de kan gøre.' — IKKE en gentagelse af label-ordene.>",
+  "voice_rationale": "<Skriv til ejeren som en venlig social medie-rådgiver. 2-3 sætninger i naturligt hverdagsdansk. Forklar hvad der kendetegner STEDET — ikke hvad 'signalerne indikerer'. Brug stedets konkrete træk (retter, beliggenhed, dagsdele, åbningstider). FORBUDTE ORD: perfekt, ideel, ideelle, alsidig, mangfoldig, unik, speciel, fantastisk, navngivningsstil, dagsbue, ejerstemme, aspirationsniveau. Slut med to sætninger: (1) 'Derfor anbefaler vi en [X]-stemme fremfor en [Y]-stemme.' — [X] skal være ét konkret adjektiv der peger på stedets tone, fx: 'kontant og stedstro', 'varm og uformel', 'direkte og jordnær'. (2) En adfærdssætning der forklarer hvad stemmen GØR: hvilke situationer, tidspunkter eller handlinger den taler til — fx: 'Det betyder at teksten taler direkte til gæsten om hvad der sker, hvornår og hvad de kan gøre.' — IKKE en gentagelse af label-ordene.>",
   "tone_model": {
     "primary_keywords": ["<2-4 nøgleord udledt fra de konkrete signaler — ikke fra kategorien>"],
-    "writing_rules": ["<3-5 konkrete skrivehandlinger — verb-baserede instruktioner, ikke adjektivbeskrivelser>"],
-    "good_examples": ["<2-3 korte fraser der UDELUKKENDE demonstrerer stemme-register og rytme — ingen retter, ingen stedsnavn, ingen CTA. Mindst én fraser skal vise registret i en ikke-menubaseret kontekst (fx en situation, et tidspunkt eller en person). En fremmed skal ikke kunne identificere virksomheden ud fra disse fraser alene>"],
+    "writing_rules": ["<3-5 konkrete skrivehandlinger udledt UDELUKKENDE fra signalerne i analysen — verb-baserede instruktioner. Krav: (1) Mindst én regel skal adressere FORMAT — men formatet SKAL udledes fra virksomhedens faktiske signaler: sen åbningstid (efter kl. 23) → en regel om aftens- og natregistret; dominerende brunch/morgenprofil → en regel om morgenstemning og uformelt nærvær; højt prisniveau → en regel om tone-kontrol og selvsikker korthed. (2) Mindst én regel skal adressere TIMING eller SERVICE-ARC — den dagsdel, det serviceprogram eller den anledning som virksomheden faktisk er bygget til. (3) DIFFERENTIERINGSTEST (OBLIGATORISK): Stil spørgsmålet 'Kan en tilfældig café to gader væk bruge denne regel om sig selv?' — hvis ja, er reglen for generisk, omskriv den med et konkret signal fra analysen som anker. (4) FORBUDT: Regler der er identiske med skrivereglerne i website-archetypet; generiske social medie-anbefalinger uden signal-forankring ('vær autentisk', 'brug korte sætninger'); regler der blot gentager kategoritype uden at pege på noget stedsspecifikt.>"],
+    "good_examples": ["<2-3 korte fraser der UDELUKKENDE demonstrerer stemme-register og rytme — ingen retter, ingen stedsnavn, ingen CTA. Brug KUN gæst eller person som sætningssubjekt — ALDRIG sted, natur eller inventar som sætningssubjekt. Mindst én fraser skal vise registret i en ikke-menubaseret kontekst (fx en situation, et tidspunkt eller en person). En fremmed skal ikke kunne identificere virksomheden ud fra disse fraser alene>"],
     "avoid_examples": ["<2-3 fraser der ville underminere stemmen>"],
     "formality": "<'informal' | 'semi-formal' | 'formal' — udledt fra ejerstemme-fragmenter og prisniveau>",
     "emoji_level": "<'none' | 'minimal' | 'moderate' — udledt fra erhvervstype og prisniveau>"
@@ -183,7 +183,8 @@ ${WEBSITE_SCHEMA}`
         response_format: { type: 'json_object' }
       },
       requestId,
-      'Voice Pipeline A (website)'
+      'Voice Pipeline A (website)',
+      { timeout: 20000, maxRetries: 1, retryDelayMs: 500, retryStatusCodes: [429, 503] }
     )
     const content = response.choices[0]?.message?.content
     return content ? parseOpenAIJson<any>(content) : null
@@ -299,7 +300,8 @@ ${ANALYSIS_SCHEMA}`
         response_format: { type: 'json_object' }
       },
       requestId,
-      'Voice Pipeline B Call 1 (signal analysis)'
+      'Voice Pipeline B Call 1 (signal analysis)',
+      { timeout: 18000, maxRetries: 1, retryDelayMs: 500, retryStatusCodes: [429, 503] }
     )
     const content = response.choices[0]?.message?.content
     return content ? parseOpenAIJson<SignalAnalysis>(content) : null
@@ -392,7 +394,8 @@ ${ENRICHED_SCHEMA}`
         response_format: { type: 'json_object' }
       },
       requestId,
-      'Voice Pipeline B Call 2 (voice generation)'
+      'Voice Pipeline B Call 2 (voice generation)',
+      { timeout: 20000, maxRetries: 1, retryDelayMs: 500, retryStatusCodes: [429, 503] }
     )
     const content = response.choices[0]?.message?.content
     if (!content) return null
@@ -548,5 +551,14 @@ export async function generateVoiceOptions(
   }
 
   console.log(`[${requestId}] Voice options: website="${websiteOption.label}", ai_enriched="${enrichedOption.label}"`)
+
+  // Divergence check: if both archetypes share the same first writing rule, the enriched
+  // archetype has failed to derive signal-specific rules. Log a warning for monitoring.
+  const websiteFirstRule: string = (websiteOption as any).tone_model?.writing_rules?.[0] ?? ''
+  const enrichedFirstRule: string = (enrichedOption as any).tone_model?.writing_rules?.[0] ?? ''
+  if (websiteFirstRule && enrichedFirstRule && websiteFirstRule === enrichedFirstRule) {
+    console.warn(`[${requestId}] ⚠️ Voice archetype convergence detected: both options share identical first writing rule: "${websiteFirstRule.slice(0, 80)}..."`)
+  }
+
   return result
 }

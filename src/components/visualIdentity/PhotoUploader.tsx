@@ -23,12 +23,14 @@ export function PhotoUploader({ businessId, onUploadComplete }: PhotoUploaderPro
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${businessId}/${Date.now()}-${i}.${fileExt}`;
+        // Use stable filename derived from original name so re-uploading the same
+        // file overwrites the existing one rather than creating a duplicate.
+        const safeName = file.name.toLowerCase().replace(/[^a-z0-9.\-_]/g, '-');
+        const fileName = `${businessId}/${safeName}`;
 
         const { data, error } = await supabase.storage
           .from('visual-identity')
-          .upload(fileName, file);
+          .upload(fileName, file, { upsert: true });
 
         if (error) {
           console.error('Upload error:', error);
@@ -40,9 +42,9 @@ export function PhotoUploader({ businessId, onUploadComplete }: PhotoUploaderPro
         }
       }
 
-      const allPaths = [...uploadedPaths, ...paths];
-      setUploadedPaths(allPaths);
-      onUploadComplete(allPaths);
+      setUploadedPaths((prev) => [...prev, ...paths]);
+      // Only pass newly uploaded paths — the parent merges with existing paths itself
+      onUploadComplete(paths);
     } catch (err) {
       console.error('Upload failed:', err);
       alert('Upload mislykkedes. Prøv igen.');

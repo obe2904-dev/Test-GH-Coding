@@ -4,6 +4,8 @@ interface PlanContextStripProps {
   plan: WeeklyContentPlan
   currentIndex: number
   sessionDoneIndices: number[]
+  /** ISO date strings (YYYY-MM-DD) of plan slots that are already committed in the DB */
+  committedPlanDates?: Set<string>
   onBack: () => void
   onSwitchPost: (rawIndex: number) => void
   onNewPost?: () => void // Exit Weekly Plan flow and start a fresh Hurtigt Opslag
@@ -26,6 +28,7 @@ export function PlanContextStrip({
   plan,
   currentIndex,
   sessionDoneIndices,
+  committedPlanDates,
   onBack,
   onSwitchPost,
   onNewPost,
@@ -62,14 +65,21 @@ export function PlanContextStrip({
       <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
         {sortedPosts.map(({ post, rawIndex }) => {
           const isActive = rawIndex === currentIndex
+          const isPublished = committedPlanDates?.has(post.timing.date) ?? false
           const isDone = sessionDoneIndices.includes(rawIndex)
 
           let chipClass =
             'inline-flex flex-col items-center px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all cursor-pointer '
 
-          if (isActive) {
+          if (isActive && isPublished) {
+            chipClass +=
+              'bg-green-600 text-white border-green-600 shadow-sm ring-2 ring-green-500 ring-offset-1'
+          } else if (isActive) {
             chipClass +=
               'bg-cta text-white border-cta shadow-sm ring-2 ring-cta ring-offset-1'
+          } else if (isPublished) {
+            chipClass +=
+              'bg-green-600 text-white border-green-600 hover:bg-green-700'
           } else if (isDone) {
             chipClass +=
               'bg-green-100 text-green-800 border-green-300 hover:bg-green-200'
@@ -83,11 +93,11 @@ export function PlanContextStrip({
               key={rawIndex}
               onClick={() => !isActive && onSwitchPost(rawIndex)}
               className={chipClass}
-              title={`${shortDayDanish(post.timing.date)} ${dayOfMonth(post.timing.date)}: ${post.contentSubject.dish}`}
+              title={`${shortDayDanish(post.timing.date)} ${dayOfMonth(post.timing.date)}: ${post.contentSubject.dish}${isPublished ? ' (planlagt)' : ''}`}
             >
               <span>{shortDayDanish(post.timing.date)}</span>
               <span className="leading-none">
-                {isDone && !isActive ? '✓' : dayOfMonth(post.timing.date)}
+                {isPublished ? '📅' : (isDone && !isActive) ? '✓' : dayOfMonth(post.timing.date)}
               </span>
             </button>
           )

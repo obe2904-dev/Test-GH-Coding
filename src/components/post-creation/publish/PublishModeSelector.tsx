@@ -10,6 +10,10 @@ interface PublishModeSelectorProps {
   nowSubtitle: string
   scheduleTitle: string
   scheduleSubtitle: string
+  showQuotaInfo?: boolean
+  quotaUsed?: number
+  quotaLimit?: number
+  quotaLabel?: string
 }
 
 const activeClasses = 'border-accent bg-[#F4F1FE] shadow-sm'
@@ -21,7 +25,11 @@ export function PublishModeSelector({
   nowTitle,
   nowSubtitle,
   scheduleTitle,
-  scheduleSubtitle
+  scheduleSubtitle,
+  showQuotaInfo = false,
+  quotaUsed = 0,
+  quotaLimit = 0,
+  quotaLabel = ''
 }: PublishModeSelectorProps) {
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -64,6 +72,11 @@ export function PublishModeSelector({
               {scheduleTitle}
             </h3>
             <p className="text-xs text-[#6B7280]">{scheduleSubtitle}</p>
+            {showQuotaInfo && (
+              <p className="text-xs text-[#7C3AED] mt-0.5 font-semibold">
+                {quotaUsed}/{quotaLimit} {quotaLabel}
+              </p>
+            )}
           </div>
           {mode === 'schedule' && (
             <div className="absolute top-2 right-2 w-5 h-5 bg-[#E3E8F8] border border-accent rounded-full flex items-center justify-center">

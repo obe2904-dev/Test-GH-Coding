@@ -165,7 +165,7 @@ export function MenuOfferingsPanel({
   
   // Initialize all hooks
   const menuSources = useMenuSources(businessId, userId)
-  const menuExtractions = useMenuExtractions(businessId, userId)
+  const menuExtractions = useMenuExtractions(businessId, userId ?? null)
   const menuHandlers = useMenuHandlers({
     menuDescription,
     onMenuDescriptionChangeCallback: onMenuDescriptionChange,
@@ -274,7 +274,6 @@ export function MenuOfferingsPanel({
           menu_type: detected.type,
           label: detected.label,
           created_by: userId,
-          created_at: new Date().toISOString()
         }
       })
 
@@ -352,7 +351,7 @@ export function MenuOfferingsPanel({
               {menuSignal.menuCategories && menuSignal.menuCategories.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {menuSignal.menuCategories.map((cat: string, idx: number) => (
-                    <span key={idx} className="px-2 py-0.5 text-xs bg-surface-alt border border-border text-text-secondary rounded">
+                    <span key={idx} className="bg-[#FAFAF8] border-[0.5px] border-[#C8C3BB] rounded-full px-[10px] py-[3px] text-[11px] font-medium text-[#5C5650] uppercase tracking-wider">
                       {cat}
                     </span>
                   ))}

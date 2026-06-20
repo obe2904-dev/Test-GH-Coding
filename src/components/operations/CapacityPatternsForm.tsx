@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import type { DayOfWeek, ServicePeriod, CapacityPattern } from '@/types';
+import type { DayOfWeek, ServicePeriod } from '@/types';
+
+interface CapacityPattern {
+  day: DayOfWeek;
+  period: ServicePeriod;
+  capacity_pct: number;
+}
 
 interface CapacityPatternsFormProps {
   busyPeriods: CapacityPattern[];

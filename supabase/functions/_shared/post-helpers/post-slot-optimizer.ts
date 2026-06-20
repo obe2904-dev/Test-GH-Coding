@@ -287,28 +287,33 @@ function generateOptimizationReason(
   const days = ['Søndag', 'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag']
   const dayName = days[day]
   
-  // Time period description
+  // Time period description (user-friendly labels)
   let timePeriod = 'optimalt tidspunkt'
-  if (hour >= 7 && hour <= 9) timePeriod = 'morgen-opmærksomhedsvindue'
-  else if (hour >= 11 && hour <= 12) timePeriod = 'frokostbeslutningsvindue'
-  else if (hour >= 14 && hour <= 17) timePeriod = 'middag-planlægningsvindue'
-  else if (hour >= 17 && hour <= 19) timePeriod = 'aften-FOMO-vindue'
-  else if (hour >= 19 && hour <= 21) timePeriod = 'aftenengagement-vindue'
+  if (hour >= 7 && hour <= 9) timePeriod = 'morgentid'
+  else if (hour >= 11 && hour <= 12) timePeriod = 'frokosttid'
+  else if (hour >= 14 && hour <= 17) timePeriod = 'eftermiddag'
+  else if (hour >= 17 && hour <= 19) timePeriod = 'aftentid'
+  else if (hour >= 19 && hour <= 21) timePeriod = 'sen aften'
   
   // Content type specific reasons
   const reasons: Record<string, string> = {
-    menu_highlight: `Menupost på ${dayName} under ${timePeriod}`,
-    dinner_menu: `Aftenmenu under ${timePeriod} til måltidsplanlægning`,
-    lunch_menu: `Frokosttilbud i umiddelbart beslutningsvindue`,
-    breakfast_menu: `Morgenmadsindhold under morgen-scroll-tid`,
-    atmosphere: `Stemningspost under ${timePeriod} for at drive besøg`,
-    location_story: `Lokationshistorie under peak-engagement`,
-    behind_scenes: `Storytelling-indhold under weekendengagement-vindue`,
-    engagement: `Interaktivt indhold under ugens engagement-peak`,
-    event_promotion: `Eventpromovering med optimalt synlighedstidspunkt`,
+    menu_highlight: `Menupost ${dayName} ${timePeriod}`,
+    menu_item: `Menuret planlagt ${dayName} ${timePeriod}`,
+    product_menu: `Menuprodukt ${dayName} ${timePeriod}`,
+    craving_visual: `Sensorisk post ${dayName} ${timePeriod}`,
+    dinner_menu: `Aftenmenu ${dayName} til måltidsplanlægning`,
+    lunch_menu: `Frokosttilbud ${dayName} i beslutningsvindue`,
+    breakfast_menu: `Morgenmad ${dayName} ved morgen-scroll`,
+    atmosphere: `Stemningspost ${dayName} ${timePeriod}`,
+    location_story: `Lokationshistorie ${dayName} ved peak-engagement`,
+    behind_scenes: `Storytelling ${dayName} ved weekendengagement`,
+    engagement: `Interaktivt indhold ${dayName} ved engagement-peak`,
+    event_promotion: `Eventpromovering ${dayName} med optimal synlighed`,
   }
   
-  let reason = reasons[contentType] || `${contentType} lagt op ved ${timePeriod}`
+  // User-friendly fallback for unmapped content types
+  const fallbackReason = `Post planlagt ${dayName} ${timePeriod}`
+  let reason = reasons[contentType] || fallbackReason
   
   if (wasAdjusted) {
     reason += ' (justeret for åbningstider/performance)'
@@ -442,7 +447,12 @@ export async function optimizeWeeklySchedule(
       // Strategy 2: Try next day with same hour
       else if (collisionAttempts <= 6) {
         optimalDay = (optimalDay + 1) % 7
-        optimalHour = selectOptimalHour(slot.contentType, slot.platform)
+        // CRITICAL: Preserve layer0Hour (strategy AI's explicit time) even when moving days
+        // Only fall back to selectOptimalHour if no layer0Hour was provided
+        if (slot.layer0Hour === undefined) {
+          optimalHour = selectOptimalHour(slot.contentType, slot.platform)
+        }
+        // Otherwise keep the layer0Hour value (e.g. lunch at 12:00 stays 12:00)
       }
       // Strategy 3: Try any available slot
       else {
@@ -485,7 +495,13 @@ export async function optimizeWeeklySchedule(
     })
   }
   
-  // Sort by scheduled date
+  // CRITICAL: Preserve original input order to maintain 1:1 mapping with enrichedSlots array
+  // Track original index BEFORE sorting by date
+  optimizedSlots.forEach((slot, idx) => {
+    (slot as any).originalIndex = idx
+  })
+  
+  // Sort by scheduled date for chronological display
   optimizedSlots.sort((a, b) => 
     a.scheduledDate.getTime() - b.scheduledDate.getTime()
   )
