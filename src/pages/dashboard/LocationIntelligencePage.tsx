@@ -410,6 +410,7 @@ function LocationIntelligencePage() {
       };
       const locationTypeMatches = analyzeLocationTypes(locationContext, countryCode);
       console.log('📍 STEP 1 - Location Type Matches (Country: ' + countryCode + '):', locationTypeMatches);
+      console.log('🔍 DEBUG - locationTypeMatches scores:', Object.entries(locationTypeMatches).map(([k, v]: [string, any]) => `${k}=${v.match_score}`).join(', '));
       
       // STEP 2: Concept fit analysis (how business fits each location type)
       const businessData = await loadBusinessData();
@@ -428,6 +429,8 @@ function LocationIntelligencePage() {
         const RELIABLE_CLIENT_VETO = new Set(['transport_hub', 'office', 'shopping_district']);
 
         // Use DB/analysis.matches scores (Google Maps-based, authoritative) for gating.
+        console.log('🔍 DEBUG - analysis.matches:', analysis.matches.map(m => `${m.categoryId}=${m.score}`).join(', '));
+        
         const categories = analysis.matches.map(m => ({
           categoryId: m.categoryId,
           score: (RELIABLE_CLIENT_VETO.has(m.categoryId) && locationTypeMatches[m.categoryId]?.match_score === 0)
@@ -435,6 +438,8 @@ function LocationIntelligencePage() {
             : m.score,
           displayName: localeConfig.categories[m.categoryId]?.name || m.categoryId
         }));
+        
+        console.log('🔍 DEBUG - categories after veto logic:', categories.map(c => `${c.categoryId}=${c.score}`).join(', '));
 
         // Filter categories >= 60% AND geographic types only (exclude demographics)
         const eligibleCategories = categories.filter(cat => 

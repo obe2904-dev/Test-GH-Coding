@@ -375,6 +375,7 @@ export function GenerateStep({
   }, [isWriteMode, businessData?.business?.id]) // Only run on mount when business loads
 
   // Auto-save draft on content change (write mode only)
+  // This provides crash recovery - user can close browser and return to their work.
   useEffect(() => {
     if (!isWriteMode || !businessData?.business?.id) return
     if (!postContent) return
@@ -388,7 +389,7 @@ export function GenerateStep({
       photo_content: photoContent,
       selected_platforms: selectedPlatforms
     })
-  }, [isWriteMode, businessData?.business?.id, postContent, photoContent, selectedPlatforms])
+  }, [isWriteMode, businessData?.business?.id, postContent, photoContent, selectedPlatforms, writeDraft])
   
   // Show tabs if: user has a business and not in strategy mode
   // Tabs should always be visible (not dependent on dismissal)

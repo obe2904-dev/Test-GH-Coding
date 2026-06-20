@@ -204,19 +204,29 @@ export function CreatePostPage() {
   // Track blob: URLs that have already been uploaded to avoid re-uploading on re-render
   const uploadedBlobsRef = useRef<Set<string>>(new Set())
   const hasRestoredDbDraftRef = useRef(false)
+  // Track previous suggestion ID to avoid clearing photos when returning to same suggestion
+  const previousSuggestionIdRef = useRef<number | null>(null)
+  // Loading state for weekly plan idea switching to prevent race conditions
+  const [isLoadingWeeklyPlanSwitch, setIsLoadingWeeklyPlanSwitch] = useState(false)
 
   const buildDbDraftKey = useCallback((): DbPostKey | null => {
     const businessId = businessData.business?.id
     if (!businessId) return null
     if (activePath === 'weekly-plan' && weeklyPlanPost?.timing?.date) {
-      return { businessId, ideaSource: 'weekly_plan', weeklyPlanSlotDate: weeklyPlanPost.timing.date }
+      return { 
+        businessId, 
+        ideaSource: 'weekly_plan', 
+        weeklyPlanSlotDate: weeklyPlanPost.timing.date,
+        weeklyPlanId: weeklyContentPlan?.id ?? null,
+        weeklyPlanSlotIndex: weeklyPlanPostIndex ?? null
+      }
     }
     if (activePath === 'ai-ideas' && selectedSuggestionData?.id != null && !isCommittedAiSuggestion) {
       return { businessId, ideaSource: 'quick_suggestions', suggestionId: selectedSuggestionData.id }
     }
     if (activePath === 'write') return { businessId, ideaSource: 'write' }
     return null
-  }, [businessData.business?.id, activePath, selectedSuggestionData?.id, weeklyPlanPost?.timing?.date, isCommittedAiSuggestion])
+  }, [businessData.business?.id, activePath, selectedSuggestionData?.id, weeklyPlanPost?.timing?.date, weeklyContentPlan?.id, weeklyPlanPostIndex, isCommittedAiSuggestion])
 
   useEffect(() => {
     if (!isCommittedAiSuggestion || publishedInfo !== null) return
@@ -477,11 +487,11 @@ export function CreatePostPage() {
     return null
   }, [activePath, selectedSuggestionData, weeklyPlanPost])
 
-  // Auto-save postContent + photo URLs whenever they change (Skriv Selv only).
+  // Auto-save postContent + photo URLs whenever they change (Skriv Selv, Weekly Plan).
   // AI Ideer uses daily_suggestions table exclusively until publish.
-  // Weekly Plan posts are saved separately inside the store's setDraftMapEntry.
+  // Skip auto-save in Udgiv step to avoid recreating combined draft after platform split.
   useEffect(() => {
-    if (!activeContent || activePath === 'weekly-plan' || activePath === 'ai-ideas') return
+    if (!activeContent || activePath === 'ai-ideas' || currentStep === 'publish') return
 
     // 1. Save text + blob: URL stubs to localStorage (fast, synchronous-feel)
     const photoMedia = photoContent?.uploadedMedia?.map(m => ({
@@ -544,12 +554,16 @@ export function CreatePostPage() {
         photoUrl: persistedPhotoUrl,
         contentJson: activeContent,
         suggestedPostDatetime: computeSuggestedPostDatetime(),
+        // Include weekly plan IDs when saving weekly plan drafts
+        ...(activePath === 'weekly-plan' && weeklyPlanPost?.idea_id != null && {
+          weeklyPlanIdeaId: Number(weeklyPlanPost.idea_id)
+        })
       })
       if (newId) draftDbIdRef.current = newId
     }, 1500) // debounce: save 1.5s after the last change
 
     return () => clearTimeout(timer)
-  }, [activeContent, photoContent, activePath, buildDbDraftKey, selectedPlatforms, posts, setPhotoContent, computeSuggestedPostDatetime])
+  }, [activeContent, photoContent, activePath, currentStep, buildDbDraftKey, selectedPlatforms, posts, setPhotoContent, computeSuggestedPostDatetime, weeklyPlanPost])
 
   // Initialize selected platforms with enabled platforms (all platforms for both tiers)
   useEffect(() => {
@@ -982,10 +996,17 @@ export function CreatePostPage() {
       }
     }
     
-    // Clear any photo content from a previous suggestion before mounting CreateStep.
-    // CreateStep's useEffect will reload photos from DB for the current suggestionId if
-    // any were saved; if not, the slate starts clean so no stale photos bleed through.
-    setPhotoContent(null)
+    // Only clear photos if switching to a different suggestion to prevent jarring reload
+    // when user navigates back to Design from Publish for the same suggestion.
+    // CreateStep's useEffect will reload photos from DB if needed.
+    const currentSuggestionId = selectedSuggestionData?.id ?? null
+    if (activePath === 'ai-ideas' && currentSuggestionId !== previousSuggestionIdRef.current) {
+      console.log('[CreatePostPage] Clearing photos - switching from suggestion', previousSuggestionIdRef.current, 'to', currentSuggestionId)
+      setPhotoContent(null)
+      previousSuggestionIdRef.current = currentSuggestionId
+    } else if (activePath === 'ai-ideas') {
+      console.log('[CreatePostPage] Keeping photos - same suggestion', currentSuggestionId)
+    }
 
     // Advance to Design step
     console.log('[CreatePostPage] Navigating to Design step')
@@ -1389,10 +1410,13 @@ export function CreatePostPage() {
 
   // Switch to a different idea from the Design-step tab strip.
   // Saves current text to draftMap, loads the new idea (from draftMap or fresh transfer).
-  const handleSwitchToIdea = (newIndex: number) => {
-    if (!weeklyContentPlan || newIndex === weeklyPlanPostIndex) return
+  const handleSwitchToIdea = async (newIndex: number) => {
+    if (!weeklyContentPlan || newIndex === weeklyPlanPostIndex || isLoadingWeeklyPlanSwitch) return
     const newPost = weeklyContentPlan.posts[newIndex]
     if (!newPost) return
+
+    // Prevent rapid switching with loading state
+    setIsLoadingWeeklyPlanSwitch(true)
 
     // Persist current edits before leaving
     if (postContent) {
@@ -1447,8 +1471,11 @@ export function CreatePostPage() {
       setCurrentStep('create')
     } else {
       // No draft yet — run the direct transfer inline (avoids useEffect race condition)
-      handleDirectTransfer(newPost, newIndex)
+      await handleDirectTransfer(newPost, newIndex)
     }
+
+    // Clear loading state after switch completes
+    setIsLoadingWeeklyPlanSwitch(false)
   }
 
   // PlanContextStrip navigation — delegates to handleSwitchToIdea so draftMap is always respected
@@ -1541,7 +1568,27 @@ export function CreatePostPage() {
       }
     }
 
-    // RULE 2: Block navigation from Generate for AI Ideas without selection
+    // RULE 2: Block navigation to Publish for AI Ideas without generated content
+    if (targetStepIndex === 2 && activePath === 'ai-ideas') {
+      const hasText = activeContent?.text && activeContent.text.trim().length >= 10
+      const hasPhotos = photoContent?.uploadedMedia && photoContent.uploadedMedia.length > 0
+      if (!hasText && !hasPhotos) {
+        console.log('[CreatePostPage] Cannot go to Publish - AI Ideas requires generated text or photos')
+        return  // Block navigation
+      }
+    }
+
+    // RULE 3: Block navigation to Publish for Weekly Plan without generated content
+    if (targetStepIndex === 2 && activePath === 'weekly-plan') {
+      const hasText = activeContent?.text && activeContent.text.trim().length >= 10
+      const hasPhotos = photoContent?.uploadedMedia && photoContent.uploadedMedia.length > 0
+      if (!hasText && !hasPhotos) {
+        console.log('[CreatePostPage] Cannot go to Publish - Weekly Plan requires generated text or photos')
+        return  // Block navigation
+      }
+    }
+
+    // RULE 4: Block navigation from Generate for AI Ideas without selection
     if (currentStepIndex === 0 && targetStepIndex > 0 && activePath === 'ai-ideas') {
       const hasSelection = selectedSuggestionData && selectedSuggestionData.id !== 0
       if (!hasSelection && !activeContent?.text && (!photoContent?.uploadedMedia || photoContent.uploadedMedia.length === 0)) {
@@ -1549,7 +1596,6 @@ export function CreatePostPage() {
         return  // Block navigation
       }
     }
-    // Weekly Plan auto-generates from plan data, so allow all navigation
 
     setCurrentStep(steps[targetStepIndex])
   }

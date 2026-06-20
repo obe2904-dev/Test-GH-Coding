@@ -46,9 +46,12 @@ export function useProgrammeProfiles(businessId: string | undefined) {
 
   const fetchProgrammes = useCallback(async () => {
     if (!businessId) {
+      console.log('[useProgrammeProfiles] No businessId provided, skipping fetch');
       setLoading(false);
       return;
     }
+
+    console.log('[useProgrammeProfiles] 🔍 Fetching programmes for business:', businessId);
 
     try {
       setLoading(true);
@@ -59,6 +62,8 @@ export function useProgrammeProfiles(businessId: string | undefined) {
         .select('*')
         .eq('business_id', businessId)
         .order('programme_type');
+
+      console.log('[useProgrammeProfiles] 📥 Raw response:', { data, error: fetchError, count: data?.length });
 
       if (fetchError) {
         throw fetchError;
@@ -84,9 +89,10 @@ export function useProgrammeProfiles(businessId: string | undefined) {
             : programme.audience_segments || [],
       }));
 
+      console.log('[useProgrammeProfiles] ✅ Parsed programmes:', parsedProgrammes.length, parsedProgrammes.map(p => p.programme_name));
       setProgrammes(parsedProgrammes);
     } catch (err) {
-      console.error('Error fetching programme profiles:', err);
+      console.error('[useProgrammeProfiles] ❌ Error fetching programme profiles:', err);
       setError(err instanceof Error ? err : new Error('Failed to fetch programme profiles'));
     } finally {
       setLoading(false);

@@ -265,6 +265,17 @@ export function BrandProfilePageV5() {
   const { programmes, loading: programmesLoading, refetch: refetchProgrammes } = useProgrammeProfiles(businessId);
   const { generating: generatingV5, generate: generateV5 } = useBrandProfileV5Generation();
 
+  // DEBUG: Log programmes state
+  React.useEffect(() => {
+    console.log('[BrandProfilePageV5] 🎨 Programmes state:', {
+      businessId,
+      programmes,
+      count: programmes?.length,
+      loading: programmesLoading,
+      showGenerator: showV5Generator
+    });
+  }, [programmes, programmesLoading, businessId, showV5Generator]);
+
   // Handle V5 regeneration
   const handleRegenerateV5 = async () => {
     if (!businessId) return;
@@ -284,22 +295,30 @@ export function BrandProfilePageV5() {
   useEffect(() => {
     const fetchBusiness = async () => {
       if (!userId) {
+        console.log('[BrandProfilePageV5] ⚠️ No userId found, skipping business fetch');
         setFetchingBusiness(false);
         return;
       }
 
+      console.log('[BrandProfilePageV5] 🔍 Fetching business for userId:', userId);
+
       try {
-        const { data: business } = await supabase
+        const { data: business, error: fetchError } = await supabase
           .from('businesses')
-          .select('id')
+          .select('id, owner_id')
           .eq('owner_id', userId)
           .maybeSingle();
 
+        console.log('[BrandProfilePageV5] 📥 Business fetch result:', { business, error: fetchError });
+
         if (business) {
           setBusinessId(business.id);
+          console.log('[BrandProfilePageV5] ✅ Business ID set:', business.id);
+        } else {
+          console.log('[BrandProfilePageV5] ⚠️ No business found for this user');
         }
       } catch (err) {
-        console.error('❌ Error fetching business:', err);
+        console.error('[BrandProfilePageV5] ❌ Error fetching business:', err);
       } finally {
         setFetchingBusiness(false);
       }

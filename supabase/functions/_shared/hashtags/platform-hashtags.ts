@@ -84,7 +84,7 @@ function inferProductTag(context: PlatformHashtagContext): string {
 }
 
 function inferLifestyleTag(context: PlatformHashtagContext, categoryTag: string): string {
-  const text = [context.text, context.detectedDishDescription, context.businessCharacter, context.businessName]
+  const text = [context.text, context.detectedDishDescription]
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
