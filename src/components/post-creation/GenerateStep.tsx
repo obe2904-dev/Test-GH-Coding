@@ -1049,8 +1049,8 @@ export function GenerateStep({
         /* Show content locked to the active path — no tab switching */
         <div className="space-y-4">
           {/* AI Forslag path */}
-          <div className={activePath === 'ai-ideas' && businessId ? 'block' : 'hidden'}>
-            {businessId && (
+          <div className={activePath === 'ai-ideas' ? 'block' : 'hidden'}>
+            {businessId ? (
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <AiSuggestionsCard
                   onSelectSuggestion={handleSelectSuggestion}
@@ -1059,6 +1059,10 @@ export function GenerateStep({
                   selectedIdea={selectedIdea}
                   committedSuggestionIds={committedSuggestionIds}
                 />
+              </div>
+            ) : (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center text-gray-500">
+                Loading...
               </div>
             )}
           </div>
