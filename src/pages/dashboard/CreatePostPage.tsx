@@ -97,10 +97,22 @@ export function CreatePostPage() {
   const activePath = urlDerivedPath
 
   // ── Path-aware current step (replaces local useState) ──
-  const currentStep: 'generate' | 'create' | 'publish' =
-    activePath === 'write' ? writeSelfStep
-    : activePath === 'ai-ideas' ? aiIdeerStep
-    : weeklyPlanStep
+  // If URL path differs from store path, it's a fresh navigation - force 'generate' stage
+  const isFreshNavigation = urlDerivedPath !== storeActivePath
+  const currentStep: 'generate' | 'create' | 'publish' = isFreshNavigation
+    ? 'generate' 
+    : activePath === 'write' ? writeSelfStep
+      : activePath === 'ai-ideas' ? aiIdeerStep
+      : weeklyPlanStep
+
+  // Debug logging for flash issue
+  if (isFreshNavigation) {
+    console.log('[CreatePostPage] Fresh navigation detected:', {
+      urlDerivedPath,
+      storeActivePath,
+      forcingCurrentStep: 'generate'
+    })
+  }
 
   const setCurrentStep = (step: 'generate' | 'create' | 'publish') => {
     if (activePath === 'write') setWriteSelfStep(step)
