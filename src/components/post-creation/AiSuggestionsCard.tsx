@@ -813,16 +813,14 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
                 <span>{thumbsUp.has(suggestion.id) ? t('dashboard.likedLabel') : t('dashboard.likeLabel')}</span>
               </button>
               {isSelected ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-mint text-base">✓</span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onGenerate?.() }}
-                    className="w-7 h-7 rounded-full bg-mint hover:bg-[#6FE0C2] text-white flex items-center justify-center transition-colors shadow-md hover:shadow-lg"
-                    title={t('dashboard.generatePostWithAI')}
-                  >
-                    <span>→</span>
-                  </button>
-                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onGenerate?.() }}
+                  className="flex items-center gap-2 px-4 py-2 bg-mint hover:bg-[#6FE0C2] text-white text-sm font-semibold rounded-lg transition-colors shadow-md hover:shadow-lg"
+                  title={t('dashboard.generatePostWithAI')}
+                >
+                  <span>Generér tekst med AI</span>
+                  <span className="text-lg">→</span>
+                </button>
               ) : (
                 <span className="text-xs text-gray-400">{t('dashboard.tapToSelect')}</span>
               )}

@@ -155,6 +155,9 @@ export function CreatePostPage() {
   const [hasEnteredUdgiv, setHasEnteredUdgiv] = useState(false)
   const [isReadOnlyMode, setIsReadOnlyMode] = useState(false)
 
+  // ── AI Generation Success State ──
+  const [showGenerationSuccess, setShowGenerationSuccess] = useState(false)
+
   // Initialize the active path from the query string so direct links like
   // /dashboard/create?mode=write open the manual flow immediately.
   useEffect(() => {
@@ -171,6 +174,33 @@ export function CreatePostPage() {
       setPublishedInfo(null)
     }
   }, [searchParams, setActivePath, setAiIdeerStep, setWeeklyPlanStep, setWriteSelfStep])
+
+  // ── Reset to Generate stage when switching between modes (via navigation tabs) ──
+  const previousActivePathRef = useRef<'write' | 'ai-ideas' | 'weekly-plan' | null>(null)
+  useEffect(() => {
+    // Skip initial mount - only reset on actual path changes
+    if (previousActivePathRef.current === null) {
+      previousActivePathRef.current = activePath
+      return
+    }
+
+    // If activePath changed, reset to Generate stage and clear navigation locks
+    if (previousActivePathRef.current !== activePath) {
+      console.log(`[CreatePostPage] Switching mode from ${previousActivePathRef.current} to ${activePath} - resetting to Generate stage`)
+      
+      // Reset current mode's step to 'generate'
+      if (activePath === 'write') setWriteSelfStep('generate')
+      else if (activePath === 'ai-ideas') setAiIdeerStep('generate')
+      else if (activePath === 'weekly-plan') setWeeklyPlanStep('generate')
+      
+      // Clear navigation locks
+      setHasEnteredUdgiv(false)
+      setIsReadOnlyMode(false)
+      setPublishedInfo(null)
+      
+      previousActivePathRef.current = activePath
+    }
+  }, [activePath, setWriteSelfStep, setAiIdeerStep, setWeeklyPlanStep])
 
   // ── Auto-save: context-keyed localStorage draft (no modal, no interval) ──
   // Weekly Plan posts are persisted by the store's setDraftMapEntry; only
@@ -279,6 +309,9 @@ export function CreatePostPage() {
 
   // Auto-advance to Design when entering from Weekly Plan (skip Generate step)
   useEffect(() => {
+    // Guard: only run for weekly-plan path to prevent interference with other paths
+    if (activePath !== 'weekly-plan') return
+    
     console.log('[WeeklyPlanEffect] fired', {
       hasWeeklyContentPlan: !!weeklyContentPlan,
       hasWeeklyPlanPost: !!weeklyPlanPost,
@@ -645,6 +678,7 @@ export function CreatePostPage() {
             carouselMode: false,
           })
         }
+        // Restore from draft - advance immediately without success delay
         setCurrentStep('create')
         return
       }
@@ -676,6 +710,7 @@ export function CreatePostPage() {
                 carouselMode: false,
               })
             }
+            // Restore from DB draft - advance immediately without success delay
             setCurrentStep('create')
             return
           }
@@ -989,6 +1024,7 @@ export function CreatePostPage() {
         // Show user-facing error — do not silently advance with empty text
         alert('Tekstgenerering fejlede. Prøv igen.')
         setIsGenerating(false)
+        setShowGenerationSuccess(false)
         return
       } finally {
         console.log('[CreatePostPage] Generation complete, clearing loading state')
@@ -1008,6 +1044,12 @@ export function CreatePostPage() {
       console.log('[CreatePostPage] Keeping photos - same suggestion', currentSuggestionId)
     }
 
+    // Show success state on Generate stage before advancing
+    console.log('[CreatePostPage] Showing success state before advancing to Design')
+    setShowGenerationSuccess(true)
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    setShowGenerationSuccess(false)
+    
     // Advance to Design step
     console.log('[CreatePostPage] Navigating to Design step')
     setCurrentStep('create')
@@ -1255,7 +1297,7 @@ export function CreatePostPage() {
       visualSubject: plan.visualDirection?.subject || undefined,
       visualAngle: plan.visualDirection?.angle || undefined,
       visualSetting: plan.visualDirection?.setting || undefined,
-      ctaIntent: plan.caption?.ctaType || undefined,
+      ctaIntent: plan.caption?.ctaType?.split('(')[0].trim() || undefined,  // Normalize: extract intent before parentheses
       platformFormat: plan.platformFormat?.format || undefined,
       selectionRationale: plan.selectionRationale || undefined,
       captionFirstLine: plan.caption?.firstLine || undefined,
@@ -1266,6 +1308,9 @@ export function CreatePostPage() {
       strategyBrief: plan.strategicContext?.strategy_brief || undefined,
       mediaDirection: plan.strategicContext?.media_direction || undefined,
       sceneSpec: plan.strategicContext?.scene_spec || undefined,
+      slotId: plan.strategicContext?.slot_id || undefined,
+      strategicIntent: plan.strategicContext?.strategic_intent || undefined,
+      slotReasoning: plan.strategicContext?.slot_reasoning || undefined,
     }
   }
 
@@ -1377,6 +1422,8 @@ export function CreatePostPage() {
       // Guard: user may have switched paths while generation was in flight
       if (usePostCreationStore.getState().activePath !== 'weekly-plan') return
       // Stay on Generate step — user can retry via "Brug dette opslag →"
+      setIsGenerating(false)
+      setShowGenerationSuccess(false)
       alert('Tekstgenerering fejlede. Prøv igen.')
       return
     } finally {
@@ -1401,11 +1448,17 @@ export function CreatePostPage() {
       addWeeklyPlanSessionDone(index)
     }
 
+    // Show success state on Generate stage before advancing
+    console.log('[handleDirectTransfer] Showing success state before advancing to Design')
+    setShowGenerationSuccess(true)
+    await new Promise(resolve => setTimeout(resolve, 1500))
+    setShowGenerationSuccess(false)
+
     setCurrentStep('create')
   }
 
   const handleBackToPlan = () => {
-    navigate('/dashboard/content/ai-weekly-plan')
+    navigate('/dashboard/ai-weekly-plan')
   }
 
   // Switch to a different idea from the Design-step tab strip.
@@ -1414,6 +1467,8 @@ export function CreatePostPage() {
     if (!weeklyContentPlan || newIndex === weeklyPlanPostIndex || isLoadingWeeklyPlanSwitch) return
     const newPost = weeklyContentPlan.posts[newIndex]
     if (!newPost) return
+
+    console.log('[handleSwitchToIdea] Switching from index', weeklyPlanPostIndex, 'to', newIndex)
 
     // Prevent rapid switching with loading state
     setIsLoadingWeeklyPlanSwitch(true)
@@ -1432,7 +1487,7 @@ export function CreatePostPage() {
       rationale: newPost.selectionRationale || newPost.postType.category,
       contentType: newPost.postType.type,
       suggestedDay: newPost.timing.day,
-      ctaIntent: newPost.caption.ctaType,
+      ctaIntent: newPost.caption.ctaType?.split('(')[0].trim(),  // Normalize: extract intent before parentheses
       platformFormat: newPost.platformFormat?.format,
       suggestedMedia: newPost.visualDirection ? {
         type: newPost.platformFormat?.format || 'photo',
@@ -1515,7 +1570,7 @@ export function CreatePostPage() {
     _resetStore()
     _clearDraft()
     setPublishedInfo(null)
-    navigate('/dashboard/content/ai-weekly-plan')
+    navigate('/dashboard/ai-weekly-plan')
   }, [_resetStore, _clearDraft, navigate])
 
   /** Called after a successful publish — deletes DB draft + refreshes badges but keeps store content */
@@ -1536,6 +1591,23 @@ export function CreatePostPage() {
     setPublishedInfo(null)
   }, [refreshCommitted])
 
+  /** Called when user deletes draft from Publish stage to unlock editing */
+  const handleDraftDeleted = useCallback(async () => {
+    console.log('[CreatePostPage] Draft deleted, unlocking editing mode')
+    // Delete from posts table (drafts)
+    const dbKey = buildDbDraftKey()
+    if (dbKey) {
+      await posts.deleteByKey(dbKey).catch(() => {})
+    }
+    // Reset navigation locks
+    setHasEnteredUdgiv(false)
+    setIsReadOnlyMode(false)
+    setPublishedInfo(null)
+    refreshCommitted()
+    // Return to Design stage for editing
+    setCurrentStep('create')
+  }, [buildDbDraftKey, posts, refreshCommitted])
+
   const handlePublishBack = () => {
     setCurrentStep('create')
   }
@@ -1555,6 +1627,13 @@ export function CreatePostPage() {
       setIsReadOnlyMode(true)
     } else if (targetStepIndex === 2) {
       setIsReadOnlyMode(false)
+    }
+
+    // For weekly-plan: if clicking back to Generate from Design/Publish, navigate to weekly plan page
+    if (activePath === 'weekly-plan' && targetStepIndex === 0 && currentStepIndex > 0) {
+      console.log('[CreatePostPage] Weekly plan: navigating back to plan overview from stage click')
+      navigate('/dashboard/ai-weekly-plan')
+      return
     }
 
     // RULE 1: Block navigation to Publish step (2) for Skriv Selv without content
@@ -1822,6 +1901,7 @@ export function CreatePostPage() {
                   onBackToPlan={activePath === 'weekly-plan' ? handleBackToPlanAfterPublish : undefined}
                   onPublishSuccess={handlePublishSuccess}
                   onPublishDeleted={handlePublishDeleted}
+                  onDraftDeleted={handleDraftDeleted}
                   publishedInfo={publishedInfo}
                   markAsSaved={markAsSaved}
                   hasUnsavedChanges={hasUnsavedChanges}
@@ -1843,6 +1923,25 @@ export function CreatePostPage() {
             </h3>
             <p className="text-sm text-gray-600">
               Jeg skriver nu et opslag baseret på din idé...
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Success Modal - shown briefly after generation completes */}
+      {showGenerationSuccess && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4 text-center">
+            <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              Tekst genereret!
+            </h3>
+            <p className="text-sm text-gray-600">
+              Går til design-fasen...
             </p>
           </div>
         </div>

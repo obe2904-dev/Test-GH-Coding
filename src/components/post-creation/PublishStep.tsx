@@ -15,6 +15,7 @@ import type { LoadedPost } from '../../hooks/usePosts'
 
 import { ScheduleCalendarPicker } from './publish/ScheduleCalendarPicker'
 import { ScheduleTimeline } from './publish/ScheduleTimeline'
+import { PostActionModal } from './publish/PostActionModal'
 import { usePublishTimeline } from './publish/usePublishTimeline'
 import { useScheduleData } from './publish/useScheduleData'
 import { Calendar, Send, TrendingUp, ChevronLeft, ChevronRight, Sun, Users, Link2, Sparkles } from './publish/icons'
@@ -60,6 +61,8 @@ interface PublishStepProps {
   publishedInfo?: SuccessInfo | null
   /** Called after the user cancels/deletes the scheduled post — parent should clear publishedInfo + refresh badges */
   onPublishDeleted?: () => void
+  /** Called when user deletes draft to unlock editing */
+  onDraftDeleted?: () => void
   /** Draft metadata restored from posts table for the current publish flow */
   restoredDbDraft?: { suggestedPostDatetime: string | null } | null
 }
@@ -72,7 +75,7 @@ export interface SuccessInfo {
   publishedPostIds: string[]
 }
 
-export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, onViewCalendar, onBackToPlan, onPublishSuccess, publishedInfo, onPublishDeleted, restoredDbDraft }: PublishStepProps) {
+export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, onViewCalendar, onBackToPlan, onPublishSuccess, publishedInfo, onPublishDeleted, onDraftDeleted, restoredDbDraft }: PublishStepProps) {
   const { t: tPublish, i18n } = useTranslation(undefined, { keyPrefix: 'createPost.publish' })
   const { postContent, selectedPlatforms, photoContent, photoIdea, selectedIdea, aiIdeas, weeklyPlanPost, postCta, activePath, weeklyPlanPostIndex, addWeeklyPlanSessionDone, selectedSuggestionData } = usePostCreationStore()
   const { isConnected } = useConnectionsStore()
@@ -104,6 +107,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
   const [scheduleFromPlan, setScheduleFromPlan] = useState(false)
   const [successInfo, setSuccessInfo] = useState<SuccessInfo | null>(publishedInfo ?? null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmDraftDelete, setConfirmDraftDelete] = useState(false)
   const [isDeletingPost, setIsDeletingPost] = useState(false)
 
   // Pre-populate schedule from Weekly Plan timing (runs once on mount)
@@ -167,6 +171,9 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
   // const [schedulingConflicts, setSchedulingConflicts] = useState<string[]>([])
   const [showManualPostModal, setShowManualPostModal] = useState(false)
   const [copiedPlatform, setCopiedPlatform] = useState<string | null>(null)
+  
+  // Post action modal state (for draft/scheduled posts)
+  const [showPostActionModal, setShowPostActionModal] = useState(false)
   
   // Scheduled post modal state
   const [showScheduledPostModal, setShowScheduledPostModal] = useState(false)
@@ -619,6 +626,10 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
   const handleScheduledPostUpdated = useCallback(() => {
     refreshTimeline()
   }, [refreshTimeline])
+
+  const handleSelectedPostClick = useCallback(() => {
+    setShowPostActionModal(true)
+  }, [])
 
   /**
    * Save published media to the media gallery for reuse.
@@ -1194,6 +1205,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                 saveLabel={tPublish('scheduleCta', 'Planlæg')}
                 publishNowLabel={tPublish('publishNowCta', 'Udgiv nu')}
                 onScheduledPostClick={handleScheduledPostClick}
+                onSelectedPostClick={successInfo ? undefined : handleSelectedPostClick}
               />
             </div>
           </div>
@@ -1259,7 +1271,40 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
           )}
         </div>
       ) : (
-        <div className="flex items-center justify-between pt-2 pb-4 gap-3">
+        <div className="flex flex-col gap-2 pt-2 pb-4">
+          {/* Delete draft button - allows editing after entering Udgiv */}
+          {!confirmDraftDelete ? (
+            <button
+              onClick={() => setConfirmDraftDelete(true)}
+              className="text-xs text-slate-400 hover:text-amber-600 transition-colors py-1 text-center"
+            >
+              🗑 Slet kladde og redigér
+            </button>
+          ) : (
+            <div className="flex items-center justify-center gap-2 py-1">
+              <span className="text-xs text-slate-500">Slet kladde og vend tilbage til design?</span>
+              <button
+                disabled={isDeletingPost}
+                onClick={async () => {
+                  setIsDeletingPost(true)
+                  await onDraftDeleted?.()
+                  setIsDeletingPost(false)
+                  setConfirmDraftDelete(false)
+                }}
+                className="text-xs font-semibold text-amber-600 hover:text-amber-700 disabled:opacity-50"
+              >
+                {isDeletingPost ? 'Sletter...' : 'Ja, slet'}
+              </button>
+              <button
+                onClick={() => setConfirmDraftDelete(false)}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >
+                Annuller
+              </button>
+            </div>
+          )}
+          
+          <div className="flex items-center justify-between gap-3">
           <button
             onClick={onBack}
             className="px-4 py-2 text-xs font-medium text-[#374151] bg-white border border-[#D1D5DB] rounded-lg hover:bg-[#F9FAFB] transition-colors flex items-center gap-1.5"
@@ -1299,6 +1344,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
               </button>
             )}
           />
+          </div>
         </div>
       )}
 
@@ -1342,6 +1388,25 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
           onUpdated={handleScheduledPostUpdated}
         />
       )}
+
+      {/* Post Action Modal for draft/scheduled posts */}
+      <PostActionModal
+        isOpen={showPostActionModal}
+        onClose={() => setShowPostActionModal(false)}
+        onPublishNow={handlePublishNow}
+        onSchedule={handlePublish}
+        isPublishing={isPublishing}
+        canSave={selectedPublishMode === 'schedule' ? canPublish && !selectedTimeIsTooOldForSchedule : canPublish}
+        saveDisabledReason={scheduleDisabledReason}
+        publishNowLabel={tPublish('publishNowCta', 'Udgiv nu')}
+        scheduleLabel={tPublish('scheduleCta', 'Planlæg')}
+        hasUnconnectedPlatforms={unconnectedPlatformLabels.length > 0}
+        manualPostingRequiredLabel={manualPostingRequiredLabel}
+        postPreview={postPreview ? {
+          headline: postPreview.headline,
+          text: postPreview.textWithHashtags || postPreview.text
+        } : undefined}
+      />
 
       {/* NEW: Post Edit/Preview Modal */}
       {selectedPost && (
