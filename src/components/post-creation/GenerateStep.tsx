@@ -1053,6 +1053,26 @@ export function GenerateStep({
           }}
           isGenerating={isGenerating}
         />
+      ) : activePath === 'ai-ideas' ? (
+        /* AI Forslag mode - show loading until businessId is ready */
+        !businessId ? (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center text-gray-500">
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-5 h-5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+              <span>Loading suggestions...</span>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <AiSuggestionsCard
+              onSelectSuggestion={handleSelectSuggestion}
+              onGenerate={handleValidatedNext}
+              businessId={businessId}
+              selectedIdea={selectedIdea}
+              committedSuggestionIds={committedSuggestionIds}
+            />
+          </div>
+        )
       ) : showAiSuggestions ? (
         /* Show content locked to the active path — no tab switching */
         <div className="space-y-4">
