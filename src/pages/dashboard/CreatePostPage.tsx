@@ -45,8 +45,17 @@ export function CreatePostPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
+  
+  // ── Derive activePath from URL immediately (before useEffect runs) ──
+  const urlMode = searchParams.get('mode')
+  const urlDerivedPath: 'write' | 'ai-ideas' | 'weekly-plan' = 
+    urlMode === 'ai' ? 'ai-ideas' 
+    : urlMode === 'weekly-plan' ? 'weekly-plan'
+    : urlMode === 'write' ? 'write'
+    : 'write' // default
+  
   const { 
-    activePath,
+    activePath: storeActivePath,
     setActivePath,
     writeSelfStep, setWriteSelfStep,
     writeSelfContent, setWriteSelfContent,
@@ -83,6 +92,9 @@ export function CreatePostPage() {
     photoContent,
     setPhotoContent,
   } = usePostCreationStore()
+
+  // ── Use URL-derived path for rendering (prevents flash of wrong content) ──
+  const activePath = urlDerivedPath
 
   // ── Path-aware current step (replaces local useState) ──
   const currentStep: 'generate' | 'create' | 'publish' =
@@ -158,49 +170,22 @@ export function CreatePostPage() {
   // ── AI Generation Success State ──
   const [showGenerationSuccess, setShowGenerationSuccess] = useState(false)
 
-  // Initialize the active path from the query string so direct links like
-  // /dashboard/create?mode=write open the manual flow immediately.
+  // Initialize the active path from the query string and sync to store.
+  // Note: We use urlDerivedPath for rendering to prevent flash of wrong content,
+  // but still sync to store for components that read activePath from Zustand.
   useEffect(() => {
-    const mode = searchParams.get('mode')
-    if (mode === 'write' || mode === 'ai' || mode === 'weekly-plan') {
-      const activeMode = mode === 'ai' ? 'ai-ideas' : mode
-
-      setActivePath(activeMode)
-      if (activeMode === 'write') setWriteSelfStep('generate')
-      if (activeMode === 'ai-ideas') setAiIdeerStep('generate')
-      if (activeMode === 'weekly-plan') setWeeklyPlanStep('generate')
-      setHasEnteredUdgiv(false)
-      setIsReadOnlyMode(false)
-      setPublishedInfo(null)
+    if (urlDerivedPath !== storeActivePath) {
+      setActivePath(urlDerivedPath)
     }
-  }, [searchParams, setActivePath, setAiIdeerStep, setWeeklyPlanStep, setWriteSelfStep])
-
-  // ── Reset to Generate stage when switching between modes (via navigation tabs) ──
-  const previousActivePathRef = useRef<'write' | 'ai-ideas' | 'weekly-plan' | null>(null)
-  useEffect(() => {
-    // Skip initial mount - only reset on actual path changes
-    if (previousActivePathRef.current === null) {
-      previousActivePathRef.current = activePath
-      return
-    }
-
-    // If activePath changed, reset to Generate stage and clear navigation locks
-    if (previousActivePathRef.current !== activePath) {
-      console.log(`[CreatePostPage] Switching mode from ${previousActivePathRef.current} to ${activePath} - resetting to Generate stage`)
-      
-      // Reset current mode's step to 'generate'
-      if (activePath === 'write') setWriteSelfStep('generate')
-      else if (activePath === 'ai-ideas') setAiIdeerStep('generate')
-      else if (activePath === 'weekly-plan') setWeeklyPlanStep('generate')
-      
-      // Clear navigation locks
-      setHasEnteredUdgiv(false)
-      setIsReadOnlyMode(false)
-      setPublishedInfo(null)
-      
-      previousActivePathRef.current = activePath
-    }
-  }, [activePath, setWriteSelfStep, setAiIdeerStep, setWeeklyPlanStep])
+    
+    // Reset to Generate stage when URL changes mode
+    if (urlDerivedPath === 'write') setWriteSelfStep('generate')
+    if (urlDerivedPath === 'ai-ideas') setAiIdeerStep('generate')
+    if (urlDerivedPath === 'weekly-plan') setWeeklyPlanStep('generate')
+    setHasEnteredUdgiv(false)
+    setIsReadOnlyMode(false)
+    setPublishedInfo(null)
+  }, [urlDerivedPath, storeActivePath, setActivePath, setAiIdeerStep, setWeeklyPlanStep, setWriteSelfStep])
 
   // ── Auto-save: context-keyed localStorage draft (no modal, no interval) ──
   // Weekly Plan posts are persisted by the store's setDraftMapEntry; only
