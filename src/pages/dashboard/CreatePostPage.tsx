@@ -1833,6 +1833,7 @@ export function CreatePostPage() {
                     <div className="absolute inset-0 z-10 cursor-not-allowed bg-slate-100 bg-opacity-40" />
                   )}
                   <GenerateStep 
+                    activePath={activePath}
                     onNext={handleGenerateNext}
                     onDirectTransfer={handleDirectTransfer}
                     markAsChanged={markAsChanged}

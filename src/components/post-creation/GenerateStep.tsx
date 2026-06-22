@@ -66,6 +66,9 @@ interface GenerateStepProps {
   isGenerating?: boolean
   /** suggestion_ids committed (published/scheduled) today — used to lock cards */
   committedSuggestionIds?: Set<number>
+  /** Override activePath from parent (for URL-derived path to prevent flash) */
+  activePath?: 'write' | 'ai-ideas' | 'weekly-plan'
+  isReadOnly?: boolean
 }
 
 export function GenerateStep({ 
@@ -78,6 +81,8 @@ export function GenerateStep({
   isStrategyMode = false,
   isGenerating = false,
   committedSuggestionIds,
+  activePath: activePathProp,
+  isReadOnly = false,
 }: GenerateStepProps) {
   const { t, i18n } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const navigate = useNavigate()
@@ -97,9 +102,12 @@ export function GenerateStep({
     setPhotoContent,
     selectedSuggestionData,
     setSelectedSuggestionData,
-    activePath,
+    activePath: storeActivePath,
     setActivePath
   } = usePostCreationStore()
+
+  // Use prop if provided, otherwise fall back to store
+  const activePath = activePathProp ?? storeActivePath
 
   const { isEnabled, loadPlatformsFromDatabase } = useConnectionsStore()
   const {
