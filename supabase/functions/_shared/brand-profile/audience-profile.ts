@@ -31,6 +31,7 @@ export interface AudienceSegment {
   decision_timing: string;          // "spontaneous" | "planned" | "mixed"
   goal_contribution: string;        // "drive_footfall" | "strengthen_brand" | "retain_regulars"
   evidence: string[];               // ["Menu has børneportioner", "Weekend hours 09:00-13:00"]
+  concept_fit_reason: string;       // Why this segment fits the business concept + location (REQUIRED)
 }
 
 export interface ProgrammeAudienceProfile {
@@ -97,6 +98,233 @@ interface LocationData {
   local_location_reference?: string;  // How locals refer to location (e.g., "ved åen")
   tourist_context?: string;
   landmarks?: string[];
+  // Phase 2C: Reachable demographics from location strategy (brand-profile-generator-v5)
+  reachable_demographics?: Array<{
+    demographic: string;              // "local_resident" | "tourist" | "student" | "business_professional"
+    proximity_score: number;          // 0-100 (from location intelligence)
+    is_reachable: boolean;            // Can business actually serve this demographic?
+    filter_reason?: string;           // Why filtered if not reachable (e.g., "price too high for students")
+  }>;
+  // NEW: Proximity signals for AI reasoning (replacing constraints)
+  demographic_proximity_signals?: Array<{
+    demographic: string;
+    proximity_score: number;
+    signal_source: string;
+    caveat?: string;
+  }>;
+  physical_context?: {
+    pedestrian_flow?: string;         // "very_high" | "high" | "medium" | "low"
+    transit_within_150m?: boolean;
+    nearest_transit?: { name: string; distance_meters: number };
+    parking_within_300m?: boolean;
+  };
+}
+
+// ===== FORMAT-OCCASION MAPPING =====
+
+/**
+ * Format-to-occasion mappings to help AI reason about social situations
+ * without relying solely on training data
+ */
+const FORMAT_OCCASION_SIGNALS: Record<string, string[]> = {
+  ayce: [
+    'Friend groups — AYCE removes the awkwardness of splitting the bill',
+    'Families — value-for-money, children can eat without a fixed price',
+    'Couples on novelty date — interactive format (grill at table) is a draw',
+  ],
+  a_la_carte: [
+    'Couples — controlled spend, intimate pacing',
+    'Business lunch — individual choices, professional setting',
+    'Solo diners — full menu access without over-ordering',
+  ],
+  brunch_buffet: [
+    'Families with children — relaxed timing, variety for picky eaters',
+    'Friend groups — weekend social ritual',
+    'Couples — weekend leisure occasion',
+  ],
+  tasting_menu: [
+    'Couples — special occasion, celebration',
+    'Food enthusiasts — the format IS the draw',
+  ],
+  fast_casual: [
+    'Solo weekday lunch — speed and value',
+    'Small work groups — quick, no booking needed',
+    'Shoppers pausing — proximity to retail is the trigger',
+  ],
+  table_grill: [
+    'Friend groups — interactive social experience, shared cooking',
+    'Families — kids enjoy the interactive element',
+    'Couples seeking novelty — active participation creates engagement',
+  ],
+  buffet: [
+    'Families with children — variety accommodates picky eaters, fixed price',
+    'Large groups — easy coordination, no menu decisions needed',
+    'Value seekers — unlimited food appeals to cost-conscious diners',
+  ],
+};
+
+/**
+ * Detect programme format from menu data and programme type
+ */
+function detectProgrammeFormat(
+  menu: MenuData,
+  programmeType: string,
+  programmeName: string
+): string | null {
+  const nameLower = programmeName.toLowerCase();
+  const typeLower = programmeType.toLowerCase();
+
+  // Check for explicit format indicators
+  if (nameLower.includes('ayce') || nameLower.includes('all you can eat') || nameLower.includes('ad libitum')) {
+    return 'ayce';
+  }
+  
+  if (nameLower.includes('brunch') && (nameLower.includes('buffet') || nameLower.includes('buffé'))) {
+    return 'brunch_buffet';
+  }
+  
+  if (nameLower.includes('buffet') || nameLower.includes('buffé')) {
+    return 'buffet';
+  }
+  
+  if (nameLower.includes('tasting') || nameLower.includes('smagsmenu')) {
+    return 'tasting_menu';
+  }
+  
+  if (nameLower.includes('bordgrill') || nameLower.includes('table grill') || nameLower.includes('grill ved bordet')) {
+    return 'table_grill';
+  }
+
+  // Check menu items for format clues
+  const hasFixedPrice = menu.items.every(item => item.price !== null && item.price !== undefined);
+  const allItemsIndividual = menu.items.length > 5 && hasFixedPrice;
+  
+  if (allItemsIndividual && !nameLower.includes('buffet')) {
+    return 'a_la_carte';
+  }
+
+  // Default: no clear format detected
+  return null;
+}
+
+// ===== DEMOGRAPHIC PROXIMITY SIGNALS (NEW ARCHITECTURE) =====
+
+/**
+ * Build demographic proximity signals section for AI prompt
+ * IMPORTANT: These are SIGNALS, not CONSTRAINTS. The AI must reason about them
+ * in combination with the business concept and occasion logic.
+ */
+function buildDemographicProximitySignalsSection(
+  location: LocationData,
+  language: string = 'da'
+): string {
+  // Prefer new signal-based architecture if available
+  if (location.demographic_proximity_signals && location.demographic_proximity_signals.length > 0) {
+    const signals = location.demographic_proximity_signals;
+
+    if (language === 'da') {
+      const lines = [
+        '\nDEMOGRAFISKE NÆRHEDSSIGNALER (geografisk rækkevidde, IKKE målgruppe):',
+        'Disse tal viser hvem der er FYSISK TILGÆNGELIG i området — ikke hvem forretningen primært er rettet mod.',
+        ''
+      ];
+
+      signals.forEach(signal => {
+        const caveatText = signal.caveat ? ` ⚠️ Bemærk: ${signal.caveat}` : '';
+        lines.push(`• ${signal.demographic}: ${signal.proximity_score}/100 (kilde: ${signal.signal_source})${caveatText}`);
+      });
+
+      lines.push('');
+      lines.push('⚠️ KRITISK: Brug FORRETNINGSKONCEPTET (sektion A) som primært filter.');
+      lines.push('Disse demografiske nærhedssignaler er ÉN input blandt tre — ikke en begrænsning.');
+
+      return lines.join('\n');
+    }
+
+    // English version
+    const lines = [
+      '\nDEMOGRAPHIC PROXIMITY SIGNALS (geographic reach, NOT target audience):',
+      'These numbers show who is PHYSICALLY REACHABLE in the area — not who the business primarily targets.',
+      ''
+    ];
+
+    signals.forEach(signal => {
+      const caveatText = signal.caveat ? ` ⚠️ Note: ${signal.caveat}` : '';
+      lines.push(`• ${signal.demographic}: ${signal.proximity_score}/100 (source: ${signal.signal_source})${caveatText}`);
+    });
+
+    lines.push('');
+    lines.push('⚠️ CRITICAL: Use BUSINESS CONCEPT (Section A) as the primary filter.');
+    lines.push('These demographic proximity signals are ONE input among three — not a constraint.');
+
+    return lines.join('\n');
+  }
+
+  // Legacy fallback: if only reachable_demographics exists (old architecture)
+  if (location.reachable_demographics && location.reachable_demographics.length > 0) {
+    const signals = location.reachable_demographics;
+
+    if (language === 'da') {
+      const lines = [
+        '\nDEMOGRAFISKE NÆRHEDSSIGNALER:',
+        ''
+      ];
+
+      signals.forEach(demo => {
+        lines.push(`• ${demo.demographic}: ${demo.proximity_score}/100${demo.is_reachable ? ' (reachable)' : ` (filtered: ${demo.filter_reason})`}`);
+      });
+
+      lines.push('');
+      lines.push('⚠️ Brug forretningskonceptet som primært filter, ikke kun disse signaler.');
+
+      return lines.join('\n');
+    }
+
+    // English fallback
+    const lines = [
+      '\nDEMOGRAPHIC PROXIMITY SIGNALS:',
+      ''
+    ];
+
+    signals.forEach(demo => {
+      lines.push(`• ${demo.demographic}: ${demo.proximity_score}/100${demo.is_reachable ? ' (reachable)' : ` (filtered: ${demo.filter_reason})`}`);
+    });
+
+    lines.push('');
+    lines.push('⚠️ Use business concept as primary filter, not just these signals.');
+
+    return lines.join('\n');
+  }
+
+  return '';
+}
+
+interface LocationData {
+  neighborhood?: string;
+  area_type?: string;              // "urban_center" | "suburban" | "tourist_area"
+  local_location_reference?: string;  // How locals refer to location (e.g., "ved åen")
+  tourist_context?: string;
+  landmarks?: string[];
+  // Phase 2C: Reachable demographics from location strategy (brand-profile-generator-v5)
+  reachable_demographics?: Array<{
+    demographic: string;              // "local_resident" | "tourist" | "student" | "business_professional"
+    proximity_score: number;          // 0-100 (from location intelligence)
+    is_reachable: boolean;            // Can business actually serve this demographic?
+    filter_reason?: string;           // Why filtered if not reachable (e.g., "price too high for students")
+  }>;
+  // NEW: Proximity signals for AI reasoning (replacing constraints)
+  demographic_proximity_signals?: Array<{
+    demographic: string;
+    proximity_score: number;
+    signal_source: string;
+    caveat?: string;
+  }>;
+  physical_context?: {
+    pedestrian_flow?: string;         // "very_high" | "high" | "medium" | "low"
+    transit_within_150m?: boolean;
+    nearest_transit?: { name: string; distance_meters: number };
+    parking_within_300m?: boolean;
+  };
 }
 
 // ===== AI COMPLEXITY DETECTOR =====
@@ -175,15 +403,26 @@ function buildAudiencePrompt(
 
   // Map Layer 2 decision_timing values to Layer 4 values for AI prompt
   const layer2ToLayer4TimingMap: Record<string, string> = {
-    'spontaneous_walk_in': 'spontaneous',
-    'planned_reservation': 'planned',
-    'mixed': 'mixed'
+    'last_minute': 'spontaneous',
+    'planned': 'planned',
+    'hybrid': 'mixed'
   };
   
   const layer4DecisionTiming = layer2ToLayer4TimingMap[commercialOrientation.decision_timing] || commercialOrientation.decision_timing;
   
   // For mixed programmes, guide AI to be SPECIFIC per segment
   const isMixedProgramme = commercialOrientation.decision_timing === 'mixed';
+
+  // Build demographic proximity signals section (NEW ARCHITECTURE)
+  const demographicProximitySection = buildDemographicProximitySignalsSection(location, language);
+
+  // Detect programme format
+  const detectedFormat = detectProgrammeFormat(menu, programme.programme_type, programme.programme_name);
+  
+  // Get format occasion signals
+  const formatSignals = detectedFormat && FORMAT_OCCASION_SIGNALS[detectedFormat]
+    ? FORMAT_OCCASION_SIGNALS[detectedFormat]
+    : [];
 
   // Check if this is a brunch programme
   const isBrunchProgramme = programme.programme_name.toLowerCase().includes('brunch') || 
@@ -208,128 +447,212 @@ KRÆVET: Timing skal reflektere brunch hours (primært 10:00-14:00, især weeken
 KRÆVET: Content angles skal være social/leisurely: "Social brunch", "Weekend hygge", "Variation i menu"
 ` : '';
 
-  // Danish prompt (fully localized)
+  // Danish prompt (fully localized with THREE-SECTION ARCHITECTURE)
   if (language === 'da') {
-    return `FORRETNINGSKONTEKST:
-Navn: ${business.business_name}
+    return `
+═══════════════════════════════════════════════════════════════════════
+SEKTION A — FORRETNINGSKONCEPT
+═══════════════════════════════════════════════════════════════════════
+
+Beskrivelse af hvad forretningen faktisk tilbyder, hvordan, og til hvilken pris.
+
+Forretning: ${business.business_name}
 Type: ${business.establishment_type || business.business_category}
 Beliggenhed: ${location.local_location_reference || location.neighborhood || business.city}
-Områdetype: ${location.area_type || 'ukendt'}
-Turistkontekst: ${location.tourist_context || 'ingen'}
 ${localPlaceInstruction}
-${brunchWarning}
-PROGRAMKONTEKST:
+
+PROGRAM OG TIDSVINDUER:
 Program: ${programme.programme_name} (${programme.programme_type})
 Åbningstider: ${programme.time_windows.join(', ')}
 Åbningsdage: ${programme.operating_days.join(', ')}
-Menubevis: ${programme.menu_evidence.join(', ')}
-${programme.languageVariants && programme.languageVariants.length > 1 ? `Menusprog: ${programme.languageVariants.join(', ')} (→ internationalt turistpublikum sandsynligt)\n` : ''}
-
-MENU UDSNIT (${menu.items.length} items i alt, viser 15):
+${programme.languageVariants && programme.languageVariants.length > 1 ? `Menusprog: ${programme.languageVariants.join(', ')} (→ internationalt publikum)\n` : ''}
+MENU FORMAT${detectedFormat ? ` (${detectedFormat})` : ''}:
 ${menuItems}
 
-LAG 2 KOMMERCIEL ORIENTERING (SKAL MATCHE):
-Beslutnings-timing: ${layer4DecisionTiming}
-Primært mål: ${primaryGoal} (${Math.round(commercialOrientation.baseline_goal_split[primaryGoal as keyof typeof commercialOrientation.baseline_goal_split])}%)
-Indholdsaffinitet: produkt ${commercialOrientation.content_type_affinity.product}, sted ${commercialOrientation.content_type_affinity.place}
-
-${identity ? `LAG 3 IDENTITET:
+${detectedFormat && formatSignals.length > 0 ? `FORMAT-ANLEDNING SIGNALER (${detectedFormat}):
+${formatSignals.map(s => `• ${s}`).join('\n')}
+` : ''}
+PRISPOSITIONERING: ${business.business_name ? 'Se menupunkter ovenfor' : 'Ikke specificeret'}
+${brunchWarning}
+${identity ? `
+BRAND IDENTITET:
 Brand essence: ${identity.brand_essence}
 Positionering: ${identity.positioning}
 Kerneværdier: ${identity.core_values.join(', ')}
 USP: ${identity.what_makes_us_different}
+` : ''}
+═══════════════════════════════════════════════════════════════════════
+SEKTION B — STEDSFAKTA
+═══════════════════════════════════════════════════════════════════════
 
-` : ''}OPGAVE:
-Generer præcis ${targetSegmentCount} målgruppesegmenter for ${programme.programme_name}.
+Rå signaler om hvem der er fysisk tilstede nær dette sted og hvornår.
 
-KRITISK ALIGNMENT REGEL:
-Primært segment goal_contribution SKAL være: ${primaryGoal}
+OMRÅDE & KARAKTER:
+Områdetype: ${location.area_type || 'ukendt'}
+Nabolag: ${location.neighborhood || 'ikke specificeret'}
+${location.physical_context ? `
+FYSISK KONTEKST:
+Fodgængerflow: ${location.physical_context.pedestrian_flow || 'ukendt'}
+${location.physical_context.transit_within_150m ? `Transit inden for 150m: ${location.physical_context.nearest_transit?.name || 'ja'}` : ''}
+${location.physical_context.parking_within_300m ? 'Parkering inden for 300m: ja' : ''}
+` : ''}${demographicProximitySection}
 
-${isMixedProgramme ? `DECISION TIMING FOR MIXED PROGRAMME:
-Programmet har MIXED timing (både planlagte og spontane kunder).
+⚠️ KRITISK BEMÆRK: Disse er GEOGRAFISKE NÆRHEDSSIGNALER. De indikerer hvem der
+KUNNE VÆRE tilgængelig, IKKE hvem forretningen primært er for. FORRETNINGSKONCEPTET
+i Sektion A er den primære determinant for målgruppen.
 
-For hvert segment: Vælg den timing der PASSER BEDST:
-• "planned" - hvis segmentet primært booker/planlægger (fx familier, fødselsdage, forretningsfrokoster)
-• "spontaneous" - hvis segmentet primært beslutter samme dag (fx kontorfolk kl 11:50, havnegåtur, solskinsbeslutninger)
-• "mixed" - KUN hvis segmentet har BEGGE mønstre ægte (fx stamgæster der både booker til events OG dropper spontant forbi)
+═══════════════════════════════════════════════════════════════════════
+SEKTION C — ANLEDNINGSLOGIK
+═══════════════════════════════════════════════════════════════════════
 
-Vær SPECIFIK når muligt - "mixed" er kun for segmenter med dokumenteret blandet adfærd.` : `Primært segment decision_timing SKAL være: ${layer4DecisionTiming}`}
+OPGAVE: Generer præcis ${targetSegmentCount} målgruppesegmenter for ${programme.programme_name}.
 
-BEVIS KRAV:
-Hvert segment skal citere konkrete facts:
-- Menupunkter (fra listen ovenfor - brug PRÆCISE navne, OPFIND IKKE)
-- Åbningstider/dage (fra programkontekst)
-- Stedkontekst (${location.local_location_reference || location.neighborhood || business.city})
-- Programtype (${programme.programme_type})
+For hvert potentielt segment skal du gennemtænke følgende:
+
+1. PASSER FORRETNINGSFORMATET til denne type person?
+   (AYCE passer til grupper, ikke solo-spisende. Smagsmenu passer til par, ikke familier med små børn.)
+
+2. GØR STEDETS BELIGGENHED denne person tilgængelig i det relevante tidsvinduer?
+
+3. Hvilken specifik ANLEDNING bringer denne person hertil — hvad fejrer de,
+   undslipper fra, eller prøver at opnå?
+
+Kun overflade et segment hvis det består alle tre checks.
+
+KRITISKE ALIGNMENT REGLER:
+• Primært segment goal_contribution SKAL være: ${primaryGoal}
+${isMixedProgramme ? `• Programmet har MIXED timing — vælg den mest passende timing per segment:
+  - "planned" hvis segmentet primært booker/planlægger
+  - "spontaneous" hvis segmentet primært beslutter samme dag
+  - "mixed" KUN hvis segmentet har BEGGE mønstre ægte` : `• Primært segment decision_timing SKAL være: ${layer4DecisionTiming}`}
+
+SEGMENTERINGS-STRATEGI (KRITISK):
+Prioriter ANLEDNINGS-baserede segmenter:
+
+PRIMÆR AKSE (social kontekst + anledning):
+• Familier (aftensmåltid, weekendmiddage, børnefødselsdag)
+• Venner (casual dining, grin og hygge, fredagsaften)
+• Par (date night, stille middag for to, fejre jubilæum)
+• Grupper (fællesspisning, firmafester, vennegrupper der deler retter)
+• Enkeltpersoner (quick lunch, arbejdsaftensmad, stamkunder)
+
+BEVIS & CONCEPT FIT KRAV (NYT KRAV):
+Hvert segment SKAL inkludere:
+• "concept_fit_reason": En-linje begrundelse der refererer til BÅDE forretningsformat 
+  (fra Sektion A) OG stedssignal (fra Sektion B)
+  Eksempel: "AYCE + bordgrill er et socialt gruppeformat — passer til venner der vil 
+  hygge sig en aften i ${location.local_location_reference || 'centrum'}"
+• "evidence": Konkrete facts fra Sektion A (menupunkter, åbningstider, programtype)
 
 SPROG KRAV:
-- TEXT-felter SKAL være på DANSK:
-  • "label": "Weekend-gæster på jagt efter natteliv" (ALDRIG "Weekend Nightlife Seekers")
-  • "content_angles": "Cocktail-tilbud ved ${location.local_location_reference || 'vandet'}" (ALDRIG "Cocktail specials")
-  • "evidence": "Menu har cocktails" (ALDRIG "Menu has cocktails")
-  • "segment_reasoning": Dansk forklaring
-- ENUM-felter SKAL være på ENGELSK (database-værdier):
-  • "motivation": "social_gathering" (ALDRIG "social samvær")
-  • "decision_timing": "planned" (ALDRIG "planlagt")
-  • "goal_contribution": "strengthen_brand" (ALDRIG "styrk brand")
-  • "segment_size": "primary" (ALDRIG "primær")
+- TEXT-felter SKAL være på DANSK: label, content_angles, evidence, segment_reasoning, concept_fit_reason
+- ENUM-felter SKAL være på ENGELSK: motivation, decision_timing, goal_contribution, segment_size
 
-Generer nu ${targetSegmentCount} segmenter med komplet evidenskæde.`;
+Generer nu ${targetSegmentCount} segmenter med komplet concept_fit_reason og evidenskæde.`;
   }
   
-  // English fallback (for other markets)
-  return `BUSINESS CONTEXT:
-Name: ${business.business_name}
+  
+  // English fallback (for other markets) with THREE-SECTION ARCHITECTURE
+  return `
+═══════════════════════════════════════════════════════════════════════
+SECTION A — BUSINESS CONCEPT
+═══════════════════════════════════════════════════════════════════════
+
+Description of what the business actually offers, how, and at what price point.
+
+Business: ${business.business_name}
 Type: ${business.establishment_type || business.business_category}
-Location: ${location.neighborhood || business.city}
-Area Type: ${location.area_type || 'unknown'}
-Tourist Context: ${location.tourist_context || 'none'}
-${brunchWarning}
-PROGRAMME CONTEXT:
+Location: ${location.local_location_reference || location.neighborhood || business.city}
+
+PROGRAMME & TIME WINDOWS:
 Programme: ${programme.programme_name} (${programme.programme_type})
 Operating Hours: ${programme.time_windows.join(', ')}
 Operating Days: ${programme.operating_days.join(', ')}
-Menu Evidence: ${programme.menu_evidence.join(', ')}
-${programme.languageVariants && programme.languageVariants.length > 1 ? `Menu Languages: ${programme.languageVariants.join(', ')} (→ international tourist audience likely)\n` : ''}
+${programme.languageVariants && programme.languageVariants.length > 1 ? `Menu Languages: ${programme.languageVariants.join(', ')} (→ international audience)\n` : ''}
 
-MENU SNAPSHOT (${menu.items.length} total items, showing 15):
+MENU FORMAT${detectedFormat ? ` (${detectedFormat})` : ''}:
 ${menuItems}
 
-LAYER 2 COMMERCIAL ORIENTATION (MUST ALIGN):
-Decision Timing: ${layer4DecisionTiming}
-Primary Goal: ${primaryGoal} (${Math.round(commercialOrientation.baseline_goal_split[primaryGoal as keyof typeof commercialOrientation.baseline_goal_split])}%)
-Content Affinity: product ${commercialOrientation.content_type_affinity.product}, place ${commercialOrientation.content_type_affinity.place}
-
-${identity ? `LAYER 3 IDENTITY:
+${detectedFormat && formatSignals.length > 0 ? `FORMAT-OCCASION SIGNALS (${detectedFormat}):
+${formatSignals.map(s => `• ${s}`).join('\n')}
+` : ''}
+PRICE POSITIONING: See menu items above
+${brunchWarning}
+${identity ? `
+BRAND IDENTITY:
 Brand Essence: ${identity.brand_essence}
 Positioning: ${identity.positioning}
 Core Values: ${identity.core_values.join(', ')}
 USP: ${identity.what_makes_us_different}
+` : ''}
+═══════════════════════════════════════════════════════════════════════
+SECTION B — LOCATION FACTS
+═══════════════════════════════════════════════════════════════════════
 
-` : ''}TASK:
-Generate exactly ${targetSegmentCount} audience segments for ${programme.programme_name}.
+Raw signals about who is physically present near this location and when.
 
-CRITICAL ALIGNMENT RULE:
-Primary segment goal_contribution MUST be: ${primaryGoal}
+AREA & CHARACTER:
+Area Type: ${location.area_type || 'unknown'}
+Neighborhood: ${location.neighborhood || 'not specified'}
+${location.physical_context ? `
+PHYSICAL CONTEXT:
+Pedestrian Flow: ${location.physical_context.pedestrian_flow || 'unknown'}
+${location.physical_context.transit_within_150m ? `Transit within 150m: ${location.physical_context.nearest_transit?.name || 'yes'}` : ''}
+${location.physical_context.parking_within_300m ? 'Parking within 300m: yes' : ''}
+` : ''}${demographicProximitySection}
 
-${isMixedProgramme ? `DECISION TIMING FOR MIXED PROGRAMME:
-Programme has MIXED timing (both planned and spontaneous customers).
+⚠️ CRITICAL NOTE: These are GEOGRAPHIC PROXIMITY SIGNALS. They indicate who
+COULD BE reachable, NOT who the business is primarily for. BUSINESS CONCEPT
+in Section A is the primary determinant of the target audience.
 
-For each segment: Choose the timing that FITS BEST:
-• "planned" - if segment primarily books/plans ahead (e.g. families, celebrations, business lunches)
-• "spontaneous" - if segment primarily decides same-day (e.g. office workers at 11:50am, harbor stroll, sunshine decisions)
-• "mixed" - ONLY if segment has BOTH patterns genuinely (e.g. regulars who book for events AND drop by spontaneously)
+═══════════════════════════════════════════════════════════════════════
+SECTION C — OCCASION LOGIC
+═══════════════════════════════════════════════════════════════════════
 
-Be SPECIFIC when possible - "mixed" is only for segments with documented mixed behavior.` : `Primary segment decision_timing MUST be: ${layer4DecisionTiming}`}
+TASK: Generate exactly ${targetSegmentCount} audience segments for ${programme.programme_name}.
 
-EVIDENCE REQUIREMENTS:
-Each segment must cite concrete facts:
-- Menu items (from list above)
-- Operating hours/days
-- Location context (${location.local_location_reference || location.area_type}, ${location.neighborhood || business.city})
-- Programme type (${programme.programme_type})
+For each potential segment, reason through the following:
 
-Generate ${targetSegmentCount} segments with complete evidence chain.`;
+1. Does the business FORMAT suit this type of person?
+   (AYCE suits groups, not solo diners. Tasting menu suits couples, not families with toddlers.)
+
+2. Does the LOCATION make this person reachable at the relevant time windows?
+
+3. What specific OCCASION brings this person here — what are they celebrating,
+   escaping from, or trying to accomplish?
+
+Only surface a segment if it passes all three checks.
+
+CRITICAL ALIGNMENT RULES:
+• Primary segment goal_contribution MUST be: ${primaryGoal}
+${isMixedProgramme ? `• Programme has MIXED timing — choose most appropriate timing per segment:
+  - "planned" if segment primarily books/plans ahead
+  - "spontaneous" if segment primarily decides same-day
+  - "mixed" ONLY if segment has BOTH patterns genuinely` : `• Primary segment decision_timing MUST be: ${layer4DecisionTiming}`}
+
+SEGMENTATION STRATEGY (CRITICAL):
+Prioritize OCCASION-based segments:
+
+PRIMARY AXIS (social context + occasion):
+• Families (dinner out, weekend meals, children's birthdays)
+• Friends (casual dining, laughs and hangout, Friday nights)
+• Couples (date night, quiet dinner for two, celebrating anniversary)
+• Groups (shared dining, corporate parties, friend groups sharing dishes)
+• Individuals (quick lunch, work dinner, regulars)
+
+EVIDENCE & CONCEPT FIT REQUIREMENTS (NEW REQUIREMENT):
+Each segment MUST include:
+• "concept_fit_reason": One-line justification referencing BOTH business format 
+  (from Section A) AND location signal (from Section B)
+  Example: "AYCE + table grill is a social group format — fits friends looking for 
+  a fun evening in ${location.local_location_reference || 'city center'}"
+• "evidence": Concrete facts from Section A (menu items, hours, programme type)
+
+LANGUAGE REQUIREMENTS:
+- TEXT fields in ${language === 'da' ? 'DANISH' : 'ENGLISH'}: label, content_angles, evidence, segment_reasoning, concept_fit_reason
+- ENUM fields in ENGLISH: motivation, decision_timing, goal_contribution, segment_size
+
+Generate ${targetSegmentCount} segments with complete concept_fit_reason and evidence chain.`;
 }
 
 // ===== VALIDATION =====
@@ -358,10 +681,10 @@ function validateAudienceProfile(
   } else {
     // For non-mixed programmes, validate primary segment matches programme timing
     // For mixed programmes, allow AI to choose specific timing per segment
-    if (commercialOrientation.decision_timing !== 'mixed') {
+    if (commercialOrientation.decision_timing !== 'hybrid') {
       const layer2TimingMap: Record<string, string> = {
-        'spontaneous_walk_in': 'spontaneous',
-        'planned_reservation': 'planned'
+        'last_minute': 'spontaneous',
+        'planned': 'planned'
       };
       
       const expectedTiming = layer2TimingMap[commercialOrientation.decision_timing] || commercialOrientation.decision_timing;
@@ -408,6 +731,11 @@ function validateAudienceProfile(
       errors.push(`Segment ${index + 1}: need at least 2 evidence items`);
     }
 
+    // NEW: Validate concept_fit_reason (CRITICAL for new architecture)
+    if (!segment.concept_fit_reason || segment.concept_fit_reason.length < 20) {
+      errors.push(`Segment ${index + 1}: concept_fit_reason missing or too short (must reference both business format AND location/timing)`);
+    }
+
     if (!["primary", "secondary", "niche"].includes(segment.segment_size)) {
       errors.push(`Segment ${index + 1}: invalid segment_size "${segment.segment_size}"`);
     }
@@ -441,6 +769,68 @@ function validateAudienceProfile(
   };
 }
 
+// ===== DEMOGRAPHIC FILTER VALIDATION =====
+
+/**
+ * Validate segments respect reachable_demographics constraints
+ * Catches AI hallucinations where it ignores the guard
+ */
+function validateDemographicFiltering(
+  profile: ProgrammeAudienceProfile,
+  location: LocationData
+): { valid: boolean; warnings: string[] } {
+  const warnings: string[] = [];
+
+  if (!location.reachable_demographics || location.reachable_demographics.length === 0) {
+    return { valid: true, warnings }; // No guard data - skip validation
+  }
+
+  const filteredDemographics = location.reachable_demographics
+    .filter(d => !d.is_reachable)
+    .map(d => d.demographic.toLowerCase());
+
+  if (filteredDemographics.length === 0) {
+    return { valid: true, warnings }; // All demographics reachable - no filtering needed
+  }
+
+  // Check each segment label and content for filtered demographic references
+  profile.audience_segments.forEach((segment, index) => {
+    const labelLower = segment.label.toLowerCase();
+    const contentAnglesLower = segment.content_angles.join(' ').toLowerCase();
+
+    filteredDemographics.forEach(demo => {
+      // Common patterns for each demographic
+      const patterns: Record<string, string[]> = {
+        'tourist': ['turist', 'tourist', 'visitor', 'besøgende', 'traveler', 'rejsende'],
+        'student': ['student', 'studerende', 'university', 'universitet', 'college'],
+        'business_professional': ['business', 'forretning', 'corporate', 'kontor', 'office'],
+        'local_resident': ['local', 'lokal', 'resident', 'beboer', 'neighbor']
+      };
+
+      const demoPatterns = patterns[demo] || [demo];
+      
+      demoPatterns.forEach(pattern => {
+        if (labelLower.includes(pattern)) {
+          warnings.push(
+            `⚠️  Segment ${index + 1} "${segment.label}" references filtered demographic "${demo}" (reason: ${location.reachable_demographics?.find(d => d.demographic === demo)?.filter_reason})`
+          );
+        }
+
+        if (contentAnglesLower.includes(pattern)) {
+          warnings.push(
+            `⚠️  Segment ${index + 1} content_angles reference filtered demographic "${demo}" (reason: ${location.reachable_demographics?.find(d => d.demographic === demo)?.filter_reason})`
+          );
+        }
+      });
+    });
+  });
+
+  return {
+    valid: warnings.length === 0,
+    warnings
+  };
+}
+
 // ===== MAIN GENERATION FUNCTION =====
 
 export async function generateAudienceSegments(
@@ -453,6 +843,19 @@ export async function generateAudienceSegments(
   apiKey: string,
   language: string = 'da'  // Multi-language support (default Danish)
 ): Promise<ProgrammeAudienceProfile> {
+  // Log demographic guard status
+  if (location.reachable_demographics && location.reachable_demographics.length > 0) {
+    const reachable = location.reachable_demographics.filter(d => d.is_reachable);
+    const filtered = location.reachable_demographics.filter(d => !d.is_reachable);
+    console.log(`🛡️  Demographic guard active: ${reachable.length} reachable, ${filtered.length} filtered`);
+    if (reachable.length > 0) {
+      console.log(`   ✓ Reachable: ${reachable.map(d => `${d.demographic} (${d.proximity_score})`).join(', ')}`);
+    }
+    if (filtered.length > 0) {
+      console.log(`   ✗ Filtered: ${filtered.map(d => `${d.demographic} (${d.filter_reason})`).join(', ')}`);
+    }
+  }
+
   // Determine optimal segment count
   const targetSegmentCount = determineSegmentCount(programme, menu, location);
 
@@ -513,6 +916,14 @@ export async function generateAudienceSegments(
   if (!validation.valid) {
     console.error("❌ Validation failed:", validation.errors);
     throw new Error(`Validation failed: ${validation.errors.join('; ')}`);
+  }
+
+  // Validate demographic filtering (guard compliance)
+  const filterValidation = validateDemographicFiltering(profile, location);
+  if (!filterValidation.valid) {
+    console.warn("⚠️  Demographic filter warnings:");
+    filterValidation.warnings.forEach(warning => console.warn(`   ${warning}`));
+    // Log warnings but don't fail - AI sometimes uses creative segment names
   }
 
   console.log(`✅ Generated ${profile.audience_segments.length} segments (confidence: ${profile.segment_confidence.toFixed(2)})`);
