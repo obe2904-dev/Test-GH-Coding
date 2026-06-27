@@ -193,11 +193,11 @@ export function CreatePostPage() {
     // Reset to Generate stage when URL changes mode
     if (urlDerivedPath === 'write') setWriteSelfStep('generate')
     if (urlDerivedPath === 'ai-ideas') setAiIdeerStep('generate')
-    if (urlDerivedPath === 'weekly-plan') setWeeklyPlanStep('generate')
+    // Note: Don't reset weeklyPlanStep here - let WeeklyPlanEffect handle it based on draft existence
     setHasEnteredUdgiv(false)
     setIsReadOnlyMode(false)
     setPublishedInfo(null)
-  }, [urlDerivedPath, storeActivePath, setActivePath, setAiIdeerStep, setWeeklyPlanStep, setWriteSelfStep])
+  }, [urlDerivedPath, storeActivePath, setActivePath, setAiIdeerStep, setWriteSelfStep])
 
   // ── Auto-save: context-keyed localStorage draft (no modal, no interval) ──
   // Weekly Plan posts are persisted by the store's setDraftMapEntry; only
@@ -216,8 +216,8 @@ export function CreatePostPage() {
     ? null
     : isCommittedAiSuggestion
       ? null
-      : activePath === 'ai-ideas' && selectedSuggestionData?.id && selectedSuggestionData?.title
-      ? `p2g_draft_idea_${selectedSuggestionData.id}_${normalizeTitleForKey(selectedSuggestionData.title)}`
+      : activePath === 'ai-ideas' && selectedSuggestionData?.id && (selectedSuggestionData?.title || selectedSuggestionData?.whyExplanation)
+      ? `p2g_draft_idea_${selectedSuggestionData.id}_${normalizeTitleForKey(selectedSuggestionData.title || selectedSuggestionData.whyExplanation?.split(/[.!?]\s+/)[0] || '')}`
       : activePath === 'ai-ideas' && selectedSuggestionData?.id
         ? `p2g_draft_idea_${selectedSuggestionData.id}`  // Fallback if no title (shouldn't happen)
         : 'p2g_draft_manual'
@@ -352,14 +352,14 @@ export function CreatePostPage() {
             return // Don't regenerate, wait for business data to load
           }
 
-          const dbKey: DbDraftKey = {
+          const dbKey: DbPostKey = {
             businessId,
             ideaSource: 'weekly_plan',
             weeklyPlanSlotDate: weeklyPlanPost.timing.date,
           }
           console.log('[WeeklyPlanEffect] Checking DB for draft:', dbKey)
           const dbDraft = await posts.loadPost(dbKey).catch((err) => { console.error('[WeeklyPlanEffect] DB load error:', err); return null })
-          const dbContent = dbDraft?.data.contentJson as PostContent | undefined
+          const dbContent = dbDraft?.contentJson as PostContent | undefined
 
           console.log('[WeeklyPlanEffect] DB draft result:', { found: !!dbDraft, hasText: !!dbContent?.text?.trim() })
 
@@ -378,13 +378,13 @@ export function CreatePostPage() {
             }
             setPostContent(dbContent)
             setDraftMapEntry(weeklyPlanPostIndex, dbContent)  // populate in-memory map too
-            if (dbDraft!.data.photoUrl) {
+            if (dbDraft!.photoUrl) {
               setPhotoContent({
                 uploadedMedia: [{
                   id: 'db-draft-photo',
                   file: null as any,
-                  url: dbDraft!.data.photoUrl,
-                  originalUrl: dbDraft!.data.photoUrl,
+                  url: dbDraft!.photoUrl,
+                  originalUrl: dbDraft!.photoUrl,
                   type: 'image' as const,
                   selectedVersionForPost: 'original' as const,
                 }],
@@ -682,22 +682,22 @@ export function CreatePostPage() {
 
       // 1b️⃣ Check DB draft — has the real Storage photo URL (unlike localStorage blob: stubs)
       if (selectedSuggestionData.id != null) {
-        const dbKey: DbDraftKey = { businessId: businessData.business?.id ?? '', ideaSource: 'quick_suggestions', suggestionId: selectedSuggestionData.id }
+        const dbKey: DbPostKey = { businessId: businessData.business?.id ?? '', ideaSource: 'quick_suggestions', suggestionId: selectedSuggestionData.id }
         if (dbKey.businessId) {
           const dbDraft = await posts.loadPost(dbKey).catch(() => null)
-          const dbDraftContent = dbDraft?.data.contentJson as PostContent | undefined
+          const dbDraftContent = dbDraft?.contentJson as PostContent | undefined
           if (dbDraftContent?.text?.trim()) {
             console.log('✅ Restoring draft from DB for suggestion:', selectedSuggestionData.id)
             draftDbIdRef.current = dbDraft!.id
             setActiveContent(dbDraftContent)
             if (selectedSuggestionData.photoIdea) setActivePhotoIdea(selectedSuggestionData.photoIdea)
-            if (dbDraft!.data.photoUrl) {
+            if (dbDraft!.photoUrl) {
               setPhotoContent({
                 uploadedMedia: [{
                   id: 'db-draft-photo',
                   file: null as any, // No File object when restoring from DB - will use URL instead
-                  url: dbDraft!.data.photoUrl,
-                  originalUrl: dbDraft!.data.photoUrl,
+                  url: dbDraft!.photoUrl,
+                  originalUrl: dbDraft!.photoUrl,
                   type: 'image' as const,
                   selectedVersionForPost: 'original' as const,
                 }],
@@ -795,7 +795,8 @@ export function CreatePostPage() {
         } else {
           // No cache or platforms changed - show loading and generate fresh content
           setIsGenerating(true)
-          console.log('🚀 Generating fresh text from idea:', selectedSuggestionData.title)
+          // Phase 3: Log title or whyExplanation
+          console.log('🚀 Generating fresh text from idea:', selectedSuggestionData.title || selectedSuggestionData.whyExplanation)
           
           const rawIdea = selectedSuggestionData._rawIdea
           const rawContentType = selectedSuggestionData.contentType || rawIdea?.idea_type || 'atmosphere'
@@ -813,7 +814,7 @@ export function CreatePostPage() {
           const contentType = contentTypeMap[rawContentType] || rawContentType
           
           const menuItemName = selectedSuggestionData.menuItemName || rawIdea?.menu_item?.name || ''
-          // Prefer explicit description; fall back to captionBase (same value for menu posts)
+          // Phase 3: Prefer explicit description; captionBase may not exist for quick suggestions
           const menuItemDescription = selectedSuggestionData.menuItemDescription
             || selectedSuggestionData.captionBase
             || rawIdea?.caption_base
@@ -825,7 +826,7 @@ export function CreatePostPage() {
               businessId: businessData.business?.id,
               suggestion: {
                 id: selectedSuggestionData.id,
-                title: selectedSuggestionData.title,
+                title: selectedSuggestionData.title,  // Phase 3: May be undefined for quick suggestions, that's OK
                 source: 'ai_ideas',
                 contentType,
                 menuItemId: selectedSuggestionData.menuItemId || rawIdea?.menu_item_id || '',
@@ -962,9 +963,12 @@ export function CreatePostPage() {
         // Use the hashtags from either cache or fresh generation
         // (already stored in hashtagArray variable)
         
+        // Phase 3: Get headline from title or whyExplanation
+        const headline = selectedSuggestionData.title || selectedSuggestionData.whyExplanation?.split(/[.!?]\s+/)[0] || ''
+        
         // Populate store with generated content
         setActiveContent({
-          headline: selectedSuggestionData.title,
+          headline,
           text: data.sharedText || data.facebook?.text || '',
           hashtags: hashtagArray,
           adjustments: {
@@ -977,7 +981,7 @@ export function CreatePostPage() {
           platformSpecific: selectedPlatforms.length > 1,
           platformContent: {
             facebook: {
-              headline: selectedSuggestionData.title,
+              headline,
               // Fall back to sharedText so cache hits without generated_platform_content still render
               text: data.facebook?.text || data.sharedText || '',
               hashtags: hashtagArray.filter((h: any) => h.platforms?.includes('facebook')),
@@ -990,7 +994,7 @@ export function CreatePostPage() {
               }
             },
             instagram: {
-              headline: selectedSuggestionData.title,
+              headline,
               text: data.instagram?.text || data.sharedText || '',
               hashtags: hashtagArray.filter((h: any) => h.platforms?.includes('instagram')),
               adjustments: {

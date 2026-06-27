@@ -80,7 +80,7 @@ async function fetchBrandVoice(
 ): Promise<Record<string, any>> {
   const { data } = await supabase
     .from('business_brand_profile')
-    .select('brand_profile_v5, brand_essence, tone_of_voice, tone_model, voice_constraints, things_to_avoid, signature_phrases, voice_examples, voice_rationale, recognizable_interior_identity, business_character, identity_keywords, content_strategy, typical_closings')
+    .select('brand_profile_v5, brand_essence, tone_of_voice, tone_model, voice_constraints, things_to_avoid, signature_phrases, voice_examples, voice_rationale, recognizable_interior_identity, business_character, business_identity_persona, marketing_manager_brief, identity_keywords, content_strategy, typical_closings')
     .eq('business_id', businessId)
     .maybeSingle()
   return data || {}
@@ -244,9 +244,18 @@ function extractBrandTone(brandVoice: Record<string, any>): { brandTone: string;
     }
   }
 
-  // V5 FALLBACK 10: Business character (business_description)
-  // V5-first: use v5Identity.business_description, fallback to legacy business_character
-  if (v5Identity?.business_description) {
+  // V5.3 FALLBACK 10: Business character (marketing_manager_brief → business_identity_persona → business_description → business_character)
+  // Priority: V5.3 synthesized brief > V5 persona > V5 description > legacy
+  const v5MarketingManagerBrief = brandVoice.marketing_manager_brief
+  const v5BusinessIdentityPersona = v5?.layer_0_intelligence?.business_identity?.system_persona
+  
+  if (v5MarketingManagerBrief && typeof v5MarketingManagerBrief === 'string' && v5MarketingManagerBrief.trim().length > 100) {
+    // Use first 300 chars of marketing manager brief as business character
+    businessCharacter = v5MarketingManagerBrief.trim().substring(0, 300)
+  } else if (v5BusinessIdentityPersona && typeof v5BusinessIdentityPersona === 'string' && v5BusinessIdentityPersona.trim().length > 50) {
+    // Use first 300 chars of business identity persona
+    businessCharacter = v5BusinessIdentityPersona.trim().substring(0, 300)
+  } else if (v5Identity?.business_description) {
     businessCharacter = v5Identity.business_description.trim()
   } else {
     const bc = brandVoice.business_character

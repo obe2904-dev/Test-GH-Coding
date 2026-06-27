@@ -516,7 +516,7 @@ serve(async (req) => {
     console.log('📥 Fetching context...')
     const [businessData, locationData, operationsData, menuItemsData, menuResultsData, profileData, programmesData, postsData, suggestionsData, brandProfileData] = await Promise.all([
       supabase.from('businesses')
-        .select('name, vertical, country')
+        .select('name, business_type_hybrid, country')
         .eq('id', businessId)
         .single(),
       
@@ -556,7 +556,7 @@ serve(async (req) => {
         .select('programme_type, programme_name, time_windows, operating_days')
         .eq('business_id', businessId),
       
-      supabase.from('published_posts')
+      supabase.from('posts')
         .select('menu_item_name, posted_at')
         .eq('business_id', businessId)
         .not('menu_item_name', 'is', null)
@@ -593,13 +593,13 @@ serve(async (req) => {
       ? brandProfile.identity_keywords
       : []
     const effectiveBusinessType = detectEffectiveVertical(
-      business?.vertical || 'restaurant',
+      business?.business_type_hybrid?.primary || '',
       businessIdentityPersona,
       identityKeywords,
     )
     
     console.log(`📦 Data fetched: ${menuItems.length} menu_items_normalized, ${menuResults.length} menu_results_v2, ${menuSignal?.signatureItems?.length || 0} signatureItems`)
-    console.log(`🧭 Effective business type: ${business?.vertical || 'restaurant'} → ${effectiveBusinessType}`)
+    console.log(`🧭 Effective business type: ${business?.business_type_hybrid?.primary || 'not detected'} → ${effectiveBusinessType}`)
     
     if (!business) {
       return new Response(JSON.stringify({ error: 'Business not found' }), {

@@ -369,7 +369,7 @@ async function getRecentlyPostedItems(
   cutoffDate.setDate(cutoffDate.getDate() - daysBack)
   
   const { data: recentPosts } = await supabase
-    .from('published_posts')
+    .from('posts')
     .select('menu_item_id, menu_item_name')
     .eq('business_id', businessId)
     .gte('published_at', cutoffDate.toISOString())

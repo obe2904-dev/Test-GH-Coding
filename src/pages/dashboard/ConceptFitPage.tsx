@@ -39,7 +39,7 @@ export default function ConceptFitPage() {
       // Get business and type (minimal safe columns)
       const { data: business } = await (supabase as any)
         .from('businesses')
-        .select('id, category, vertical, name, logo_url')
+        .select('id, category, business_type_hybrid, name, logo_url')
         .eq('owner_id', user.id)
         .single();
 
@@ -48,8 +48,8 @@ export default function ConceptFitPage() {
         return;
       }
 
-      // Set business type for display (prefer explicit category, fallback to vertical/name)
-      const bizType = (business as any).category || (business as any).vertical || (business as any).name || null;
+      // Set business type for display (prefer explicit category, fallback to business_type_hybrid.primary/name)
+      const bizType = (business as any).category || (business as any).business_type_hybrid?.primary || (business as any).name || null;
       setBusinessType(bizType);
       setBusinessId((business as any).id || null);
 
@@ -101,7 +101,7 @@ export default function ConceptFitPage() {
       if (persistedAbbr) {
         setSelectedAbbr(persistedAbbr)
       } else {
-        const abbr = pickAbbr((business as any).category, (business as any).vertical, (business as any).name, hasTableFlag, menusList)
+        const abbr = pickAbbr((business as any).category, (business as any).business_type_hybrid?.primary, (business as any).name, hasTableFlag, menusList)
         setSelectedAbbr(abbr)
 
         // Persist automatic selection only when there is no user-saved value

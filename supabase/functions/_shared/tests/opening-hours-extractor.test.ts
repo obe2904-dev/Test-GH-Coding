@@ -52,3 +52,25 @@ test('extractOpeningHours flags conflicting opening-hours blocks for review', ()
   expect(hours.reviewReasons.length).toBeGreaterThan(0)
   expect(hours.openingHours?.monday?.open).toBe('17:00')
 })
+
+test('extractOpeningHours parses hours from visible text around a contact heading', () => {
+  const hours = extractOpeningHours(
+    `
+      <section>
+        <h2>Kontakt</h2>
+        <p>Mandag – lørdag: 11.30-22.00</p>
+        <p>Køkkenet er åbent frem til kl. 21</p>
+      </section>
+    `,
+    []
+  )
+
+  expect(hours.openingHours?.monday?.open).toBe('11:30')
+  expect(hours.openingHours?.monday?.close).toBe('22:00')
+  expect(hours.openingHours?.saturday?.open).toBe('11:30')
+  expect(hours.openingHours?.saturday?.close).toBe('22:00')
+})
+
+test('extractKitchenCloseTime handles kitchen open-until phrasing', () => {
+  expect(extractKitchenCloseTime('<p>Køkkenet er åbent frem til kl. 21</p>')).toBe('21:00')
+})

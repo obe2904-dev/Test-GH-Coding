@@ -71,23 +71,30 @@ function inferServicePeriod(
   if (menuTiming && menuTiming.length > 0) {
     console.log(`[inferServicePeriod] Using ${menuTiming.length} menu timing facts`);
     
+    // ✅ FIX: Sort by specificity - shorter windows first (exclude all-day periods)
+    // This ensures "FROKOST: 09:00-17:30" matches before "Cocktails: 00:00-23:59"
+    const sortedTiming = menuTiming
+      .filter(m => m.startTime && m.endTime)
+      .map(m => {
+        const [sH, sM] = m.startTime.split(':');
+        const [eH, eM] = m.endTime.split(':');
+        const startMin = parseInt(sH) * 60 + parseInt(sM || '0');
+        const endMin = parseInt(eH) * 60 + parseInt(eM || '0');
+        const duration = endMin - startMin;
+        return { ...m, duration, startMin, endMin };
+      })
+      .filter(m => m.duration < 1440)  // Exclude 24h periods (1440 min = all-day)
+      .sort((a, b) => a.duration - b.duration);  // Shortest (most specific) first
+    
     // Find which menu period this time falls into
-    for (const menu of menuTiming) {
-      if (!menu.startTime || !menu.endTime) continue;
-      
-      const [startHourStr, startMinStr] = menu.startTime.split(':');
-      const startMinutes = parseInt(startHourStr) * 60 + parseInt(startMinStr || '0');
-      
-      const [endHourStr, endMinStr] = menu.endTime.split(':');
-      const endMinutes = parseInt(endHourStr) * 60 + parseInt(endMinStr || '0');
-      
+    for (const menu of sortedTiming) {
       // Check if time falls within this menu period
-      if (totalMinutes >= startMinutes && totalMinutes < endMinutes) {
-        console.log(`[inferServicePeriod] → ${menu.servicePeriodName} (matched ${menu.menuTitle}: ${menu.startTime}-${menu.endTime})`);
+      if (totalMinutes >= menu.startMin && totalMinutes < menu.endMin) {
+        console.log(`[inferServicePeriod] → ${menu.servicePeriodName} (matched ${menu.menuTitle}: ${menu.startTime}-${menu.endTime}, duration: ${menu.duration}min)`);
         return menu.servicePeriodName;
       }
     }
-    console.log('[inferServicePeriod] No menu period matched, using fallback');
+    console.log('[inferServicePeriod] No specific menu period matched, using fallback');
   }
   
   // FALLBACK: Hardcoded heuristics if no menu data
@@ -524,12 +531,25 @@ export async function generatePostDetail(
     ? (typeof targetAudienceRaw === 'string' ? targetAudienceRaw : (targetAudienceRaw?.primary_demographic || ''))
     : '';
   // Pick the single most relevant content-strategy signal for this goal_mode (was 4-item list)
+  // V5.6: ROTATE through brand_anchors array for varied weekly content (not always [0])
   const cs = (context.brand_voice as any)?.content_strategy;
   const contentStrategyAnchor = (() => {
     if (!cs || !goalMode) return '';
-    if (goalMode === 'drive_footfall' && cs.footfall_signals?.length > 0) return (cs.footfall_signals as string[])[0];
-    if (goalMode === 'build_brand' && cs.brand_anchors?.length > 0) return (cs.brand_anchors as string[])[0];
-    if (goalMode === 'retain_loyalty' && cs.loyalty_hooks?.length > 0) return (cs.loyalty_hooks as string[])[0];
+    if (goalMode === 'drive_footfall' && cs.footfall_signals?.length > 0) {
+      // ✅ Rotate through footfall signals
+      const signals = cs.footfall_signals as string[];
+      return signals[postIndex % signals.length];
+    }
+    if (goalMode === 'build_brand' && cs.brand_anchors?.length > 0) {
+      // ✅ Rotate through brand anchors
+      const anchors = cs.brand_anchors as string[];
+      return anchors[postIndex % anchors.length];
+    }
+    if (goalMode === 'retain_loyalty' && cs.loyalty_hooks?.length > 0) {
+      // ✅ Rotate through loyalty hooks
+      const hooks = cs.loyalty_hooks as string[];
+      return hooks[postIndex % hooks.length];
+    }
     return '';
   })();
   // Line 1: who they are + who they serve
@@ -544,19 +564,6 @@ export async function generatePostDetail(
     voiceConstraint ? `Undgå: ${voiceConstraint}` : '',
     contentStrategyAnchor ? `Nøglesignal: ${contentStrategyAnchor}` : '',
   ].filter(Boolean).join(' | ');
-
-  // Writing patterns — condensed to 1 opening + 2 signature phrases max
-  const typicalOpenings: string[] = ((context.brand_voice as any)?.typical_openings || []).slice(0, 1);
-  const signaturePhrases: string[] = ((context.brand_voice as any)?.signature_phrases || []).slice(0, 2);
-  const communicationGoal: string | null = (context.brand_voice as any)?.communication_goal || null;
-  const writingPatternBlock = (typicalOpenings.length > 0 || signaturePhrases.length > 0 || communicationGoal)
-    ? [
-        'SKRIVEMØNSTER:',
-        communicationGoal ? `• ${communicationGoal}` : null,
-        typicalOpenings.length > 0 ? `• Åbning: ${typicalOpenings.map((o: string) => `"${o}"`).join(' / ')}` : null,
-        signaturePhrases.length > 0 ? `• Fraser: ${signaturePhrases.map((p: string) => `"${p}"`).join(', ')}` : null,
-      ].filter(Boolean).join('\n')
-    : '';
 
   // ── Per-slot rationale focus: each slot must lead with a DIFFERENT Phase 0 angle ──
   // This prevents all posts from defaulting to the same "mild weather + payday" opening.
@@ -936,6 +943,8 @@ export async function generatePostDetail(
    
    ⛔ FORBUDTE STARTER: Forkæl, Nyd, Oplev, Tag, Prøv, Smag, Forestil, Drøm, Velkommen, Mærk, Find
    
+   ⛔ FORBUDT SEPARATOR: Brug ALDRIG "—" eller "–" som separator i titel. Brug én sætning uden bindestreg.
+   
    ⛔ FORBUDT: Poetiske/abstrakte beskrivelser uden kommerciel værdi:
    - "Morgenens første damp stiger" (hvad får kunden?)
    - "Stemningen vågner" (intet produkt)
@@ -954,6 +963,8 @@ export async function generatePostDetail(
    TONE: ${titleStyleHint}
    
    ⛔ FORBUDTE STARTER: Forkæl, Nyd, Oplev, Tag, Prøv, Smag, Forestil, Drøm, Velkommen
+   
+   ⛔ FORBUDT SEPARATOR: Brug ALDRIG "—" eller "–" som separator i titel. Brug én sætning uden bindestreg.
    
    KRAV: Rettens navn skal stå først. Kunden skal vide hvad de kan bestille.`;
 
@@ -976,7 +987,7 @@ PRIMÆR VINKEL — START HERFRA:
 ${slotRationaleFocus}${ctaInstruction ? `\n${ctaInstruction}` : ''}
 
 BRAND:
-${brandIdentityLine ? brandIdentityLine + '\n' : ''}${brandToneLine}${writingPatternBlock ? `\n${writingPatternBlock}` : ''}
+${brandIdentityLine ? brandIdentityLine + '\n' : ''}${brandToneLine}
 
 KONTEKST:
 Vejr: ${weatherLine}${holidayFramingBlock}
@@ -1161,7 +1172,7 @@ PRIMÆR VINKEL — START HERFRA:
 ${slotRationaleFocus}${ctaInstruction ? `\n${ctaInstruction}` : ''}
 
 BRAND:
-${brandIdentityLine ? brandIdentityLine + '\n' : ''}${brandToneLine}${writingPatternBlock ? `\n${writingPatternBlock}` : ''}
+${brandIdentityLine ? brandIdentityLine + '\n' : ''}${brandToneLine}
 ${venueIdentityLine ? `\n${venueIdentityLine}` : ''}${voiceRationaleLine ? `\n${voiceRationaleLine}` : ''}
 
 KONTEKST:
@@ -1377,6 +1388,10 @@ Svar KUN med JSON:
       service_period: inferServicePeriod(postSlot, canonicalTime, menuTiming),
       // Strategic intent — carries Phase 1 narrative to the plan generator and caption prompt
       strategic_intent: strategicIntent || undefined,
+      // Slot reasoning — the "because" from Phase 1 strategy
+      slot_reasoning: angleForIntent?.reasoning || undefined,
+      // ✨ TIMING INTELLIGENCE: Context-driven timing recommendations from Phase 2 enrichment
+      timing_intelligence: (postSlot as any).timing_intelligence || undefined,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1415,6 +1430,7 @@ Svar KUN med JSON:
         direction: 'Standard billede',
         photo_count: 1
       },
+      slot_reasoning: angleForIntentFb?.reasoning || undefined,
       weather_dependent: false,
       estimated_performance: 'medium',
       strategic_fit: 0.75,
@@ -1425,6 +1441,8 @@ Svar KUN med JSON:
       // Service period tracking (Option B): fact-based using menu timing
       service_period: inferServicePeriod(postSlot, canonicalTime, menuTiming),
       strategic_intent: strategicIntentFb || undefined,
+      // ✨ TIMING INTELLIGENCE: Preserve timing recommendations even in fallback
+      timing_intelligence: (postSlot as any).timing_intelligence || undefined,
     };
   }
 }

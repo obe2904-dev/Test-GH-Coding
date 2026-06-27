@@ -866,23 +866,32 @@ export interface MenuCapabilities {
 }
 
 export interface StrategicAngle {
-  focus: string;              // Custom strategic angle (not just predefined categories)
-  weight: number;             // 0.0-1.0, all weights sum to 1.0
+  focus: string;              // Custom strategic angle (not just predefined categories) OR legacy field
+  weight: number;             // 0.0-1.0, all weights sum to 1.0 (legacy format) OR equal distribution (new format)
   reasoning: string;          // Deep contextual reasoning (2-3 sentences)
   menu_alignment: string;     // Which menu capabilities support this angle
   content_direction: string;  // How posts should execute this angle
   phase0_factors_used?: string[]; // Phase 0 factor IDs this angle addresses (e.g. ["special_day:Valentinsdag"])
-  // NEW: Slot-based content strategy fields
-  slot_id?: 'A' | 'B' | 'C' | 'D';               // Which weekly slot this angle belongs to
+  
+  // NEW ARCHITECTURE: Exact N slots with unique IDs (replaces weight-based distribution)
+  slot_id?: number | 'A' | 'B' | 'C' | 'D'; // Unique slot identifier (1, 2, 3, 4... in new format; A/B/C/D legacy)
+  strategic_intent?: string;  // NEW: Clear description of what this slot should achieve (replaces fuzzy "focus")
+  target_days?: string[];     // NEW: Day range hints for timing system e.g. ["Friday", "Saturday"] or ["Monday", "Tuesday"]
+  target_service_period?: 'dinner' | 'lunch' | 'brunch' | 'bar' | 'any'; // NEW: Service period hint for timing
+  
+  // Slot-based content strategy fields
   goal_mode?: 'drive_footfall' | 'build_brand' | 'retain_loyalty';  // Business goal for this post
   content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people'; // Content type
-  timing_window?: string;     // Recommended timing context e.g. "Thu-Fri 14:00"
+  content_focus?: 'menu_item' | 'atmosphere' | 'behind_scenes' | 'occasion' | 'seasonal'; // Content focus hint
+  timing_window?: string;     // Recommended timing context e.g. "Thu-Fri 14:00" (legacy format)
+  
   // CTA mode — Phase 1 decision on how to drive action for drive_footfall posts.
   // Replaces day-of-week heuristics in Phase 2b with a strategy-level decision.
   //   walk_in   → "kom forbi i dag" — no booking push, low-threshold invitation
   //   booking   → "book dit bord" — hard booking link CTA
   //   hybrid    → "kom forbi eller book via link" — both options
-  cta_mode?: 'walk_in' | 'booking' | 'hybrid';
+  //   engagement → community engagement, no hard CTA
+  cta_mode?: 'walk_in' | 'booking' | 'hybrid' | 'engagement';
   suggested_content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people'; // AI hint from Phase 1 prompt for semantic slot matching
 }
 

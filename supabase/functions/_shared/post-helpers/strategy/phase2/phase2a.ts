@@ -26,9 +26,43 @@ export async function generateContentPlan2a(
 
   const t0 = performance.now();
 
-  const anglesSummary = strategicBrief.angles
-    .map(a => `"${a.focus}" (${Math.round(a.weight * 100)}%)`)
-    .join(', ');
+  // Check if using new slot format (exact N slots) or legacy format (weighted angles)
+  const hasNewSlotFormat = strategicBrief.angles.every((a: any) => a.slot_id !== undefined);
+  
+  let slotsSummary: string;
+  let angleInstructions: string;
+  
+  if (hasNewSlotFormat) {
+    // NEW FORMAT: Phase 1 created exact N slots with strategic intent
+    slotsSummary = strategicBrief.angles
+      .map((slot: any) => `Slot ${slot.slot_id}: ${slot.strategic_intent || slot.focus} (${slot.goal_mode})`)
+      .join('\n');
+    
+    angleInstructions = `STRATEGISKE SLOTS (lav præcis 1 post per slot i denne rækkefølge):
+${slotsSummary}
+
+⚠️ KRITISK: Du skal lave præcis ${targetPostCount} posts i denne rækkefølge.
+• Post 1 = Slot 1, Post 2 = Slot 2, osv.
+• Hver post skal følge sin slots strategic_intent
+• Vælg content type (menu_item/atmosphere/behind_scenes) baseret på slot's indhold
+• Vælg suggested_day baseret på slot's target_days og timing_window`;
+    
+  } else {
+    // LEGACY FORMAT: Weighted angles that need distribution
+    const anglesSummary = strategicBrief.angles
+      .map(a => `"${a.focus}" (${Math.round(a.weight * 100)}%)`)
+      .join(', ');
+    
+    slotsSummary = anglesSummary;
+    angleInstructions = `FOKUS-OMRÅDER: ${anglesSummary}
+
+REGLER:
+• Præcis ${targetPostCount} posts, max ${maxMenuPosts} menu_item
+• 1 post/dag, fordel efter vægtning
+• Brug EKSAKTE fokus-navne
+• ⚠️ Unikt (type + angle_focus) for hver post
+• Vælg suggested_day baseret på strategisk timing (byg narrativ-momentum mod hovedfokus)`;
+  }
 
   // If brand profile provides product_menu weight (0–100), use it; fall back to 60%
   const menuWeight = contentCategoryWeights?.product_menu;
@@ -49,7 +83,7 @@ export async function generateContentPlan2a(
 
   const prompt = `Du er marketing-chef. Fordel ${targetPostCount} posts over ugen.
 
-FOKUS-OMRÅDER: ${anglesSummary}
+${angleInstructions}
 ${strategicContext}
 
 TILGÆNGELIGE DAGE: ${availableDays.join(', ')}
@@ -61,13 +95,6 @@ INDHOLDSTYPER:
 - "atmosphere": Vis stemning, sted, udsigt (mindst ${minExperiencePosts} stk)
 - "behind_scenes": Vis køkken, mennesker, forberedelse
 - "seasonal": Vis sæson-stemning uden specifik ret
-
-REGLER:
-• Præcis ${targetPostCount} posts, max ${maxMenuPosts} menu_item
-• 1 post/dag, fordel efter vægtning
-• Brug EKSAKTE fokus-navne
-• ⚠️ Unikt (type + angle_focus) for hver post
-• Vælg suggested_day baseret på strategisk timing (byg narrativ-momentum mod hovedfokus)
 
 Svar KUN med JSON:
 [
@@ -88,41 +115,42 @@ Svar KUN med JSON:
 
   const plan = Array.isArray(result.parsed) ? result.parsed : result.parsed.posts || result.parsed.post_plan || [];
 
-  // ── Use Phase 1 slot assignments from strategicBrief.angles ──
-  // Phase 1 has already computed the correct slot_id / goal_mode / content_category /
-  // timing_window for each post based on goal_blend weights. We use those here
-  // instead of a hardcoded SLOT_ORDER, so the slot distribution really reflects
-  // the business's Post Strategi.
+  // ══════════════════════════════════════════════════════════════════════════════
+  // SIMPLIFIED 1:1 SLOT MAPPING (NEW ARCHITECTURE)
+  // ══════════════════════════════════════════════════════════════════════════════
+  // Phase 1 now creates exactly N strategic slots (e.g., 4 slots for 4 posts).
+  // Each slot has a unique slot_id (1, 2, 3, 4...) with clear strategic intent.
+  // We map directly by slot_id - NO fuzzy matching, NO weight distribution logic needed.
   //
-  // CRITICAL: If Phase 1 provides fewer slots than targetPostCount, we need to
-  // expand the slots to match. This happens when the strategic brief has limited
-  // angles but we need more posts for better week coverage.
-  let phase1Slots = strategicBrief.angles.slice(0, targetPostCount);
+  // If Phase 1 output has strategic_slots (new format), we have exact 1:1 mapping.
+  // If Phase 1 output has angles with weights (old format), we keep legacy distribution.
   
-  if (phase1Slots.length < targetPostCount) {
-    console.log(`[Phase 2a] Expanding ${phase1Slots.length} Phase 1 slots to ${targetPostCount} total slots`);
+  // Note: hasNewSlotFormat already determined earlier in this function
+  
+  if (hasNewSlotFormat) {
+    console.log(`[Phase 2a] ✅ NEW ARCHITECTURE: Using 1:1 slot mapping (${strategicBrief.angles.length} slots → ${targetPostCount} posts)`);
     
-    // Replicate slots cyclically, but mark them as flexible ("any" timing)
-    // so they can be assigned to any available day. Give them unique focus values
-    // to prevent Gemini's angle_focus from matching multiple expanded slots.
-    const expandedSlots = [];
-    for (let i = 0; i < targetPostCount; i++) {
-      const baseSlot = phase1Slots[i % phase1Slots.length];
-      if (i < phase1Slots.length) {
-        // Original slots keep their timing windows
-        expandedSlots.push(baseSlot);
-      } else {
-        // Expanded slots become flexible (any timing) with unique focus to prevent duplicate matching
-        expandedSlots.push({
-          ...baseSlot,
-          focus: `__expanded_slot_${i}__`,  // Unique focus that won't match Gemini's output
-          timing_window: 'any',
-          slot_id: `${baseSlot.slot_id}_exp${i}`
-        });
-      }
+    // Validate that we have exactly the right number of slots
+    if (strategicBrief.angles.length !== targetPostCount) {
+      throw new Error(
+        `[Phase 2a] CRITICAL: Phase 1 created ${strategicBrief.angles.length} slots, ` +
+        `but target is ${targetPostCount} posts. Phase 1 must create exactly ${targetPostCount} slots.`
+      );
     }
-    phase1Slots = expandedSlots;
+    
+    // Log slot distribution for transparency
+    strategicBrief.angles.forEach((slot: any) => {
+      console.log(`[Phase 2a]   Slot ${slot.slot_id}: ${slot.strategic_intent || slot.focus} (${slot.goal_mode})`);
+    });
+    
+  } else {
+    // Legacy path: Use weight-based distribution
+    console.log(`[Phase 2a] ⚠️ LEGACY: Using weight-based distribution`);
+    // (Keep existing weight distribution logic for backward compatibility)
   }
+  
+  // Use Phase 1 slots directly - they already have correct count and IDs
+  let phase1Slots: any[] = strategicBrief.angles;
 
   // ── BUSINESS RULES ENGINE: Revenue-driven day allocation ──
   // If brand profile has revenue_drivers, generate allocation rules from business logic
@@ -522,24 +550,70 @@ Svar KUN med JSON:
     if (!moved) break; // can't improve further
   }
 
-  // Match each plan entry to the correct Phase 1 slot by angle_focus name.
-  // Index-based matching breaks whenever the AI returns posts in a different
-  // order than Phase 1's angle array (e.g. "Brunch ved Åen" gets Fri-Sat 14:00).
+  // ══════════════════════════════════════════════════════════════════════════════
+  // SLOT-TO-POST MAPPING
+  // ══════════════════════════════════════════════════════════════════════════════
+  // NEW ARCHITECTURE: Phase 1 creates exactly N slots with unique IDs (1, 2, 3, 4...)
+  //                   We map directly by slot_id or index - NO fuzzy matching needed
+  // LEGACY: Phase 1 created weighted angles, we match by angle_focus text (fuzzy)
+  
   const usedPhase1Indices = new Set<number>();
   const enrichedPlan = plan.map((p: any, planIdx: number) => {
-    // Find the Phase 1 slot whose focus matches this plan entry's angle_focus.
-    // Track used indices to handle the rare case of duplicate angle_focus values.
-    let slotIdx = phase1Slots.findIndex(
-      (s, i) => s.focus === p.angle_focus && !usedPhase1Indices.has(i)
-    );
-    if (slotIdx === -1) {
-      // Fallback: any unused slot
-      slotIdx = phase1Slots.findIndex((_, i) => !usedPhase1Indices.has(i));
+    let slotIdx: number;
+    let phase1Slot: any;
+    
+    if (hasNewSlotFormat) {
+      // NEW: Direct 1:1 mapping by plan index
+      // Plan post 1 → Slot 1, Post 2 → Slot 2, etc.
+      slotIdx = planIdx;
+      
+      if (slotIdx >= phase1Slots.length) {
+        throw new Error(
+          `[Phase 2a] Plan returned ${plan.length} posts but we only have ${phase1Slots.length} slots. ` +
+          `Gemini must return exactly ${phase1Slots.length} posts.`
+        );
+      }
+      
+      phase1Slot = phase1Slots[slotIdx];
+      console.log(`[Phase 2a] ✅ Post ${planIdx + 1} → Slot ${phase1Slot.slot_id} (${phase1Slot.strategic_intent || phase1Slot.focus})`);
+      
+    } else {
+      // LEGACY: Match by angle_focus text (with fuzzy matching fallback)
+      slotIdx = phase1Slots.findIndex(
+        (s, i) => s.focus === p.angle_focus && !usedPhase1Indices.has(i)
+      );
+      
+      // VALIDATION: If exact match fails, try fuzzy match before falling back
+      if (slotIdx === -1) {
+        console.warn(`[Phase 2a] ⚠️ No exact match for angle_focus "${p.angle_focus}" (post ${planIdx + 1})`);
+        
+        // Try fuzzy match: angle_focus contains Phase 1 focus OR vice versa
+        const fuzzyIdx = phase1Slots.findIndex(
+          (s, i) => !usedPhase1Indices.has(i) && (
+            s.focus.toLowerCase().includes(p.angle_focus.toLowerCase()) ||
+            p.angle_focus.toLowerCase().includes(s.focus.toLowerCase())
+          )
+        );
+        
+        if (fuzzyIdx !== -1) {
+          slotIdx = fuzzyIdx;
+          console.log(`[Phase 2a] ✓ Fuzzy match: "${p.angle_focus}" → "${phase1Slots[fuzzyIdx].focus}"`);
+        } else {
+          // Final fallback: any unused slot
+          slotIdx = phase1Slots.findIndex((_, i) => !usedPhase1Indices.has(i));
+          console.warn(
+            `[Phase 2a] ❌ MISLABELING RISK: Post ${planIdx + 1} angle_focus "${p.angle_focus}" ` +
+            `doesn't match any Phase 1 angle. Using fallback slot ${slotIdx}. ` +
+            `Available angles: ${phase1Slots.map(s => `"${s.focus}"`).join(', ')}`
+          );
+        }
+      }
+      
+      if (slotIdx === -1) slotIdx = planIdx % phase1Slots.length; // last resort
+      usedPhase1Indices.add(slotIdx);
+      
+      phase1Slot = phase1Slots[slotIdx];
     }
-    if (slotIdx === -1) slotIdx = planIdx % phase1Slots.length; // last resort
-    usedPhase1Indices.add(slotIdx);
-
-    const phase1Slot = phase1Slots[slotIdx];
     const slotPreferredDay = dayByOriginalIndex[slotIdx] ?? availableDays[planIdx] ?? availableDays[0];
     
     // STRATEGY-AWARE DAY SELECTION:

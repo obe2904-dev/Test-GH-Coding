@@ -16,6 +16,7 @@
 // - Handles dish renames, similar names, multilingual variants
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { parseCuisineFromSummary, type CuisineContext } from './cuisine-parser.ts'
 
 /**
  * Menu item with rotation metadata
@@ -30,6 +31,8 @@ export interface RotationQueueItem {
   days_since_posted: number | null  // Days since last post, null if never posted
   total_posts: number  // How many times this dish has been posted
   service_period: string | null  // Primary service period for this dish
+  cuisine_context: string | null  // Detected cuisine style (e.g., "Thai", "Italian", "Nordic")
+  ai_summary_raw: string | null  // Raw ai_summary from menu_results_v2 (for advanced parsing)
 }
 
 /**
@@ -47,7 +50,7 @@ export interface RotationQueueOptions {
 /**
  * Get menu rotation queue: dishes sorted by least-recently-posted
  * 
- * Uses indexed query on published_posts.idx_published_posts_menu_rotation
+ * Uses indexed query on posts.idx_posts_menu_rotation
  * Returns dishes that haven't been posted recently at the top of the queue.
  * 
  * @param supabase - Supabase client instance
@@ -91,9 +94,22 @@ export async function getMenuRotationQueue(
   // Filter by is_active = true to exclude obsolete items from previous menu versions
   // Exclude kids_menu and sides - they're not suitable for general Quick Suggestions
   // OPTIMIZED: Fetch item_description here to eliminate redundant query
+  // NEW: JOIN to menu_results_v2 for cuisine intelligence from ai_summary
   let query = supabase
     .from('menu_items_normalized')
-    .select('id, item_name, item_description, category_name, menu_language, service_periods, category_type')
+    .select(`
+      id,
+      item_name,
+      item_description,
+      category_name,
+      menu_language,
+      service_periods,
+      category_type,
+      menu_result_id,
+      menu_results_v2!inner (
+        ai_summary
+      )
+    `)
     .eq('business_id', businessId)
     .eq('is_active', true)
     .not('category_type', 'in', '("kids_menu","sides")')
@@ -116,12 +132,12 @@ export async function getMenuRotationQueue(
   }
 
   // Step 2: Get posting history for these dishes
-  // Uses idx_published_posts_menu_rotation (business_id, menu_item_name, posted_at DESC)
+  // Uses idx_posts_menu_rotation (business_id, menu_item_name, posted_at DESC)
   // Include BOTH published posts (already posted) AND scheduled posts (scheduled to go out)
   // This prevents double-booking the same dish in rotation
   // NEW: Include menu_item_id for UUID-first matching (more reliable than name-only)
   const { data: postHistory, error: historyError } = await supabase
-    .from('published_posts')
+    .from('posts')
     .select('menu_item_id, menu_item_name, posted_at, scheduled_for, status')
     .eq('business_id', businessId)
     .not('menu_item_name', 'is', null)
@@ -197,6 +213,10 @@ export async function getMenuRotationQueue(
     const servicePeriods = item.service_periods as string[] | null
     const primaryPeriod = servicePeriods?.[0] || null
 
+    // Parse cuisine context from ai_summary (if available)
+    const aiSummary = (item as any).menu_results_v2?.ai_summary || null
+    const cuisineContext = parseCuisineFromSummary(aiSummary)
+
     queue.push({
       menu_item_name: item.item_name,
       menu_item_id: item.id,  // Stable now that we use soft-delete (is_active)
@@ -206,7 +226,9 @@ export async function getMenuRotationQueue(
       last_posted_at: lastPostedAt,
       days_since_posted: daysSincePosted,
       total_posts: dishPosts.length,
-      service_period: primaryPeriod
+      service_period: primaryPeriod,
+      cuisine_context: cuisineContext.primary,  // Detected cuisine ("Thai", "Italian", etc.)
+      ai_summary_raw: aiSummary  // Raw summary for advanced use cases
     })
   }
 
@@ -270,7 +292,7 @@ export async function wasDishRecentlyPosted(
   // Check both published posts (posted_at) and scheduled posts (scheduled_for)
   // NEW: Support UUID-first matching (checks both menu_item_id and menu_item_name)
   const { data, error } = await supabase
-    .from('published_posts')
+    .from('posts')
     .select('id, status, posted_at, scheduled_for')
     .eq('business_id', businessId)
     .or(`menu_item_id.eq.${dishIdentifier},menu_item_name.eq.${dishIdentifier}`)

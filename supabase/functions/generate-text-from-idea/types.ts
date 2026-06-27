@@ -33,6 +33,10 @@ export interface Suggestion {
   strategyBrief?: string         // Phase 2b compact directive: what caption should achieve + weather/timing/role context
   mediaDirection?: string        // Phase 2b photo/scene direction — what to photograph and how
   sceneSpec?: string             // Phase 2b scene specification for experience posts (who/action/setting)
+  // Strategic Slot Architecture (Phase 1 → Phase 2a → Phase 2b → Weekly Plan Generator)
+  slotId?: string | number      // Slot identifier (e.g., "A", "B", "C", "D" or 1, 2, 3, 4)
+  strategicIntent?: string      // What this slot aims to achieve (from Phase 1)
+  slotReasoning?: string        // Why this strategic slot exists - the "because" (from Phase 1)
 }
 
 export interface PromptOptions {
@@ -61,6 +65,7 @@ export interface PromptOptions {
   todayOpenTime: string
   todayCloseTime: string
   kitchenCloseTime?: string   // kitchen close time (may differ from venue close); used for food posts
+  hasOutdoorSeating?: boolean // whether business has outdoor seating (gates outdoor seating mentions)
   selectedCta: string | null  // null for behind_scenes; optional for other types
   businessName: string
   city: string
@@ -78,8 +83,8 @@ export interface PromptOptions {
   venueScene: string          // v5: venue_scene — observational scene-setting from photo analysis
   keyOfferings?: string       // Free tier: menu names from Profile (newline-separated)
   identityKeywords: string[]  // v5: identity_keywords — 3-5 identity chips
-  vertical: string            // business vertical within F&B (cafe, restaurant, bar, bakery…)
-  effectiveVertical: string   // keyword-detected operational type for prompt context
+  vertical: string            // business_type_hybrid.primary from AI detection (cafe, restaurant, bar, bakery…)
+  effectiveVertical: string   // time-aware operational type resolved from hybrid structure + time of day
   humorLevel: string          // v5: humor_level — 'none' | 'subtle' | 'moderate' | 'high'
   formalityLevel: string      // v5: formality_level — 'informal' | 'semi-formal' | 'formal' (synced from tone_dna)
   targetAudience: string      // v5: target_audience — who this business serves
@@ -108,6 +113,7 @@ export interface PromptOptions {
   location_natural_vocab?: string[] | null  // tone_dna.location_driver.natural_vocabulary
   location_avoid_vocab?: string[] | null    // tone_dna.location_driver.avoid_vocabulary
   humor_style?: string | null           // brand_profile_v5.voice.humor_style
+  humor_character?: { permission_level: string, execution_style?: string, tone_descriptors?: string[] } | null  // tone_dna.humor_character
   locationIntelligenceNarrative?: string | null  // Fix 4: geographic_context.narrative for atmosphere posts
   business_identity_persona?: string    // V5.5: Full business identity persona
   enhanced_social_examples?: any[]      // V5.5: Enhanced social examples

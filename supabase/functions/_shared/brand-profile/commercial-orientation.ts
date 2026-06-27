@@ -54,7 +54,7 @@ export interface CommercialOrientation {
     strengthen_brand: number;
     retain_regulars: number;
   };
-  decision_timing: "spontaneous_walk_in" | "planned_reservation" | "mixed";
+  decision_timing: "last_minute" | "planned" | "hybrid";
   content_type_affinity: {
     product: number;
     place: number;
@@ -168,8 +168,10 @@ function buildCommercialOrientationPrompt(
   if (location.local_location_reference) {
     parts.push(`Lokal betegnelse: ${location.local_location_reference}`);
   }
-  if (location.neighborhood) {
-    parts.push(`Område: ${location.neighborhood}`);
+  // Fallback chain: local_location_reference > neighborhood > city
+  const locationContext = location.local_location_reference || location.neighborhood || business.city;
+  if (locationContext && !location.local_location_reference) {
+    parts.push(`Område: ${locationContext}`);
   }
   if (location.area_type) {
     parts.push(`Type: ${location.area_type}`);
@@ -222,9 +224,9 @@ function buildCommercialOrientationPrompt(
   
   parts.push(``);
   parts.push(`Tænk som en kunde der beslutter sig for at besøge dette program:`);
-  parts.push(`- Beslutter de samme dag? (spontaneous)`);
-  parts.push(`- Planlægger de i forvejen? (planned)`);  
-  parts.push(`- Begge mønstre? (mixed)`);
+  parts.push(`- Beslutter de samme dag? (last_minute)`);
+  parts.push(`- Planlægger de i forvejen? (planned)`);
+  parts.push(`- Begge mønstre? (hybrid)`);
   parts.push(``);
   parts.push(
     `Location (${locationHint}, ${competitionHint}) og program-type (${programme.type}) informerer, men TÆNK SOM KUNDE.`
@@ -269,7 +271,7 @@ function validateCommercialOrientation(
   }
 
   // Validate decision_timing
-  const validTimings = ["spontaneous_walk_in", "planned_reservation", "mixed"];
+  const validTimings = ["last_minute", "planned", "hybrid"];
   if (!validTimings.includes(result.decision_timing)) {
     throw new Error(
       `decision_timing must be one of: ${validTimings.join(", ")}`

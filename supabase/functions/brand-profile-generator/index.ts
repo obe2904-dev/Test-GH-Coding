@@ -140,6 +140,10 @@ import {
   patchContentPillarsNotesToReferenceHooks
 } from '../_shared/brand-profile/repair/patchers.ts'
 
+import {
+  resolveLocationPhrase
+} from '../_shared/brand-profile/location-phrase-resolver.ts'
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -404,15 +408,8 @@ async function generateBrandProfile(
     let pillars = normalizeContentPillars(rawPillars ?? [])
     if (pillars.length < 6) {
       console.log(`[${requestId}] 🔧 content_pillars has ${pillars.length} items — rebuilding deterministically from venue signals`)
-      const _loc = dataSources?.location || {}
-      const _areaType = _loc?.enrichment?.micro?.area_type
-      const _ph = _areaType === 'waterfront' ? (locale.preferredPhrasing?.['location_waterfront'] || 'ved vandet')
-        : _areaType === 'transit_hub' ? (locale.preferredPhrasing?.['location_transit'] || 'ved stationen')
-        : _areaType === 'shopping_street' ? (locale.preferredPhrasing?.['location_shopping'] || 'på gågaden')
-        : ''
-      const _city = _loc?.enrichment?.macro?.city || dataSources?.business?.city || 'byen'
-      const _locationHook = _ph ? `${_ph} i ${_city}` : _city
-      pillars = buildContentPillarsFallback(dataSources, analysis, _locationHook)
+      // Use centralized resolver with proper priority hierarchy (no hardcoded 'ved vandet')
+      pillars = buildContentPillarsFallback(dataSources, analysis, undefined, locale)
       console.log(`[${requestId}] ✅ content_pillars rebuilt: ${pillars.filter((p: any) => p.encouraged).map((p: any) => p.pillar).join(', ')} encouraged`)
     }
     (sections as any).content_pillars = pillars
@@ -1019,7 +1016,7 @@ async function classifyBusinessModel(
   const operations = dataSources.operations as any
   const locationIntelRow = dataSources.locationIntelligenceRow as any
 
-  const establishmentType: string = operations?.establishment_type ?? (dataSources.business as any)?.vertical ?? ''
+  const establishmentType: string = operations?.establishment_type ?? (dataSources.business as any)?.business_type_hybrid?.primary ?? ''
   const dayArcProgrammes: string[] = (dataSources.menuSignalProgrammes as any[] | null)
     ?.filter((p: any) => p?.brand_weight !== 'operational')
     ?.map((p: any) => p?.label_da ?? p?.label ?? '')
@@ -2054,6 +2051,66 @@ serve(async (req: Request) => {
       versionHash
     )
 
+    // Stage PP — Programme Profiles (non-blocking, non-fatal)
+    // Detects service programmes (brunch, lunch, dinner, bar) from menu + opening hours
+    // and saves them to business_programme_profiles table.
+    console.log(`[${requestId}] 🍽️  Stage PP: detecting and saving programme profiles...`)
+    try {
+      const { detectProgrammes } = await import('../_shared/brand-profile/programme-detection.ts')
+      
+      const openingHoursRows = dataSources.openingHoursRows ?? []
+      const menuItems = dataSources.normalizedMenuItems ?? []
+      
+      // Detect programmes using deterministic logic
+      const programmeDetection = detectProgrammes(
+        openingHoursRows.map((r: any) => ({
+          weekday: r.weekday,
+          open_time: r.open_time,
+          close_time: r.close_time,
+          closed: r.closed,
+          kind: r.kind
+        })),
+        menuItems.map((m: any) => ({
+          service_periods: m.service_periods ?? [],
+          service_period_name: m.service_period_name,
+          menu_title: m.menu_title
+        }))
+      )
+      
+      if (programmeDetection.programmes.length > 0) {
+        // Create programme profile objects for database
+        const programmeProfiles = programmeDetection.programmes.map(prog => ({
+          business_id: businessId,
+          programme_type: prog.type,
+          programme_name: prog.label,
+          time_windows: [`${prog.timeWindow.start}-${prog.timeWindow.end}`],
+          operating_days: prog.daysOfWeek,
+          menu_evidence: prog.menuEvidence,
+          confidence: prog.confidence === 'high' ? 0.9 : prog.confidence === 'medium' ? 0.7 : 0.5,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }))
+        
+        // Upsert to database
+        const { error: ppError } = await supabaseClient
+          .from('business_programme_profiles')
+          .upsert(programmeProfiles, {
+            onConflict: 'business_id,programme_type'
+          })
+        
+        if (ppError) {
+          console.warn(`[${requestId}] ⚠️  Stage PP save failed (non-fatal):`, ppError.message)
+        } else {
+          console.log(`[${requestId}] ✅ Stage PP: saved ${programmeProfiles.length} programme profiles (${programmeProfiles.map(p => p.programme_type).join(', ')})`)
+        }
+      } else {
+        console.log(`[${requestId}] ℹ️  Stage PP: no programmes detected (insufficient menu/hours data)`)
+      }
+    } catch (ppError) {
+      console.warn(`[${requestId}] ⚠️  Stage PP exception (non-fatal):`, String(ppError))
+    }
+
     // Stage B5 — Audience Segment Intelligence (non-blocking, non-fatal)
     // Generates 3-6 named segments with timing windows + content angles + metadata.
     // Saved to audience_segments JSONB column — consumed by get-quick-suggestions + owner UI.
@@ -2154,7 +2211,7 @@ serve(async (req: Request) => {
           : 'hybrid'
 
       const psBusinessName = (dataSources.business as any)?.name ?? ''
-      const psEstablishmentType = psOperations?.establishment_type ?? (dataSources.business as any)?.vertical ?? 'restaurant'
+      const psEstablishmentType = psOperations?.establishment_type ?? (dataSources.business as any)?.business_type_hybrid?.primary ?? ''
       const psCityName = (dataSources.location as any)?.enrichment?.macro?.city ?? (dataSources.business as any)?.city ?? ''
       const psAreaType = psLocationIntel?.area_type ?? ''
       const psNeighborhood = psLocationIntel?.neighborhood ?? ''

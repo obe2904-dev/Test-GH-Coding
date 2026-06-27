@@ -117,6 +117,118 @@ export function analyzeMenuOriginStrategy(
   }
 }
 
+// ============================================================================
+// TEAM/PEOPLE ANCHORS EXTRACTION (V5.6)
+// ============================================================================
+
+/**
+ * Extracts verified team roles and processes for BTS content
+ * 
+ * Purpose: Prevent hallucination in brand_behind/team_people posts by providing
+ * factual boundaries about what roles and processes actually exist.
+ * 
+ * @param menuContext - Menu data including signature themes and items
+ * @param businessType - Detected business type and vertical
+ * @param programmes - Active programmes (brunch, bar, etc.)
+ * @returns Array of verified team/process anchors
+ */
+export function extractTeamPeopleAnchors(
+  menuContext?: VoiceGenerationInput['menuContext'],
+  businessType?: { type: string; vertical?: string },
+  programmes?: Array<{ type: string }>,
+  menuItems?: Array<{ name?: string; description?: string; category?: string }>
+): string[] {
+  const anchors: string[] = []
+  
+  if (!menuContext && !businessType && !programmes) {
+    return anchors
+  }
+  
+  // Craft/homemade signals from menu
+  const craftKeywords = [
+    'hjemmelavet', 'hjemmelavede', 'friskbagt', 'friskbagte',
+    'egen produktion', 'egenproduceret', 'in-house',
+    'håndlavet', 'håndlavede', 'håndværk'
+  ]
+  
+  const menuText = menuItems
+    ?.map(item => `${item.name || ''} ${item.description || ''}`.toLowerCase())
+    .join(' ') || ''
+  
+  const hasCraftSignals = craftKeywords.some(keyword => 
+    menuText.includes(keyword) || 
+    menuContext?.signature_themes?.some(theme => theme.toLowerCase().includes(keyword))
+  )
+  
+  if (hasCraftSignals) {
+    anchors.push('Køkken der tilbereder hjemmelavede elementer')
+  }
+  
+  // Bartender role (requires bar programme + cocktails/wine)
+  const hasBarProgramme = programmes?.some(p => 
+    p.type === 'bar' || p.type === 'cocktail_bar' || p.type === 'wine_bar'
+  ) || businessType?.vertical === 'bar' || businessType?.vertical === 'cocktail_bar'
+  
+  const hasCocktails = menuText.includes('cocktail') || 
+    menuContext?.signature_themes?.some(theme => 
+      theme.toLowerCase().includes('cocktail') || theme.toLowerCase().includes('drinks')
+    )
+  
+  const hasWine = menuText.includes('vin ') || menuText.includes('wine') ||
+    menuContext?.signature_themes?.some(theme => theme.toLowerCase().includes('vin'))
+  
+  if (hasBarProgramme && (hasCocktails || hasWine)) {
+    if (hasCocktails) {
+      anchors.push('Bartender med cocktailprogram')
+    } else if (hasWine) {
+      anchors.push('Sommelier med vinprogram')
+    }
+  }
+  
+  // Barista role (specialty coffee signals)
+  const specialtyCoffeeKeywords = [
+    'espresso', 'cappuccino', 'flat white', 'cortado',
+    'specialty coffee', 'kaffebar', 'coffee bar'
+  ]
+  
+  const hasSpecialtyCoffee = specialtyCoffeeKeywords.some(keyword => 
+    menuText.includes(keyword) ||
+    menuContext?.signature_themes?.some(theme => theme.toLowerCase().includes(keyword))
+  )
+  
+  if (hasSpecialtyCoffee) {
+    anchors.push('Barista med specialty coffee')
+  }
+  
+  // Food presentation signals (tapas, sharing, tasting menu)
+  const presentationKeywords = [
+    'tapas', 'sharing', 'deletallerken', 'tasting menu',
+    'menu', 'anretning', 'præsentation'
+  ]
+  
+  const hasPresentation = presentationKeywords.some(keyword => 
+    menuText.includes(keyword) ||
+    menuContext?.signature_themes?.some(theme => theme.toLowerCase().includes(keyword))
+  )
+  
+  if (hasPresentation) {
+    anchors.push('Mad-præsentation og anretning')
+  }
+  
+  // Chef/kitchen operation (most restaurants/cafes have this)
+  const hasKitchen = businessType?.vertical === 'restaurant' || 
+    businessType?.vertical === 'cafe' || 
+    businessType?.vertical === 'bakery' ||
+    programmes?.some(p => p.type === 'brunch' || p.type === 'lunch' || p.type === 'dinner')
+  
+  // Only add generic chef anchor if no specific craft/presentation anchors exist
+  if (hasKitchen && anchors.length === 0) {
+    anchors.push('Køkken der tilbereder dagens retter')
+  }
+  
+  return anchors
+}
+
 /**
  * Generates voice profile (Layer 5a)
  * 
@@ -158,11 +270,22 @@ export async function generateVoiceProfile(
     undefined  // requestId - can be added later if needed
   )
   
+  // NEW V5.6: Extract team/people anchors from menu and business context
+  console.log(`👥 Extracting team/people anchors...`)
+  const teamPeopleAnchors = extractTeamPeopleAnchors(
+    input.menuContext,
+    input.businessTypeDetection,
+    undefined,  // programmes - not available in VoiceGenerationInput, will need to be passed if available
+    input.menuContext?.sample_items
+  )
+  console.log(`👥 Team anchors extracted: ${teamPeopleAnchors.join(', ') || 'none'}`)
+  
   // Merge results
   return {
     ...voiceFramework,
     menu_description_examples: menuExamples,
-    social_writing_examples: socialExamples
+    social_writing_examples: socialExamples,
+    team_people_anchors: teamPeopleAnchors.length > 0 ? teamPeopleAnchors : undefined
   }
 }
 

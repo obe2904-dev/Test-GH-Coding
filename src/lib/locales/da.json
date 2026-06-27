@@ -1901,7 +1901,7 @@
       "stage2Title": "Design",
       "imageReady": "Billede klar",
       "pending": "Afventer",
-      "stage3Title": "Publicering"
+      "stage3Title": "Udgiv"
     },
     "weekToggle": {
       "current": "Denne uge",
@@ -2101,11 +2101,11 @@
         "optimal": "Optimalt tidspunkt"
       },
       "cta": {
-        "booking": "🔔 Book bord",
+        "booking": "� Reservér",
         "event": "🎉 Event",
-        "engagement": "💬 Interaktion",
-        "awareness": "👁️ Del",
-        "traffic": "⚡ Kør trafik",
+        "engagement": "💭 Interaktion",
+        "awareness": "📢 Synlighed",
+        "traffic": "🚶 Drive besøg",
         "default": "✨ Kom forbi"
       },
       "status": {

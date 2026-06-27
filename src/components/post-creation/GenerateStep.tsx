@@ -482,7 +482,8 @@ export function GenerateStep({
     console.log('[GenerateStep] Stored suggestion in selectedSuggestionData')
     
     // Store headline but DON'T switch tabs - let user click Next to generate
-    setHeadline(suggestion.title)
+    // Phase 3: Use whyExplanation if title is not available (quick suggestions)
+    setHeadline(suggestion.title || suggestion.whyExplanation?.split(/[.!?]\s+/)[0] || '')
     
     // Mark as changed
     markAsChanged?.()

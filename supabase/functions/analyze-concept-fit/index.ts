@@ -1016,8 +1016,6 @@ Menu karakteristika:
 - Vin: ${menuMetadata?.has_wine_list ? 'Ja' : 'Nej'}
 - Kost muligheder: ${menuMetadata?.dietary_options?.join(', ') || 'Ingen'}
 
-Brand værdier: ${brandProfile?.values?.join(', ') || 'Ingen'}
-
 ---
 
 OMRÅDE FORVENTNINGER:
@@ -1372,7 +1370,17 @@ function summarizeHours(hours: any): string {
   if (!hours) return 'Ukendt';
   
   const days = Object.entries(hours);
-  const openDays = days.filter(([_, h]: any) => !h.closed);
+  // Days are considered open if they exist in the object and have open/close times
+  // (closed days either don't exist or are marked closed for backward compatibility)
+  const openDays = days.filter(([_, h]: any) => {
+    if (typeof h === 'object' && h !== null) {
+      // Check for explicit closed flag (backward compatibility)
+      if (h.closed === true) return false;
+      // Day is open if it has open time
+      return !!h.open;
+    }
+    return false;
+  });
   
   if (openDays.length === 0) return 'Lukket';
   if (openDays.length === 7) return 'Åben alle dage';

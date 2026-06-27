@@ -13,7 +13,7 @@ Legend:
 | `tone_of_voice` | `keep` | Compatibility / derived output still consumed downstream | Still referenced by `generate-text-from-idea`, `adjust-text`, `generate-weekly-plan`, and `brand-profile-generator` saves it as a compatibility field |
 | `tone_keywords` | `keep` | Compatibility / downstream consumer still reads it | Used by weekly plan and other brand-profile consumers; not the primary source of truth, but still live |
 | `tone_model` | `keep` | Compatibility / derived output | Still used in prompt consumers and saved as a normalized legacy structure |
-| `typical_openings` | `keep` | Writing-example compatibility field | Used by `writing-examples.ts` and downstream consumers; not a dead reference |
+| `typical_openings` | `remove` | **REMOVED 2026-06-24** | Caused runtime errors (extractTypicalOpenings not defined). All references removed from runtime code, UI, and types. Schema column remains for backward compatibility. |
 | `typical_closings` | `derive` | Generated output, not a live DB input | No longer treated as a prompt input from `business_brand_profile`; generated in the writing-example pipeline |
 | `signature_phrases` | `remove` | Missing live DB column in the representative inventory | Still selected in `brand-profile-generator-v5`, but the inventory shows it as `missing_column` |
 | `never_say` | `remove` | Missing live DB column in the representative inventory | Still selected in `brand-profile-generator-v5`, but the inventory shows it as `missing_column` |

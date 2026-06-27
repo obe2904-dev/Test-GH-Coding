@@ -256,10 +256,10 @@ function LocationIntelligencePage() {
 
     try {
 
-      // Load business profile (has description and other data)
+      // Load business profile (has long_description - user-entered description)
       const { data: profile } = await supabase
         .from('business_profile')
-        .select('short_description, long_description')
+        .select('long_description')
         .eq('business_id', businessId)
         .maybeSingle();
 
@@ -338,7 +338,7 @@ function LocationIntelligencePage() {
       }
 
       const conceptInput: ConceptFitInput = {
-        aboutText: profile?.short_description || profile?.long_description || undefined,
+        aboutText: profile?.long_description || undefined,
         openingHours: Object.keys(openingHours).length > 0 ? openingHours : undefined,
         menuSummary: undefined, // No longer using menu metadata
         serviceModel: serviceModel,

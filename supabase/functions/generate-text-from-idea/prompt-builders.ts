@@ -48,6 +48,19 @@ function sanitizeGuestMoment(raw: string): string {
 // Only lines where the value is non-empty are included.
 export function buildWeeklyPlanContext(s: Suggestion, captionFirstLineUsedAsHook = false): string {
   const lines: string[] = []
+  
+  // Strategic Slot Context — Phase 1's strategic framing for this post
+  if (s.slotId || s.strategicIntent) {
+    const slotLabel = s.slotId ? `#${s.slotId}` : ''
+    const intent = s.strategicIntent || ''
+    if (slotLabel || intent) {
+      lines.push(`STRATEGISK SLOT ${slotLabel}: ${intent}`.trim())
+    }
+  }
+  if (s.slotReasoning) {
+    lines.push(`HVORFOR DENNE VINKEL: ${s.slotReasoning}`)
+  }
+  
   if (s.guestMoment) {
     const cleanMoment = sanitizeGuestMoment(s.guestMoment)
     if (cleanMoment) lines.push(`GÆSTEMOMENT: ${cleanMoment}`)
@@ -74,6 +87,26 @@ export function buildWeeklyPlanContext(s: Suggestion, captionFirstLineUsedAsHook
   if (s.holidayContext) {
     lines.push(`⚠️ HELLIGDAG: ${s.holidayContext} — AL framing SKAL afspejle denne helligdag. Generisk framing er ugyldig.`)
   }
+  
+  // NEW: Segment Coverage Context (June 27, 2026)
+  // Distinguishes strategic segment posts from gap-time capacity posts
+  if (s.segmentCoverage) {
+    if (s.segmentCoverage.mode === 'strategic_segment' && s.segmentCoverage.matchedSegment) {
+      const seg = s.segmentCoverage.matchedSegment
+      lines.push(`\n🎯 SEGMENT-MATCH: ${seg.people_type} (${seg.timing})`)
+      if (seg.situation) {
+        lines.push(`MÅLGRUPPE: ${seg.situation}`)
+      }
+      lines.push(`FRAMING-KRAV: Brug denne segments personas, occasions og motivationer. Undgå generisk framing — skriv specifikt til segmentets situation.`)
+    } else if (s.segmentCoverage.mode === 'gap_capacity') {
+      lines.push(`\n⚡ GAP-KAPACITET: Ingen segment-match for dette tidspunkt`)
+      lines.push(`FRAMING-TILGANG: Brug formatstyrker (AYCE, beliggenhed, variation, spontan interesse) + brand voice. Undgå at tvinge segment-personas (date night, vennegrupper, familier) ind i indholdet. Fokus på universelle appeals og format-driven værdi.`)
+      if (s.segmentCoverage.gapRationale) {
+        lines.push(`KONTEKST: ${s.segmentCoverage.gapRationale}`)
+      }
+    }
+  }
+  
   if (lines.length === 0) return ''
   return `\nUGEPLANKONTEKST:\n${lines.join('\n')}\n`
 }
@@ -262,6 +295,31 @@ function buildBrandBlock(o: BrandBlockOptions): string {
     b += `\nNår du refererer til lokation: brug PRÆCIST disse termer (ikke generiske alternativer).`
   }
   
+  // FIX 01: FACTUAL CONSTRAINT FOR ATMOSPHERE/AVAILABILITY POSTS (no verified interior description)
+  // When contentType is atmosphere or availability AND no venue identity is available, the model
+  // must be explicitly constrained from inventing interior/window/light details.
+  const isAtmosphereOrAvailability = o.contentType === 'atmosphere' || o.contentType === 'availability'
+  if (isAtmosphereOrAvailability && !o.venueIdentity && !o.venueScene) {
+    const locationVocabForPrompt = o.locationVocabulary.length > 0 
+      ? o.locationVocabulary.join(', ') 
+      : 'ved åen, på Åboulevarden'  // Fallback for Café Faust context
+    
+    const outdoorSeatingNote = o.hasOutdoorSeating === true 
+      ? 'udeservering (verificeret)' 
+      : o.hasOutdoorSeating === false 
+        ? '' 
+        : 'udeservering (kun hvis verificeret)'
+    const factualAnchors = ['åbningstider', outdoorSeatingNote, 'konkrete retter fra menuen']
+      .filter(x => x)
+      .join(', ')
+    b += `\n\n🚫 FAKTUEL BEGRÆNSNING — ATMOSFÆREPOST UDEN VERIFICERET INDRETNINGSBESKRIVELSE:
+- Du har INGEN verificeret beskrivelse af indretningen, vinduerne, lyset eller interiøret.
+- Du MÅ IKKE opfinde sanselige detaljer om interiøret (vinduer, lys, gulv, indretning, stemning inde).
+- Brug KUN verificerede lokationsreferencer: ${locationVocabForPrompt}.
+- Faktuelle ankerpunkter du KAN bruge: ${factualAnchors}.
+${o.hasOutdoorSeating === false ? '- 🚫 NÆVN IKKE udeservering, terrasse eller udendørs spisning — virksomheden har IKKE udendørs pladser.\n' : ''}- Hvis intet konkret at sige: skriv én sætning om location + én om hvad der serveres nu. Stop.`
+  }
+  
   if (o.brandTone)                  b += `\n${o.brandTone}`
 
   if (o.brandWritingRules.length)   b += `\nSkriveregler:\n${o.brandWritingRules.map(r => `- ${r}`).join('\n')}`
@@ -386,14 +444,14 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
 
   // forbiddenOpener — prevents literal echo of the idea title as opening sentence.
   const forbiddenOpenerDA = hook.trim().length > 10
-    ? `- Skriv IKKE dette som åbningssætning ordret: "${hook.slice(0, 80)}" — åbn med et konkret element fra INDHOLD\n`
-    : ''
+    ? `- Skriv IKKE dette som åbningssætning ordret: "${hook.slice(0, 80)}" — åbn med et konkret element fra INDHOLD\n- FORBUDT: Markdown overskrifter (#### eller andre # symboler) — skriv kun almindelig tekst\n`
+    : '- FORBUDT: Markdown overskrifter (#### eller andre # symboler) — skriv kun almindelig tekst\n'
   const forbiddenOpenerSV = hook.trim().length > 10
-    ? `- Skriv INTE detta som öppningsmening ordagrant: "${hook.slice(0, 80)}" — öppna med ett konkret element från INNEHÅLL\n`
-    : ''
+    ? `- Skriv INTE detta som öppningsmening ordagrant: "${hook.slice(0, 80)}" — öppna med ett konkret element från INNEHÅLL\n- FÖRBJUDET: Markdown-rubriker (#### eller andra # symboler) — skriv bara vanlig text\n`
+    : '- FÖRBJUDET: Markdown-rubriker (#### eller andra # symboler) — skriv bara vanlig text\n'
   const forbiddenOpenerDE = hook.trim().length > 10
-    ? `- Schreibe NICHT diesen Satz wörtlich als Eröffnungssatz: "${hook.slice(0, 80)}" — öffne stattdessen mit einem konkreten Element aus dem INHALT\n`
-    : ''
+    ? `- Schreibe NICHT diesen Satz wörtlich als Eröffnungssatz: "${hook.slice(0, 80)}" — öffne stattdessen mit einem konkreten Element aus dem INHALT\n- VERBOTEN: Markdown-Überschriften (#### oder andere # Symbole) — schreibe nur normalen Text\n`
+    : '- VERBOTEN: Markdown-Überschriften (#### oder andere # Symbole) — schreibe nur normalen Text\n'
   const forbiddenOpener: Record<string, string> = { da: forbiddenOpenerDA, sv: forbiddenOpenerSV, de: forbiddenOpenerDE }
 
   // AI Ideas: lighter brand block — same source, trimmed at call site.
@@ -426,6 +484,8 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     isSceneMoodPost,
     voiceRationale,
     venueIdentity,
+    venueScene: opts.venueScene,  // FIX 01: Pass venueScene for atmosphere constraint check
+    contentType,  // FIX 01: Pass contentType for atmosphere/availability constraint check
     businessCharacter,
     identityKeywords,
     formalityLevel: opts.formalityLevel,
@@ -442,6 +502,12 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     sv: ctaStyle === 'strict' ? 'Avsluta alltid med CTA-raden' : 'Avsluta med texten ovan — intentionen och emojis bevaras, lätt omformulering tillåten',
     de: ctaStyle === 'strict' ? 'Beende immer mit der CTA-Zeile' : 'Beende mit dem Text oben — Intention und Emojis bleiben, leichte Umformulierung erlaubt',
   }
+  
+  // Build CTA section (only when selectedCta is not null)
+  const ctaSection = selectedCta
+    ? `${ctaHeader[language] || ctaHeader.da}\n"${selectedCta}"\n`
+    : ''
+  
   // Nu-faktor (KRAV #5): model must anchor the post in a concrete "why now" signal.
   const anledningRule: Record<string, string> = {
     da: '5) Nu-faktor: teksten SKAL give ét konkret signal om HVORFOR dette er relevant NU — brug LEJLIGHED eller KONTEKST fra INDHOLD som vinkel hvis til stede ("perfekt til frokostpausen", "nu er sæsonen for det her"). Ingen tekst uden en grund til at handle i dag.',
@@ -455,9 +521,7 @@ ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${
 INDHOLD (skriv om KUN dette):
 ${contentBlock}
 ${brandBlock}${hoursBlock}${faktaforbud.da}${sceneMoodOpeningHint}${forbiddenOpener.da}${dishProtagonistHint}
-${ctaHeader.da}
-"${selectedCta}"
-KRAV TIL TEKSTEN
+${ctaSection}KRAV TIL TEKSTEN
 1) Længde: 300-450 tegn INKL. emojis og CTA
 ${startRules.da}
 ${sensoryRules.da}
@@ -467,7 +531,7 @@ ${anledningRule.da}
 7) Aldrig " - " eller " – " som bindeled mellem sætningsled ("god mad – hyggelig stemning – book nu").
 8) ${emojiInstruction}
    ☕ MÅ KUN bruges, hvis kaffe, espresso, latte eller cappuccino er eksplicit nævnt som en drik i selve teksten — "Café" i virksomhedsnavnet tæller IKKE.
-9) ${ctaRule8.da}${qualityNote}
+9) ${selectedCta ? ctaRule8.da : 'Ingen CTA påkrævet for dette opslag — lad teksten tale for sig selv'}${qualityNote}
 
 OUTPUT
 Returner KUN dette JSON på én linje (ingen markdown, ingen forklaring):
@@ -479,9 +543,7 @@ ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${
 INNEHÅLL (skriv om BARA detta):
 ${contentBlock}
 ${brandBlock}${hoursBlock}${faktaforbud.sv}${sceneMoodOpeningHint}${forbiddenOpener.sv}${dishProtagonistHint}
-${ctaHeader.sv}
-"${selectedCta}"
-KRAV
+${ctaSection}KRAV
 1) Längd: 300-450 tecken INKL. emojis och CTA
 ${startRules.sv}
 ${sensoryRules.sv}
@@ -491,7 +553,7 @@ ${anledningRule.sv}
 7) Aldrig " - " eller " – " som bindeled mellan meningsled.
 8) ${emojiInstruction}
    ☕ FÅR BARA användas om kaffe, espresso, latte eller cappuccino uttryckligen nämns som en dryck i texten — "Café" i företagsnamnet räknas INTE.
-9) ${ctaRule8.sv}
+9) ${selectedCta ? ctaRule8.sv : 'Ingen CTA krävs för detta inlägg — låt texten tala för sig själv'}
 
 OUTPUT
 Returnera KUN detta JSON på en rad (ingen markdown, ingen förklaring):
@@ -503,9 +565,7 @@ ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${
 INHALT (schreibe NUR über dieses):
 ${contentBlock}
 ${brandBlock}${hoursBlock}${faktaforbud.de}${sceneMoodOpeningHint}${forbiddenOpener.de}${dishProtagonistHint}
-${ctaHeader.de}
-"${selectedCta}"
-ANFORDERUNGEN
+${ctaSection}ANFORDERUNGEN
 1) Länge: 300-450 Zeichen INKL. Emojis und CTA
 ${startRules.de}
 ${sensoryRules.de}
@@ -515,7 +575,7 @@ ${anledningRule.de}
 7) Niemals " - " oder " – " als Bindeglied zwischen Satzteilen.
 8) ${emojiInstruction}
    ☕ DARF NUR genutzt werden, wenn Kaffee, Espresso, Latte oder Cappuccino ausdrücklich als Getränk im Text erwähnt wird — "Café" im Firmennamen zählt NICHT.
-9) ${ctaRule8.de}
+9) ${selectedCta ? ctaRule8.de : 'Keine CTA erforderlich für diesen Beitrag — lass den Text für sich sprechen'}
 
 
 OUTPUT
@@ -648,6 +708,8 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     isSceneMoodPost,
     voiceRationale,
     venueIdentity,
+    venueScene: opts.venueScene,  // FIX 01: Pass venueScene for atmosphere constraint check
+    contentType,  // FIX 01: Pass contentType for atmosphere/availability constraint check
     businessCharacter,
     identityKeywords,
     formalityLevel: opts.formalityLevel,
@@ -670,14 +732,26 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
   }
 
   if (location_natural_vocab && location_natural_vocab.length > 0) {
-    toneDNABlock.push(`FORETRUKKET LOKATIONS-VOKABULAR: ${location_natural_vocab.join(', ')}`)
+    toneDNABlock.push(`FORETRUKKET LOKATIONS-VOKABULAR — ROTER mellem disse (brug ikke samme hver gang):\n${location_natural_vocab.map((v, i) => `  ${i + 1}. "${v}"`).join('\n')}`)
   }
 
   if (location_avoid_vocab && location_avoid_vocab.length > 0) {
     toneDNABlock.push(`UNDGÅ DISSE ORD (clasher med lokation): ${location_avoid_vocab.join(', ')}`)
   }
 
-  if (humor_style && humor_style !== 'none') {
+  // V5.6: Use humor_character if available (richer guidance), otherwise fall back to humor_style
+  const humor_character = (opts as any).humor_character
+  if (humor_character && humor_character.permission_level !== 'none') {
+    const parts = [`Niveau: ${humor_character.permission_level}`]
+    if (humor_character.execution_style) {
+      parts.push(`Stil: ${humor_character.execution_style}`)
+    }
+    if (humor_character.tone_descriptors && humor_character.tone_descriptors.length > 0) {
+      parts.push(`Register: ${humor_character.tone_descriptors.join(', ')}`)
+    }
+    toneDNABlock.push(`HUMOR KARAKTER:\n  ${parts.join('\n  ')}`)
+  } else if (humor_style && humor_style !== 'none') {
+    // Legacy fallback
     const humorMap: Record<string, string> = {
       playful: 'Let og lidt selvironisk — aldrig på bekostning af maden eller stedet',
       dry: 'Tør og afdæmpet — brug sparsomt',
@@ -713,6 +787,11 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     sv: ctaStyle === 'strict' ? 'Avsluta alltid med CTA-raden' : 'Avsluta med texten ovan — intentionen och emojis bevaras, lätt omformulering tillåten',
     de: ctaStyle === 'strict' ? 'Beende immer mit der CTA-Zeile' : 'Beende mit dem Text oben — Intention und Emojis bleiben, leichte Umformulierung erlaubt',
   }
+  
+  // Conditionally include CTA section only when selectedCta is not null (Weekly Plan path)
+  const wpCtaSection = selectedCta
+    ? `${ctaHeader[language] || ctaHeader.da}\n"${selectedCta}"\n`
+    : ''
 
   // WP: same principle-based opening rule as AI Ideas path — mirrors sceneMoodOpeningHint.
   const wpSceneMoodOpeningHintMap: Record<string, string> = {
@@ -734,9 +813,7 @@ ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INDHOLD (skriv om KUN dette):
 ${contentBlock}
 ${brandBlock}${toneDNASection}${geoNarrativeBlock}${forbiddenWordsBlock}${hoursBlock}${faktaforbud.da}${wpSceneMoodOpeningHint}
-${ctaHeader.da}
-"${selectedCta}"
-KRAV TIL TEKSTEN
+${wpCtaSection}KRAV TIL TEKSTEN
 1) Længde: 300-450 tegn INKL. emojis og CTA
 ${startRules.da}
 ${sensoryRules.da}
@@ -750,7 +827,7 @@ ${dishRules.da}
 6) Aldrig " - " eller " – " som bindeled mellem sætningsled ("god mad – hyggelig stemning – book nu").
 7) ${emojiInstruction}
    ☕ MÅ KUN bruges, hvis kaffe, espresso, latte eller cappuccino er eksplicit nævnt som en drik i selve teksten — "Café" i virksomhedsnavnet tæller IKKE.
-8) ${ctaRule8.da}${qualityNote}
+8) ${selectedCta ? ctaRule8.da : 'Ingen CTA påkrævet for dette opslag — lad teksten tale for sig selv'}${qualityNote}
 9) Sætninger med kun subjekt + intransitivt verbum er forbudt overalt — "X venter", "X kalder", "X lokker" er scenefylde.
 
 OUTPUT
@@ -763,9 +840,7 @@ ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INNEHÅLL (skriv om BARA detta):
 ${contentBlock}
 ${brandBlock}${hoursBlock}${faktaforbud.sv}${wpSceneMoodOpeningHint}
-${ctaHeader.sv}
-"${selectedCta}"
-KRAV
+${wpCtaSection}KRAV
 1) Längd: 300-450 tecken INKL. emojis och CTA
 ${startRules.sv}
 ${sensoryRules.sv}
@@ -774,7 +849,7 @@ ${dishRules.sv}
 6) Aldrig " - " eller " – " som bindeled mellan meningsled.
 7) ${emojiInstruction}
    ☕ FÅR BARA användas om kaffe, espresso, latte eller cappuccino uttryckligen nämns som en dryck i texten — "Café" i företagsnamnet räknas INTE.
-8) ${ctaRule8.sv}
+8) ${selectedCta ? ctaRule8.sv : 'Ingen CTA krävs för detta inlägg — låt texten tala för sig själv'}
 9) Meningar med bara subjekt + intransitivt verb är förbjudna genomgående — "X väntar", "X kallar", "X lockar" är scenfyllnad.
 
 OUTPUT
@@ -787,9 +862,7 @@ ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INHALT (schreibe NUR über dieses):
 ${contentBlock}
 ${brandBlock}${hoursBlock}${faktaforbud.de}${wpSceneMoodOpeningHint}
-${ctaHeader.de}
-"${selectedCta}"
-ANFORDERUNGEN
+${wpCtaSection}ANFORDERUNGEN
 1) Länge: 300-450 Zeichen INKL. Emojis und CTA
 ${startRules.de}
 ${sensoryRules.de}
@@ -798,7 +871,7 @@ ${dishRules.de}
 6) Niemals " - " oder " – " als Bindeglied zwischen Satzteilen.
 7) ${emojiInstruction}
    ☕ DARF NUR genutzt werden, wenn Kaffee, Espresso, Latte oder Cappuccino ausdrücklich als Getränk im Text erwähnt wird — "Café" im Firmennamen zählt NICHT.
-8) ${ctaRule8.de}
+8) ${selectedCta ? ctaRule8.de : 'Keine CTA erforderlich für diesen Beitrag — lass den Text für sich sprechen'}
 9) Sätze nur mit Subjekt + intransitivem Verb sind durchgehend verboten — "X wartet", "X ruft", "X lockt" sind Szenenerfüllung.
 
 OUTPUT

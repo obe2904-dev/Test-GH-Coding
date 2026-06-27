@@ -116,51 +116,7 @@ serve(async (req) => {
     console.log(`[${requestId}] Found ${menuResults.length} menu(s)`)
     
     // ========================================================================
-    // STEP 3: Check if we have 2+ menus (requirement for cross-summary)
-    // ========================================================================
-    
-    if (menuResults.length < 2) {
-      console.log(`[${requestId}] ⚠️  Only 1 menu found - cross-summary requires 2+ menus`)
-      
-      // Store the single menu summary as fallback
-      const singleMenuSummary = {
-        cross_menu_summary: menuResults[0].ai_summary || null,
-        total_menus: 1,
-        total_items: menuResults[0].structured_data?.items?.length || 0,
-        overall_avg_price: null,
-        menu_breakdown: [{
-          service_period: menuResults[0].service_period_name || (menuResults[0].service_periods?.[0] || 'general'),
-          item_count: menuResults[0].structured_data?.items?.length || 0,
-          avg_price: null,
-          ai_summary: menuResults[0].ai_summary
-        }],
-        signature_themes: [],
-        generated_at: new Date().toISOString(),
-        is_single_menu: true
-      }
-      
-      await supabase
-        .from('business_brand_profile')
-        .upsert({
-          business_id: businessId,
-          menu_overview_summary: singleMenuSummary,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'business_id'
-        })
-      
-      return new Response(
-        JSON.stringify({ 
-          success: true, 
-          message: 'Single menu - stored individual summary',
-          menu_overview_summary: singleMenuSummary
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-    
-    // ========================================================================
-    // STEP 4: Prepare menu data for cross-summary generation
+    // STEP 3: Prepare menu data for cross-summary generation
     // ========================================================================
     
     console.log(`[${requestId}] Preparing menu data for cross-summary...`)
@@ -200,7 +156,7 @@ serve(async (req) => {
     })
     
     // ========================================================================
-    // STEP 5: Generate cross-menu summary using AI
+    // STEP 4: Generate cross-menu summary using AI
     // ========================================================================
     
     console.log(`[${requestId}] 🤖 Generating cross-menu summary...`)
@@ -231,7 +187,7 @@ serve(async (req) => {
     console.log(`[${requestId}]    • Gastronomic profile: ${crossMenuSummary?.gastronomic_profile ? 'Generated' : 'Not available'}`)
     
     // ========================================================================
-    // STEP 6: Store in business_brand_profile (both JSONB and separate column)
+    // STEP 5: Store in business_brand_profile (both JSONB and separate columns)
     // ========================================================================
     
     console.log(`[${requestId}] 💾 Storing menu overview summary...`)

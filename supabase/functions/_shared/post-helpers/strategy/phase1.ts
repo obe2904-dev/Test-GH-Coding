@@ -241,21 +241,35 @@ export async function generateStrategicBrief(
     'weather', 'economic', 'event', 'seasonal', 'special_day', 'location', 'business',
   ]);
 
-  if (Array.isArray(rawBrief.angles)) {
-    rawBrief.angles = rawBrief.angles.map((a: any) => ({
-      ...a,
-      reasoning: a.reasoning ? cleanTextForConsultantSpeak(a.reasoning) : a.reasoning,
-      content_direction: a.content_direction ? cleanTextForConsultantSpeak(a.content_direction) : a.content_direction,
-      menu_alignment: a.menu_alignment ? cleanTextForConsultantSpeak(a.menu_alignment) : a.menu_alignment,
+  // NEW: Handle strategic_slots format (exact N slots with IDs) or fall back to angles (legacy with weights)
+  const strategicSlots = rawBrief.strategic_slots || rawBrief.angles;
+  
+  if (Array.isArray(strategicSlots)) {
+    // Clean and validate slots
+    const cleaned = strategicSlots.map((slot: any, idx: number) => ({
+      ...slot,
+      // Ensure slot_id is set (either from new format or generate from index)
+      slot_id: slot.slot_id || (idx + 1),
+      // Clean text fields
+      reasoning: slot.reasoning ? cleanTextForConsultantSpeak(slot.reasoning) : slot.reasoning,
+      content_direction: slot.content_direction ? cleanTextForConsultantSpeak(slot.content_direction) : slot.content_direction,
+      menu_alignment: slot.menu_alignment ? cleanTextForConsultantSpeak(slot.menu_alignment) : slot.menu_alignment,
+      // Normalize strategic_intent from new format or focus from old format
+      strategic_intent: slot.strategic_intent || slot.focus || `Slot ${slot.slot_id || idx + 1}`,
       // Strip any fabricated/malformed IDs — keep only 'type:detail' format with known types
-      phase0_factors_used: Array.isArray(a.phase0_factors_used)
-        ? a.phase0_factors_used.filter((id: unknown) => {
+      phase0_factors_used: Array.isArray(slot.phase0_factors_used)
+        ? slot.phase0_factors_used.filter((id: unknown) => {
             if (typeof id !== 'string') return false;
             const colonIdx = id.indexOf(':');
             return colonIdx !== -1 && validPhase0Types.has(id.slice(0, colonIdx));
           })
         : [],
+      // For backward compatibility: maintain weight field if present, otherwise default to equal
+      weight: slot.weight !== undefined ? slot.weight : (1 / strategicSlots.length),
     }));
+    
+    // Store in angles field for downstream compatibility
+    rawBrief.angles = cleaned;
   }
 
   // Validate content_direction quality — must be three-part (a — b — c) with sufficient specificity.
@@ -267,7 +281,7 @@ export async function generateStrategicBrief(
       const hasTiming = /\d{1,2}[:h]\d{0,2}|\bkl\.\s*\d|\bmandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|hverdags|weekend/i.test(cd);
       if (separatorCount < 2 || cd.length < 100 || !hasTiming) {
         console.warn(
-          `[Phase 1] content_direction quality warning on angle "${a.focus}":`,
+          `[Phase 1] content_direction quality warning on slot ${a.slot_id || 'unknown'} "${a.strategic_intent || a.focus}":`,
           { separators: separatorCount, length: cd.length, hasTiming },
           'First 150 chars:', cd.slice(0, 150),
         );
@@ -455,6 +469,18 @@ Ugen er primært regnfuld (${badDays}/${forecasts.length} dage med regn/sne/tåg
 • Alle faktorer og tidsvinduer skal analyseres i lyset af regnvejr, IKKE antage solskin.`;
   })();
 
+  // Outdoor seating constraint — blocks outdoor-related angles when business doesn't have outdoor seating
+  const outdoorSeatingConstraint = (() => {
+    const hasOutdoorSeating = (context.weather as any)?.has_outdoor_seating ?? (context.location as any)?.has_outdoor_seating ?? false;
+    if (hasOutdoorSeating) return ''; // Business has outdoor seating — no constraint needed
+    return `
+⚠️ UDESERVERING (kritisk — gælder for hele analysen):
+Forretningen HAR IKKE udeservering.
+• Nævn ALDRIG udeservering, udendørs servering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter som en faktor eller fordel.
+• Generer INGEN angles eller faktorer der relaterer til udendørs oplevelser.
+• Fokusér udelukkende på indendørs oplevelser, stemning, menu og service.`;
+  })();
+
   return `
 ## STEP 1: CONTEXTUAL ANALYSIS
 
@@ -474,6 +500,7 @@ Opgave: Identificér
 • Faktor-kombinationer (compound opportunities)
 `}
 ${weatherReframingInstruction}
+${outdoorSeatingConstraint}
 ${identityBlock ? `${identityBlock}\n` : ''}
 ## BUSINESS CONTEXT
 
@@ -592,14 +619,26 @@ Regnen skaber indendørs pull: ${locationPhrase} som tørt, varmt fristed med ud
 • Skriv KUN på dansk — ingen engelske labels som "Terrace Pull", "Destination Visit" o.l. i output.
 
 `;
-})()} 
+})()}
+${(() => {
+  // Outdoor seating constraint for Step 2 — blocks outdoor angles when business doesn't have outdoor seating
+  const hasOutdoorSeating = (context.weather as any)?.has_outdoor_seating ?? (context.location as any)?.has_outdoor_seating ?? false;
+  if (hasOutdoorSeating) return ''; // Business has outdoor seating — no constraint needed
+  return `⚠️ UDESERVERING (kritisk — gælder for ALLE angles og al formulering):
+Forretningen HAR IKKE udeservering.
+• Nævn ALDRIG udeservering, udendørs servering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter i week_summary, competitive_advantage eller angles.
+• Generer INGEN angles baseret på udendørs oplevelser — fokusér udelukkende på indendørs oplevelser, stemning, menu og service.
+
+`;
+})()}
 
 ## BOOKING & CTA RULES (afgørende for CTA-valg på footfall-opslag)
 
 ${(() => {
   const ctaRules = (context as any).cta_rules;
   const bm = (context as any).booking_model;
-  const bookingPhrases = (context as any).brand_voice?.booking_cta_phrases || [];
+  const ctaLibrary = (context as any).brand_voice?.cta_library;
+  const ctaPreferences = (context as any).brand_voice?.cta_preferences;
   
   if (!ctaRules && !bm) return '(Ingen booking-data tilgængelig — brug hybrid som default)';
   
@@ -619,9 +658,20 @@ ${(() => {
       lines.push(`    - goal_mode: "drive_footfall"`);
       lines.push(`    - content_category: "booking_nudge"`);
       lines.push(`    - suggested_time: 11:00-13:00 (optimal social reach)`);
-      lines.push(`    - cta_mode: "booking" (brug godkendte booking_cta_phrases)`);
-      if (bookingPhrases.length > 0) {
-        lines.push(`  • Godkendte booking-fraser: ${bookingPhrases.join(', ')}`);
+      lines.push(`    - cta_mode: "booking"`);
+      
+      // Display brand-specific CTAs from V5.6 library
+      if (ctaLibrary?.booking) {
+        const bookingCTAs = [];
+        if (ctaLibrary.booking.soft?.length > 0) bookingCTAs.push(...ctaLibrary.booking.soft);
+        if (ctaLibrary.booking.urgent?.length > 0) bookingCTAs.push(...ctaLibrary.booking.urgent);
+        if (bookingCTAs.length > 0) {
+          lines.push(`  • Brand-specifikke booking CTAs: ${bookingCTAs.slice(0, 5).join(', ')}`);
+        }
+      }
+      
+      if (ctaPreferences?.avoid_phrases?.length > 0) {
+        lines.push(`  • UNDGÅ: ${ctaPreferences.avoid_phrases.join(', ')}`);
       }
       lines.push('');
     }
@@ -819,6 +869,12 @@ ${(() => {
   }
   return '';
 })()}
+${(() => {
+  // Outdoor seating constraint — blocks outdoor angles when business doesn't have outdoor seating
+  const hasOutdoorSeating = (context.weather as any)?.has_outdoor_seating ?? (context.location as any)?.has_outdoor_seating ?? false;
+  if (hasOutdoorSeating) return ''; // Business has outdoor seating — no constraint needed
+  return `⚠️ UDESERVERING: Forretningen HAR IKKE udeservering. Nævn ALDRIG udeservering, udendørs servering, terrasse, gårdhave eller udendørs faciliteter i week_summary, competitive_advantage eller angles. Fokusér kun på indendørs oplevelser.`;
+})()}
 
 ⚠️ VARIATION — Dynamisér feeden, undgå et repetitivt broadcast:
 ${(() => {
@@ -844,88 +900,127 @@ Givet contextual_analysis viste "4-day window":
   
   "competitive_advantage": "Netop denne uge er fordelen, at caféen dækker kontinuerlig service fra morgen til nat — Kr. Himmelfartsdag aktiverer primært frokost-segmentet torsdag, men klemmedag-mønsteret rykker også aftenbesøg ind i samme vindue. Placeringen ved åen giver ekstra pull fredag ved 16°C.",
   
-  "angles": [
+  "strategic_slots": [
     {
-      "focus": "Planlagt frokostbesøg torsdag-fredag (helligdag + klemmedag)",
-      "weight": 0.35,
+      "slot_id": 1,
+      "strategic_intent": "Drive planned lunch visits for Thursday-Friday (holiday + bridge day)",
       "goal_mode": "drive_footfall",
       "cta_mode": "booking",
-      "content_type": "menu_item",
+      "content_focus": "menu_item",
       "content_category": "product_menu",
-      "timing_window": "Wed-Thu 10:00",
-      "promoted_moment": "frokost torsdag-fredag",
+      "target_service_period": "lunch",
+      "target_days": ["Thursday", "Friday"],
       "reasoning": "Kr. Himmelfartsdag torsdag (butikker lukket, familier søger restaurantbesøg) + mange tager fredag fri = 2-dages frokost-surge. Caféens frokostmenu og åbningstider dækker præcis dette vindue. Uge-relevans: Ikke standard hverdagsfrokost — dette er planlagte helligdags-/klemmedags-besøg.",
       "menu_alignment": "Frokostretter",
       "content_direction": "product_menu fordi surge-vindue kræver konkret ret + booking-CTA — vis dampende varm hovedret med synlige ingredienser — trigger booking-intention onsdag-torsdag formiddag",
-      "suggested_content_category": "product_menu",
       "phase0_factors_used": ["special_day:Kr. Himmelfartsdag"]
     },
     {
-      "focus": "Aftenbesøg torsdag-fredag (fejringsmode + bridge day leisure)",
-      "weight": 0.35,
+      "slot_id": 2,
+      "strategic_intent": "Drive evening visits for Thursday-Friday (celebration mode + bridge day leisure)",
       "goal_mode": "drive_footfall",
       "cta_mode": "booking",
-      "content_type": "menu_item",
-      "content_category": "product_menu",
-      "timing_window": "Thu-Fri 14:00",
-      "promoted_moment": "aftenservering torsdag-fredag",
+      "content_focus": "atmosphere",
+      "content_category": "craving_visual",
+      "target_service_period": "dinner",
+      "target_days": ["Thursday", "Friday"],
       "reasoning": "Torsdag aften aktiveret af 'ingen arbejde fredag'-mønster + fredag aften aktiveret af forlænget weekend-stemning. Caféens cocktail-menu giver evening appeal. Uge-relevans: 4-dages vindue starter torsdag.",
       "menu_alignment": "Cocktails og drinksmenu",
       "content_direction": "craving_visual fordi aften-stemning > specifik ret — vis cocktails i aftenbelysning, fokus på glassene — trigger spontant besøg torsdag-fredag 17-21",
-      "suggested_content_category": "craving_visual",
       "phase0_factors_used": ["special_day:Kr. Himmelfartsdag"]
     }
   ]
 }
-↑ Bemærk: BEGGE lunch+evening dækket (dual opportunity).
+↑ Bemærk: BEGGE lunch+evening dækket (dual opportunity). Eksempel viser 2 slots for illustration.
 
-⚠️ Eksempel viser 2 angles. Du leverer ${targetPostCount} angles.
+⚠️ Eksempel viser 2 slots. Du leverer præcis ${targetPostCount} slots.
 
-## OUTPUT - ${targetPostCount} ANGLES
+## OUTPUT - PRÆCIS ${targetPostCount} STRATEGISKE SLOTS
 
-**VIGTIG DAG-FORDELING for ${targetPostCount} opslag:**
-Fordel opslag jævnt henover ugen — IKKE alle i slutningen:
-- drive_footfall (slot A): timing_window = "Thu-Fri" (beslutningsvindue for weekendbesøg)
-- drive_footfall (slot B): timing_window = "Tue-Wed" (midtuge-boost)
-- build_brand: timing_window = "Mon-Tue" (ugeopener — byg kendskab tidligt på ugen)
-- retain_loyalty: timing_window = "Wed-Thu" (midtuge — nær stamgæster inden weekend)
+**KRITISK: Du skal lave PRÆCIS ${targetPostCount} slots — hvert slot bliver til ét opslag.**
 
-Mål: mindst ét opslag mandag-onsdag, mindst ét torsdag-søndag.
+Hver slot beskriver HVAD og HVORFOR — ikke HVORNÅR (timing bestemmes senere).
+
+**Slot-nummerering:**
+- Slot 1, 2, 3, 4, ... (unikt ID for hver slot — bruges til præcis tracking)
+
+**Fordeling af goal_mode baseret på ugens kontekst:**
+- drive_footfall: Booking/footfall posts (weekend dinner, events, peak days)
+- build_brand: Atmosfære, beliggenhed, brand-fortælling  
+- retain_loyalty: Stamgæster, midtuge-boost, community
+
+**Target service periods (giver hint til timing-systemet):**
+- "dinner": Aftenservering (booking-fokus)
+- "lunch": Frokost (walk-in eller advance)
+- "brunch": Brunch/morgenmad
+- "bar": Cocktails/drinks
+
+**Target days (range, ikke specifik dato):**
+- ["Friday", "Saturday"]: Weekend dinner booking posts
+- ["Thursday", "Friday"]: Pre-weekend momentum
+- ["Monday", "Tuesday"]: Early week brand posts
+- ["any"]: Flexible timing
 
 SVAR KUN MED JSON:
 
 {
   "week_summary": "[3-4 sætninger baseret på din contextual_analysis]",
   "competitive_advantage": "[Start med 'Netop denne uge er fordelen, at...']",
-  "angles": [
+  "strategic_slots": [
     {
-      "focus": "[dagsdel/adfærd + mekanisme]",
-      "weight": 0.4,
+      "slot_id": 1,
+      "strategic_intent": "Drive weekend dinner bookings for Friday/Saturday",
       "goal_mode": "drive_footfall",
-      "cta_mode": "walk_in",
-      "content_type": "menu_item",
+      "cta_mode": "booking",
+      "content_focus": "menu_item",
       "content_category": "product_menu",
-      "timing_window": "Thu-Fri 14:00",
-      "promoted_moment": "frokost torsdag-fredag",
-      "reasoning": "[2-4 sætninger: adfærd + virksomhedsfit + uge-relevans]",
+      "target_service_period": "dinner",
+      "target_days": ["Friday", "Saturday"],
+      "reasoning": "[2-3 sætninger: adfærd + virksomhedsfit + uge-relevans]",
       "menu_alignment": "[relevante menu-kategorier]",
-      "content_direction": "[format fordi argument — vis konkret scene — trigger gæste-handling]",
-      "suggested_content_category": "product_menu",
+      "content_direction": "[format + scene + trigger]",
       "phase0_factors_used": []
     },
     {
-      "focus": "[brand-fortælling + identitet]",
-      "weight": 0.25,
+      "slot_id": 2,
+      "strategic_intent": "Weekend walk-in footfall for lunch",
+      "goal_mode": "drive_footfall",
+      "cta_mode": "walk_in",
+      "content_focus": "atmosphere",
+      "content_category": "craving_visual",
+      "target_service_period": "lunch",
+      "target_days": ["Saturday", "Sunday"],
+      "reasoning": "[2-3 sætninger]",
+      "menu_alignment": "",
+      "content_direction": "[scene beskrivelse]",
+      "phase0_factors_used": []
+    },
+    {
+      "slot_id": 3,
+      "strategic_intent": "Brand atmosphere and location advantage",
       "goal_mode": "build_brand",
       "cta_mode": "walk_in",
-      "content_type": "atmosphere",
+      "content_focus": "atmosphere",
       "content_category": "craving_visual",
-      "timing_window": "Mon-Tue 09:00",
-      "promoted_moment": "mandag morgen",
-      "reasoning": "[2-4 sætninger: brand-angle + uge-relevans]",
+      "target_service_period": "any",
+      "target_days": ["Monday", "Tuesday"],
+      "reasoning": "[2-3 sætninger]",
       "menu_alignment": "",
-      "content_direction": "[atmosfære/oplevelse — vis sted/stemning — byg kendskab]",
-      "suggested_content_category": "craving_visual",
+      "content_direction": "[atmosfære beskrivelse]",
+      "phase0_factors_used": []
+    },
+    {
+      "slot_id": 4,
+      "strategic_intent": "Mid-week retention post for regulars",
+      "goal_mode": "retain_loyalty",
+      "cta_mode": "engagement",
+      "content_focus": "behind_scenes",
+      "content_category": "behind_scenes",
+      "target_service_period": "any",
+      "target_days": ["Wednesday", "Thursday"],
+      "reasoning": "[2-3 sætninger]",
+      "menu_alignment": "",
+      "content_direction": "[team/kitchen scene]",
       "phase0_factors_used": []
     }
   ]

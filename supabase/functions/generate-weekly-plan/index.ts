@@ -17,8 +17,9 @@ const corsHeaders = {
 function buildOpeningHours(openingHoursRaw: any[] | null): Record<string, any> {
   const result: Record<string, any> = {}
   if (!openingHoursRaw) return result
+  // All rows represent open days (closed days have no row in database)
   for (const day of openingHoursRaw) {
-    if (!day.closed && day.open_time && day.close_time) {
+    if (day.open_time && day.close_time) {
       result[day.weekday] = {
         open: day.open_time.slice(0, 5), // "HH:MM:SS" → "HH:MM"
         close: day.close_time.slice(0, 5),
@@ -352,13 +353,13 @@ serve(async (req) => {
         tone_model: bv.tone_model ?? null,
         tone_of_voice: bv.tone_of_voice ?? null,
         brand_essence: bv.brand_essence ?? '',
-        brand_essence_elaboration: bv.brand_essence_elaboration ?? null,
-        // NEW (June 12, 2026): Use flattened business_identity_persona, fallback to nested
-        business_character: (snap as any).business_identity_persona || snap.business_character || null,
+        // V5.6 (June 23, 2026): Keep business_character SHORT (business type reasoning)
+        business_character: snap.business_character || null,
+        // V5.6 (June 23, 2026): Separate field for strategic guidance (marketing brief or persona)
+        marketing_guidance: (snap as any).marketing_manager_brief || (snap as any).business_identity_persona || null,
         booking_link: snap.booking_link ?? null,
         content_strategy: bv.content_strategy ?? null,
         never_say: bv.never_say ?? [],
-        typical_openings: bv.typical_openings ?? [],
         audience_segments: bv.audience_segments ?? null,
         // CRITICAL: Forbidden phrases enforcement (customer-facing posts)
         forbidden_phrases: guardrails.forbidden_phrases ?? [],
@@ -493,7 +494,7 @@ serve(async (req) => {
         { data: _openingHoursRaw },
         { data: _recentPlansRaw },
       ] = await Promise.all([
-        supabaseClient.from('business_brand_profile').select('*, voice_guardrails, business_identity_persona').eq('business_id', business.id).single(),
+        supabaseClient.from('business_brand_profile').select('*, voice_guardrails, business_identity_persona, marketing_manager_brief').eq('business_id', business.id).single(),
         supabaseClient.from('business_profile').select('*').eq('business_id', business.id).single(),
         supabaseClient.from('business_location_intelligence').select('*').eq('business_id', business.id).single(),
         supabaseClient.from('menu_items_normalized').select('item_name, item_description, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', business.id).eq('menu_language', countryToLanguageCode(business.country)),
@@ -515,6 +516,18 @@ serve(async (req) => {
       );
       console.log(`[generate-weekly-plan] Language filter (no-snap path): allowed=${allowedLangsNoSnap.join(',')}, local_ids=${localMenuResultIdsNoSnap.size}/${(_menuItemsRaw ?? []).length}`);
       brandProfile = _brandProfile
+      
+      // V5.6 (June 23, 2026): Add marketing_guidance field separate from business_character
+      // business_character = SHORT business type reasoning (~20-70 chars)
+      // marketing_guidance = LONG strategic brief (marketing_manager_brief or business_identity_persona)
+      if (brandProfile) {
+        brandProfile.marketing_guidance = 
+          brandProfile.marketing_manager_brief || 
+          brandProfile.business_identity_persona || 
+          null
+        // Keep business_character short - don't overwrite with long guidance
+      }
+      
       businessProfile = _businessProfile
       locationIntel = _locationIntel
       // Filter menu_items_normalized to local-language menus only

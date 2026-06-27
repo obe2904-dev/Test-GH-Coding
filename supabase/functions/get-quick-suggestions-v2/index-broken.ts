@@ -338,7 +338,7 @@ serve(async (req) => {
         .single(),
       
       // Recent posts (actually published)
-      supabase.from('published_posts')
+      supabase.from('posts')
         .select('menu_item_name, posted_at')
         .eq('business_id', businessId)
         .not('menu_item_name', 'is', null)
@@ -382,7 +382,7 @@ serve(async (req) => {
     }
     
     // Build recency map: dish name → days since last use
-    // "Use" = posted (published_posts) OR suggested (daily_suggestions)
+    // "Use" = posted (posts) OR suggested (daily_suggestions)
     const recencyMap = new Map<string, number>()
     
     for (const post of recentPostsRaw) {

@@ -8,6 +8,7 @@ export interface PlatformHashtagContext {
   text?: string | null
   detectedDishName?: string | null
   detectedDishDescription?: string | null
+  locationVocabulary?: string[] | null  // FIX 03-B: Location-specific hashtag vocabulary
 }
 
 export interface PlatformHashtagSets {
@@ -26,15 +27,15 @@ type HashtagLayerName =
   | 'campaign'
   | 'community'
 
-const PLATFORM_LIMITS: Record<'facebook' | 'instagram', number> = {
-  facebook: 3,
-  instagram: 5,
+// FIX 03-B: Updated platform limits to support ranges (FB: 0-2, IG: 3-5)
+const PLATFORM_LIMITS: Record<'facebook' | 'instagram', { min: number; max: number }> = {
+  facebook: { min: 0, max: 2 },
+  instagram: { min: 3, max: 5 },
 }
 
 function toPascalTag(input: string): string {
   const cleaned = input
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .normalize('NFC')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
 
@@ -89,19 +90,25 @@ function inferLifestyleTag(context: PlatformHashtagContext, categoryTag: string)
     .join(' ')
     .toLowerCase()
 
-  // Content-driven lifestyle tags - only return if actually present in the post content
-  if (/(brunch|morgenmad)/.test(text)) return 'BrunchTime'
-  if (/(coffee|cafe|café|espresso|latte)/.test(text)) return 'CoffeeLovers'
-  if (/(cocktail|drinks?|vin|øl|beer|bar)/.test(text)) return 'DrinkLovers'
-  if (/(lunch|frokost)/.test(text)) return 'LunchBreak'
-  if (/(dinner|aftensmad|aften)/.test(text)) return 'DateNight'
-  if (/(cozy|hygg|warm|varm|indendørs|inside)/.test(text)) return 'CozyCafe'
+  // Coffee: only if the post itself is about coffee
+  if (/(coffee|cafe|café|espresso|latte|cappuccino|cortado|filterkaffe|kaffebar)/.test(text)) return 'CoffeeLovers'
   
-  // Generic food/dining lifestyle tags as fallback when content mentions food
-  if (/(food|mad|dish|ret|menu|meal|måltid)/.test(text)) return 'FoodLovers'
+  // Brunch: only if post mentions it
+  if (/(brunch|morgenmad)/.test(text)) return 'BrunchTime'
+  
+  // Drinks: only if post mentions it
+  if (/(cocktail|drinks?|vin|øl|beer|bar)/.test(text)) return 'DrinkLovers'
+  
+  // Meal occasions: only if post mentions them
+  if (/(lunch|frokost)/.test(text)) return 'LunchBreak'
+  if (/(dinner|aftensmad)/.test(text) && /(date|par|romantisk)/.test(text)) return 'DateNight'
+  if (/(cozy|hygg|warm|varm|indendørs|inside)/.test(text)) return 'CozyCafe'
 
-  // No lifestyle tag if content doesn't match any pattern
-  // This prevents venue-type bleeding (e.g., cafe → CoffeeLovers for non-coffee posts)
+  // Food in general — only if food words appear in the post
+  if (/(food|mad|dish|ret|menu|meal|måltid|smag|serverer)/.test(text)) return 'FoodLovers'
+
+  // IMPORTANT: no venue-category fallback here.
+  // A café posting about a concert or an event should NOT get #CoffeeLovers.
   return ''
 }
 
@@ -153,8 +160,23 @@ function inferCommunityTag(context: PlatformHashtagContext): string {
 function buildLayers(context: PlatformHashtagContext): Record<HashtagLayerName, string[]> {
   const cityTag = context.city ? toPascalTag(context.city) : ''
   const categoryTag = inferVenueCategory(context)
-  const localPrimary = context.city ? compactTag(context.city, categoryTag) : ''
-  const localSecondary = cityTag && cityTag !== localPrimary ? cityTag : ''
+  
+  // FIX 03-B: Use location vocabulary if available, otherwise fall back to city+category
+  const locationVocabTags = context.locationVocabulary
+    ? context.locationVocabulary
+        .slice(0, 3)  // Max 3 location-specific tags
+        .map(vocab => toPascalTag(vocab))
+        .filter(Boolean)
+    : [];
+  
+  const localPrimary = locationVocabTags.length > 0 
+    ? locationVocabTags[0]
+    : (context.city ? compactTag(context.city, categoryTag) : '')
+  const localSecondary = locationVocabTags.length > 1
+    ? locationVocabTags[1]
+    : (cityTag && cityTag !== localPrimary ? cityTag : '')
+  const localTertiary = locationVocabTags.length > 2 ? locationVocabTags[2] : ''
+  
   const productTag = inferProductTag(context)
   const lifestyleTag = inferLifestyleTag(context, categoryTag)
   const brandTag = context.businessName ? toPascalTag(context.businessName) : ''
@@ -164,7 +186,7 @@ function buildLayers(context: PlatformHashtagContext): Record<HashtagLayerName, 
   const communityTag = inferCommunityTag(context)
 
   return {
-    local: [localPrimary, localSecondary].filter(Boolean),
+    local: [localPrimary, localSecondary, localTertiary].filter(Boolean),
     product: [productTag].filter(Boolean),
     category: [categoryTag].filter(Boolean),
     lifestyle: [lifestyleTag].filter(Boolean),
@@ -180,36 +202,37 @@ function selectForPlatform(
   layers: Record<HashtagLayerName, string[]>,
   platform: 'facebook' | 'instagram'
 ): string[] {
-  const order: HashtagLayerName[] = [
-    'local',
-    'product',
-    'category',
-    'lifestyle',
-    'brand',
-    'occasion',
-    'dietary',
-    'campaign',
-    'community',
-  ]
+  const limits = PLATFORM_LIMITS[platform]
 
-  const pool: string[] = []
-  for (const layer of order) {
-    for (const tag of layers[layer]) {
-      pushUnique(pool, tag)
+  if (platform === 'facebook') {
+    // Facebook: prioritise local + the most specific content signal
+    // Order: local primary → product (dish/keyword) → occasion → lifestyle → category
+    const fbOrder: HashtagLayerName[] = ['local', 'product', 'occasion', 'lifestyle', 'category']
+    const pool: string[] = []
+    for (const layer of fbOrder) {
+      for (const tag of layers[layer]) pushUnique(pool, tag)
+      if (pool.length >= limits.max) break
     }
+    return pool.slice(0, limits.max)
   }
 
-  return pool.slice(0, PLATFORM_LIMITS[platform])
+  // Instagram: full pool in standard order
+  const order: HashtagLayerName[] = [
+    'local', 'product', 'category', 'lifestyle',
+    'brand', 'occasion', 'dietary', 'campaign', 'community',
+  ]
+  const pool: string[] = []
+  for (const layer of order) {
+    for (const tag of layers[layer]) pushUnique(pool, tag)
+  }
+  return pool.slice(0, limits.max)
 }
 
 export function buildPlatformHashtagSets(context: PlatformHashtagContext): PlatformHashtagSets {
   const layers = buildLayers(context)
-  const cityTag = context.city ? toPascalTag(context.city) : ''
-  const localPrimary = layers.local[0] || ''
-  const localSecondary = cityTag && cityTag !== localPrimary ? cityTag : ''
 
-  const facebook = selectForPlatform(layers, 'facebook', localSecondary)
-  const instagram = selectForPlatform(layers, 'instagram', localSecondary)
+  const facebook = selectForPlatform(layers, 'facebook')
+  const instagram = selectForPlatform(layers, 'instagram')
 
   return { facebook, instagram }
 }

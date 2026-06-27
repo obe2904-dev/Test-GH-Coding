@@ -300,6 +300,18 @@ function MenuPage() {
       const { data: { session } } = await supabase.auth.getSession()
       const authToken = session?.access_token
 
+      // Normalize URL - add https:// if missing
+      let normalizedUrl = websiteUrl.trim()
+      if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+        normalizedUrl = `https://${normalizedUrl}`
+      }
+
+      console.log('🔍 Attempting to analyze website:', {
+        originalUrl: websiteUrl,
+        normalizedUrl,
+        businessId
+      })
+
       const endpoint = import.meta.env.VITE_SUPABASE_FUNCTION_ANALYZE_WEBSITE as string
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -308,13 +320,24 @@ function MenuPage() {
           'Authorization': `Bearer ${authToken}`
         },
         body: JSON.stringify({
-          url: websiteUrl,
+          url: normalizedUrl,
           businessId
         })
       })
 
       if (!response.ok) {
-        throw new Error(t('menu.error.analyzeFailed'))
+        // Try to get the actual error message from the response
+        let errorMessage = t('menu.error.analyzeFailed')
+        try {
+          const errorData = await response.json()
+          if (errorData.error) {
+            errorMessage = errorData.error
+            console.error('🔴 Edge function error:', errorData.error)
+          }
+        } catch (e) {
+          console.error('🔴 Could not parse error response')
+        }
+        throw new Error(errorMessage)
       }
 
       const result = await response.json()
@@ -800,16 +823,18 @@ function MenuPage() {
     if (!confirm(t('menu.delete.confirm'))) return
 
     try {
+      // NOTE: is_active field not yet added to menu_items_normalized schema
       // Soft-delete normalized menu items (set is_active = false)
       // This preserves menu data for historical analysis and potential recovery
-      const { error: normalizedError } = await supabase
-        .from('menu_items_normalized')
-        .update({ is_active: false })
-        .eq('menu_url', sourceUrl)
-      
-      if (normalizedError) {
-        console.error('Error soft-deleting normalized items:', normalizedError)
-      }
+      // TODO: Uncomment when is_active column is added to database
+      // const { error: normalizedError } = await supabase
+      //   .from('menu_items_normalized')
+      //   .update({ is_active: false })
+      //   .eq('menu_url', sourceUrl)
+      // 
+      // if (normalizedError) {
+      //   console.error('Error soft-deleting normalized items:', normalizedError)
+      // }
       
       // Hard-delete extraction results (metadata no longer needed)
       await supabase

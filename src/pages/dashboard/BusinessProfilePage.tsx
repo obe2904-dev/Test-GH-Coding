@@ -99,7 +99,7 @@ function BusinessProfilePage() {
   const [isGeneratingCharacter, setIsGeneratingCharacter] = useState(false)
 
   // Opening hours state
-  type DaySchedule = { open: string; close: string }
+  type DaySchedule = { open: string; close: string; isOpen: boolean }
   type ManualWindow = { open: string; close: string }
   type ManualDaySchedule = {
     extraWindows: ManualWindow[]
@@ -121,13 +121,13 @@ function BusinessProfilePage() {
   }
 
   const createEmptySchedule = (): WeekSchedule => ({
-    man: { open: '', close: '' },
-    tir: { open: '', close: '' },
-    ons: { open: '', close: '' },
-    tor: { open: '', close: '' },
-    fre: { open: '', close: '' },
-    lør: { open: '', close: '' },
-    søn: { open: '', close: '' }
+    man: { open: '', close: '', isOpen: true },
+    tir: { open: '', close: '', isOpen: true },
+    ons: { open: '', close: '', isOpen: true },
+    tor: { open: '', close: '', isOpen: true },
+    fre: { open: '', close: '', isOpen: true },
+    lør: { open: '', close: '', isOpen: true },
+    søn: { open: '', close: '', isOpen: false }
   })
 
   const createEmptyManualDay = (): ManualDaySchedule => ({
@@ -417,9 +417,11 @@ function BusinessProfilePage() {
           hoursData.forEach((dayData: any) => {
             const dayKey = dayMap[dayData.weekday]
             if (dayKey) {
+              const hasHours = !!dayData.open_time && !!dayData.close_time
               schedule[dayKey] = {
                 open: dayData.open_time?.substring(0, 5) || '',
-                close: dayData.close_time?.substring(0, 5) || ''
+                close: dayData.close_time?.substring(0, 5) || '',
+                isOpen: hasHours
               }
             }
           })
@@ -444,9 +446,9 @@ function BusinessProfilePage() {
         }
 
         const sector: BusinessSector | null = 
-          (businessData as any).vertical && 
-          ['hospitality', 'beauty', 'wellness', 'retail'].includes((businessData as any).vertical)
-            ? (businessData as any).vertical as BusinessSector
+          (businessData as any).business_type_hybrid?.primary && 
+          ['hospitality', 'beauty', 'wellness', 'retail'].includes((businessData as any).business_type_hybrid.primary)
+            ? (businessData as any).business_type_hybrid.primary as BusinessSector
             : null
 
         // Load key_offerings
@@ -458,7 +460,7 @@ function BusinessProfilePage() {
           websiteUrl: (businessData as any).website_url ?? (websiteAnalysisData as any)?.source_url ?? '',
           businessName: (businessData as any).name ?? '',
           businessSector: sector,
-          businessCategory: (businessData as any).vertical ?? '',
+          businessCategory: (businessData as any).business_type_hybrid?.primary ?? '',
           aboutText: (profileData as any)?.user_about_text ?? (profileData as any)?.long_description ?? '',
           phone: (locationData as any)?.phone ?? '',
           email: (locationData as any)?.email ?? '',
@@ -606,50 +608,71 @@ function BusinessProfilePage() {
 
       // Opening hours
       if (analysis.openingHours && Object.keys(analysis.openingHours).length > 0) {
-        const hasExistingHours = Object.values(openingHours).some(h => h.open || h.close)
-        if (!hasExistingHours) {
-          const convertedSchedule: WeekSchedule = {
-            man: { 
-              open: analysis.openingHours.monday?.open || '', 
-              close: analysis.openingHours.monday?.close || '' 
-            },
-            tir: { 
-              open: analysis.openingHours.tuesday?.open || '', 
-              close: analysis.openingHours.tuesday?.close || '' 
-            },
-            ons: { 
-              open: analysis.openingHours.wednesday?.open || '', 
-              close: analysis.openingHours.wednesday?.close || '' 
-            },
-            tor: { 
-              open: analysis.openingHours.thursday?.open || '', 
-              close: analysis.openingHours.thursday?.close || '' 
-            },
-            fre: { 
-              open: analysis.openingHours.friday?.open || '', 
-              close: analysis.openingHours.friday?.close || '' 
-            },
-            lør: { 
-              open: analysis.openingHours.saturday?.open || '', 
-              close: analysis.openingHours.saturday?.close || '' 
-            },
-            søn: { 
-              open: analysis.openingHours.sunday?.open || '', 
-              close: analysis.openingHours.sunday?.close || '' 
-            }
+        const convertedSchedule: WeekSchedule = {
+          man: { 
+            open: analysis.openingHours.monday?.open || '', 
+            close: analysis.openingHours.monday?.close || '',
+            isOpen: !!(analysis.openingHours.monday?.open && analysis.openingHours.monday?.close)
+          },
+          tir: { 
+            open: analysis.openingHours.tuesday?.open || '', 
+            close: analysis.openingHours.tuesday?.close || '',
+            isOpen: !!(analysis.openingHours.tuesday?.open && analysis.openingHours.tuesday?.close)
+          },
+          ons: { 
+            open: analysis.openingHours.wednesday?.open || '', 
+            close: analysis.openingHours.wednesday?.close || '',
+            isOpen: !!(analysis.openingHours.wednesday?.open && analysis.openingHours.wednesday?.close)
+          },
+          tor: { 
+            open: analysis.openingHours.thursday?.open || '', 
+            close: analysis.openingHours.thursday?.close || '',
+            isOpen: !!(analysis.openingHours.thursday?.open && analysis.openingHours.thursday?.close)
+          },
+          fre: { 
+            open: analysis.openingHours.friday?.open || '', 
+            close: analysis.openingHours.friday?.close || '',
+            isOpen: !!(analysis.openingHours.friday?.open && analysis.openingHours.friday?.close)
+          },
+          lør: { 
+            open: analysis.openingHours.saturday?.open || '', 
+            close: analysis.openingHours.saturday?.close || '',
+            isOpen: !!(analysis.openingHours.saturday?.open && analysis.openingHours.saturday?.close)
+          },
+          søn: { 
+            open: analysis.openingHours.sunday?.open || '', 
+            close: analysis.openingHours.sunday?.close || '',
+            isOpen: !!(analysis.openingHours.sunday?.open && analysis.openingHours.sunday?.close)
           }
+        }
+        
+        // Check if extracted hours are different from existing hours
+        const isDifferent = Object.keys(convertedSchedule).some((day) => {
+          const newHours = convertedSchedule[day as keyof WeekSchedule]
+          const existingHours = openingHours[day as keyof WeekSchedule]
+          return newHours.open !== existingHours.open || 
+                 newHours.close !== existingHours.close || 
+                 newHours.isOpen !== existingHours.isOpen
+        })
+        
+        if (isDifferent) {
           setOpeningHours(convertedSchedule)
           fieldsUpdated++
-          console.log('✅ Opening hours extracted and populated:', convertedSchedule)
+          console.log('✅ Opening hours extracted and updated (different from existing):', convertedSchedule)
         } else {
-          console.log('ℹ️ Skipping opening hours - user already has hours filled in')
+          console.log('ℹ️ Skipping opening hours - extracted hours are identical to existing hours')
         }
       }
 
-      if ((analysis as any).kitchenCloseTime && !kitchenCloseTime.trim()) {
-        setKitchenCloseTime((analysis as any).kitchenCloseTime)
-        fieldsUpdated++
-        console.log('✅ Kitchen close time extracted and populated:', (analysis as any).kitchenCloseTime)
+      if ((analysis as any).kitchenCloseTime) {
+        const extractedKitchenTime = (analysis as any).kitchenCloseTime
+        if (extractedKitchenTime !== kitchenCloseTime) {
+          setKitchenCloseTime(extractedKitchenTime)
+          fieldsUpdated++
+          console.log('✅ Kitchen close time extracted and updated:', extractedKitchenTime)
+        } else {
+          console.log('ℹ️ Skipping kitchen close time - extracted time is identical to existing')
+        }
       }
 
       // Service model detection - save to business_operations
@@ -906,7 +929,7 @@ function BusinessProfilePage() {
             .insert({
               owner_id: user.id,
               name: businessName,
-              vertical: businessCategory || businessSector || 'other',
+              business_type_hybrid: (businessCategory || businessSector) ? { primary: businessCategory || businessSector || '', secondary: [], hybridLabel: businessCategory || businessSector || '' } : null,
               subscription_tier: currentTier
             })
             .select()
@@ -928,11 +951,10 @@ function BusinessProfilePage() {
         local_location_reference: localLocationReference.trim() || null
       }
       
-      // Map businessCategory to vertical column
-      if (businessCategory) {
-        updateData.vertical = businessCategory
-      } else if (businessSector) {
-        updateData.vertical = businessSector
+      // Map businessCategory/businessSector to business_type_hybrid
+      if (businessCategory || businessSector) {
+        const typeValue = businessCategory || businessSector || ''
+        updateData.business_type_hybrid = { primary: typeValue, secondary: [], hybridLabel: typeValue }
       }
 
       console.log('💾 Saving business data:', updateData)
@@ -1086,7 +1108,7 @@ function BusinessProfilePage() {
       }
 
       const hoursToInsert = Object.entries(openingHours)
-        .filter(([_, hours]) => hours.open && hours.close)
+        .filter(([_, hours]) => hours.isOpen && hours.open && hours.close)
         .map(([dayKey, hours]) => ({
           business_id: effectiveBusinessId,
           weekday: dayMap[dayKey as DayKey],
@@ -1591,11 +1613,26 @@ function BusinessProfilePage() {
                   return (
                     <div key={day} className="space-y-2 rounded-md border border-[#E7E2DA] bg-[#FCFBF8] p-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-8 text-xs text-text-secondary shrink-0">{dayNames[day]}</div>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={openingHours[day].isOpen}
+                            onChange={(e) => {
+                              setOpeningHours(prev => ({
+                                ...prev,
+                                [day]: { ...prev[day], isOpen: e.target.checked }
+                              }))
+                              markUnsaved()
+                            }}
+                            className="rounded"
+                          />
+                          <div className="w-8 text-xs text-text-secondary shrink-0">{dayNames[day]}</div>
+                        </label>
                         <div className="flex gap-1 items-center">
                           <QuarterHourTimePicker
                             value={openingHours[day].open}
                             className="w-32"
+                            disabled={!openingHours[day].isOpen}
                             onChange={(value) => {
                               setOpeningHours(prev => ({
                                 ...prev,
@@ -1608,6 +1645,7 @@ function BusinessProfilePage() {
                           <QuarterHourTimePicker
                             value={openingHours[day].close}
                             className="w-32"
+                            disabled={!openingHours[day].isOpen}
                             onChange={(value) => {
                               setOpeningHours(prev => ({
                                 ...prev,

@@ -270,8 +270,11 @@ export async function generateNarrative(
   // These fields are in WeekContext but not part of brand_voice. Without them,
   // Phase 2c defaults to weather-led framing and misses the day-to-evening arc.
   const conceptLines: string[] = [];
-  if (context.business_character) {
-    conceptLines.push(`Forretningsbeskrivelse: ${context.business_character}`);
+  // V5.6 (June 23, 2026): Use marketing_guidance (long strategic text) for business description,
+  // fallback to business_character (short type reasoning) if marketing_guidance not available
+  const businessDescription = (context as any).marketing_guidance || context.business_character;
+  if (businessDescription) {
+    conceptLines.push(`Forretningsbeskrivelse: ${businessDescription}`);
   }
   const menuProgrammes = (context as any).menu_programmes as Array<{ role: string; timeContext: string | null }> | null | undefined;
   if (menuProgrammes && menuProgrammes.length > 0) {

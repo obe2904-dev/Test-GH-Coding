@@ -50,6 +50,11 @@ export interface LocationPositioning {
     count: number
     radius: number
   }
+  matched_motivations?: string[]
+  primary_type?: string
+  marketing_focus?: string
+  tourist_context?: boolean
+  tourist_factor?: string
 }
 
 export interface BrandVoice {
@@ -194,7 +199,12 @@ async function fetchLocationPositioning(
     competitionLevel: {
       count: data.competition_count || 0,
       radius: 300 // meters - standard analysis radius
-    }
+    },
+    matched_motivations: data.matched_motivations,
+    primary_type: data.primary_type,
+    marketing_focus: data.marketing_focus,
+    tourist_context: data.tourist_context,
+    tourist_factor: data.tourist_factor
   }
 }
 

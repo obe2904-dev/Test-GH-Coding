@@ -70,7 +70,6 @@ export interface IdentityProfileInput {
     weekday: string;
     open_time: string;
     close_time: string;
-    closed: boolean;
   }>;
   // NEW V5.1: Professional persona and context
   professionalPersona?: ProfessionalPersona;
@@ -196,23 +195,20 @@ function buildIdentityPrompt(input: IdentityProfileInput): string {
     parts.push('OPENING HOURS (day-specific):');
     
     // Group by similar times
+    // All rows represent open days (closed days have no row in database)
     const weekdayHours = input.opening_hours.filter(h => 
-      ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'].includes(h.weekday) && !h.closed
+      ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'].includes(h.weekday)
     );
     const weekendHours = input.opening_hours.filter(h => 
-      ['saturday', 'sunday'].includes(h.weekday) && !h.closed
+      ['saturday', 'sunday'].includes(h.weekday)
     );
     
     // Show all days for precision
     input.opening_hours.forEach(h => {
-      if (h.closed) {
-        parts.push(`  ${h.weekday}: CLOSED`);
-      } else {
-        // Format time as HH:MM
-        const openTime = h.open_time.substring(0, 5);  // "09:30:00" -> "09:30"
-        const closeTime = h.close_time.substring(0, 5);
-        parts.push(`  ${h.weekday}: ${openTime} - ${closeTime}`);
-      }
+      // Format time as HH:MM
+      const openTime = h.open_time.substring(0, 5);  // "09:30:00" -> "09:30"
+      const closeTime = h.close_time.substring(0, 5);
+      parts.push(`  ${h.weekday}: ${openTime} - ${closeTime}`);
     });
     
     parts.push('');

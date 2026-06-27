@@ -60,7 +60,7 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
         // Get user's business
         const { data: business, error: businessError } = await supabase
           .from('businesses')
-          .select('id, name, vertical, has_table_seating, menus, service_model, local_location_reference')
+          .select('id, name, business_type_hybrid, has_table_seating, menus, service_model, local_location_reference')
           .eq('owner_id', user.id)
           .maybeSingle()
 
@@ -94,7 +94,7 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
             : []
 
           setBusinessType(resolveEffectiveVertical(
-            (business.vertical as string) || 'cafe',
+            (business.business_type_hybrid as any)?.primary || '',
             businessCharacter,
             identityKeywords,
           ))
@@ -188,7 +188,7 @@ export function FreeBusinessProfile({ onUpgrade }: FreeBusinessProfileProps) {
         .from('businesses')
         .update({
           name: businessName.trim(),
-          vertical: businessType,
+          business_type_hybrid: businessType ? { primary: businessType, secondary: [], hybridLabel: businessType } : null,
           has_table_seating: hasTableSeating,
           menus: menus && menus.length > 0 ? menus : null,
           service_model: serviceModel || null,

@@ -336,8 +336,28 @@ function computeSlotCount(
   isProTier: boolean,
   isLateNight: boolean,
 ): number {
-  if (!isPaidTier) return 2
-  if (isLateNight) return 1
+  // ── DEBUG LOGGING (June 24, 2026) ──
+  const nowHHMM = `${Math.floor(nowMins / 60).toString().padStart(2, '0')}:${(nowMins % 60).toString().padStart(2, '0')}`
+  const closeHHMM = `${Math.floor(closeMins / 60).toString().padStart(2, '0')}:${(closeMins % 60).toString().padStart(2, '0')}`
+  const kitchenCloseHHMM = kitchenCloseMins ? `${Math.floor(kitchenCloseMins / 60).toString().padStart(2, '0')}:${(kitchenCloseMins % 60).toString().padStart(2, '0')}` : 'NULL'
+  
+  console.log(`🔍 computeSlotCount DEBUG:
+    Current time: ${nowHHMM} (${nowMins} mins)
+    Venue closes: ${closeHHMM} (${closeMins} mins)
+    Kitchen closes: ${kitchenCloseHHMM} (${kitchenCloseMins ?? 'NULL'} mins)
+    isPaidTier: ${isPaidTier}
+    isLateNight: ${isLateNight}
+    allWindows: ${allWindows.length}
+    remainingWindows: ${remainingWindows.length}`)
+
+  if (!isPaidTier) {
+    console.log(`   → Result: 2 (free tier fixed)`)
+    return 2
+  }
+  if (isLateNight) {
+    console.log(`   → Result: 1 (late night mode)`)
+    return 1
+  }
 
   // Use kitchen close - FOOD_LEAD_MINS as the content deadline so slot count
   // reflects how many actionable food posting windows actually remain.
@@ -346,6 +366,10 @@ function computeSlotCount(
     ? kitchenCloseMins - FOOD_LEAD_MINS
     : closeMins - 30
   const hoursOfContentRemaining = Math.max(0, contentDeadline - nowMins) / 60
+  
+  const deadlineHHMM = `${Math.floor(contentDeadline / 60).toString().padStart(2, '0')}:${(contentDeadline % 60).toString().padStart(2, '0')}`
+  console.log(`    Content deadline: ${deadlineHHMM} (${contentDeadline} mins)
+    Hours remaining: ${hoursOfContentRemaining.toFixed(2)}h`)
 
   if (allWindows.length >= 2) {
     // Multiple distinct service periods: drive from remaining food windows
@@ -355,13 +379,21 @@ function computeSlotCount(
     // This preserves the expected 3-card experience while still falling back to fewer
     // slots when the day is almost over.
     const hoursFloor = hoursOfContentRemaining >= 2.5 ? 3 : hoursOfContentRemaining >= 1.5 ? 2 : 1
-    return Math.max(count, hoursFloor)
+    const result = Math.max(count, hoursFloor)
+    console.log(`    Multiple windows (${allWindows.length}): remainingFoodWindows=${remainingFoodWindows.length}, count=${count}, hoursFloor=${hoursFloor}
+   → Result: ${result}`)
+    return result
   }
 
   // Single window or no program data: use content hours remaining
-  if (hoursOfContentRemaining >= 2.5) return 3
-  if (hoursOfContentRemaining >= 1.5) return 2
-  return 1
+  let result: number
+  if (hoursOfContentRemaining >= 2.5) result = 3
+  else if (hoursOfContentRemaining >= 1.5) result = 2
+  else result = 1
+  
+  console.log(`    Single/no window: hours=${hoursOfContentRemaining.toFixed(2)}h
+   → Result: ${result}`)
+  return result
 }
 
 // ── Slot timing computation ───────────────────────────────────────────────────

@@ -21,6 +21,149 @@ import type {
 // ============================================================================
 
 /**
+ * Extract programme-specific brand anchors
+ * 
+ * Maps each programme type to its distinctive brand-building anchor.
+ * Called per-programme during content strategy aggregation.
+ * 
+ * @param programme - V5Programme object
+ * @param anchors - Array to accumulate anchors (mutated)
+ */
+function extractProgrammeBrandAnchors(programme: V5Programme, anchors: string[]) {
+  const { type, name } = programme
+  
+  switch (type) {
+    // Fine dining & dinner programmes → culinary craft
+    case 'dinner':
+    case 'fine_dining':
+    case 'evening_dining':
+      anchors.push(`${name} håndværk`)
+      break
+    
+    // Brunch → weekend experience and quality
+    case 'brunch':
+    case 'weekend_brunch':
+      anchors.push(`${name}-oplevelse`)
+      break
+    
+    // Lunch → quality and freshness
+    case 'lunch':
+    case 'daily_lunch':
+      anchors.push(`${name}-kvalitet`)
+      break
+    
+    // Bar programmes → cocktail craft and atmosphere
+    case 'bar':
+    case 'evening_bar':
+    case 'cocktail_bar':
+      anchors.push(`${name}-håndværk`)
+      break
+    
+    // Coffee programmes → coffee culture
+    case 'coffee':
+    case 'specialty_coffee':
+    case 'cafe':
+      anchors.push(`Kaffekultur`)
+      break
+    
+    // Bakery → fresh baking
+    case 'bakery':
+    case 'patisserie':
+      anchors.push(`Frisk bagning`)
+      break
+    
+    // Wine bar → wine programme
+    case 'wine_bar':
+      anchors.push(`Vinprogram`)
+      break
+    
+    // Tapas/sharing → food presentation
+    case 'tapas':
+    case 'sharing_plates':
+      anchors.push(`Mad-præsentation`)
+      break
+    
+    // Default for other programme types
+    default:
+      // Don't add generic anchor here - let the fallback handle it
+      break
+  }
+}
+
+/**
+ * Extract menu-based brand anchors
+ * 
+ * Derives brand anchors from menu signature themes and craft signals.
+ * Examples: "Hjemmelavet pasta", "Specialty kaffe", "Økologiske råvarer"
+ * 
+ * @param menuOverview - Optional menu context
+ * @param anchors - Array to accumulate anchors (mutated)
+ */
+function extractMenuBrandAnchors(
+  menuOverview: { signature_themes?: string[]; craft_signals?: string[] } | undefined,
+  anchors: string[]
+) {
+  if (!menuOverview) return
+  
+  // Extract from craft signals (homemade, artisan, etc.)
+  if (menuOverview.craft_signals && menuOverview.craft_signals.length > 0) {
+    // Take first 2 craft signals as brand anchors
+    menuOverview.craft_signals.slice(0, 2).forEach(signal => {
+      anchors.push(signal)
+    })
+  }
+  
+  // Extract from signature themes (if distinctive and not too generic)
+  if (menuOverview.signature_themes && menuOverview.signature_themes.length > 0) {
+    // Take first signature theme if it's specific enough
+    const firstTheme = menuOverview.signature_themes[0]
+    const genericThemes = ['mad', 'drikke', 'menu', 'retter']
+    const isSpecific = !genericThemes.some(generic => firstTheme.toLowerCase().includes(generic))
+    
+    if (isSpecific) {
+      anchors.push(firstTheme)
+    }
+  }
+}
+
+/**
+ * Extract location-based brand anchors
+ * 
+ * Derives brand anchors from geographic positioning and location advantages.
+ * Examples: "Placering ved åen", "Havnekig", "Indre by-stemning"
+ * 
+ * @param geoContext - Optional geographic context
+ * @param anchors - Array to accumulate anchors (mutated)
+ */
+function extractLocationBrandAnchors(
+  geoContext: { signature_reference?: string; location_type?: string } | undefined,
+  anchors: string[]
+) {
+  if (!geoContext) return
+  
+  // Use signature reference if available (e.g., "ved åen", "Nyhavn")
+  if (geoContext.signature_reference) {
+    anchors.push(`Placering ${geoContext.signature_reference}`)
+  }
+  
+  // Map location_type to brand anchor
+  if (geoContext.location_type) {
+    const locationTypeMap: Record<string, string> = {
+      'waterfront_leisure': 'Vandkant-oplevelse',
+      'downtown_commercial': 'Bymidten',
+      'residential_neighborhood': 'Nabolagsstemning',
+      'tourist_area': 'Turistområde',
+      'cultural_district': 'Kulturkvarter'
+    }
+    
+    const anchor = locationTypeMap[geoContext.location_type]
+    if (anchor) {
+      anchors.push(anchor)
+    }
+  }
+}
+
+/**
  * Aggregate programme-level commercial orientations into business-wide strategy
  * 
  * V5 stores commercial strategy per-programme, but Weekly Plan prompts expect
@@ -30,8 +173,16 @@ import type {
  * - goal_blend (not default_goal_split) with build_brand/retain_loyalty (not strengthen_brand/retain_regulars)
  * - content_category_weights with product_menu/craving_visual/behind_scenes/team_people percentages
  * - primary_goal, footfall_signals, brand_anchors, loyalty_hooks
+ * 
+ * @param programmes - V5Programme array
+ * @param menuOverview - Optional menu context for signature themes and craft signals
+ * @param geoContext - Optional geographic context for location-based anchors
  */
-export function deriveContentStrategy(programmes: V5Programme[]) {
+export function deriveContentStrategy(
+  programmes: V5Programme[],
+  menuOverview?: { signature_themes?: string[]; craft_signals?: string[] },
+  geoContext?: { signature_reference?: string; location_type?: string }
+) {
   if (!programmes || programmes.length === 0) {
     return null
   }
@@ -86,13 +237,20 @@ export function deriveContentStrategy(programmes: V5Programme[]) {
     if (p.commercialOrientation?.decision_timing === 'spontaneous') {
       footfall_signals.push(`${p.name} (spontan besøg)`)
     }
-    if (p.type === 'dinner' || p.type === 'fine_dining') {
-      brand_anchors.push(`${p.name} håndværk`)
-    }
+    
+    // ✅ ENRICHED: Extract programme-specific brand anchors
+    extractProgrammeBrandAnchors(p, brand_anchors)
+    
     if (p.timeWindow?.recurring) {
       loyalty_hooks.push(p.name)
     }
   })
+  
+  // ✅ NEW: Extract menu-based brand anchors
+  extractMenuBrandAnchors(menuOverview, brand_anchors)
+  
+  // ✅ NEW: Extract location-based brand anchors
+  extractLocationBrandAnchors(geoContext, brand_anchors)
   
   // Fallback to sensible defaults if no signals found
   if (footfall_signals.length === 0) footfall_signals.push('daglig trafik')
@@ -290,7 +448,19 @@ export function constructBrandVoiceFromV5(v5Profile: V5BrandProfile) {
     seasonal_notes: guardrails.seasonal_notes || [],
     
     // ── LAYERS 1-2-4: Programme Data (AGGREGATE) ──
-    content_strategy: deriveContentStrategy(programmes),
+    content_strategy: deriveContentStrategy(
+      programmes,
+      // Extract menu context for brand anchors
+      v5Profile.layer_0_intelligence?.menu_overview ? {
+        signature_themes: v5Profile.layer_0_intelligence.menu_overview.signature_themes,
+        craft_signals: voice.tone_dna?.culinary_character?.craft_signals
+      } : undefined,
+      // Extract geographic context for brand anchors
+      v5Profile.layer_0_intelligence?.geographic_context ? {
+        signature_reference: v5Profile.layer_0_intelligence.geographic_context.signature_reference,
+        location_type: v5Profile.layer_0_intelligence.geographic_context.location_type
+      } : undefined
+    ),
     target_audience: deriveTargetAudience(programmes),
     programmes_summary: programmes.map(p => ({
       name: p.name,

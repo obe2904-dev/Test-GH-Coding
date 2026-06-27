@@ -1,11 +1,17 @@
 /**
  * Test page for Business Goals hook
  * Demonstrates CRUD operations with new database schema
+ * 
+ * ⚠️ DEPRECATED: business_goals table dropped April 2026
+ * This file is archived and non-functional
  */
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useBusinessGoals } from '@/hooks/useBusinessGoals';
-import type { CreateBusinessGoal, GoalType, Priority } from '@/types';
+// import { useBusinessGoals } from '@/hooks/useBusinessGoals';
+// import type { CreateBusinessGoal, GoalType, Priority } from '@/types';
+type CreateBusinessGoal = any; // Placeholder for removed type
+type GoalType = any;
+type Priority = any;
 
 export default function TestBusinessGoals() {
   const [businessId, setBusinessId] = useState<string | null>(null);

@@ -276,29 +276,43 @@ export function Sidebar({ className = '' }: SidebarProps) {
             </button>
 
             {/* AI Ugentlig Plan */}
-            <button
-              onClick={() => {
-                if (isWeeklyPlanLocked) {
-                  navigate('/dashboard/plans')
-                  return
-                }
+            <div className="space-y-1.5">
+              <button
+                onClick={() => {
+                  if (isWeeklyPlanLocked) {
+                    navigate('/dashboard/plans')
+                    return
+                  }
 
-                setActivePath('weekly-plan')
-                setWeeklyPlanStep('generate')
-                navigate('/dashboard/ai-weekly-plan')
-              }}
-              className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm ${
-                isWeeklyPlanLocked
-                  ? 'text-text-muted font-medium hover:bg-surface-alt hover:text-text opacity-60'
-                  : pathname === '/dashboard/ai-weekly-plan'
-                    ? 'bg-[#E6F4F1] text-[#076B4E] font-semibold border border-[#0A7D5F] shadow-sm'
-                    : 'text-text font-medium hover:bg-surface-alt'
-              }`}
-            >
-              <WeeklyPlanIcon className={`w-5 h-5 flex-shrink-0 ${isWeeklyPlanLocked ? 'text-[#5C5650]' : pathname === '/dashboard/ai-weekly-plan' ? 'text-[#0A7D5F]' : 'text-[#5C5650]'}`} />
-              <span className="truncate">{t('navigation.weeklyPlan')}</span>
-              {isWeeklyPlanLocked && <span className="ml-auto text-xs">🔒</span>}
-            </button>
+                  setActivePath('weekly-plan')
+                  setWeeklyPlanStep('generate')
+                  navigate('/dashboard/ai-weekly-plan')
+                }}
+                className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm ${
+                  isWeeklyPlanLocked
+                    ? 'text-text-muted font-medium hover:bg-surface-alt hover:text-text opacity-60'
+                    : pathname === '/dashboard/ai-weekly-plan'
+                      ? 'bg-[#E6F4F1] text-[#076B4E] font-semibold border border-[#0A7D5F] shadow-sm'
+                      : 'text-text font-medium hover:bg-surface-alt'
+                }`}
+              >
+                <WeeklyPlanIcon className={`w-5 h-5 flex-shrink-0 ${isWeeklyPlanLocked ? 'text-[#5C5650]' : pathname === '/dashboard/ai-weekly-plan' ? 'text-[#0A7D5F]' : 'text-[#5C5650]'}`} />
+                <span className="truncate">{t('navigation.weeklyPlan')}</span>
+                {isWeeklyPlanLocked && <span className="ml-auto text-xs">🔒</span>}
+              </button>
+              {/* Pro Upsell Chip - only show if weekly plan is locked (free tier) */}
+              {isWeeklyPlanLocked && (
+                <button
+                  onClick={() => navigate('/dashboard/plans')}
+                  className="ml-8 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all inline-flex items-center gap-1"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+                  </svg>
+                  Opgrader
+                </button>
+              )}
+            </div>
           </div>
           
           {/* Subtle dotted separator */}

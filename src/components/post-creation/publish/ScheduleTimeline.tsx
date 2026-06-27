@@ -1,8 +1,6 @@
 import { useTranslation } from 'react-i18next'
-import { Clock } from './icons'
-import { PlatformIndicator } from './PlatformIndicator'
+import { PostFrame, type Platform, type PostStatus } from './PostFrame'
 import { getPlatformLabel } from './utils'
-import { TimelinePostCard } from './TimelinePostCard'
 
 export interface EngagementMetrics {
   views: number
@@ -84,18 +82,10 @@ interface ScheduleTimelineProps {
   saveLabel?: string
   publishNowLabel?: string
   onScheduledPostClick?: (postId: string | number) => void
+  onSelectedPostClick?: () => void  // New: Opens modal for draft post actions
 }
 
 const HEADLINE_FALLBACK = 'Your New Post'
-
-const renderEngagement = (metrics: EngagementMetrics) => (
-  <div className="flex gap-3 text-xs text-slate-600">
-    <span>👁 {metrics.views}</span>
-    <span>❤️ {metrics.likes}</span>
-    <span>💬 {metrics.comments}</span>
-    <span>↗️ {metrics.shares}</span>
-  </div>
-)
 
 const renderSelectedTitle = (postPreview: SelectedPostPreview | null) => {
   if (!postPreview) {
@@ -136,20 +126,11 @@ const formatSelectedMeta = (date: Date, locale: string) => {
   return `${datePart} ${timePart}`
 }
 
-const renderSelectedDescription = (preview: SelectedPostPreview | null) => {
+const getSelectedPostText = (preview: SelectedPostPreview | null): string => {
   if (!preview) {
-    return null
+    return ''
   }
-
-  const content = preview.textWithHashtags || preview.text
-
-  if (!content) {
-    return null
-  }
-
-  return (
-    <p className="text-xs text-slate-700 line-clamp-1">{content}</p>
-  )
+  return (preview.textWithHashtags || preview.text || '').trim()
 }
 
 export function ScheduleTimeline({
@@ -170,8 +151,17 @@ export function ScheduleTimeline({
   saveLabel,
   publishNowLabel,
   onScheduledPostClick,
+  onSelectedPostClick,  // New callback for draft/selected posts
 }: ScheduleTimelineProps) {
   const { t } = useTranslation()
+
+  // Helper to normalize platform names to match PostFrame Platform type
+  const normalizePlatform = (platform: string): Platform => {
+    const lower = platform.toLowerCase()
+    if (lower.includes('facebook')) return 'facebook'
+    if (lower.includes('instagram')) return 'instagram'
+    return 'facebook' // default fallback
+  }
 
   return (
     <div className="space-y-2">
@@ -179,240 +169,80 @@ export function ScheduleTimeline({
         if (item.type === 'recent') {
           const post = item.post
           return (
-            <TimelinePostCard
+            <PostFrame
               key={item.id}
-              platform={post.platform}
-              isConnected={isPlatformConnected(post.platform)}
-              statusLabel={t('posts.status.published')}
-              statusClassName="bg-green-100 text-green-700"
-              title={post.title}
-              time={post.time}
-              thumbnail={post.thumbnail}
-            >
-              {renderEngagement(post.engagement)}
-            </TimelinePostCard>
+              id={String(item.id)}
+              platform={normalizePlatform(post.platform)}
+              status="udgivet"
+              headline={post.title}
+              text={post.snippet || post.title}
+              photoUrl={post.thumbnail}
+              scheduledAt={post.date.toISOString()}
+              onClick={() => {
+                // Could open a modal with full post details
+                console.log('Clicked published post:', item.id)
+              }}
+              engagement={post.engagement}
+            />
           )
         }
 
         if (item.type === 'selected') {
-          const hasUnconnected = unconnectedPlatforms.length > 0
-          const formattedDate = formatSelectedMeta(item.date, locale)
           const hasPlatformSplit = (selectedPlatformPreviews?.length ?? 0) > 1
 
-          console.log('[ScheduleTimeline] selected item rendering:', {
-            selectedPlatformPreviewsLength: selectedPlatformPreviews?.length,
-            hasPlatformSplit,
-            selectedPlatforms,
-            selectedPlatformPreviews
-          })
-
           // Render separate frames for each platform when split
-          if (hasPlatformSplit) {
+          if (hasPlatformSplit && selectedPlatformPreviews) {
             return (
               <div key="selected" className="space-y-2">
-                {(selectedPlatformPreviews ?? []).map((preview, index) => {
-                  const platformName = getPlatformLabel(preview.platform)
-                  const isFirstFrame = index === 0
-                  
-                  return (
-                    <div key={preview.platform} className="p-2 bg-purple-50 rounded-lg border-2 border-purple-400">
-                      <div className="flex gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-1 mb-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <PlatformIndicator
-                                platform={platformName}
-                                isConnected={isPlatformConnected(preview.platform)}
-                              />
-                              <span className="text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded font-bold">
-                                selected
-                              </span>
-                            </div>
-
-                            {/* Show action buttons only on first frame */}
-                            {isFirstFrame && (onSave && onPublishNow ? (
-                              <div className="flex-shrink-0 grid grid-cols-2 gap-1.5 min-w-[180px]">
-                                <button
-                                  onClick={onPublishNow}
-                                  disabled={isPublishing}
-                                  className="px-2.5 py-1 bg-purple-600 text-white text-[11px] font-bold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1"
-                                >
-                                  {isPublishing ? (
-                                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                  ) : (
-                                    <span>⚡</span>
-                                  )}
-                                  <span>{publishNowLabel ?? 'Udgiv nu'}</span>
-                                </button>
-                                <button
-                                  onClick={onSave}
-                                  disabled={!canSave || isPublishing}
-                                  title={!canSave ? saveDisabledReason : undefined}
-                                  className="px-2.5 py-1 bg-purple-600 text-white text-[11px] font-bold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1"
-                                >
-                                  {isPublishing ? (
-                                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                  ) : (
-                                    <span>💾</span>
-                                  )}
-                                  <span>{saveLabel ?? 'Planlæg'}</span>
-                                </button>
-                              </div>
-                            ) : onSave ? (
-                              <button
-                                onClick={onSave}
-                                disabled={!canSave || isPublishing}
-                                className="flex-shrink-0 px-2.5 py-1 bg-purple-600 text-white text-[11px] font-bold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                              >
-                                {isPublishing ? (
-                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                ) : (
-                                  <span>💾</span>
-                                )}
-                                <span>{saveLabel ?? 'Gem'}</span>
-                              </button>
-                            ) : null)}
-                          </div>
-
-                          <p className="text-xs font-bold text-purple-900 mb-0.5">
-                            {preview.headline && preview.headline.trim().length > 0
-                              ? preview.headline
-                              : renderSelectedTitle(postPreview)}
-                          </p>
-                          <p className="text-[11px] text-purple-700 mb-1 line-clamp-2">
-                            {(preview.textWithHashtags || preview.text || '').trim() || renderSelectedDescription(postPreview)}
-                          </p>
-
-                          {isFirstFrame && !canSave && saveDisabledReason && (
-                            <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
-                              <span>⏰</span> {saveDisabledReason}
-                            </p>
-                          )}
-
-                          {isFirstFrame && hasUnconnected && (
-                            <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
-                              <span>⚠️</span> {manualPostingRequiredLabel}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
+                {selectedPlatformPreviews.map((preview) => (
+                  <PostFrame
+                    key={`selected-${preview.platform}`}
+                    id="selected"
+                    platform={normalizePlatform(preview.platform)}
+                    status="udkast"
+                    headline={preview.headline || renderSelectedTitle(postPreview)}
+                    text={preview.textWithHashtags || preview.text || getSelectedPostText(postPreview)}
+                    photoUrl={selectedMediaUrl}
+                    scheduledAt={item.date.toISOString()}
+                    onClick={() => onSelectedPostClick?.()}
+                    isSelected={true}
+                  />
+                ))}
               </div>
             )
           }
 
           // Single platform - render single frame
           return (
-            <div key="selected" className="p-2 bg-purple-50 rounded-lg border-2 border-purple-400">
-              <div className="flex gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-1 mb-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {selectedPlatforms.map((platform) => {
-                        const platformName = getPlatformLabel(platform)
-                        return (
-                          <PlatformIndicator
-                            key={platform}
-                            platform={platformName}
-                            isConnected={isPlatformConnected(platformName)}
-                          />
-                        )
-                      })}
-                      <span className="text-xs bg-purple-600 text-white px-1.5 py-0.5 rounded font-bold">
-                        selected
-                      </span>
-                    </div>
-
-                    {/* Top-right actions — publish now + schedule */}
-                    {onSave && onPublishNow ? (
-                      <div className="flex-shrink-0 grid grid-cols-2 gap-1.5 min-w-[180px]">
-                        <button
-                          onClick={onPublishNow}
-                          disabled={isPublishing}
-                          className="px-2.5 py-1 bg-purple-600 text-white text-[11px] font-bold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1"
-                        >
-                          {isPublishing ? (
-                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <span>⚡</span>
-                          )}
-                          <span>{publishNowLabel ?? 'Udgiv nu'}</span>
-                        </button>
-                        <button
-                          onClick={onSave}
-                          disabled={!canSave || isPublishing}
-                          title={!canSave ? saveDisabledReason : undefined}
-                          className="px-2.5 py-1 bg-purple-600 text-white text-[11px] font-bold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1"
-                        >
-                          {isPublishing ? (
-                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <span>💾</span>
-                          )}
-                          <span>{saveLabel ?? 'Planlæg'}</span>
-                        </button>
-                      </div>
-                    ) : onSave && (
-                      <button
-                        onClick={onSave}
-                        disabled={!canSave || isPublishing}
-                        className="flex-shrink-0 px-2.5 py-1 bg-purple-600 text-white text-[11px] font-bold rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                      >
-                        {isPublishing ? (
-                          <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <span>💾</span>
-                        )}
-                        <span>{saveLabel ?? 'Gem'}</span>
-                      </button>
-                    )}
-                  </div>
-
-                  <p className="text-xs font-bold text-purple-900 mb-0.5">
-                    {renderSelectedTitle(postPreview)}
-                  </p>
-                  <p className="text-xs text-purple-700 mb-1">{formattedDate}</p>
-
-                  {renderSelectedDescription(postPreview)}
-
-                  {!canSave && saveDisabledReason && (
-                    <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
-                      <span>⏰</span> {saveDisabledReason}
-                    </p>
-                  )}
-
-                  {hasUnconnected && (
-                    <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
-                      <span>⚠️</span> {manualPostingRequiredLabel}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
+            <PostFrame
+              key="selected"
+              id="selected"
+              platform={normalizePlatform(selectedPlatforms[0] || 'facebook')}
+              status="udkast"
+              headline={renderSelectedTitle(postPreview)}
+              text={getSelectedPostText(postPreview)}
+              photoUrl={selectedMediaUrl}
+              scheduledAt={item.date.toISOString()}
+              onClick={() => onSelectedPostClick?.()}
+              isSelected={true}
+            />
           )
         }
 
         if (item.type === 'future') {
           const post = item.post
           return (
-            <TimelinePostCard
-              key={item.id} 
-              platform={post.platform}
-              isConnected={isPlatformConnected(post.platform)}
-              statusLabel={t('posts.status.scheduled')}
-              statusClassName="bg-white text-green-700 border border-green-300"
-              title={post.title}
-              time={post.time}
-              thumbnail={post.thumbnail}
+            <PostFrame
+              key={item.id}
+              id={String(item.id)}
+              platform={normalizePlatform(post.platform)}
+              status="planlagt"
+              headline={post.title}
+              text={post.snippet || post.title}
+              photoUrl={post.thumbnail}
+              scheduledAt={post.date.toISOString()}
               onClick={() => onScheduledPostClick?.(item.id)}
-            >
-              <div className="flex items-center gap-1 mt-1">
-                <Clock className="w-2.5 h-2.5 text-slate-500" />
-                <span className="text-xs text-slate-600">{post.timeUntil}</span>
-              </div>
-            </TimelinePostCard>
+            />
           )
         }
 

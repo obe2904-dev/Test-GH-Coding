@@ -201,8 +201,12 @@ function buildEnhancedFactsPrompt(
   if (businessData.location_intelligence) {
     parts.push(`=== LOCATION INTELLIGENCE ===`);
     
-    if (businessData.location_intelligence.neighborhood) {
-      parts.push(`Neighborhood: ${businessData.location_intelligence.neighborhood}`);
+    // Fallback chain: local_location_reference > neighborhood > city
+    const locationContext = businessData.location_intelligence.local_location_reference || 
+                           businessData.location_intelligence.neighborhood || 
+                           businessData.city;
+    if (locationContext) {
+      parts.push(`Neighborhood: ${locationContext}`);
     }
     
     if (businessData.location_intelligence.neighborhood_character) {

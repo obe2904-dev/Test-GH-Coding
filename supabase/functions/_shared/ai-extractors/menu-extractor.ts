@@ -204,6 +204,15 @@ CRITICAL RULES - MUST FOLLOW:
 7. Preserve EXACT category names (e.g., "BRUNCH", "FROKOST", "AFTEN", "TAPAS")
 8. Look for time ranges in category names (e.g., "BRUNCH 09.00-12.00")
 
+JAVASCRIPT GALLERY WIDGETS - SPECIAL HANDLING:
+9. Some sites use JavaScript-rendered filterable gallery widgets for menu items
+   - Dish names appear as link text inside <a> tags (often with href="javascript:void(0)" or misspelled "javascrpit:void(0)")
+   - Extract ALL link text values from these anchor tags as menu items
+   - Group items by their nearest preceding section heading, filter tab label, or category marker
+   - DEDUPLICATE items - gallery widgets often render each item twice (thumbnail + label version)
+   - Look for section markers like "Korean BBQ", "Sushi", "Drikkevarer" and subcategories like "Hosomaki", "Nigiri"
+   - Even if links don't look like traditional menu markup, extract them if they appear to be dish names
+
 If the content below DOES NOT contain clear menu items with dish names, return:
 {
   "menuStructure": [],

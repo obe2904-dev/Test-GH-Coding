@@ -164,7 +164,7 @@ SIZE LIMITS (hard):
 INPUT (priority):
 TIER 1 (internal):
 - name=${business?.name || 'Unknown'}
-- vertical=${business?.vertical || 'Unknown'}
+- type=${business?.business_type_hybrid?.primary || 'Unknown'}
 - city=${business?.city || 'Unknown'}
 - address=${business?.address || '—'}
 - country=${business?.country || '—'}
@@ -175,7 +175,6 @@ User Profile:
 ${profile?.short_description ? `- short_description=${profile.short_description}` : ''}
 ${profile?.long_description ? `- long_description=${profile.long_description}` : ''}
 ${profile?.target_audience ? `- target_audience=${profile.target_audience}` : ''}
-${profile?.price_level ? `- price_level=${profile.price_level}` : ''}
 ${existingBusinessCharacter ? `- existing_business_character: ${existingBusinessCharacter}` : ''}
 
 ${operationalProgrammesBlock ? operationalProgrammesBlock + '\n' : ''}

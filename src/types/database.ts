@@ -157,7 +157,6 @@ export type Database = {
           tone_model: Json | null
           tone_of_voice: string | null
           typical_closings: string[] | null
-          typical_openings: string[] | null
           updated_at: string | null
           values: string[] | null
           venue_data_source: string | null
@@ -2236,26 +2235,9 @@ export type Database = {
       create_business_onboarding:
         | {
             Args: {
-              p_business_name: string
-              p_business_vertical: string
-              p_city: string
-              p_country: string
-              p_postal_code: string
-              p_selected_platforms: string[]
               p_user_id: string
-            }
-            Returns: string
-          }
-        | {
-            Args: {
               p_business_name: string
-              p_business_vertical: string
-              p_city: string
-              p_country: string
-              p_postal_code: string
               p_selected_platforms: string[]
-              p_user_id: string
-              p_website_url?: string
             }
             Returns: string
           }

@@ -315,7 +315,8 @@ serve(async (req: any) => {
 
       kitchenCloseTime = extractKitchenCloseTime(homepageHtml)
 
-      if (extractedHours) {
+      // Only derive kitchen close time from opening hours if not already extracted
+      if (!kitchenCloseTime && extractedHours) {
         const closeCounts = new Map<string, number>()
         for (const dayHours of Object.values(extractedHours)) {
           if (dayHours?.closed || !dayHours?.close) continue
@@ -326,7 +327,7 @@ serve(async (req: any) => {
           const [mostCommonCloseTime] = [...closeCounts.entries()].sort((a, b) => b[1] - a[1])[0]
           if (mostCommonCloseTime) {
             kitchenCloseTime = mostCommonCloseTime
-            console.log('🍳 Derived kitchen close time from opening hours:', kitchenCloseTime)
+            console.log('🍳 Derived kitchen close time from opening hours (fallback):', kitchenCloseTime)
           }
         }
       }

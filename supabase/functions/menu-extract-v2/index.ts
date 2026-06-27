@@ -245,6 +245,92 @@ function classifyEstablishmentType(menuStructure: any): 'FSE' | 'SBO' | null {
   return null
 }
 
+/**
+ * Extract menu items from JavaScript gallery widgets (e.g., WordPress filter plugins)
+ * These widgets render items as links with href="javascrpit:void(0)" and often duplicate
+ * names with image references (wPT_Dish Name vs Dish Name). This pre-processor extracts
+ * clean item lists before the generic HTML-to-text conversion muddies the signal.
+ */
+function extractJsGalleryMenuItems(html: string): string | null {
+  // Detect wPT_ pattern (common in WordPress gallery/filter plugins) or javascript:void links
+  if (!html.includes('wPT_') && !html.includes('javascript:void(0)')) return null
+
+  const seenItems = new Set<string>()
+  const seenCats = new Set<string>()
+  const lines: string[] = []
+  
+  // Extract filter category labels (these become section headers)
+  // They appear as button/tab text before the item grids, often in elements with "filter" class
+  const categoryPattern = /class="[^"]*filter[^"]*"[^>]*>([^<]+)</gi
+  let catMatch
+  while ((catMatch = categoryPattern.exec(html)) !== null) {
+    const cat = catMatch[1].trim()
+    if (cat && cat !== 'All' && cat !== 'all' && cat.length > 1 && cat.length < 50 && !seenCats.has(cat)) {
+      seenCats.add(cat)
+    }
+  }
+
+  // Strategy 1: Extract from image alt attributes (common WordPress gallery pattern)
+  // Images have alt="wPT_Dish Name" which we can extract and clean
+  const imgAltPattern = /<img[^>]+alt=["']wPT_([^"']+)["'][^>]*>/gi
+  let match
+  while ((match = imgAltPattern.exec(html)) !== null) {
+    const name = match[1].trim().replace(/-/g, ' ') // Convert "Tempura-rejer" to "Tempura rejer"
+    if (name.length > 1 && name.length < 150 && !seenItems.has(name) && !seenCats.has(name)) {
+      seenItems.add(name)
+      lines.push(`- ${name}`)
+    }
+  }
+  
+  // Strategy 2: Extract from links - handles both javascript:void(0) and real URLs
+  // Look for duplicate link patterns (wPT_Name + Name pointing to same URL)
+  const linkPattern = /<a\s+[^>]*href="([^"]*)"[^>]*>([^<]+)<\/a>/gi
+  const urlToNames = new Map<string, string[]>()
+  
+  while ((match = linkPattern.exec(html)) !== null) {
+    const url = match[1]
+    const name = match[2].trim()
+    
+    // Skip navigation links, social media, etc.
+    if (name.length < 2 || name.length > 150) continue
+    if (name.startsWith('wPT_')) continue
+    if (/^(all|menu|om os|kontakt|book bord|reservér bord|reserver bord|se menu|allergener|facebook|instagram|tiktok|home|info|åbningstider|fødevarekontrol|videre til indhold|k-bbq silkeborg)$/i.test(name)) continue
+    
+    // Only consider links pointing to potential menu item URLs (contain product/dish path segments)
+    if (!url || url === '#' || url.startsWith('mailto:') || url.startsWith('tel:')) continue
+    if (!url.includes('/')) continue // Must have path
+    
+    // Track names pointing to same URL
+    if (!urlToNames.has(url)) urlToNames.set(url, [])
+    urlToNames.get(url)!.push(name)
+  }
+  
+  // Extract items where we found duplicate links to same URL (gallery widget signature)
+  for (const [url, names] of urlToNames.entries()) {
+    // If URL has multiple names pointing to it, extract the clean one
+    if (names.length >= 2) {
+      const cleanName = names.find(n => !n.startsWith('wPT_')) || names[0]
+      if (!seenItems.has(cleanName) && !seenCats.has(cleanName)) {
+        seenItems.add(cleanName)
+        lines.push(`- ${cleanName}`)
+      }
+    } else if (names.length === 1) {
+      // Single link - only include if URL looks like menu item path
+      const name = names[0]
+      if ((url.includes('/menu/') || url.includes('/dish') || url.includes('/sushi') || url.includes('/bbq') || url.includes('koreanan')) &&
+          !seenItems.has(name) && !seenCats.has(name)) {
+        seenItems.add(name)
+        lines.push(`- ${name}`)
+      }
+    }
+  }
+
+  if (lines.length === 0) return null
+  
+  const catList = seenCats.size > 0 ? `\n\nDETECTED CATEGORIES: ${Array.from(seenCats).join(', ')}` : ''
+  return `JS GALLERY MENU ITEMS (extracted from filter widget):\n${lines.join('\n')}${catList}\n\n`
+}
+
 function htmlToText(html: string): string {
   // Preserve some structure before stripping tags.
   let s = html
@@ -291,15 +377,31 @@ function cleanHtmlTextForLlm(text: string, maxChars: number): string {
   for (const ln of finalLines) {
     const key = ln.toLowerCase()
     const count = seen.get(key) ?? 0
+    
     // Category/section headers (short ALL-CAPS lines) may legitimately appear in both
     // site navigation and in the menu content body. Allow up to 2 occurrences so the
     // actual section header is never silently dropped.
     const isLikelyHeader = ln.length <= 40 && ln === ln.toUpperCase() && /[A-ZÆØÅ]/.test(ln)
+    
     // Price-only lines (e.g. "125,-", "95 kr", "109 DKK") are contextually unique —
     // each occurrence belongs to the item immediately above it. Deduplicating them
     // would silently drop prices for items that share the same price value. Never cap them.
     const isPriceOnly = priceRe.test(ln) && ln.replace(priceRe, '').trim() === ''
-    if (count >= (isLikelyHeader ? 2 : isPriceOnly ? 999 : 1)) continue
+    
+    // Navigation noise - common site elements that appear in menus but aren't food
+    const isNavNoise = /^(all|menu|om os|kontakt|book bord|reservér bord|reserver bord|videre til indhold|søndergade|cvr|allergener|se menu|åbningstider|fødevarekontrol)$/i.test(ln)
+    
+    // Dish names (short text, 2-120 chars, mixed case, looks like food) appear multiple times
+    // in JavaScript gallery widgets across different filter tabs. NEVER deduplicate these —
+    // the gallery widget legitimately renders "Tempura rejer" once under "All", once under
+    // "Korean BBQ", once under each subcategory tab. Let the LLM see all occurrences and
+    // deduplicate intelligently during JSON extraction. 120 char limit accommodates long
+    // Danish dish names with qualifiers (e.g., "Langtidsstegt oksebryst med grillede rodfrugter").
+    const isLikelyDishName = !isLikelyHeader && !isPriceOnly && !isNavNoise && ln.length <= 120
+    
+    const maxOccurrences = isPriceOnly ? 999 : isLikelyHeader ? 2 : isNavNoise ? 1 : isLikelyDishName ? 999 : 1
+    
+    if (count >= maxOccurrences) continue
     seen.set(key, count + 1)
     outLines.push(ln)
   }
@@ -400,6 +502,15 @@ CRITICAL RULES:
 9) ONLY extract items explicitly written. Do not invent.
 10) Preserve original dish names (æ, ø, å).
 11) **ALWAYS include full descriptions** - Text between dish name and price is the description.
+
+JAVASCRIPT GALLERY WIDGETS - SPECIAL EXTRACTION:
+- Some menus use JavaScript-rendered filterable gallery widgets for menu items
+- Dish names appear as link text, often with href="javascript:void(0)" or misspelled "javascrpit:void(0)"
+- **EXTRACT ALL LINK TEXT** as menu items, even if they appear in unconventional markup
+- Look for filter tab labels or section headings to group items (e.g., "Korean BBQ", "Sushi", "Drikkevarer", "Hosomaki", "Nigiri")
+- **DEDUPLICATE** - gallery widgets often render each item twice (thumbnail view + list view)
+- If you see repeated dish names, include each unique dish ONLY ONCE
+- Group items by their nearest preceding heading or category marker
 12) **Capture ALL prices AND currency** - Danish formats: 95,- | 95 kr | 95,00 kr | 95 DKK
     - Extract numeric price (e.g., "95", "95.00", "12.5")
     - Detect currency: kr/DKK = "DKK", € = "EUR", $ = "USD", £ = "GBP", etc.
@@ -413,6 +524,18 @@ CRITICAL RULES:
 19) **Items without a visible price** - If an item has no price line following it before the next item name or category header begins, set price to null. Do NOT borrow a price from a neighbouring item.
 20) **TAPAS section with component list + single price** - A TAPAS section (or similar sharing board) may list many individual ingredients as bullet points, followed by a single price for the entire board. In that case, create ONE item named "TAPAS" (or the section name) with a description listing all components and the single board price.
 21) **Variant items (UDEN/MED, WITH/WITHOUT)** - Lines like "UDEN KYLLING" or "MED KYLLING" following a dish description are separate price variants of the same dish. Create separate items for each variant, each with its own price from the line immediately following it.
+22) **AD LIBITUM PRICING TIERS** - When a category name is "FROKOST K-BBQ & SUSHI AD LIBITUM", "AFTEN K-BBQ & SUSHI AD LIBITUM", or similar, and the items below it are just price variants by day/time (Man. – Tors. / Fre – Søn og Helligdage), create separate items for EACH day variant:
+    - Item name: "Man. – Tors." (or the exact day text), price: "198", currency: "DKK"
+    - Item name: "Fre – Søn og Helligdage", price: "208", currency: "DKK"
+    - Do NOT repeat the category name as the item name
+    - Do NOT create a single item with the category name - split by day/time variants
+23) **ITEMS WITHOUT INDIVIDUAL PRICES** - When you encounter flat lists of dish or drink names under a section header with NO individual prices, extract EACH name as a separate item with price: null. Do NOT collapse them into a single combined item or omit them — they are real menu items whose price is set at the category or concept level (buffet, set menu, fixed-price, shared board, etc.). Filter/tab UI labels that appear immediately before item lists (e.g. subcategory names like "Hosomaki", "Uramaki", "Rød vin", "Hvid vin", "All") are structural navigation headers, not menu items — use them as category or subcategory context rather than extracting them as items. Within a single category, if the same item name appears more than once due to filter widget rendering, include it only once.
+24) **AD LIBITUM / ALL-YOU-CAN-EAT MENUS** - Some restaurants use an "all you can eat" buffet model where:
+    - Individual dishes have NO per-item prices (set price: null for all items)
+    - Pricing appears as separate "package" or "time period" tiers (e.g., "FROKOST 198 kr", "AFTEN 238 kr", "AD LIBITUM MED DRIKKE 399 kr")
+    - Extract the dish items normally under their category headings (KOREAN BBQ, SUSHI, DRIKKEVARER, etc.)
+    - Extract the pricing tiers as separate items under a category called "PRISER" or "PAKKER" with tier name as item name and tier price as price
+    - **BØRNE PRISER** (children's pricing) should be its own category with age-based pricing tiers as items
 
 EXAMPLE INPUT:
 "BRUNCH MENU
@@ -1250,6 +1373,35 @@ serve(async (req: Request) => {
       const urlLooksPdf = url.toLowerCase().split('?')[0].endsWith('.pdf')
       const isPdf = urlLooksPdf || probeCt.includes('pdf') || looksLikePdf(probeBytes)
 
+      // Check if URL is an image file (early detection to avoid unnecessary processing)
+      const urlLower = url.toLowerCase().split('?')[0]
+      const isImageUrl = urlLower.endsWith('.jpg') || urlLower.endsWith('.jpeg') || 
+                        urlLower.endsWith('.png') || urlLower.endsWith('.gif') || 
+                        urlLower.endsWith('.webp')
+      const isImageContentType = probeCt.includes('image/')
+      
+      if (isImageUrl || isImageContentType) {
+        console.error('❌ URL is a menu image - OCR extraction not yet supported')
+        await supabaseService
+          .from('menu_results_v2')
+          .update({
+            status: 'error',
+            error_message: 'Vi kan desværre ikke udtrække tekst automatisk fra menubilleder. Upload billedet manuelt eller brug menukort-siden i stedet.',
+            source_content_type: probeCt || 'image/*',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', resultId)
+        
+        return new Response(
+          JSON.stringify({
+            success: true,
+            resultId,
+            message: 'Image detected - extraction skipped',
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
       // Persist observed content type for observability.
       await supabaseService
         .from('menu_results_v2')
@@ -1324,44 +1476,67 @@ serve(async (req: Request) => {
             const menuEndTime = menuAvailabilityTime ? (menuPeriods[menuPeriods.length - 1]?.endTime ?? null) : null
             const enrichedStructured = { ...structured, menuPeriods, startTime: menuStartTime, endTime: menuEndTime }
 
-            // Infer service periods from menu title and normalize to canonical taxonomy
+            // Collect all service periods explicitly named in category headers.
+            // This handles pages that cover multiple service periods (e.g. lunch + dinner).
+            const explicitPeriods: string[] = []
+            for (const cat of structured.categories || []) {
+              const n = (cat.name || '').toLowerCase()
+              if ((n.includes('frokost') || n.includes('lunch')) && !explicitPeriods.includes('lunch'))
+                explicitPeriods.push('lunch')
+              if ((n.includes('aften') || n.includes('dinner') || n.includes('aftensmad')) && !explicitPeriods.includes('dinner'))
+                explicitPeriods.push('dinner')
+              if ((n.includes('brunch') || n.includes('morgenmad')) && !explicitPeriods.includes('brunch'))
+                explicitPeriods.push('brunch')
+              if ((n.includes('bar') || n.includes('cocktail')) && !explicitPeriods.includes('bar'))
+                explicitPeriods.push('bar')
+            }
+
             const menuTitle = structured.menuTitle || structured.categories?.[0]?.name || ''
             let rawPeriodName: string
-            
-            // Extract raw period name from menu title or time
-            if (menuTitle.toLowerCase().includes('brunch') || menuTitle.toLowerCase().includes('morgenmad')) {
-              rawPeriodName = 'brunch'
-            } else if (menuTitle.toLowerCase().includes('frokost') || menuTitle.toLowerCase().includes('lunch')) {
-              rawPeriodName = 'frokost'
-            } else if (menuTitle.toLowerCase().includes('aften') || menuTitle.toLowerCase().includes('dinner') || menuTitle.toLowerCase().includes('aftensmad')) {
-              rawPeriodName = 'aften'
-            } else if (menuTitle.toLowerCase().includes('bar') || menuTitle.toLowerCase().includes('cocktail') || menuTitle.toLowerCase().includes('drink')) {
-              rawPeriodName = 'bar'
-            } else if (menuPeriods.length > 0) {
-              // Check if this is an all-day menu (00:00-23:59 or similar)
-              const firstPeriod = menuPeriods[0]
-              const isAllDay = (firstPeriod.startTime === '00:00' && firstPeriod.endTime === '23:59') ||
-                               firstPeriod.type === 'all_day' ||
-                               firstPeriod.type === 'other'
-              
-              if (isAllDay) {
-                rawPeriodName = 'all_day'
-              } else {
-                // Infer from time for specific service periods
-                const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
-                if (startHour < 11) rawPeriodName = 'brunch'
-                else if (startHour >= 17) rawPeriodName = 'dinner'
-                else rawPeriodName = 'lunch'
-              }
+
+            if (explicitPeriods.length > 0) {
+              // Use the first detected period as the primary label
+              rawPeriodName = explicitPeriods[0]
             } else {
-              rawPeriodName = 'lunch'
+              // Existing fallback: infer from menuTitle, then from parsed menuPeriods timing
+              if (menuTitle.toLowerCase().includes('brunch') || menuTitle.toLowerCase().includes('morgenmad')) {
+                rawPeriodName = 'brunch'
+              } else if (menuTitle.toLowerCase().includes('frokost') || menuTitle.toLowerCase().includes('lunch')) {
+                rawPeriodName = 'frokost'
+              } else if (menuTitle.toLowerCase().includes('aften') || menuTitle.toLowerCase().includes('dinner') || menuTitle.toLowerCase().includes('aftensmad')) {
+                rawPeriodName = 'aften'
+              } else if (menuTitle.toLowerCase().includes('bar') || menuTitle.toLowerCase().includes('cocktail') || menuTitle.toLowerCase().includes('drink')) {
+                rawPeriodName = 'bar'
+              } else if (menuPeriods.length > 0) {
+                // Check if this is an all-day menu (00:00-23:59 or similar)
+                const firstPeriod = menuPeriods[0]
+                const isAllDay = (firstPeriod.startTime === '00:00' && firstPeriod.endTime === '23:59') ||
+                                 firstPeriod.type === 'all_day' ||
+                                 firstPeriod.type === 'other'
+                
+                if (isAllDay) {
+                  rawPeriodName = 'all_day'
+                } else {
+                  // Infer from time for specific service periods
+                  const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
+                  if (startHour < 11) rawPeriodName = 'brunch'
+                  else if (startHour >= 17) rawPeriodName = 'dinner'
+                  else rawPeriodName = 'lunch'
+                }
+              } else {
+                rawPeriodName = 'lunch'
+              }
             }
             
-            // Normalize to canonical taxonomy (brunch, lunch, dinner, all_day)
-            const servicePeriodName = normalizeProgrammeName(rawPeriodName)
-            const servicePeriods = [servicePeriodName]
+            // Normalize all detected periods to canonical taxonomy and store as array
+            // service_period_name holds the primary (first) period for backward compatibility
+            const servicePeriods = explicitPeriods.length > 0
+              ? explicitPeriods.map(p => normalizeProgrammeName(p))
+              : [normalizeProgrammeName(rawPeriodName)]
             
-            console.log(`📅 Service period: "${rawPeriodName}" → normalized to "${servicePeriodName}"`)
+            const servicePeriodName = servicePeriods[0]
+            
+            console.log(`📅 Service period${servicePeriods.length > 1 ? 's' : ''}: "${rawPeriodName}" → ${servicePeriods.join(', ')} (primary: ${servicePeriodName})`)
 
             const isSignature =
               menuTitle.toLowerCase().includes('signatur') ||
@@ -1549,6 +1724,36 @@ serve(async (req: Request) => {
         }
 
         const htmlCt = _stripContentType(htmlResp.headers.get('content-type'))
+        
+        // Check if URL is an image file
+        const urlLower = url.toLowerCase().split('?')[0]
+        const isImageUrl = urlLower.endsWith('.jpg') || urlLower.endsWith('.jpeg') || 
+                          urlLower.endsWith('.png') || urlLower.endsWith('.gif') || 
+                          urlLower.endsWith('.webp')
+        const isImageContentType = htmlCt.includes('image/')
+        
+        if (isImageUrl || isImageContentType) {
+          console.error('❌ URL is a menu image - OCR extraction not yet supported')
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'error',
+              error_message: 'Vi kan desværre ikke udtrække tekst automatisk fra menubilleder. Upload billedet manuelt eller brug menukort-siden i stedet.',
+              source_content_type: htmlCt || 'image/*',
+              completed_at: new Date().toISOString(),
+            })
+            .eq('id', resultId)
+          
+          return new Response(
+            JSON.stringify({
+              success: true,
+              resultId,
+              message: 'Image detected - extraction skipped',
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        
         if (htmlCt.includes('html')) {
           const htmlBytes = await readAtMostBytes(htmlResp, MAX_HTML_BYTES)
           const html = new TextDecoder('utf-8').decode(htmlBytes)
@@ -1575,12 +1780,18 @@ serve(async (req: Request) => {
             )
           }
           
-          const rawText = htmlToText(html)
+          // Extract JS gallery widget items first (before generic HTML-to-text muddies the signal)
+          const galleryExtract = extractJsGalleryMenuItems(html)
+          const rawText = galleryExtract 
+            ? galleryExtract + htmlToText(html)
+            : htmlToText(html)
           const llmText = cleanHtmlTextForLlm(rawText, MAX_EDGE_LLM_CHARS)
 
           // ALWAYS try Edge parsing for HTML (removed signal check)
           // GPT-4o-mini is cheap and fast - better to try and fail than pre-filter
           console.log(`🔍 Attempting Edge extraction for HTML (${llmText.length} chars)`)
+          if (galleryExtract) console.log(`✨ Detected JS gallery widget with ${galleryExtract.split('\n').length - 3} items`)
+          console.log(`📄 First 1500 chars of text sent to AI:\n${llmText.substring(0, 1500)}`)
           
           // Mark processing so Cloud Run won't claim it.
           await supabaseService
@@ -1657,48 +1868,71 @@ serve(async (req: Request) => {
                 endTime: menuAvailabilityTime ? (menuPeriods[menuPeriods.length - 1]?.endTime ?? null) : null,
               }
 
-              // ✨ NEW: Determine service periods from menu title/structure and normalize to canonical taxonomy
+              // Collect all service periods explicitly named in category headers.
+              // This handles pages that cover multiple service periods (e.g. lunch + dinner).
+              const explicitPeriods: string[] = []
+              for (const cat of structured.categories || []) {
+                const n = (cat.name || '').toLowerCase()
+                if ((n.includes('frokost') || n.includes('lunch')) && !explicitPeriods.includes('lunch'))
+                  explicitPeriods.push('lunch')
+                if ((n.includes('aften') || n.includes('dinner') || n.includes('aftensmad')) && !explicitPeriods.includes('dinner'))
+                  explicitPeriods.push('dinner')
+                if ((n.includes('brunch') || n.includes('morgenmad')) && !explicitPeriods.includes('brunch'))
+                  explicitPeriods.push('brunch')
+                if ((n.includes('bar') || n.includes('cocktail')) && !explicitPeriods.includes('bar'))
+                  explicitPeriods.push('bar')
+              }
+
               const menuTitle = structured.menuTitle || structured.categories?.[0]?.name || ''
               let rawPeriodName: string
-              
-              // Extract raw period name from menu title or time
-              if (menuTitle.toLowerCase().includes('brunch') || menuTitle.toLowerCase().includes('morgenmad')) {
-                rawPeriodName = 'brunch'
-              } else if (menuTitle.toLowerCase().includes('frokost') || menuTitle.toLowerCase().includes('lunch')) {
-                rawPeriodName = 'frokost'
-              } else if (menuTitle.toLowerCase().includes('aften') || menuTitle.toLowerCase().includes('dinner') || menuTitle.toLowerCase().includes('aftensmad')) {
-                rawPeriodName = 'aften'
-              } else if (menuTitle.toLowerCase().includes('bar') || menuTitle.toLowerCase().includes('cocktail') || menuTitle.toLowerCase().includes('drink')) {
-                rawPeriodName = 'bar'
-              } else if (menuPeriods && menuPeriods.length > 0) {
-                // Check if this is an all-day menu (00:00-23:59 or similar)
-                const firstPeriod = menuPeriods[0]
-                const isAllDay = (firstPeriod.startTime === '00:00' && firstPeriod.endTime === '23:59') ||
-                                 firstPeriod.type === 'all_day' ||
-                                 firstPeriod.type === 'other'
-                
-                if (isAllDay) {
-                  rawPeriodName = 'all_day'
-                } else {
-                  // Use timing from parsed menu periods to infer service type
-                  const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
-                  if (startHour < 11) {
-                    rawPeriodName = 'brunch'
-                  } else if (startHour >= 17) {
-                    rawPeriodName = 'dinner'
-                  } else {
-                    rawPeriodName = 'lunch'
-                  }
-                }
+
+              if (explicitPeriods.length > 0) {
+                // Use the first detected period as the primary label
+                rawPeriodName = explicitPeriods[0]
               } else {
-                rawPeriodName = 'lunch'
+                // Existing fallback: infer from menuTitle, then from parsed menuPeriods timing
+                if (menuTitle.toLowerCase().includes('brunch') || menuTitle.toLowerCase().includes('morgenmad')) {
+                  rawPeriodName = 'brunch'
+                } else if (menuTitle.toLowerCase().includes('frokost') || menuTitle.toLowerCase().includes('lunch')) {
+                  rawPeriodName = 'frokost'
+                } else if (menuTitle.toLowerCase().includes('aften') || menuTitle.toLowerCase().includes('dinner') || menuTitle.toLowerCase().includes('aftensmad')) {
+                  rawPeriodName = 'aften'
+                } else if (menuTitle.toLowerCase().includes('bar') || menuTitle.toLowerCase().includes('cocktail') || menuTitle.toLowerCase().includes('drink')) {
+                  rawPeriodName = 'bar'
+                } else if (menuPeriods && menuPeriods.length > 0) {
+                  // Check if this is an all-day menu (00:00-23:59 or similar)
+                  const firstPeriod = menuPeriods[0]
+                  const isAllDay = (firstPeriod.startTime === '00:00' && firstPeriod.endTime === '23:59') ||
+                                   firstPeriod.type === 'all_day' ||
+                                   firstPeriod.type === 'other'
+                  
+                  if (isAllDay) {
+                    rawPeriodName = 'all_day'
+                  } else {
+                    // Use timing from parsed menu periods to infer service type
+                    const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
+                    if (startHour < 11) {
+                      rawPeriodName = 'brunch'
+                    } else if (startHour >= 17) {
+                      rawPeriodName = 'dinner'
+                    } else {
+                      rawPeriodName = 'lunch'
+                    }
+                  }
+                } else {
+                  rawPeriodName = 'lunch'
+                }
               }
               
-              // Normalize to canonical taxonomy (brunch, lunch, dinner, all_day)
-              const servicePeriodName = normalizeProgrammeName(rawPeriodName)
-              const servicePeriods = [servicePeriodName]
+              // Normalize all detected periods to canonical taxonomy and store as array
+              // service_period_name holds the primary (first) period for backward compatibility
+              const servicePeriods = explicitPeriods.length > 0
+                ? explicitPeriods.map(p => normalizeProgrammeName(p))
+                : [normalizeProgrammeName(rawPeriodName)]
               
-              console.log(`📅 Service period (worker): "${rawPeriodName}" → normalized to "${servicePeriodName}"`)
+              const servicePeriodName = servicePeriods[0]
+              
+              console.log(`📅 Service period${servicePeriods.length > 1 ? 's' : ''} (worker): "${rawPeriodName}" → ${servicePeriods.join(', ')} (primary: ${servicePeriodName})`)
 
               // Detect signature dishes (look for special menu titles or categories)
               const isSignature = 
@@ -1845,6 +2079,27 @@ serve(async (req: Request) => {
                   .eq('id', resultId)
               }
             }
+        } else {
+          // Not HTML, not PDF, not image - unsupported content type
+          console.error(`❌ Unsupported content type: ${htmlCt}`)
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'error',
+              error_message: `Unsupported content type: ${htmlCt || 'unknown'}. Please provide an HTML page or PDF menu.`,
+              source_content_type: htmlCt || null,
+              completed_at: new Date().toISOString(),
+            })
+            .eq('id', resultId)
+          
+          return new Response(
+            JSON.stringify({
+              success: false,
+              resultId,
+              error: `Unsupported content type. Please provide an HTML page or PDF menu.`,
+            }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
         }
       }
     } catch (e) {

@@ -396,7 +396,7 @@ export function allocateContentTypes(
     
     return {
       ...post,
-      content_type: selectedType,
+      content_type: selectedType.toLowerCase(),  // ✅ FIX: Lowercase for database constraint
       type_rationale: rationale,
     };
   });

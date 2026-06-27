@@ -1,23 +1,25 @@
 -- ============================================================================
--- ADD LOCAL_LOCATION_REFERENCE TO create_business_onboarding FUNCTION
+-- MINIMAL ONBOARDING FUNCTION
 -- ============================================================================
--- Adds optional local_location_reference parameter to onboarding function
--- Allows website analysis to auto-populate authentic local place names
+-- Simplified onboarding that only collects:
+-- - User ID (from auth)
+-- - Business name (optional, defaults to "My Business")
+-- - Selected platforms (optional, defaults to facebook)
+-- Location and other details can be added later via settings
 -- ============================================================================
 
--- Update create_business_onboarding function to include local_location_reference
-DROP FUNCTION IF EXISTS public.create_business_onboarding(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[], TEXT);
+-- Drop all previous versions of the function
+DROP FUNCTION IF EXISTS public.create_business_onboarding(UUID, TEXT, TEXT, TEXT, TEXT, TEXT[]);
+DROP FUNCTION IF EXISTS public.create_business_onboarding(UUID, TEXT, TEXT, TEXT, TEXT, TEXT[], TEXT);
+DROP FUNCTION IF EXISTS public.create_business_onboarding(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[], TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.create_business_onboarding(UUID, TEXT, TEXT, TEXT, TEXT, TEXT[], TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.create_business_onboarding(UUID, TEXT, TEXT[]);
 
+-- Create minimal onboarding function
 CREATE OR REPLACE FUNCTION public.create_business_onboarding(
   p_user_id UUID,
   p_business_name TEXT,
-  p_business_vertical TEXT,
-  p_postal_code TEXT,
-  p_city TEXT,
-  p_country TEXT,
-  p_selected_platforms TEXT[],
-  p_website_url TEXT DEFAULT NULL,
-  p_local_location_reference TEXT DEFAULT NULL  -- NEW: Optional local place name
+  p_selected_platforms TEXT[]
 )
 RETURNS UUID
 LANGUAGE plpgsql
@@ -26,13 +28,10 @@ AS $$
 DECLARE
   v_business_id UUID;
 BEGIN
-  -- Create business record with optional website_url and local_location_reference
+  -- Create business record with minimal fields
   INSERT INTO public.businesses (
     owner_id,
     name,
-    vertical,
-    website_url,
-    local_location_reference,  -- NEW: Store local place name if provided
     primary_language,
     plan,
     created_at,
@@ -40,10 +39,7 @@ BEGIN
   )
   VALUES (
     p_user_id,
-    p_business_name,
-    p_business_vertical,
-    p_website_url,
-    p_local_location_reference,  -- NEW: Can be NULL if not extracted/provided
+    COALESCE(NULLIF(p_business_name, ''), 'My Business'),
     'da', -- Danish default
     'free', -- Free tier by default
     NOW(),
@@ -51,28 +47,10 @@ BEGIN
   )
   RETURNING id INTO v_business_id;
 
-  -- Create business location record
-  INSERT INTO public.business_locations (
-    business_id,
-    postal_code,
-    city,
-    country,
-    is_primary,
-    created_at
-  )
-  VALUES (
-    v_business_id,
-    p_postal_code,
-    p_city,
-    p_country,
-    TRUE, -- First location is primary
-    NOW()
-  );
-
-  -- Store selected platforms in profiles for backward compatibility
+  -- Store selected platforms in profiles
   UPDATE public.profiles
   SET
-    selected_platforms = to_jsonb(p_selected_platforms),
+    selected_platforms = to_jsonb(COALESCE(NULLIF(p_selected_platforms, ARRAY[]::TEXT[]), ARRAY['facebook'])),
     onboarding_completed = TRUE,
     updated_at = NOW()
   WHERE id = p_user_id;
@@ -82,7 +60,7 @@ END;
 $$;
 
 -- Grant execute permission to authenticated users
-GRANT EXECUTE ON FUNCTION public.create_business_onboarding(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT[], TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_business_onboarding(UUID, TEXT, TEXT[]) TO authenticated;
 
 -- Refresh PostgREST schema cache
 NOTIFY pgrst, 'reload schema';
@@ -90,18 +68,7 @@ NOTIFY pgrst, 'reload schema';
 -- ============================================================================
 -- NOTES
 -- ============================================================================
--- 1. Backward compatible: p_local_location_reference has DEFAULT NULL
---    - Old 8-parameter calls will work (local_location_reference will be NULL)
---    - New 9-parameter calls can include local_location_reference
---
--- 2. Auto-population flow:
---    - OnboardingPage analyzes website → extractBasicInfo returns localLocationReference
---    - OnboardingPage passes it to create_business_onboarding
---    - Stored in businesses.local_location_reference
---    - Used by brand-profile-generator-v5 for all AI prompts
---
--- 3. Examples of extracted values:
---    - "ved åen" (from "Café beliggende ved åen i Aarhus")
---    - "Nyhavn" (from "Restaurant lige midt i Nyhavn")
---    - "i Vesterbro" (from "Bar i Vesterbro")
+-- 1. Onboarding collects only name/email (from auth) + optional business name + optional platforms
+-- 2. Location fields (postal code, city, country) removed - can be added later
+-- 3. Business classification and enrichment happen after onboarding
 -- ============================================================================

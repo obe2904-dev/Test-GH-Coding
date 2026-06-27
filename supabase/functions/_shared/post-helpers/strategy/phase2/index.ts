@@ -18,6 +18,7 @@ import {
 } from '../ui-builders.ts';
 import { assembleBusinessIntelligence, formatBusinessIntelligenceForPrompt } from '../../assemble-business-intelligence.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { generateTimingRecommendation } from '../timing-intelligence.ts';
 
 export async function generateContentPlanSplit(
   context: WeekContext,
@@ -70,6 +71,52 @@ export async function generateContentPlanSplit(
 
   if (contentPlan.length === 0) {
     throw new Error('Phase 2a returned empty content plan');
+  }
+
+  // ── TIMING INTELLIGENCE ENRICHMENT ──
+  // Add context-driven timing recommendations to each post based on:
+  // - Weather patterns (outdoor seating opportunity)
+  // - Event proximity (booking lead days)
+  // - Service period decision windows
+  // - Booking behavior (reservation_required, walk-in friendly)
+  console.log('[Phase 2] Enriching posts with timing intelligence...');
+  
+  for (const slot of contentPlan) {
+    try {
+      // Determine service period from content type
+      const servicePeriod = inferServicePeriod(slot.type, slot.content_category, context);
+      
+      // Check for upcoming events near this post's suggested day
+      const postDate = new Date(slot.suggested_day);
+      const eventProximity = context.events?.map((evt: any) => {
+        const evtDate = new Date(evt.date);
+        const daysUntil = Math.round((evtDate.getTime() - postDate.getTime()) / (24 * 60 * 60 * 1000));
+        return {
+          event_name: evt.name || evt.type,
+          event_date: evt.date.split('T')[0],
+          days_until: daysUntil
+        };
+      }).filter((e: any) => e.days_until >= 0 && e.days_until <= 6)
+        .sort((a: any, b: any) => a.days_until - b.days_until)[0];
+      
+      // Generate timing recommendation
+      const timingRec = generateTimingRecommendation({
+        service_period: servicePeriod as any,
+        content_category: slot.content_category || 'craving_visual',
+        goal_mode: slot.goal_mode || 'build_brand',
+        weekContext: context,
+        available_days: context.available_days,
+        event_proximity: eventProximity
+      });
+      
+      // Enrich slot with timing metadata
+      (slot as any).timing_intelligence = timingRec;
+      
+      console.log(`[Phase 2] Post ${slot.id} timing: ${timingRec.timing_rationale}`);
+    } catch (err) {
+      console.warn(`[Phase 2] Failed to generate timing intelligence for post ${slot.id}:`, err);
+      // Continue without timing intelligence for this post
+    }
   }
 
   // ── 2b: Content Detailer (sequential to avoid rate limits) ──
@@ -205,4 +252,44 @@ export async function generateContentPlanSplit(
     strategic_priorities: strategicPriorities,
     post_ideas: postDetails,
   };
+}
+
+/**
+ * Infer service period from post type and content category
+ * Used by timing intelligence to determine decision windows
+ */
+function inferServicePeriod(type: string, category: string | undefined, context: WeekContext): string {
+  // Check if post mentions specific service periods in context
+  const programmes = (context as any).menu_programmes || [];
+  
+  // Menu items: infer from category or type
+  if (type === 'menu_item' || category === 'product_menu') {
+    // Check if business has specific programmes
+    if (programmes.length > 0) {
+      // Default to lunch if multiple programmes exist
+      const lunchProg = programmes.find((p: any) => p.programme_type === 'lunch');
+      if (lunchProg) return 'lunch';
+      
+      const dinnerProg = programmes.find((p: any) => p.programme_type === 'dinner');
+      if (dinnerProg) return 'dinner';
+      
+      const brunchProg = programmes.find((p: any) => p.programme_type === 'brunch');
+      if (brunchProg) return 'brunch';
+    }
+    
+    // Fallback: assume lunch for menu items
+    return 'lunch';
+  }
+  
+  // Behind scenes: usually morning/brunch prep
+  if (type === 'behind_scenes') return 'brunch';
+  
+  // Seasonal/atmosphere: all-day applicability
+  if (type === 'seasonal' || type === 'atmosphere') return 'all_day';
+  
+  // Bar/drinks: bar service
+  if (type === 'bar' || category === 'bar') return 'bar';
+  
+  // Default: all-day
+  return 'all_day';
 }

@@ -9,7 +9,7 @@ export const FREE_CTAS: Record<string, Record<string, string[]>> = {
     visit: [
       'Ses vi i dag? 😊',
       'Vi har åbent — og vi glæder os',
-      'Svip forbi efter arbejde 🍽️',
+      'Kom forbi når det passer dig 🍽️',
       'Se menuen og book bord 👇'
     ],
     social: [
@@ -49,7 +49,7 @@ export const FREE_CTAS: Record<string, Record<string, string[]>> = {
 }
 
 interface CTASelectionParams {
-  typicalClosings: string[]     // brand-specific CTA pool from brand_profile
+  typicalClosings: string[]     // LEGACY: brand-specific CTA pool from brand_profile
   language: string
   suggestionCtaIntent?: string  // explicit intent from suggestion
   resolvedGoalMode?: string     // weekly_plan goal mode used as fallback intent
@@ -59,6 +59,111 @@ interface CTASelectionParams {
   reservationRequired?: boolean  // booking pattern signal
   acceptsWalkIns?: boolean       // walk-in signal
   contentType?: string           // content type (determines if CTA needed)
+  
+  // NEW v5.6: Structured CTA library
+  ctaLibrary?: {
+    visit?: {
+      casual?: string[]
+      formal?: string[]
+    }
+    booking?: {
+      soft?: string[]
+      urgent?: string[]
+    }
+    engagement?: {
+      question?: string[]
+      social?: string[]
+    }
+    social_media?: string[]
+    signature_closing?: string
+  }
+  ctaPreferences?: {
+    default_style?: 'casual' | 'formal'
+    booking_priority?: 'soft' | 'urgent'
+    avoid_phrases?: string[]
+  }
+}
+
+/**
+ * NEW v5.6: Select CTA from brand-specific library
+ * Returns null if no suitable CTA found (fallback to legacy logic)
+ */
+function selectFromBrandLibrary(
+  ctaLibrary: NonNullable<CTASelectionParams['ctaLibrary']>,
+  ctaPreferences: CTASelectionParams['ctaPreferences'],
+  ctaIntent: string,
+  bookingLink: string | null,
+  reservationRequired: boolean,
+  acceptsWalkIns: boolean,
+  suggestionId: number | string
+): { cta: string } | null {
+  
+  let brandCTAPool: string[] | undefined
+  
+  // Select appropriate CTA pool based on intent and context
+  if (ctaIntent === 'visit') {
+    // Booking required → use booking CTAs
+    if (reservationRequired && bookingLink && ctaLibrary.booking) {
+      const priority = ctaPreferences?.booking_priority || 'soft'
+      brandCTAPool = ctaLibrary.booking[priority]
+    }
+    // Walk-in friendly → use casual visit CTAs
+    else if (acceptsWalkIns && !reservationRequired && ctaLibrary.visit) {
+      brandCTAPool = ctaLibrary.visit.casual
+    }
+    // Default visit → use preferred style
+    else if (ctaLibrary.visit) {
+      const style = ctaPreferences?.default_style || 'casual'
+      brandCTAPool = ctaLibrary.visit[style]
+    }
+  }
+  else if (ctaIntent === 'booking' && ctaLibrary.booking) {
+    const priority = ctaPreferences?.booking_priority || 'soft'
+    brandCTAPool = ctaLibrary.booking[priority]
+  }
+  else if (ctaIntent === 'engagement' && ctaLibrary.engagement) {
+    // Prefer question style for engagement
+    brandCTAPool = ctaLibrary.engagement.question || ctaLibrary.engagement.social
+  }
+  else if (ctaIntent === 'social' && ctaLibrary.engagement) {
+    brandCTAPool = ctaLibrary.engagement.social
+  }
+  else if (ctaIntent === 'save' && ctaLibrary.social_media) {
+    brandCTAPool = ctaLibrary.social_media
+  }
+  
+  // No suitable pool found
+  if (!brandCTAPool || brandCTAPool.length === 0) {
+    return null
+  }
+  
+  // Filter out avoided phrases
+  const avoidPhrases = ctaPreferences?.avoid_phrases || []
+  const filteredPool = brandCTAPool.filter(cta => 
+    !avoidPhrases.some(avoided => cta.toLowerCase().includes(avoided.toLowerCase()))
+  )
+  
+  if (filteredPool.length === 0) {
+    console.warn('⚠️ All brand CTAs filtered out by avoid_phrases, using unfiltered pool')
+    // Fall back to unfiltered if all CTAs were filtered
+    return selectCTAFromPool(brandCTAPool, suggestionId)
+  }
+  
+  return selectCTAFromPool(filteredPool, suggestionId)
+}
+
+/**
+ * Deterministic CTA selection from pool by cycling based on suggestion ID
+ */
+function selectCTAFromPool(pool: string[], suggestionId: number | string): { cta: string } {
+  // Deterministic selection by cycling (same idea always gets same CTA)
+  // String IDs (e.g. UUIDs from weekly_plan) are reduced to a numeric hash
+  const ctaIndex = (typeof suggestionId === 'number'
+    ? suggestionId
+    : [...String(suggestionId)].reduce((a, c) => a + c.charCodeAt(0), 0)
+  ) % pool.length
+  
+  return { cta: pool[ctaIndex] }
 }
 
 export interface CTASelection {
@@ -79,9 +184,31 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
     reservationRequired = false,
     acceptsWalkIns = false,
     contentType,
+    ctaLibrary,
+    ctaPreferences,
   } = params
 
+  // FIX 02: AWARENESS CONTENT TYPE GUARD
+  // Content types that are awareness/pull posts by nature — never conversion moments.
+  // These posts are same-day awareness, not pre-booking scenarios.
+  const AWARENESS_ONLY_TYPES = new Set([
+    'atmosphere',
+    'availability',
+    'behind_scenes',
+    'team_people',
+  ])
+
+  if (contentType && AWARENESS_ONLY_TYPES.has(contentType)) {
+    console.log('🎯 No booking CTA for awareness post type:', contentType)
+    return {
+      selectedCta: null,
+      ctaStyle: 'soft',
+      ctaIntent: 'awareness',
+    }
+  }
+
   // NO CTA for behind-the-scenes posts — craft speaks for itself
+  // (kept for backward compatibility, but now covered by AWARENESS_ONLY_TYPES)
   if (contentType === 'behind_scenes') {
     console.log('🎯 No CTA for behind_scenes post')
     return { 
@@ -102,7 +229,33 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
     || (isMenuPost ? 'visit' : 'social')
 
   // ═══════════════════════════════════════════════════════════════════════
-  // BOOKING PATTERN ADAPTATION
+  // NEW v5.6: BRAND CTA LIBRARY SELECTION (PRIORITY PATH)
+  // ═══════════════════════════════════════════════════════════════════════
+  
+  if (ctaLibrary) {
+    const brandCTAs = selectFromBrandLibrary(
+      ctaLibrary,
+      ctaPreferences,
+      ctaIntent,
+      bookingLink,
+      reservationRequired,
+      acceptsWalkIns,
+      suggestionId
+    )
+    
+    if (brandCTAs) {
+      const ctaStyle: 'strict' | 'soft' = (ctaIntent === 'visit' && !!bookingLink) ? 'strict' : 'soft'
+      console.log('🎯 CTA selected from brand library:', brandCTAs.cta, '(intent:', ctaIntent, ', style:', ctaStyle, ', source: brand_cta_library)')
+      return {
+        selectedCta: brandCTAs.cta,
+        ctaStyle,
+        ctaIntent
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // FALLBACK: LEGACY BOOKING PATTERN ADAPTATION
   // ═══════════════════════════════════════════════════════════════════════
   // Adjust CTA pool based on business booking pattern
   
@@ -116,7 +269,7 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
       da: [
         'Kom forbi i dag 😊',
         'Vi ses snart? ☕',
-        'Svip forbi når du er i nærheden',
+        'Hop forbi',
         'Vi glæder os til at se dig'
       ],
       sv: ['Titta förbi idag ☀️', 'Ses vi snart? 😊'],
@@ -131,7 +284,7 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
     const bookingFocusedCTAs: Record<string, string[]> = {
       da: [
         'Book bord online 👇',
-        'Reservér din plads 📅',
+        'Book dit bord 📅',
         'Se menuen og book bord',
         'Sikr dig et bord — book nu'
       ],

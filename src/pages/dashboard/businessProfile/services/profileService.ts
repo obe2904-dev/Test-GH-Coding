@@ -100,7 +100,7 @@ export async function saveBusinessProfile(data: ProfileData): Promise<void> {
     .from('businesses') as any)
     .update({
       name: data.businessName.trim() || 'Min Virksomhed',
-      vertical: data.businessSector ?? 'retail',
+      business_type_hybrid: data.businessSector ? { primary: data.businessSector, secondary: [], hybridLabel: data.businessSector } : null,
       category: data.businessCategory.trim() || null,
       website_url: data.websiteUrl.trim() || null,
       updated_at: new Date().toISOString()

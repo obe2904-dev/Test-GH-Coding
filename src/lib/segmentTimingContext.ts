@@ -49,7 +49,6 @@ export function getCurrentTimingContext(
   const hour = overrideTime 
     ? parseInt(overrideTime.time.split(':')[0], 10)
     : now.getHours()
-  const time = overrideTime?.time || `${String(hour).padStart(2, '0')}:00`
 
   // Determine time of day label
   let timeOfDayLabel = ''

@@ -140,6 +140,7 @@ export interface PostSpecification {
     media_direction?: string | null
     scene_spec?: string | null
     strategic_intent?: string | null
+    slot_reasoning?: string | null  // The "because" - why this strategic slot exists
     // Booking nudge display metadata (optional — only present on booking nudge posts)
     nudge_rationale?: string | null
     peak_day?: string | null                    // ISO date of targeted visit day

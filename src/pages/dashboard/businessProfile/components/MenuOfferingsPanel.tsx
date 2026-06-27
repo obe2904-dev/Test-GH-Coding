@@ -194,7 +194,16 @@ export function MenuOfferingsPanel({
     menuHandlers.setProcessingError('')
 
     try {
-      console.log('🔍 Detecting new menu URLs from:', websiteUrl)
+      // Normalize URL - add https:// if missing
+      let normalizedUrl = websiteUrl.trim()
+      if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+        normalizedUrl = `https://${normalizedUrl}`
+      }
+
+      console.log('🔍 Detecting new menu URLs from:', {
+        originalUrl: websiteUrl,
+        normalizedUrl
+      })
       
       // Import supabase
       const { supabase } = await import('../../../../lib/supabase')
@@ -212,13 +221,24 @@ export function MenuOfferingsPanel({
           'Authorization': `Bearer ${authToken}`
         },
         body: JSON.stringify({
-          url: websiteUrl,
+          url: normalizedUrl,
           businessId
         })
       })
 
       if (!response.ok) {
-        throw new Error('Vi kunne ikke analysere hjemmesiden. Tjek at linket virker.')
+        // Try to get the actual error message from the response
+        let errorMessage = 'Vi kunne ikke analysere hjemmesiden. Tjek at linket virker.'
+        try {
+          const errorData = await response.json()
+          if (errorData.error) {
+            errorMessage = errorData.error
+            console.error('🔴 Edge function error:', errorData.error)
+          }
+        } catch (e) {
+          console.error('🔴 Could not parse error response')
+        }
+        throw new Error(errorMessage)
       }
 
       const result = await response.json()

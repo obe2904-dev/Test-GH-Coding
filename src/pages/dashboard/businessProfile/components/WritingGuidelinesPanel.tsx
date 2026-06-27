@@ -3,7 +3,6 @@ import { useState } from 'react'
 interface WritingGuidelines {
   writing_rules: string[]
   voice_constraints: string
-  typical_openings: string[]
   signature_phrases: string[]
   content_anchors: string[]
   humor_level: string
@@ -216,52 +215,6 @@ export function WritingGuidelinesPanel({ guidelines, isLoading, onEdit }: Writin
                       +{guidelines.content_anchors.length - 3} mere
                     </span>
                   )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Typical Openings - Sentence Rhythm */}
-        {guidelines.typical_openings && guidelines.typical_openings.length > 0 && (
-          <div className="space-y-2 pt-3 border-t border-gray-100">
-            <button
-              onClick={() => toggleSection('typical_openings')}
-              className="w-full flex items-center justify-between text-left"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-indigo-600">🎵</span>
-                <span className="text-xs font-medium text-gray-700">Åbningsregister</span>
-                <span className="text-[10px] text-gray-400">(rytme og stemme)</span>
-              </div>
-              <svg 
-                className={`w-4 h-4 text-gray-400 transition-transform ${expandedSection === 'typical_openings' ? 'rotate-180' : ''}`} 
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            
-            {expandedSection === 'typical_openings' ? (
-              <div className="pl-6 space-y-2">
-                <div className="text-[11px] text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded mb-2">
-                  Hvordan din brand starter tekster — lån tonen, ikke indholdet
-                </div>
-                {guidelines.typical_openings.map((opening, i) => (
-                  <div 
-                    key={i} 
-                    className="text-xs text-gray-700 bg-indigo-50 border-l-2 border-indigo-400 pl-3 py-2 pr-2 rounded-r italic"
-                  >
-                    "{opening}"
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="pl-6">
-                <div className="text-xs text-gray-700 bg-indigo-50 border-l-2 border-indigo-400 pl-3 py-2 pr-2 rounded-r truncate italic">
-                  "{guidelines.typical_openings[0]}"
                 </div>
               </div>
             )}

@@ -14,13 +14,17 @@
 
 import { buildNeverSayList } from './never-say-config/builder.ts'
 import { getHospitalityRegisterBlock, countryToLangCode } from './utils/hospitality-register.ts'
-import { getBTSAnchors } from './post-helpers/bts-by-vertical.ts'
+import { getBTSAnchors, getBTSAnchorsFiltered } from './post-helpers/bts-by-vertical.ts'
+import { isValidBusinessCharacter } from './brand-profile/business-type-detection.ts'
 import { buildMenuMediaInstruction, buildBehindScenesMediaInstruction, buildAtmosphereMediaInstruction } from './media-suggestion/media-builders-typed.ts'
 
 function buildRecencyRationaleBlock(targetQualifier: string): string {
   return `
-   FORMAT: "[Sensorisk faktum om ingrediens/teknik]. Sidst fremhævet for [X] dage siden, hvilket [strategic value] til ${targetQualifier}"
-   FALLBACK HVIS RETTEN IKKE HAR EN TIDLIGERE MENTION: "[Sensorisk faktum om ingrediens/teknik]. Aldrig fremhævet endnu, hvilket [strategic value] til ${targetQualifier}"`
+   FORMAT: "[Sensorisk faktum om ingrediens/teknik], som [strategic value] til ${targetQualifier}"
+   
+   VIGTIGT: Fokusér på HVORFOR retten passer til situationen — IKKE på rotation eller "aldrig fremhævet".
+   Undgå: "aldrig fremhævet", "ikke postet før", "ny på sociale medier"
+   Fokus: Smag, ingredienser, timing, målgruppe, stemning`
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -134,6 +138,9 @@ export interface DagensPromptContext {
   touristContext?: string
   // Layer 5: user-provided context override (max 120 chars, typed at generation time)
   userContext?: string
+  
+  // NEW V5.6: Team/people content anchors
+  teamPeopleAnchors?: string[]  // Verified team roles and processes for BTS content
 }
 
 export interface SlotPlannerResult {
@@ -473,12 +480,36 @@ export function buildSharedContext(ctx: DagensPromptContext): string {
     ? `\n🚫 STEDSNAVN-REGEL: Stedet ligger "${ctx.localLocationReference}" — brug KUN denne betegnelse. Skriv ALDRIG "terrassen", "haven", "gården", "udeområdet" eller andre stedsbetegnelser der ikke er bekræftet ovenfor.`
     : ''
 
+  // V5.6 (June 22, 2026): Sanitize businessCharacter - should be SHORT, not full persona
+  const sanitizedBusinessCharacter = ctx.businessCharacter && isValidBusinessCharacter(ctx.businessCharacter)
+    ? ctx.businessCharacter
+    : null
+
   return `Forretning: ${ctx.businessName}${ctx.city ? `, ${ctx.city}` : ''}${servicePeriodHint}
-Type: ${ctx.effectiveVertical}${ctx.businessCharacter ? ` — ${ctx.businessCharacter}` : ''}${cuisineBlock}${programBlock}
+Type: ${ctx.effectiveVertical}${sanitizedBusinessCharacter ? ` — ${sanitizedBusinessCharacter}` : ''}${cuisineBlock}${programBlock}
 Vejr: ${ctx.weatherInfo} | Sæson: ${ctx.season}
 Dag: ${ctx.dayName} (${ctx.dayBehavior.danishMode}) | Weekend: ${ctx.isWeekend ? 'ja' : 'nej'}
 Dagsstemning: ${ctx.dayBehavior.emphasis}
 Udeservering: ${ctx.outdoorNote}${ctx.outdoorProhibitionBlock}${locationNamingRule}${programConstraint}${(ctx.audienceBreadth !== 'broad' && ctx.businessModelType !== 'offer_led' && ctx.targetAudienceText) ? `\nAktiv målgruppe: ${ctx.targetAudienceText}` : ''}${(ctx.audienceBreadth !== 'broad' && ctx.businessModelType !== 'offer_led' && ctx.activeSegmentAngle) ? `\nAnbefalet vinkel: ${ctx.activeSegmentAngle}` : ''}${ctx.priceLevel ? `\nPrisniveau: ${['', 'Budget', 'Casual', 'Middelklasse', 'Premium'][ctx.priceLevel] || ''}` : ''}${ctx.identityKeywords ? `\nNøgleord: ${ctx.identityKeywords}` : ''}`
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// HELPER: FREE TIER - Simplified Context Block (NO timing references)
+// ────────────────────────────────────────────────────────────────────────────
+
+export function buildFreeSharedContext(ctx: DagensPromptContext): string {
+  const cuisineBlock = getCuisineBlock(ctx.cuisineStyle)
+  
+  // V5.6: Sanitize businessCharacter - should be SHORT, not full persona
+  const sanitizedBusinessCharacter = ctx.businessCharacter && isValidBusinessCharacter(ctx.businessCharacter)
+    ? ctx.businessCharacter
+    : null
+
+  // FREE TIER: Simple context without timing, programs, or complex constraints
+  return `Forretning: ${ctx.businessName}${ctx.city ? `, ${ctx.city}` : ''}
+Type: ${ctx.effectiveVertical}${sanitizedBusinessCharacter ? ` — ${sanitizedBusinessCharacter}` : ''}${cuisineBlock}
+Vejr: ${ctx.weatherInfo} | Sæson: ${ctx.season}
+Udeservering: ${ctx.outdoorNote}${ctx.outdoorProhibitionBlock}${ctx.priceLevel ? `\nPrisniveau: ${['', 'Budget', 'Casual', 'Middelklasse', 'Premium'][ctx.priceLevel] || ''}` : ''}`
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -511,6 +542,35 @@ ${getHospitalityRegisterBlock(countryToLangCode(ctx.country ?? ''), ctx.effectiv
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// HELPER: FREE TIER - Simplified Writing Rules (NO timing references)
+// ────────────────────────────────────────────────────────────────────────────
+
+export function buildFreeSharedRules(ctx: DagensPromptContext, neverSayBlock: string): string {
+  const priceLevelFormalityHint = (() => {
+    const pl = ctx.priceLevel
+    if (pl === 1) return '\n💰 BUDGET-REGISTER: Hold sproget afslappet, direkte, nærværende. Undgå fancy-ord eller gourmet-jargon.'
+    if (pl === 4) return '\n💰 PREMIUM-REGISTER: Tillad et mere raffineret sprog, men stadig tilgængeligt. Undgå slang eller alt-for casual tone.'
+    if (pl === 2 || pl === 3) return '\n💰 CASUAL/MIDDELKLASSE: Balance mellem tilgængeligt og kvalitetsbevidst. Naturligt dansk uden overdreven formalitet.'
+    return ''
+  })()
+
+  // FREE TIER: Simple rules without timing constraints
+  return `──── SKRIVESTIL ────
+${getHospitalityRegisterBlock(countryToLangCode(ctx.country ?? ''), ctx.effectiveVertical)}${priceLevelFormalityHint}${neverSayBlock}${ctx.toneInstructions}
+⛔ ABSOLUTTE TITELREGLER (ingen undtagelse):
+- INGEN punktum i titlen — aldrig.
+- INGEN kolon der opdeler titlen i to dele.
+- INGEN "X venter", "X kalder", "X lokker" konstruktion — hverken mad- eller abstrakte substantiver.
+- INGEN interiørelement som titelsubjekt — lys, vinduer, gulve, rum er kulisse, ikke protagonister.
+- Titlen er EN sammenhængende sætning. 3–7 ord. Aktiv konstruktion. Naturligt dansk.${ctx.voiceRationale ? `\n🚫 REGISTERVAGT: ${ctx.voiceRationale}` : ''}
+
+⛔ FOKUS for why_explanation:
+- Beskriv HVORFOR retten/situationen appellerer til gæster
+- Hold fokus på smag, kvalitet, stemning og oplevelse
+- Undgå tekniske detaljer og tidspunkter`
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // TIMING SIGNAL HELPERS
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -522,6 +582,11 @@ function seasonInDanish(season: string): string {
 /** Builds a concrete timing-facts block to inject into slot prompts.
  *  Gemini is required to cite at least one of these values in why_explanation. */
 function buildTimingSignalBlock(ctx: DagensPromptContext, options?: { isFollowUpSlot?: boolean; targetPostTime?: string; targetSegmentTime?: string; targetServiceWindow?: { name: string; start: string; end: string } }): string {
+  // FREE TIER: No timing signals - keep it clean and simple
+  if (!ctx.isPaidTier) {
+    return ''
+  }
+  
   const lines: string[] = []
   
   // ── FIX #1: Suppress generation time for follow-up slots ──
@@ -596,8 +661,33 @@ function buildTimingSignalBlock(ctx: DagensPromptContext, options?: { isFollowUp
 
   // ── PRIMARY TIMING ANCHOR: Active service period (with time window) ──
   // This should be the FIRST thing Gemini sees and uses in rationales
+  // FIX (June 24, 2026): Add post-service guard to prevent suggesting ended periods
   if (ctx.currentProgram) {
-    lines.push(`- 🍽️ AKTIV SERVICE-PERIODE: ${ctx.currentProgram.name} (${ctx.currentProgram.start}–${ctx.currentProgram.end}) — vi serverer dette menukort lige nu`)
+    // Verify the program hasn't ended by checking against current hour
+    const programEndMins = ctx.currentProgram.end.split(':').map(Number).reduce((h, m) => h * 60 + m)
+    const currentMins = ctx.currentHour * 60
+    const isProgramEnded = currentMins >= programEndMins
+    
+    if (isProgramEnded) {
+      // Service period has ENDED - add explicit guard
+      lines.push(`- ⏰ VIGTIG TIMING-REGEL: ${ctx.currentProgram.name} er AFSLUTTET (sluttede kl. ${ctx.currentProgram.end})`)
+      lines.push(`- ⚠️ UNDGÅ at skrive "Vi serverer ${ctx.currentProgram.name} lige nu" — serviceperioden er FORBI`)
+      lines.push(`- ✅ PÅKRÆVET framing: Brug fremtidsrettet sprog om næste service ELLER nutids stemning/atmosfære (ikke mad)`)
+      
+      // Try to find next upcoming service period
+      if (ctx.allPrograms && ctx.allPrograms.length > 1) {
+        const nextProgram = ctx.allPrograms.find(p => {
+          const startMins = p.start.split(':').map(Number).reduce((h, m) => h * 60 + m)
+          return startMins > currentMins
+        })
+        if (nextProgram) {
+          lines.push(`- 🔜 NÆSTE SERVICE: ${nextProgram.name} starter kl. ${nextProgram.start}`)
+        }
+      }
+    } else {
+      // Service period is ACTIVE - normal handling
+      lines.push(`- 🍽️ AKTIV SERVICE-PERIODE: ${ctx.currentProgram.name} (${ctx.currentProgram.start}–${ctx.currentProgram.end}) — vi serverer dette menukort lige nu`)
+    }
   } else if (ctx.activeServicePeriod && ctx.activeServicePeriod !== 'all_day') {
     const periodLabel: Record<string, string> = { 
       dinner: 'aftensmad', 
@@ -611,7 +701,17 @@ function buildTimingSignalBlock(ctx: DagensPromptContext, options?: { isFollowUp
       label.includes(p.name.toLowerCase())
     )
     if (program) {
-      lines.push(`- 🍽️ AKTIV SERVICE-PERIODE: ${label} (${program.start}–${program.end})`)
+      // Check if this period has ended
+      const programEndMins = program.end.split(':').map(Number).reduce((h, m) => h * 60 + m)
+      const currentMins = ctx.currentHour * 60
+      const isProgramEnded = currentMins >= programEndMins
+      
+      if (isProgramEnded) {
+        lines.push(`- ⏰ VIGTIG TIMING-REGEL: ${label} (${program.start}–${program.end}) er AFSLUTTET`)
+        lines.push(`- ⚠️ UNDGÅ "serverer ${label} lige nu" — brug fremtidsrettet eller atmosfære-fokus`)
+      } else {
+        lines.push(`- 🍽️ AKTIV SERVICE-PERIODE: ${label} (${program.start}–${program.end})`)
+      }
     } else {
       lines.push(`- 🍽️ AKTIV SERVICE-PERIODE: ${label}`)
     }
@@ -812,7 +912,7 @@ export function buildSlotAPrompt(
   return `Du er social media manager for ${ctx.businessName}. Generer ÉT post-forslag til SLOT A – TILBUD.
 
 ──── KONTEKST ────
-${sharedCtx}${ctx.calendarEventFacts.length > 0 ? `\nKommende events (reference): ${ctx.calendarEventFacts.slice(0, 2).join(' | ')}` : ''}${ctx.isHybridBusiness ? `\nAktiv profil nu (kl. ${ctx.currentHour}): ${ctx.effectiveVertical} — matche denne profil.` : ''}
+${sharedCtx}${ctx.calendarEventFacts.length > 0 ? `\nKommende events (reference): ${ctx.calendarEventFacts.slice(0, 2).join(' | ')}` : ''}${ctx.isHybridBusiness && ctx.isPaidTier ? `\nAktiv profil nu (kl. ${ctx.currentHour}): ${ctx.effectiveVertical} — matche denne profil.` : ctx.isHybridBusiness ? `\nAktiv profil: ${ctx.effectiveVertical} — matche denne profil.` : ''}
 Bekræftede facts: Børnemenu: ${ctx.hasKidsMenu ? 'JA' : 'NEJ'} | Takeaway: ${ctx.hasTakeaway ? 'JA' : 'NEJ'}
 
 ──── MENU (vælg herfra) ────
@@ -824,10 +924,15 @@ ${slotAProductRule}
 → ⛔ ABSOLUT KRAV: Du SKAL vælge en ret der IKKE er på listen "Retter brugt nyligt" ovenfor. ALLE retter på listen er FORBUDT — uanset hvor mange dage siden (0-6 dage = seneste uge). Vælg ALTID en anden ret fra menuen. Dette er ikke et forslag — det er en hård regel.
 → dish_text_brief: List den valgte rets ingredienser/karakteristika direkte fra menulisten. Inkluder ALLE ingredienser medmindre retten har 7+ komponenter — vælg da de 5-6 mest visuelle eller smags-definerende. Undgå generiske: "sauce", "salat", "brød". Foretruk specifikke: "syltede rødløg", "24h-marineret kylling".
 → TITLEN SKAL være grammatisk komplet — aldrig afbrudt midt i sætning, altid med korrekt tegnsætning.
-→ FORMAT-EKSEMPLER til titel (erstat [RET] med din valgte ret):
+${ctx.isPaidTier 
+  ? `→ FORMAT-EKSEMPLER til titel (erstat [RET] med din valgte ret):
   "[RET] og en times pause"
   "To tallerkener [RET] til middag"
-  "Frokosttid: [RET] klar nu"
+  "Frokosttid: [RET] klar nu"`
+  : `→ FORMAT-EKSEMPLER til titel (erstat [RET] med din valgte ret):
+  "[RET] og en times pause"
+  "To tallerkener [RET] på bordet"
+  "[RET] venter på dig"`}
 → Tilbud-tone: ${ctx.dayBehavior.offeringTone}
 
 ⏱️ ARBEJDSKONTEKST FOR EJEREN: Dette er en LYNHURTIG arbejdsgang ("POST NU"). Ejeren skal kunne poste INDEN FOR 5 MINUTTER — valget skal være objektivt: "Har vi denne ret? Ja/Nej" og IKKE kræve koordinering med team eller strategiske vurderinger.
@@ -861,15 +966,15 @@ ${buildRecencyRationaleBlock('[audience/tidspunkt]')}
    ❌ "Passer til sæsonen" (generisk — hvad specifikt matcher?)
    ❌ "klassiker", "hyggelig", "[ugedag]sstemning" (vage meninger)
    
-  ✅ GOD: "Hjemmelavet pastadej med svampe og trøffel. Sidst fremhævet for 6 dage siden, hvilket giver frisk synlighed til aftensgæster kl. 19:30"
-  ✅ GOD: "Hjemmelavet pastadej med svampe og trøffel. Aldrig fremhævet endnu, hvilket giver frisk synlighed til aftensgæster kl. 19:30"
+  ✅ GOD: "Hjemmelavet pastadej med svampe og trøffel, som giver fyldig smag til aftensgæster kl. 19:30"
+  ✅ GOD: "Flanksteak med chimichurri, som matcher perfekt til det gode vejr og udeservering ved åen"
   ❌ DÅRLIG: "Denne ret er ikke fremhævet for nylig og passer til torsdagsstemningen"
 
 ✅ GODT EKSEMPEL:
-"Vi serverer frokost lige nu (12:00-15:00) — Faustburger passer perfekt til frokosten. Sidst fremhævet for 8 dage siden, hvilket giver frisk synlighed til gæster i den aktive service-periode."
+"Vi serverer frokost lige nu (12:00-15:00) — Faustburger passer perfekt til frokosten med sin kraftige smag og sprøde brød, som appellerer til gæster i den aktive service-periode."
 
 ❌ DÅRLIGT EKSEMPEL:
-"Køkkenet åbner kl. Denne ret er ikke fremhævet i den seneste uge og passer til den let festlige torsdagsstemning."
+"Køkkenet åbner kl. Denne ret passer til den let festlige torsdagsstemning."
 
 ⛔ FORBUDT:
 - "klassiker", "hyggelig", "passer til sæsonen" som standalone
@@ -879,17 +984,22 @@ ${buildRecencyRationaleBlock('[audience/tidspunkt]')}
 
 ` : ''}occasion_context FORMAT — 1 SÆTNING (creative brief for Stage 2 AI):
 Beskriv SITUATIONEN eller LEJLIGHEDEN der gør denne ret relevant NU.
-- Brug konkrete udtryk: "ved åen", "frokostpause", "aftensmøde", "weekend brunch"
+- Brug konkrete udtryk: "ved åen", ${ctx.isPaidTier ? '"frokostpause", "aftensmøde", ' : ''}"weekend brunch"
 - Fokuser på GÆSTens moment, ikke stedet eller retten
 - Vær konkret og sensorisk — undgå abstrakt marketing-sprog
 
 EKSEMPLER på occasion_context:
-✅ "Frokostpause ved åen midt på dagen"
+${ctx.isPaidTier 
+  ? `✅ "Frokostpause ved åen midt på dagen"
 ✅ "Weekend brunch når solen rammer bordet"
 ✅ "Aftensmøde efter arbejdstid med kollegerne"
-✅ "Rolig eftermiddagskaffe mellem to ærinder"
+✅ "Rolig eftermiddagskaffe mellem to ærinder"`
+  : `✅ "Pause ved åen når solen skinner"
+✅ "Weekend brunch når solen rammer bordet"
+✅ "Møde med kollegerne over en kop kaffe"
+✅ "Rolig eftermiddag mellem ærinder"`}
 ❌ "Dette er det perfekte tidspunkt" (for generisk)
-❌ "Kl. 13:00 i frokostservicen" (for system-level)
+${ctx.isPaidTier ? `❌ "Kl. 13:00 i frokostservicen" (for system-level)` : `❌ "Den bedste tid på dagen" (for generisk)`}
 
 media_suggestion: Trin-for-trin guide til mobiltelefon-foto (3 imperative sætninger):
 ${buildMenuMediaInstruction({ isCravingVisual: false, language: 'da' })}${avoidSection}
@@ -970,9 +1080,9 @@ why_explanation FORMAT — 3 sætninger med strategisk rationale:
 ${buildRecencyRationaleBlock('[audience] kl. [targetPostTime]')}
    
    EKSEMPLER:
-   ✅ "Andeconfit med sitrus og sprød overflade. Ikke vist i 6 dage, hvilket giver frisk synlighed til aftensgæster kl. 19:30"
-   ✅ "Hjemmelavet pastadej med sæsonsvampe. Aldrig fremhævet — introducerer signaturret til aftensegmentet"
-   ❌ "Denne ret er ikke fremhævet for nylig og passer til aftensstemningen" (mangler sensorisk + specifik værdi)
+   ✅ "Andeconfit med sitrus og sprød overflade, som tilbyder en raffineret oplevelse til aftensgæster kl. 19:30"
+   ✅ "Hjemmelavet pastadej med sæsonsvampe, som introducerer signaturret til aftensegmentet"
+   ❌ "Denne ret passer til aftensstemningen" (mangler sensorisk + specifik værdi)
 (c) KONTRAST: I ét konkret led — hvad tilbyder DENNE ret gæsten, som adskiller sig fra Slot A's valg? Fx: en anden service-periode (aftensmad vs. frokost), sensorisk kontrast (let vs. fyldigt), eller en social anledning retten passer særlig godt til. Intet system-sprog om slots.
 ❌ UNDGÅ: imperativ-tone, tilbudssprog, "forkæl dig selv", "kom ind", "nyd", system-jargon ("slots", "tilbuds-slots").
 
@@ -1085,12 +1195,39 @@ export function buildSlotCPrompt(
     ctx.effectiveVertical ?? null,
   )
   
+  // V5.6 (June 22, 2026): Use filtered BTS anchors to prevent hallucinations
+  // Extract menu data for validation
+  const menuCategories = ctx.menuCategories?.map(cat => cat.catName) ?? []
+  const menuItemsText = ctx.menuCategories
+    ?.flatMap(cat => cat.items.map(item => `${item.name} ${item.description || ''}`))
+    .join(' ') ?? ''
+  
+  // Extract verified facilities (if available in context - may need to be added)
+  const verifiedFacilities = {
+    has_outdoor_seating: ctx.outdoorSuitability ?? undefined,
+    has_bar: ctx.effectiveVertical === 'bar' || ctx.effectiveVertical === 'cocktail_bar' || ctx.effectiveVertical === 'wine_bar',
+    has_kitchen: ctx.effectiveVertical === 'restaurant' || ctx.effectiveVertical === 'cafe' || ctx.effectiveVertical === 'bakery',
+    serves_coffee: menuItemsText.toLowerCase().includes('kaffe') || menuItemsText.toLowerCase().includes('coffee'),
+    serves_alcohol: menuItemsText.toLowerCase().includes('vin') || menuItemsText.toLowerCase().includes('wine') || menuItemsText.toLowerCase().includes('øl') || menuItemsText.toLowerCase().includes('beer') || menuItemsText.toLowerCase().includes('cocktail'),
+  }
+  
   const btsAnchors = effectiveSlotC === 'behind_scenes'
-    ? getBTSAnchors(ctx.effectiveVertical, ctx.currentHour)
+    ? getBTSAnchorsFiltered(
+        ctx.effectiveVertical, 
+        ctx.currentHour,
+        menuCategories,
+        menuItemsText,
+        verifiedFacilities
+      )
     : []
   
   const btsAnchorsBlock = btsAnchors.length > 0
     ? `\n→ BTS INSPIRATIONSVINKLER (vælg én som udgangspunkt — disse er spørgsmål, ikke krav. Kombiner med konkrete facts fra BEKRÆFTEDE FACTS):\n${btsAnchors.map(a => `  • ${a}`).join('\n')}`
+    : ''
+  
+  // NEW V5.6: Team/people anchors (verified roles and processes)
+  const teamPeopleAnchorsBlock = (effectiveSlotC === 'behind_scenes' && ctx.teamPeopleAnchors && ctx.teamPeopleAnchors.length > 0)
+    ? `\n\n→ BEKRÆFTEDE TEAM/PROCES-FACTS (brug KUN disse — opfind IKKE roller eller processer):\n${ctx.teamPeopleAnchors.map(a => `  • ${a}`).join('\n')}`
     : ''
 
   const slotCHeader = effectiveSlotC === 'behind_scenes' ? 'BAG FACADEN' : 'BRAND/INVITATION'
@@ -1148,7 +1285,7 @@ Eksempel på GRÆNSEN:
 → TITLEN SKAL være grammatisk komplet — aldrig afbrudt midt i sætning, altid med korrekt tegnsætning.
 → Sælg oplevelsen som svar på en social situation. Invitér — beskriv ikke.
 → FORBUDT: passiv stedsbeskrivelse, ruminventar, lys og overflader som titelsubjekt`}${ctx.emotionalPromise ? `\n→ 💡 BRANDFØLELSE: ${ctx.emotionalPromise}` : ''}${ctx.contentExclusions ? `\n→ 🚫 ALDRIG I DETTE OPSLAG: ${ctx.contentExclusions}` : ''}
-→ Aktivitetsvindue i køkken/service lige nu: ${btsActivityWindow}${btsAnchorsBlock}
+→ Aktivitetsvindue i køkken/service lige nu: ${btsActivityWindow}${btsAnchorsBlock}${teamPeopleAnchorsBlock}
 → concrete_anchor: Vælg ÉT faktum fra BEKRÆFTEDE FACTS ovenfor. MAKS 80 tegn — ét faktum, én kort sætning, ingen forklaring.${effectiveSlotC === 'behind_scenes' ? (ctx.isPaidTier ? ' Anker SKAL handle om en PERSON, NAVNGIVEN PRAKSIS eller TEAMHANDLING — IKKE et rum, møbel eller klargøringsoperation.' : ' Anker SKAL handle om en PERSON eller HVAD gæsten får — ALDRIG HOW noget laves med mindre det er verificeret i BEKRÆFTEDE FACTS.') : ' En konkret handling, et rum eller en service er alle gyldige.'}
   FORBUDT: "varmen fra teamet", "den gode energi bag kulisserne", "vores passion" — meninger, ikke fakta.${ctx.isPaidTier ? '' : '\n  HUSK GRÆNSEN: Hvis det ikke står i BEKRÆFTEDE FACTS eller MENU, må du ikke skrive det.'}${effectiveSlotC === 'behind_scenes'
     ? (ctx.isPaidTier 
@@ -1189,4 +1326,305 @@ Svar KUN med ét JSON-objekt (ingen array) — UNDGÅ at tilføje felter der IKK
   "content_type": "${slotCType}",
   "slot": "brand_behind"
 }`
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// UNIFIED PROMPT BUILDER (Phase 1 Refactor - June 2026)
+// ────────────────────────────────────────────────────────────────────────────
+// Combines all 3 slots (A, B, C) into a single AI call for improved efficiency
+// Reduces from 4 AI calls (planner + 3 slots) to 2 AI calls (planner + unified)
+// Maintains all slot-specific rules while eliminating redundant context passing
+
+/**
+ * Build unified prompt for all 3 slots in a single AI call
+ * 
+ * @param ctx - Full dagens prompt context
+ * @param slotTypes - Array of slot types from planner: [slotA, slotB, slotC]
+ * @param sharedCtx - Shared context block
+ * @param sharedRules - Shared rules block
+ * @param menuBlock - Menu block for slot A and menu-based slot B
+ * @param recentSlotASection - Recent dishes section
+ * @param confirmedFactsSlotBBlock - Facts for slot B
+ * @param confirmedFactsSlotCBlock - Facts for slot C
+ * @param avoidSection - Never-say list
+ * @param options - Optional targeting (time, segment, service window)
+ * @returns Combined prompt requesting JSON array with 3 suggestions
+ */
+export function buildUnifiedPrompt(
+  ctx: DagensPromptContext,
+  slotTypes: { slotA: string; slotB: string; slotC: string },
+  sharedCtx: string,
+  sharedRules: string,
+  menuBlock: string,
+  recentSlotASection: string,
+  confirmedFactsSlotBBlock: string,
+  confirmedFactsSlotCBlock: string,
+  avoidSection: string,
+  options?: {
+    isFollowUpSlot?: boolean
+    targetPostTime?: string
+    targetSegmentTime?: string
+    targetServiceWindow?: { name: string; start: string; end: string }
+  }
+): string {
+  const isBarVertical = ctx.effectiveVertical === 'bar'
+  const isBakeryVertical = ctx.effectiveVertical === 'bakery'
+  const isCoffeeVertical = ctx.effectiveVertical === 'coffee_shop'
+  
+  // Cuisine context for menu items (from rotation queue)
+  const cuisineBlock = ctx.cuisineStyle 
+    ? `\n──── KULINARISK KONTEKST ────\nKulinarisk stil: ${ctx.cuisineStyle}\nBrug denne kontekst til at frame menu-retter kulturelt korrekt.`
+    : ''
+
+  return `Du er social media manager for ${ctx.businessName}. Generer 3 post-forslag (Slot A, B, C) i ÉN JSON-array.
+
+──── FÆLLES KONTEKST ────
+${sharedCtx}${cuisineBlock}${ctx.calendarEventFacts.length > 0 ? `\nKommende events: ${ctx.calendarEventFacts.slice(0, 2).join(' | ')}` : ''}${ctx.isHybridBusiness && ctx.isPaidTier ? `\nAktiv profil nu (kl. ${ctx.currentHour}): ${ctx.effectiveVertical}` : ''}
+Bekræftede facts: Børnemenu: ${ctx.hasKidsMenu ? 'JA' : 'NEJ'} | Takeaway: ${ctx.hasTakeaway ? 'JA' : 'NEJ'}
+
+──── MENU ────
+${menuBlock}${recentSlotASection}
+${sharedRules}${avoidSection}
+
+════════════════════════════════════════════════════════════════════════════════
+SLOT A – TILBUD (${slotTypes.slotA})
+════════════════════════════════════════════════════════════════════════════════
+
+${isBarVertical
+  ? '→ Vælg en DRINK, cocktail, vin eller deletallerken — bar/drinkskoncept. IKKE generiske mad-retter.'
+  : isBakeryVertical
+    ? '→ Vælg ét BAGVÆRK, brød eller kage fra menuen — bageri/konditori produkt.'
+    : isCoffeeVertical
+      ? '→ Vælg én KAFFEDRIK, te eller bagværk — kaffebar produkt.'
+      : '→ Vælg KUN egentlige måltider (forret, main, dessert, brunch-ret) — IKKE snacks, nibbles, dips.'}
+
+→ ⛔ ABSOLUT KRAV: Vælg en ret der IKKE er på "Retter brugt nyligt" listen.
+→ dish_text_brief: List rettens ingredienser direkte fra menuen. Inkluder ALLE ingredienser (max 5-6 hvis 7+).
+→ TITLEN SKAL være grammatisk komplet med korrekt tegnsætning.
+${ctx.isPaidTier ? `→ FORMAT-EKSEMPLER: "[RET] og en times pause", "Frokosttid: [RET] klar nu"` : `→ FORMAT-EKSEMPLER: "[RET] på bordet", "[RET] venter på dig"`}
+
+${buildTimingSignalBlock(ctx, options)}
+
+${ctx.isPaidTier ? `why_explanation (2 sætninger):
+(a) TIDSVINDUE — vælg den første der passer:
+   1. Aktiv service-periode: "Vi serverer frokost lige nu (12:00-15:00)"
+   2. Nuværende tidspunkt: "Klokken nærmer sig ${ctx.currentHour}:00"
+   3. KUN hvis ikke åbent endnu: "Stedet åbner kl. [open]"
+${ctx.outdoorNote?.includes('PERFEKT') ? '   🌤️ VEJR: Nævn perfekt udeservering i denne sætning.\n' : ''}
+(b) DETTE VALG — kombiner: SENSORISK → STRATEGISK VÆRDI
+${buildRecencyRationaleBlock('[audience/tidspunkt]')}
+
+✅ GOD: "Hjemmelavet pastadej med svampe og trøffel, som giver fyldig smag til aftensgæster kl. 19:30"
+❌ DÅRLIG: "Denne ret passer til torsdagsstemningen"
+` : ''}
+occasion_context (1 sætning): Konkret situation/lejlighed der gør retten relevant NU.
+${ctx.isPaidTier 
+  ? '✅ "Frokostpause ved åen midt på dagen", "Weekend brunch når solen rammer bordet"'
+  : '✅ "Pause ved åen når solen skinner", "Weekend brunch når solen rammer bordet"'}
+
+media_suggestion: 3 imperative sætninger til mobiltelefon-foto.
+
+════════════════════════════════════════════════════════════════════════════════
+SLOT B – GÆST-MOMENT (${slotTypes.slotB})
+════════════════════════════════════════════════════════════════════════════════
+
+${confirmedFactsSlotBBlock}
+
+${slotTypes.slotB === 'menu_item' || slotTypes.slotB === 'drink'
+  ? `→ Vælg en ret/drink fra menuen ovenfor (IKKE samme som Slot A)
+→ menu_item_name: SPECIFIKT rettens navn — IKKE kategori-overskrift`
+  : `→ INGEN menu_item_name felt — dette er et ${slotTypes.slotB} opslag
+→ Fokuser på gæstens oplevelse/moment — IKKE på retten`}
+
+→ concrete_anchor: Vælg ÉT faktum fra BEKRÆFTEDE FACTS. Maks 80 tegn.
+${ctx.isPaidTier ? `why_explanation (3 sætninger): Begrund valget strategisk — HVEM, HVAD, HVORFOR.` : ''}
+occasion_context (1 sætning): Beskriv gæst-momentet/situationen.
+
+════════════════════════════════════════════════════════════════════════════════
+SLOT C – ${slotTypes.slotC === 'behind_scenes' ? 'BAG FACADEN' : 'BRAND/ATMOSFÆRE'} (${slotTypes.slotC})
+════════════════════════════════════════════════════════════════════════════════
+
+${confirmedFactsSlotCBlock}${ctx.visualCharacter ? `\nKonceptkarakter: ${ctx.visualCharacter}` : ''}${ctx.venueScene ? `\nScenestemning: ${ctx.venueScene}` : ''}
+
+${slotTypes.slotC === 'behind_scenes'
+  ? (ctx.isPaidTier
+      ? `→ VIS MENNESKENE bag oplevelsen — teamet, medarbejder, service-praksis.
+→ TITLEN skal handle om PERSON, RELATION eller HANDLING — aldrig rum eller ting.
+→ FORMAT-EKSEMPLER: "Samme ansigt bag baren hver onsdag", "Line kender din ordre inden du sætter dig"`
+      : `→ DU ER OBSERVATØR — beskriver præcist hvad der ER.
+→ GRÆNSE: KUN verificerbare facts fra BEKRÆFTEDE FACTS.
+→ TITLEN om PERSON, RELATION eller HVAD gæsten får — ALDRIG HOW (med mindre i FACTS).
+→ FORBUDT: Opfundet tilberedning ("Vi hakker selv...", "Fra egen have...") med mindre EKSPLICIT i FACTS`)
+  : `→ SOCIAL INVITATION: Hvilken anledning eller stemning gør stedet til det rigtige valg NU?
+→ Sælg oplevelsen som svar på social situation.
+→ FORBUDT: Passiv stedsbeskrivelse, ruminventar.`}
+
+→ concrete_anchor: ÉT faktum fra BEKRÆFTEDE FACTS. Maks 80 tegn.${slotTypes.slotC === 'behind_scenes' ? ' Skal handle om PERSON/PRAKSIS/HVAD gæsten får.' : ' Handling, rum eller service.'}
+${ctx.isPaidTier ? `why_explanation (3 sætninger): Strategisk rationale — aktivt segment, dag, variation i historik.` : ''}
+occasion_context (1 sætning): ${slotTypes.slotC === 'behind_scenes' ? 'Hvad sker bag facaden lige nu.' : 'Den sociale situation.'}
+
+════════════════════════════════════════════════════════════════════════════════
+
+Svar med JSON ARRAY af 3 objekter (ét per slot):
+
+[
+  {
+    "title": "Slot A titel (3–7 ord)",
+    "menu_item_name": "Specifikt rettens navn fra menu",
+    "dish_text_brief": "Ingredienser",${ctx.isPaidTier ? `\n    "why_explanation": "2 sætninger",\n    "occasion_context": "1 sætning",` : ''}
+    "media_suggestion": {"primary": {"type": "photo", "instruction": "3 sætninger"}, "alternatives": []},
+    "content_type": "${slotTypes.slotA}",
+    "slot": "offering"
+  },
+  {
+    "title": "Slot B titel",${slotTypes.slotB === 'menu_item' || slotTypes.slotB === 'drink' ? `\n    "menu_item_name": "Navn fra menu (IKKE samme som Slot A)",` : ''}
+    "concrete_anchor": "Faktum fra BEKRÆFTEDE FACTS",${ctx.isPaidTier ? `\n    "why_explanation": "3 sætninger",` : ''}
+    "occasion_context": "1 sætning",
+    "media_suggestion": {"primary": {"type": "photo", "instruction": "3 sætninger"}, "alternatives": []},
+    "content_type": "${slotTypes.slotB}",
+    "slot": "guest_moment"
+  },
+  {
+    "title": "Slot C titel",
+    "concrete_anchor": "Faktum fra BEKRÆFTEDE FACTS",${ctx.isPaidTier ? `\n    "why_explanation": "3 sætninger",` : ''}
+    "occasion_context": "1 sætning",
+    "media_suggestion": {"primary": {"type": "photo", "instruction": "3 sætninger"}, "alternatives": []},
+    "content_type": "${slotTypes.slotC}",
+    "slot": "brand_behind"
+  }
+]`
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// UNIFIED PROMPT BUILDER B+C (Phase 1 Hybrid - June 2026)
+// ────────────────────────────────────────────────────────────────────────────
+// Combines Slots B and C into a single AI call while keeping Slot A separate
+// Reduces from 4 AI calls (planner + 3 slots) to 2 AI calls (planner+A, then B+C)
+// Achieves 50% latency reduction while preserving Slot A deduplication logic
+
+/**
+ * Build unified prompt for Slots B and C in a single AI call
+ * 
+ * @param ctx - Full dagens prompt context
+ * @param slotBType - Slot B content type (menu_item, drink, atmosphere, etc.)
+ * @param slotCType - Slot C content type (behind_scenes, atmosphere)
+ * @param slotBIsMenu - Whether Slot B is menu-based
+ * @param sharedCtx - Shared context block
+ * @param sharedRules - Shared rules block
+ * @param menuBlockForB - Menu block for Slot B (already filtered to exclude Slot A)
+ * @param recentSlotASection - Recent dishes section
+ * @param confirmedFactsSlotBBlock - Facts for Slot B
+ * @param confirmedFactsSlotCBlock - Facts for Slot C
+ * @param menuIntelligenceBlock - Menu intelligence for Slot C
+ * @param avoidSection - Never-say list (includes Slot A avoidance)
+ * @param slotBOptions - Optional targeting for Slot B (time, segment, service window)
+ * @param slotCOptions - Optional targeting for Slot C (time, segment, service window)
+ * @returns Combined prompt requesting JSON array with 2 suggestions
+ */
+export function buildUnifiedPromptBC(
+  ctx: DagensPromptContext,
+  slotBType: string,
+  slotCType: string,
+  slotBIsMenu: boolean,
+  sharedCtx: string,
+  sharedRules: string,
+  menuBlockForB: string,
+  recentSlotASection: string,
+  confirmedFactsSlotBBlock: string,
+  confirmedFactsSlotCBlock: string,
+  menuIntelligenceBlock: string,
+  avoidSection: string,
+  slotBOptions?: {
+    targetPostTime?: string
+    targetSegmentTime?: string
+    targetServiceWindow?: { name: string; start: string; end: string }
+  },
+  slotCOptions?: {
+    targetPostTime?: string
+    targetSegmentTime?: string
+    targetServiceWindow?: { name: string; start: string; end: string }
+  }
+): string {
+  const effectiveSlotC = slotCType === 'behind_scenes' ? 'behind_scenes' : 'atmosphere'
+  const slotCSlot = effectiveSlotC === 'behind_scenes' ? 'brand_behind' : 'guest_moment'
+  const slotCHeader = effectiveSlotC === 'behind_scenes' ? 'BAG FACADEN' : 'BRAND/ATMOSFÆRE'
+  
+  return `Du er social media manager for ${ctx.businessName}. Generer 2 post-forslag (Slot B, Slot C) i ÉN JSON-array.
+
+──── FÆLLES KONTEKST ────
+${sharedCtx}${ctx.visualCharacter ? `\nKonceptkarakter: ${ctx.visualCharacter}` : ''}${ctx.venueScene ? `\nScenestemning: ${ctx.venueScene}` : ''}${ctx.isHybridBusiness ? `\nAktiv profil nu (kl. ${ctx.currentHour}): ${ctx.effectiveVertical}` : ''}
+
+${sharedRules}${avoidSection}
+
+════════════════════════════════════════════════════════════════════════════════
+SLOT B – GÆST-MOMENT (${slotBType})
+════════════════════════════════════════════════════════════════════════════════
+
+${confirmedFactsSlotBBlock}
+
+${slotBIsMenu
+  ? `──── MENU (vælg herfra) ────
+${menuBlockForB}${recentSlotASection}
+
+→ Vælg en ret/drink fra menuen ovenfor (IKKE samme som Slot A)
+→ menu_item_name: SPECIFIKT rettens navn — IKKE kategori-overskrift
+→ dish_text_brief: Ingredienser fra menuen`
+  : `→ INGEN menu_item_name felt — dette er et ${slotBType} opslag
+→ Fokuser på gæstens oplevelse/moment — IKKE på retten`}
+
+→ concrete_anchor: Vælg ÉT faktum fra BEKRÆFTEDE FACTS. Maks 80 tegn.
+${ctx.isPaidTier ? `→ why_explanation (3 sætninger): Begrund valget strategisk — HVEM, HVAD, HVORFOR.` : ''}
+→ occasion_context (1 sætning): Beskriv gæst-momentet/situationen.
+${slotBOptions?.targetPostTime ? `→ 🕐 MÅLRETTET POSTETID: Opslag beregnet til kl. ${slotBOptions.targetPostTime}` : ''}
+
+════════════════════════════════════════════════════════════════════════════════
+SLOT C – ${slotCHeader} (${slotCType})
+════════════════════════════════════════════════════════════════════════════════
+
+${confirmedFactsSlotCBlock}${menuIntelligenceBlock}
+
+${effectiveSlotC === 'behind_scenes'
+  ? (ctx.isPaidTier
+      ? `→ VIS MENNESKENE bag oplevelsen — teamet, medarbejder, service-praksis.
+→ TITLEN skal handle om PERSON, RELATION eller HANDLING — aldrig rum eller ting.
+→ TITLEN SKAL være grammatisk komplet med korrekt tegnsætning.
+→ FORMAT-EKSEMPLER: "Samme ansigt bag baren hver onsdag", "Line kender din ordre inden du sætter dig"
+→ FORBUDT: "Vi + [klargøre/stå/forberede]", "[Rum/møbel] gøres klar"`
+      : `→ DU ER OBSERVATØR — beskriver præcist hvad der ER.
+→ GRÆNSE: KUN verificerbare facts fra BEKRÆFTEDE FACTS.
+→ TITLEN om PERSON, RELATION eller HVAD gæsten får — ALDRIG HOW (med mindre i FACTS).
+→ TITLEN SKAL være grammatisk komplet med korrekt tegnsætning.
+→ FORBUDT: Opfundet tilberedning ("Vi hakker selv...", "Fra egen have...") med mindre EKSPLICIT i FACTS`)
+  : `→ SOCIAL INVITATION: Hvilken anledning eller stemning gør stedet til det rigtige valg NU?
+→ TITLEN SKAL være grammatisk komplet med korrekt tegnsætning.
+→ Sælg oplevelsen som svar på social situation.
+→ FORBUDT: Passiv stedsbeskrivelse, ruminventar.`}
+
+→ concrete_anchor: ÉT faktum fra BEKRÆFTEDE FACTS. Maks 80 tegn.${effectiveSlotC === 'behind_scenes' ? ' Skal handle om PERSON/PRAKSIS/HVAD gæsten får.' : ' Handling, rum eller service.'}
+${ctx.isPaidTier ? `→ why_explanation (3 sætninger): Strategisk rationale — aktivt segment, dag, variation i historik.` : ''}
+→ occasion_context (1 sætning): ${effectiveSlotC === 'behind_scenes' ? 'Hvad sker bag facaden lige nu.' : 'Den sociale situation.'}
+${slotCOptions?.targetPostTime ? `→ 🕐 MÅLRETTET POSTETID: Opslag beregnet til kl. ${slotCOptions.targetPostTime}` : ''}
+
+════════════════════════════════════════════════════════════════════════════════
+
+Svar med JSON ARRAY af 2 objekter (ét per slot):
+
+[
+  {
+    "title": "Slot B titel",${slotBIsMenu ? `\n    "menu_item_name": "Navn fra menu (IKKE samme som Slot A)",\n    "dish_text_brief": "Ingredienser",` : ''}
+    "concrete_anchor": "Faktum fra BEKRÆFTEDE FACTS",${ctx.isPaidTier ? `\n    "why_explanation": "3 sætninger",` : ''}
+    "occasion_context": "1 sætning",
+    "media_suggestion": {"primary": {"type": "photo", "instruction": "3 sætninger"}, "alternatives": []},
+    "content_type": "${slotBType}",
+    "slot": "guest_moment"
+  },
+  {
+    "title": "Slot C titel",
+    "concrete_anchor": "Faktum fra BEKRÆFTEDE FACTS",${ctx.isPaidTier ? `\n    "why_explanation": "3 sætninger",` : ''}
+    "occasion_context": "1 sætning",
+    "media_suggestion": {"primary": {"type": "photo", "instruction": "3 sætninger"}, "alternatives": []},
+    "content_type": "${slotCType}",
+    "slot": "${slotCSlot}"
+  }
+]`
 }

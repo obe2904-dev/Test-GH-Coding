@@ -219,3 +219,94 @@ export function detectBusinessType(data: BusinessData): BusinessTypeDetection {
 export function getProfessionalDomain(businessType: BusinessType): string {
   return PROFESSIONAL_DOMAINS[businessType] || PROFESSIONAL_DOMAINS.restaurant;
 }
+
+// ============================================================================
+// HELPER: Generate fallback business_character when reasoning is missing
+// ============================================================================
+// Used to generate correct business_character from business type
+// when businessTypeDetection.reasoning is unavailable
+
+export function generateFallbackBusinessCharacter(businessType: BusinessType): string {
+  // Map business type back to standard reasoning patterns
+  switch (businessType) {
+    case 'hybrid_cafe':
+      return 'Flere programmer der spænder over hele dagen (morgenmad, frokost, bar/middag)';
+    
+    case 'coffee_bar':
+      return 'Specialty coffee terminologi i menu (espresso, flat white, specialty coffee)';
+    
+    case 'wine_bar':
+      return 'Bar-program med stort vin-fokus (10+ vin-entries i menu)';
+    
+    case 'cocktail_bar':
+      return 'Bar-program med cocktail-fokus (cocktail navne i menu)';
+    
+    case 'fine_dining':
+      return 'Fine dining indikatorer i type eller menu (tasting menu, michelin, gastronomisk)';
+    
+    case 'bakery_cafe':
+      return 'Bageri-kategori med café-service (morning program)';
+    
+    case 'bistro':
+      return 'Bistro i type/kategori eller fransk-inspireret menu';
+    
+    case 'pub':
+      return 'Pub i type eller bar med pub-menu (burger, fish & chips, øl)';
+    
+    case 'casual_dining':
+      return 'Frokost/middag program uden morgenmad = casual dining';
+    
+    case 'restaurant':
+    default:
+      return 'Standard restaurant uden specifik type-indikator';
+  }
+}
+
+// ============================================================================
+// HELPER: Validate business_character (prevent persona corruption)
+// ============================================================================
+// Returns true if business_character is valid (short reasoning)
+// Returns false if corrupted (contains persona or too long)
+
+export function isValidBusinessCharacter(value: string | null | undefined): boolean {
+  if (!value || typeof value !== 'string') return false;
+  
+  // Check 1: Must be short (< 200 chars)
+  if (value.length >= 200) {
+    return false;
+  }
+  
+  // Check 2: Must NOT be the persona (starts with "Du er Marketing ekspert")
+  if (value.startsWith('Du er Marketing ekspert') || value.startsWith('Du er')) {
+    return false;
+  }
+  
+  // Check 3: Must NOT contain multiple sections (FORRETNING:, LOKATION:, etc.)
+  if (value.includes('FORRETNING:') || value.includes('LOKATION:')) {
+    return false;
+  }
+  
+  return true;
+}
+
+// ============================================================================
+// HELPER: Sanitize business_character (fix corruption at runtime)
+// ============================================================================
+// Returns valid business_character or null if corrupted
+
+export function sanitizeBusinessCharacter(
+  value: string | null | undefined,
+  fallbackType?: BusinessType
+): string | null {
+  if (isValidBusinessCharacter(value)) {
+    return value as string;
+  }
+  
+  // If corrupted and we have a fallback type, generate correct value
+  if (fallbackType) {
+    return generateFallbackBusinessCharacter(fallbackType);
+  }
+  
+  // Otherwise return null (let caller handle)
+  return null;
+}

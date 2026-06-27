@@ -281,5 +281,7 @@ export function resolveEffectiveVertical(
   if (isCoffee) return 'cafe'
   if (isFoodTruck) return 'food_truck'
 
+  // Return vertical if it's a valid config key, otherwise 'cafe' (for type safety)
+  // Note: This fallback is for backward compatibility with BusinessVertical type
   return (VERTICAL_CONFIGS[vertical as BusinessVertical] ? vertical : 'cafe') as BusinessVertical
 }

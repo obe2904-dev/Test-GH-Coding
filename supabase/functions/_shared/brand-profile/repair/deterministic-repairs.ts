@@ -12,6 +12,7 @@ import { extractBrandEssenceConstraints, validateBrandEssence, buildConstrainedB
 import { formatAndRepairProfile, type FormatContext } from './auto-repair-formatters.ts'
 import { buildBusinessCharacterDeterministic, buildAudienceFrameworkDeterministic, buildVoiceSystemDeterministic } from './fallback-builders.ts'
 import { getLanguageByCode } from '../languages.ts'
+import { resolveLocationPhrase } from '../location-phrase-resolver.ts'
 
 export function applyDeterministicRepairs(sections: any, dataSources: any, analysis: any, language: string, locale: LocaleConfig, requestErrors?: any): any {
   // Create fallback context for robust fallbacks
@@ -22,17 +23,13 @@ export function applyDeterministicRepairs(sections: any, dataSources: any, analy
     errors: requestErrors ?? null
   }
   
-  // Extract canonical location and venue type
-  const location = dataSources?.location || {}
-  const locationPhrase = location?.enrichment?.micro?.area_type === 'waterfront' ? (locale.preferredPhrasing['location_waterfront'] || 'ved åen')
-    : location?.enrichment?.micro?.area_type === 'transit_hub' ? (locale.preferredPhrasing['location_transit'] || 'ved stationen')
-    : location?.enrichment?.micro?.area_type === 'shopping_street' ? (locale.preferredPhrasing['location_shopping'] || 'på gågaden')
-    : ''
-  const city = location?.enrichment?.macro?.city || dataSources?.business?.city || 'byen'
-  const canonicalLocationHook = locationPhrase ? `${locationPhrase} i ${city}` : city
+  // Use centralized location phrase resolver with proper priority hierarchy
+  const locationResult = resolveLocationPhrase(dataSources, locale, { includePreposition: true })
+  const city = dataSources?.location?.enrichment?.macro?.city || dataSources?.business?.city || 'byen'
+  const canonicalLocationHook = locationResult.phrase || city
   
   const business = dataSources?.business || {}
-  const rawVenueType = business?.vertical || business?.business_category || 'restaurant'
+  const rawVenueType = business?.business_type_hybrid?.primary || business?.business_category || ''
   const venueType = locale.venueTypes[rawVenueType.toLowerCase()] || rawVenueType
 
   // Build context for auto-repair formatters
@@ -679,7 +676,8 @@ export function buildDeterministicBrandEssence(
   const waHasDaySignal = /brunch|frokost|morgen|morgenmad|lunch/i.test(waAllText)
   const waOpeningHours: Record<string, any> = waAnalysis?.openingHours || {}
   const waHasLateNight = Object.values(waOpeningHours).some((day: any) => {
-    if (!day || day.closed) return false
+    // Skip if explicitly closed or missing data
+    if (!day || day.closed === true || !day.close) return false
     const h = parseInt((day.close || '').split(':')[0], 10)
     return !isNaN(h) && h >= 0 && h < 6
   })
@@ -954,18 +952,28 @@ function buildDeterministicElaborationBlock(
  * Called when AI returns 0 items for content_pillars.
  * Sets encouraged=true for pillars that match confirmed venue signals.
  */
-export function buildContentPillarsFallback(dataSources: any, analysis: any, locationHook?: string): any[] {
+export function buildContentPillarsFallback(dataSources: any, analysis: any, locationHook?: string, locale?: LocaleConfig): any[] {
   const location = dataSources?.location || {}
   const isWaterfront = location?.enrichment?.micro?.area_type === 'waterfront'
   const hasDistinctiveLocation = !!location?.enrichment?.micro?.area_type
+  
+  // Use centralized resolver if locale is provided, otherwise fall back to passed locationHook
+  let resolvedLocationPhrase: string
+  if (locale) {
+    const locationResult = resolveLocationPhrase(dataSources, locale, { includePreposition: true })
+    const city = location?.enrichment?.macro?.city || dataSources?.business?.city || 'byen'
+    resolvedLocationPhrase = locationResult.phrase || city
+  } else {
+    resolvedLocationPhrase = locationHook || 'ved åen'
+  }
+  
   const businessName: string = (dataSources?.profile as any)?.business_name
     || (dataSources?.profile as any)?.name
     || dataSources?.business?.business_name
     || dataSources?.business?.name
     || 'Stedet'
   const city: string = location?.enrichment?.macro?.city || dataSources?.business?.city || 'byen'
-  // NEVER use generic "ved vandet" - use specific location term from locale (ved åen, ved fjorden, ved søen, ved havnen)
-  const locationLabel = isWaterfront ? `${locationHook || 'ved åen'} i ${city}` : hasDistinctiveLocation ? `den centrale placering i ${city}` : `beliggenheden i ${city}`
+  const locationLabel = isWaterfront ? `${resolvedLocationPhrase}${resolvedLocationPhrase.includes(city) ? '' : ` i ${city}`}` : hasDistinctiveLocation ? `den centrale placering i ${city}` : `beliggenheden i ${city}`
 
   // Determine if the venue is food-led, craft-led, or event-led
   const hasFoodMenu = !!(dataSources?.menu?.length || dataSources?.menuSummaries?.length
@@ -982,7 +990,7 @@ export function buildContentPillarsFallback(dataSources: any, analysis: any, loc
 
   const vibeEncouraged = isWaterfront || hasTerraceOrOutdoor || hasDistinctiveLocation
   const vibeNotes = isWaterfront
-    ? `${businessName} ligger direkte ${locationHook || 'ved åen'} — atmosfærebilleder af lyset og livet ved terrassen er oplagt primært indhold.`
+    ? `${businessName} ligger direkte ${resolvedLocationPhrase} — atmosfærebilleder af lyset og livet ved terrassen er oplagt primært indhold.`
     : hasTerraceOrOutdoor
     ? `Udendørsarealerne giver naturlige vibe-billeder i godt vejr — indhold der sælger oplevelsen af at sidde udenfor.`
     : `Fysiske rammer og belysning kan understøtte stemningsbilleder — brug konkrete detaljer fra interiøret som signal.`

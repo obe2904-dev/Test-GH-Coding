@@ -8,6 +8,8 @@
 import type { DataSources, LanguageConfig, FeatureScore } from '../types.ts'
 import { getPhrasesForLocale } from '../../i18n/index.ts'
 import { canonicalizeProgrammes } from '../../canonical-programmes.ts'  // Task 3.2 - Fixed path
+import { resolveLocationPhrase } from '../location-phrase-resolver.ts'
+import { resolveLocale } from '../locales.ts'
 
 // Helper to extract structured website data
 function extractStructuredWebsiteData(websiteAnalysis: any, business: any) {
@@ -151,21 +153,24 @@ function parseHour(timeStr: string): number {
   return isNaN(h) ? 12 : h
 }
 
-function getLocationPhrase(dataSources: DataSources): string {
-  const location = (dataSources as any)?.location || {}
+/**
+ * Get location phrase with proper priority hierarchy.
+ * Uses centralized resolver to ensure businesses.local_location_reference is respected.
+ */
+function getLocationPhrase(dataSources: DataSources, language?: LanguageConfig): string {
   const business = (dataSources as any)?.business || {}
-  const areaType = location?.enrichment?.micro?.area_type
-  const waterfrontTerm = location?.enrichment?.micro?.waterfront_term
-  const city = location?.enrichment?.macro?.city || business?.city || ''
+  const location = (dataSources as any)?.location || {}
   
-  let phrase = ''
-  if (areaType === 'waterfront' && waterfrontTerm) {
-    phrase = `${waterfrontTerm}${city ? ` i ${city}` : ''}`
-  } else if (city) {
-    phrase = `i ${city}`
-  }
+  // Resolve locale for fallback logic
+  const country = location?.country || business?.country
+  const city = location?.city || business?.city
+  const langCode = language?.code || language?.language || 'da'
+  const locale = resolveLocale(country, city, langCode)
   
-  return phrase
+  // Use centralized resolver
+  const result = resolveLocationPhrase(dataSources, locale, { includePreposition: true })
+  
+  return result.phrase
 }
 
 function deriveVenueRoles(programmes: any[]): string {
@@ -215,7 +220,7 @@ function buildHybridNarrative(dataSources: DataSources, language: LanguageConfig
   const programmes = (dataSources as any)?.menuSignalProgrammes || []
   const hours = (dataSources as any)?.openingHoursRows || []
   const ops = (dataSources as any)?.operations || {}
-  const location = getLocationPhrase(dataSources)
+  const location = getLocationPhrase(dataSources, language)
   const roles = deriveVenueRoles(programmes)
   
   const sentences: string[] = []
@@ -300,7 +305,7 @@ function buildCafeDescription(dataSources: DataSources, language: LanguageConfig
   const programmes = (dataSources as any)?.menuSignalProgrammes || []
   const ops = (dataSources as any)?.operations || {}
   const hours = (dataSources as any)?.openingHoursRows || []
-  const location = getLocationPhrase(dataSources)
+  const location = getLocationPhrase(dataSources, language)
   
   const progNames = programmes.length > 0 
     ? programmes.map((p: any) => p.role).join(' og ')
@@ -333,7 +338,7 @@ function buildRestaurantDescription(dataSources: DataSources, language: Language
   const programmes = (dataSources as any)?.menuSignalProgrammes || []
   const menu = (dataSources as any)?.menu || []
   const ops = (dataSources as any)?.operations || {}
-  const location = getLocationPhrase(dataSources)
+  const location = getLocationPhrase(dataSources, language)
   
   // If rich menu data, use narrative
   if (menu.length >= 5) {
@@ -373,7 +378,7 @@ function buildRestaurantDescription(dataSources: DataSources, language: Language
 function buildWineBarNarrative(dataSources: DataSources, language: LanguageConfig): string {
   const programmes = (dataSources as any)?.menuSignalProgrammes || []
   const hours = (dataSources as any)?.openingHoursRows || []
-  const location = getLocationPhrase(dataSources)
+  const location = getLocationPhrase(dataSources, language)
   
   const sentences: string[] = []
   const locationPart = location ? ` ${location}` : ''
@@ -411,7 +416,7 @@ function buildCoffeeShopDescription(dataSources: DataSources, language: Language
   const hours = (dataSources as any)?.openingHoursRows || []
   const ops = (dataSources as any)?.operations || {}
   const menu = (dataSources as any)?.menu || []
-  const location = getLocationPhrase(dataSources)
+  const location = getLocationPhrase(dataSources, language)
   
   const locationPart = location ? ` ${location}` : ''
   
@@ -448,7 +453,7 @@ function buildCoffeeShopDescription(dataSources: DataSources, language: Language
 function buildBarDescription(dataSources: DataSources, language: LanguageConfig): string {
   const programmes = (dataSources as any)?.menuSignalProgrammes || []
   const hours = (dataSources as any)?.openingHoursRows || []
-  const location = getLocationPhrase(dataSources)
+  const location = getLocationPhrase(dataSources, language)
   
   const locationPart = location ? ` ${location}` : ''
   const progNames = programmes.length > 0 
@@ -752,14 +757,14 @@ export function buildFallbackSignatureShot(dataSources: DataSources, analysis: a
   const business = (dataSources as any)?.business || {}
   const location = (dataSources as any)?.location || {}
 
-  // Use enriched location if available
-  const locationPhrase = location?.enrichment?.micro?.area_type === 'waterfront' ? 'åen'
-    : location?.enrichment?.micro?.area_type === 'transit_hub' ? 'stationen'
-    : location?.enrichment?.micro?.area_type === 'shopping_street' ? 'gågaden'
-    : ''
+  // Use centralized location phrase resolver with proper priority hierarchy
+  const country = location?.country || business?.country
+  const city = location?.city || business?.city
+  const langCode = language?.code || language?.language || 'da'
+  const locale = resolveLocale(country, city, langCode)
   
-  const city = location?.enrichment?.macro?.city || location?.city || 'byen'
-  const locationCue = locationPhrase ? `${locationPhrase} i ${city}` : city
+  const locationResult = resolveLocationPhrase(dataSources, locale, { includePreposition: true })
+  const locationCue = locationResult.phrase || city || 'byen'
 
   const hook = (Array.isArray(analysis?.distinctive_hooks) && analysis.distinctive_hooks[0] && typeof analysis.distinctive_hooks[0].hook === 'string')
     ? analysis.distinctive_hooks[0].hook.trim()
@@ -820,14 +825,14 @@ export function buildFallbackBrandEssence(dataSources: DataSources, analysis: an
   const profile = (dataSources as any)?.profile || {}
   const operations = (dataSources as any)?.operations || {}
 
-  // Location context
-  const locationPhrase = location?.enrichment?.micro?.waterfront_term || 
-    (location?.enrichment?.micro?.area_type === 'waterfront' ? 'ved åen' :
-     location?.enrichment?.micro?.area_type === 'transit_hub' ? 'ved stationen' :
-     location?.enrichment?.micro?.area_type === 'shopping_street' ? 'på gågaden' : '')
+  // Use centralized location phrase resolver with proper priority hierarchy
+  const country = location?.country || business?.country
+  const city = location?.city || business?.city
+  const langCode = language?.code || language?.language || 'da'
+  const locale = resolveLocale(country, city, langCode)
   
-  const city = location?.enrichment?.macro?.city || location?.city || 'byen'
-  const locationCue = locationPhrase ? `${locationPhrase} i ${city}` : `i ${city}`
+  const locationResult = resolveLocationPhrase(dataSources, locale, { includePreposition: true })
+  const locationCue = locationResult.phrase || (city ? `i ${city}` : 'i byen')
   
   const isDanish = String(language?.code || '').toLowerCase().startsWith('da') || 
                    String(language?.name || '').toLowerCase().includes('danish')
@@ -1020,7 +1025,7 @@ export function buildFallbackBrandEssence(dataSources: DataSources, analysis: an
   ) || null  // null when no verified offering — never assume 'brunch'
 
   // Sparse data: no verified offering available — safe generic phrase with no temporal or offering claims
-  const baseVenueType = profile?.business_category || business?.vertical || 'Café'
+  const baseVenueType = profile?.business_category || business?.business_type_hybrid?.primary || 'café'
   if (!offering) {
     return isDanish
       ? `Det velfortjente stop ${locationCue}.`

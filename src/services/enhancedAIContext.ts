@@ -199,7 +199,7 @@ export async function gatherEnhancedAIContext(
   if (brandProfile) {
     context.brandVoice = {
       // DEPRECATED: essence removed - use signature_themes from menu intelligence
-      essence: undefined,
+      essence: null,
       toneOfVoice: brandProfile.tone_of_voice,
       socialStyle: brandProfile.social_style,
       voiceExamples: brandProfile.voice_examples,

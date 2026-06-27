@@ -3,6 +3,7 @@
  * Supports both structured data (schema.org) and HTML pattern matching
  */
 
+import { htmlToCleanText } from './html-parser.ts'
 import type { StructuredData } from './structured-data-extractor.ts'
 
 export interface DayHours {
@@ -83,19 +84,140 @@ function hoursSignature(hours: WeekHours): string {
     .join('|')
 }
 
+function normalizeHeadingText(value: string): string {
+  // Decode HTML entities first
+  const decoded = value
+    .replace(/&aring;/gi, 'å')
+    .replace(/&Aring;/g, 'Å')
+    .replace(/&aelig;/gi, 'æ')
+    .replace(/&AElig;/g, 'Æ')
+    .replace(/&oslash;/gi, 'ø')
+    .replace(/&Oslash;/g, 'Ø')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#\d+;/g, (match) => {
+      const code = parseInt(match.slice(2, -1))
+      return String.fromCharCode(code)
+    })
+    .replace(/&#x[\da-f]+;/gi, (match) => {
+      const code = parseInt(match.slice(3, -1), 16)
+      return String.fromCharCode(code)
+    })
+  
+  return decoded.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function isHeadingMarker(line: string): boolean {
+  return /^#{1,3}\s*h\d:/i.test(line)
+}
+
+function stripHeadingMarker(line: string): string {
+  return line
+    .replace(/^#{1,3}\s*h\d:\s*/i, '')
+    .replace(/\s*#{1,3}\s*$/i, '')
+    .trim()
+}
+
+function extractVisibleTextAroundHeadings(html: string, headings: string[]): string[] {
+  const cleanText = htmlToCleanText(html, true)
+  const lines = cleanText
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  console.log(`  📄 Clean text has ${lines.length} lines, first 10:`)
+  lines.slice(0, 10).forEach((line, i) => {
+    const marker = isHeadingMarker(line) ? '[H]' : '   '
+    console.log(`    ${marker} ${i}: ${line.slice(0, 60)}`)
+  })
+
+  if (lines.length === 0) return []
+
+  const normalizedHeadings = headings.map((heading) => normalizeHeadingText(heading))
+  console.log(`  🔍 Looking for normalized headings:`, normalizedHeadings)
+  
+  const candidates: string[] = []
+  let headingCount = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (!isHeadingMarker(line)) continue
+    
+    headingCount++
+    const headingText = stripHeadingMarker(line)
+    const normalizedHeading = normalizeHeadingText(headingText)
+    
+    console.log(`  📍 Found heading ${headingCount}: "${headingText}" (normalized: "${normalizedHeading}")`)
+    
+    const matchesHeading = normalizedHeadings.some((needle) => normalizedHeading.includes(needle))
+    if (!matchesHeading) {
+      console.log(`    ❌ Does not match target headings`)
+      continue
+    }
+    console.log(`    ✅ Matches target heading!`)
+
+    const block: string[] = [headingText]
+    let added = 0
+
+    for (let j = i + 1; j < lines.length && added < 8; j++) {
+      const next = lines[j]
+      if (isHeadingMarker(next)) break
+
+      block.push(next)
+      added++
+    }
+
+    const candidate = block.join('\n').trim()
+    if (candidate && !candidates.includes(candidate)) {
+      candidates.push(candidate)
+    }
+  }
+
+  console.log(`  📊 Total headings found: ${headingCount}, matching candidates: ${candidates.length}`)
+  return candidates
+}
+
 export function extractKitchenCloseTime(html: string): string | null {
   const text = html
     .replace(/<br\s*\/?\s*>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ')
+    // Decode HTML entities (Danish characters + common entities)
+    .replace(/&aring;/gi, 'å')
+    .replace(/&Aring;/g, 'Å')
+    .replace(/&aelig;/gi, 'æ')
+    .replace(/&AElig;/g, 'Æ')
+    .replace(/&oslash;/gi, 'ø')
+    .replace(/&Oslash;/g, 'Ø')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#(\d+);/g, (match, code) => String.fromCharCode(parseInt(code)))
+    .replace(/&#x([\da-f]+);/gi, (match, code) => String.fromCharCode(parseInt(code, 16)))
     .replace(/\s+/g, ' ')
 
-  const match = text.match(/køkken(?:et)?\s*lukker(?:\s*kl\.?|\s*at)?\s*(\d{1,2})[:\.](\d{2})/i)
-    || text.match(/kitchen\s*closes?(?:\s*at)?\s*(\d{1,2})[:\.](\d{2})/i)
-    || text.match(/kitchen\s*close(?:s|d)?(?:\s*at)?\s*(\d{1,2})[:\.](\d{2})/i)
+  // Try to find kitchen close time with flexible spacing
+  const match = text.match(/køkken(?:et)?(?:\s+er)?\s+åbent(?:\s+frem)?\s+til\s+(?:kl\.?)?\s*(\d{1,2})(?:[:\.](\d{2}))?/i)
+    || text.match(/køkken(?:et)?\s+lukker\s+(?:\w+\s+)*(?:kl\.?)?\s*(\d{1,2})(?:[:\.](\d{2}))?/i)
+    || text.match(/kitchen(?:\s+is)?\s+open(?:\s+until|\s+to)\s+(?:at)?\s*(\d{1,2})(?:[:\.](\d{2}))?/i)
+    || text.match(/kitchen\s*closes?\s+(?:\w+\s+)*(?:at)?\s*(\d{1,2})(?:[:\.](\d{2}))?/i)
 
-  if (!match) return null
-  return normalizeTime(`${match[1].padStart(2, '0')}:${match[2]}`)
+  if (!match) {
+    // Diagnostic: log a snippet to help debug
+    const snippet = text.match(/køkken.{0,80}/i)?.[0] || text.match(/kitchen.{0,80}/i)?.[0]
+    if (snippet) {
+      console.log('⚠️ Kitchen close time pattern did not match. Found text:', snippet)
+    }
+    return null
+  }
+  
+  const result = normalizeTime(`${match[1].padStart(2, '0')}:${match[2] || '00'}`)
+  console.log(`✅ Extracted kitchen close time: ${result} from pattern match`)
+  return result
 }
 
 /**
@@ -179,6 +301,18 @@ export function extractOpeningHours(html: string, structuredData: StructuredData
     }
   }
 
+  const headingCandidates = extractVisibleTextAroundHeadings(html, [
+    'åbningstider',
+    'opening hours',
+    'åbent',
+    'kontakt',
+  ])
+  console.log(`🔍 Found ${headingCandidates.length} candidates from heading extraction`)
+  for (const candidate of headingCandidates) {
+    console.log(`  → Candidate (${candidate.length} chars): ${candidate.slice(0, 100)}...`)
+    pushCandidate(candidate)
+  }
+
   const tableMatch = html.match(/<table[^>]*>[\s\S]*?(?:mandag|monday|man|mon)[\s\S]*?<\/table>/i)
   if (tableMatch) {
     pushCandidate(tableMatch[0])
@@ -204,6 +338,21 @@ export function extractOpeningHours(html: string, structuredData: StructuredData
       .replace(/<\/\s*(?:p|div|li|tr|td|th|section|article|ul|ol|h[1-6]|strong|b|span)\s*>/gi, '\n')
       .replace(/<[^>]+>/g, ' ')
       .replace(/&nbsp;/g, ' ')
+      // Decode HTML entities (Danish characters + common entities)
+      .replace(/&aring;/gi, 'å')
+      .replace(/&Aring;/g, 'Å')
+      .replace(/&aelig;/gi, 'æ')
+      .replace(/&AElig;/g, 'Æ')
+      .replace(/&oslash;/gi, 'ø')
+      .replace(/&Oslash;/g, 'Ø')
+      .replace(/&ndash;/gi, '–')
+      .replace(/&mdash;/gi, '—')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#(\d+);/g, (match, code) => String.fromCharCode(parseInt(code)))
+      .replace(/&#x([\da-f]+);/gi, (match, code) => String.fromCharCode(parseInt(code, 16)))
     const normalizedText = cleanText
       .replace(/\u00a0/g, ' ')
       .split('\n')
@@ -232,39 +381,77 @@ export function extractOpeningHours(html: string, structuredData: StructuredData
 
     const detectDaysInLine = (line: string): Array<keyof WeekHours> => {
       const lower = line.toLowerCase()
-      const found: Array<keyof WeekHours> = []
-
+      
+      // Find days and their positions in the text
+      const foundWithPositions: Array<{ day: keyof WeekHours; position: number }> = []
       for (const entry of DAY_ALIASES) {
-        if (entry.labels.some((label) => new RegExp(`\\b${escapeRegex(label)}\\b`, 'i').test(lower))) {
-          found.push(entry.day)
+        for (const label of entry.labels) {
+          const regex = new RegExp(`\\b${escapeRegex(label)}\\b`, 'i')
+          const match = lower.match(regex)
+          if (match && match.index !== undefined) {
+            foundWithPositions.push({ day: entry.day, position: match.index })
+            break // Only record first matching label for this day
+          }
         }
       }
 
-      const uniqueDays = Array.from(new Set(found))
-      if (uniqueDays.length < 2) return uniqueDays
-
-      const dayIndexes = uniqueDays
-        .map((day) => DAY_ORDER.indexOf(day))
-        .filter((index) => index >= 0)
-        .sort((a, b) => a - b)
-
-      if (dayIndexes.length < 2) return uniqueDays
-
-      const firstIndex = dayIndexes[0]
-      const lastIndex = dayIndexes[dayIndexes.length - 1]
-      const hasRangeSeparator = /(?:\btil\b|\bto\b|[-–—])/.test(lower)
-      const isContiguous = dayIndexes.every((index, position) => index === firstIndex + position)
-
-      if (isContiguous || hasRangeSeparator) {
-        return DAY_ORDER.slice(firstIndex, lastIndex + 1)
+      if (foundWithPositions.length === 0) return []
+      
+      // Sort by position in text to preserve original order
+      foundWithPositions.sort((a, b) => a.position - b.position)
+      
+      // Remove duplicates while preserving order
+      const found: Array<keyof WeekHours> = []
+      const seen = new Set<keyof WeekHours>()
+      for (const item of foundWithPositions) {
+        if (!seen.has(item.day)) {
+          found.push(item.day)
+          seen.add(item.day)
+        }
       }
 
-      return uniqueDays
+      if (found.length < 2) return found
+
+      // Check if we have a range separator
+      const hasRangeSeparator = /(?:\btil\b|\bto\b|[-–—])/.test(lower)
+      
+      if (!hasRangeSeparator) {
+        // No separator, return individual days
+        return found
+      }
+
+      // For ranges, use first and last day in text order
+      const firstDay = found[0]
+      const lastDay = found[found.length - 1]
+      const firstIndex = DAY_ORDER.indexOf(firstDay)
+      const lastIndex = DAY_ORDER.indexOf(lastDay)
+
+      if (firstIndex === -1 || lastIndex === -1) return found
+
+      // Check if this is a wrap-around range (e.g., Sunday to Thursday)
+      if (firstIndex > lastIndex) {
+        // Wrap around: from firstDay to end of week, then from start to lastDay
+        const result: Array<keyof WeekHours> = []
+        // From firstDay to Sunday
+        for (let i = firstIndex; i < DAY_ORDER.length; i++) {
+          result.push(DAY_ORDER[i])
+        }
+        // From Monday to lastDay
+        for (let i = 0; i <= lastIndex; i++) {
+          result.push(DAY_ORDER[i])
+        }
+        return result
+      } else {
+        // Normal forward range
+        return DAY_ORDER.slice(firstIndex, lastIndex + 1)
+      }
     }
 
     const kitchenCloseFromLine = (line: string): string | null => {
-      const match = line.match(/køkken(?:et)?\s*lukker\s*kl\.?\s*(\d{1,2})[:\.](\d{2})/i)
-        || line.match(/kitchen\s*closes?\s*at\s*(\d{1,2})[:\.](\d{2})/i)
+      const match = line.match(/køkken(?:et)?(?:\s+er)?\s+åbent(?:\s+frem\s+til|\s+til)?(?:\s*kl\.?|\s*at)?\s*(\d{1,2})[:\.](\d{2})/i)
+        || line.match(/køkken(?:et)?\s+lukker\s+(?:\w+\s+)*(?:kl\.?)?\s*(\d{1,2})[:\.](\d{2})/i)
+        || line.match(/kitchen(?:\s+is)?\s+open(?:\s+until|\s+to)?(?:\s*at)?\s*(\d{1,2})[:\.](\d{2})/i)
+        || line.match(/kitchen\s*closes?\s+(?:\w+\s+)*(?:at)?\s*(\d{1,2})[:\.](\d{2})/i)
         || line.match(/kitchen\s*close(?:s|d)?\s*at\s*(\d{1,2})[:\.](\d{2})/i)
 
       if (!match) return null
@@ -387,7 +574,10 @@ export function extractOpeningHours(html: string, structuredData: StructuredData
     }
 
     for (const line of normalizedText) {
-      parseDayLine(line)
+      const parsed = parseDayLine(line)
+      if (parsed) {
+        console.log(`    📝 Parsed line: "${line.slice(0, 60)}" → days: ${Object.keys(candidateHours).length}`)
+      }
     }
 
     if (Object.keys(candidateHours).length > 0) {
@@ -462,10 +652,16 @@ export function extractOpeningHours(html: string, structuredData: StructuredData
 
   const parsedCandidates: Array<{ hours: WeekHours; score: number; signature: string; complex: boolean }> = []
 
+  console.log(`🔍 Parsing ${candidateTexts.length} candidates...`)
   for (const candidateText of candidateTexts) {
+    console.log(`  → Parsing candidate (${candidateText.length} chars): ${candidateText.slice(0, 80)}...`)
     const parsedHoursResult = parseHoursText(candidateText)
-    if (!parsedHoursResult.hours) continue
+    if (!parsedHoursResult.hours) {
+      console.log(`    ❌ No hours extracted from this candidate`)
+      continue
+    }
     const score = Object.keys(parsedHoursResult.hours).length
+    console.log(`    ✅ Extracted ${score} days:`, Object.keys(parsedHoursResult.hours))
     parsedCandidates.push({
       hours: parsedHoursResult.hours,
       score,

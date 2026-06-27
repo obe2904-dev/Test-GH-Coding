@@ -99,6 +99,44 @@ export function PostDetailModal({ post, onClose, onUpdate: _onUpdate, planId: _p
             </section>
           )}
 
+          {/* Strategic Slot */}
+          {(post.strategicContext?.strategic_intent || post.strategicContext?.slot_id) && (
+            <section>
+              <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-900 mb-3">
+                🎯 {t('weeklyPlan.detail.strategicSlot', 'Strategic Slot')}
+              </h3>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  {post.strategicContext.slot_id && (
+                    <span className="px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded">
+                      Slot {post.strategicContext.slot_id}
+                    </span>
+                  )}
+                  {post.strategicContext.goal_mode && (
+                    <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-100 text-blue-800">
+                      {post.strategicContext.goal_mode === 'drive_footfall' ? '💰 Drive Footfall' :
+                       post.strategicContext.goal_mode === 'build_brand' ? '🎨 Build Brand' :
+                       '🤝 Retain Loyalty'}
+                    </span>
+                  )}
+                </div>
+                {post.strategicContext.strategic_intent && (
+                  <p className="text-sm text-blue-900 leading-relaxed">
+                    {post.strategicContext.strategic_intent}
+                  </p>
+                )}
+                {post.strategicContext.slot_reasoning && (
+                  <div className="mt-3 pt-3 border-t border-blue-200">
+                    <div className="text-xs font-semibold text-blue-700 mb-1">Hvorfor denne slot?</div>
+                    <p className="text-sm text-blue-800 leading-relaxed italic">
+                      {post.strategicContext.slot_reasoning}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Drink pairing */}
           {post.strategicContext?.drink_pairing && (
             <section>
@@ -154,6 +192,17 @@ export function PostDetailModal({ post, onClose, onUpdate: _onUpdate, planId: _p
                   <div className="text-sm font-semibold text-slate-900">{post.timing.time}</div>
                 </div>
               </div>
+              {post.timing.timingRationale && (
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  <div className="flex items-start gap-2">
+                    <span className="text-purple-600 mt-0.5">🧠</span>
+                    <div className="flex-1">
+                      <div className="text-xs font-semibold text-purple-900 mb-1">AI Timing Intelligence</div>
+                      <p className="text-sm text-slate-700 leading-relaxed">{post.timing.timingRationale}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         </div>

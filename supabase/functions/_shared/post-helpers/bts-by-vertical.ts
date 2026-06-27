@@ -244,3 +244,168 @@ export function getBTSAnchors(vertical: string, currentHour: number): string[] {
   const deduped = Array.from(new Set(combined))
   return deduped.slice(0, 5)
 }
+
+/**
+ * VALIDATION-AWARE BTS ANCHORS (V5.6 - June 22, 2026)
+ * 
+ * Filters BTS template suggestions based on actual menu evidence and verified facilities.
+ * Prevents hallucinations when recognizable_interior_identity is NULL.
+ * 
+ * FILTERING RULES:
+ * 1. Personnel references (barista, sommelier, chef) → Requires menu evidence
+ * 2. Facility references (udeservering, terrasse) → Requires verified facility flag
+ * 3. Product references (kaffe, vin, cocktails) → Requires menu category match
+ * 
+ * @param vertical - The resolved effective vertical (e.g. 'cafe', 'bar', 'bakery')
+ * @param currentHour - 0-23 hour for time-of-day bucketing
+ * @param menuCategories - Array of menu categories from actual menu data (e.g. ['brunch', 'frokost', 'middag'])
+ * @param menuItemsText - Combined text of all menu items (names + descriptions) for keyword matching
+ * @param verifiedFacilities - Object with verified facility flags from business_operations
+ * @returns Filtered array of Danish BTS content prompts (max 5)
+ */
+export function getBTSAnchorsFiltered(
+  vertical: string,
+  currentHour: number,
+  menuCategories: string[] = [],
+  menuItemsText: string = '',
+  verifiedFacilities: {
+    has_outdoor_seating?: boolean
+    has_bar?: boolean
+    has_kitchen?: boolean
+    serves_coffee?: boolean
+    serves_alcohol?: boolean
+  } = {}
+): string[] {
+  // Get unfiltered anchors
+  const allAnchors = getBTSAnchors(vertical, currentHour)
+  
+  // If no menu data provided, return safe fallback anchors only
+  if (menuCategories.length === 0 && !menuItemsText) {
+    console.log('[BTS Filter] ⚠️  No menu data provided, using safe fallback anchors only')
+    return DEFAULT_ANCHORS.filter(anchor => !requiresVerification(anchor)).slice(0, 4)
+  }
+  
+  // Normalize menu text for keyword matching (lowercase, preserve Danish characters)
+  const normalizedMenuText = menuItemsText.toLowerCase()
+  const normalizedCategories = menuCategories.map(c => c.toLowerCase())
+  
+  // Filter anchors based on verification requirements
+  const filtered = allAnchors.filter(anchor => {
+    const anchorLower = anchor.toLowerCase()
+    
+    // RULE 1: BARISTA - Requires coffee in menu
+    if (anchorLower.includes('barista')) {
+      const hasCoffee = verifiedFacilities.serves_coffee 
+        || normalizedMenuText.includes('kaffe')
+        || normalizedMenuText.includes('coffee')
+        || normalizedMenuText.includes('espresso')
+        || normalizedMenuText.includes('latte')
+        || normalizedMenuText.includes('cappuccino')
+        || normalizedCategories.some(cat => /kaffe|coffee/i.test(cat))
+      
+      if (!hasCoffee) {
+        console.log(`[BTS Filter] ❌ Filtered (no coffee in menu): "${anchor.substring(0, 50)}..."`)
+        return false
+      }
+    }
+    
+    // RULE 2: KAFFE/COFFEE - Requires coffee in menu
+    if (anchorLower.includes('kaffe') || anchorLower.includes('coffee')) {
+      const hasCoffee = verifiedFacilities.serves_coffee
+        || normalizedMenuText.includes('kaffe')
+        || normalizedMenuText.includes('coffee')
+        || normalizedMenuText.includes('espresso')
+        || normalizedCategories.some(cat => /kaffe|coffee/i.test(cat))
+      
+      if (!hasCoffee) {
+        console.log(`[BTS Filter] ❌ Filtered (no coffee in menu): "${anchor.substring(0, 50)}..."`)
+        return false
+      }
+    }
+    
+    // RULE 3: OUTDOOR SEATING - Requires verified facility
+    if (anchorLower.match(/udendørs|udeservering|terrasse|outdoor/)) {
+      const hasOutdoor = verifiedFacilities.has_outdoor_seating === true
+      
+      if (!hasOutdoor) {
+        console.log(`[BTS Filter] ❌ Filtered (no outdoor seating): "${anchor.substring(0, 50)}..."`)
+        return false
+      }
+    }
+    
+    // RULE 4: SOMMELIER - Requires wine in menu
+    if (anchorLower.includes('sommelier')) {
+      const hasWine = verifiedFacilities.serves_alcohol
+        || normalizedMenuText.includes('vin')
+        || normalizedMenuText.includes('wine')
+        || normalizedMenuText.includes('rødvin')
+        || normalizedMenuText.includes('hvidvin')
+        || normalizedCategories.some(cat => /vin|wine/i.test(cat))
+      
+      if (!hasWine) {
+        console.log(`[BTS Filter] ❌ Filtered (no wine in menu): "${anchor.substring(0, 50)}..."`)
+        return false
+      }
+    }
+    
+    // RULE 5: BARTENDER - Requires bar/cocktails in menu
+    if (anchorLower.includes('bartender')) {
+      const hasBar = verifiedFacilities.has_bar
+        || verifiedFacilities.serves_alcohol
+        || normalizedMenuText.includes('cocktail')
+        || normalizedMenuText.includes('drink')
+        || normalizedMenuText.includes('øl')
+        || normalizedMenuText.includes('beer')
+        || normalizedCategories.some(cat => /bar|cocktail|drinks/i.test(cat))
+      
+      if (!hasBar) {
+        console.log(`[BTS Filter] ❌ Filtered (no bar/cocktails): "${anchor.substring(0, 50)}..."`)
+        return false
+      }
+    }
+    
+    // RULE 6: CHEF/KOK - Requires kitchen operation
+    if (anchorLower.match(/\bkok\b|kokken|chef/)) {
+      const hasKitchen = verifiedFacilities.has_kitchen
+        || normalizedCategories.some(cat => /frokost|middag|brunch|lunch|dinner/i.test(cat))
+        || normalizedMenuText.length > 100  // Assumes substantial food menu
+      
+      if (!hasKitchen) {
+        console.log(`[BTS Filter] ❌ Filtered (no kitchen operation): "${anchor.substring(0, 50)}..."`)
+        return false
+      }
+    }
+    
+    // Anchor passed all filters
+    return true
+  })
+  
+  // If all anchors were filtered out, return safe generic fallbacks
+  if (filtered.length === 0) {
+    console.log('[BTS Filter] ⚠️  All anchors filtered, using generic fallbacks')
+    return [
+      'Hvad sker der bag kulisserne i dag?',
+      'En detalje ved stedet som gæsterne sjældent opdager',
+      'Historien bag et af produkterne på menuen',
+      'Hvad er vi mest stolte af denne uge?',
+    ]
+  }
+  
+  console.log(`[BTS Filter] ✅ ${filtered.length}/${allAnchors.length} anchors passed validation`)
+  return filtered
+}
+
+/**
+ * Helper: Check if anchor requires verification
+ * Used to identify anchors that should not be shown without menu data
+ */
+function requiresVerification(anchor: string): boolean {
+  const lower = anchor.toLowerCase()
+  return lower.includes('barista')
+    || lower.includes('kaffe')
+    || lower.includes('coffee')
+    || lower.includes('sommelier')
+    || lower.includes('bartender')
+    || lower.match(/udendørs|udeservering|terrasse/)
+    || lower.match(/\bkok\b|kokken|chef/)
+}

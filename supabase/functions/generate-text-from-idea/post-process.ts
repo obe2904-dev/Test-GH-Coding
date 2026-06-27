@@ -60,7 +60,7 @@ export function needsSpellingCheck(text: string, language: string): boolean {
 // Defense-in-depth safeguard against prompt instruction leakage from brand profile
 // or AI hallucination. Patterns: (vær specifik: ...), (be specific: ...), [insert X], etc.
 export function stripMetaInstructions(text: string): string {
-  return text
+  let cleaned = text
     // Danish placeholders from brand profile never_say examples
     .replace(/\(vær specifik[^)]*\)/gi, '')
     .replace(/\(vær konkret[^)]*\)/gi, '')
@@ -81,8 +81,29 @@ export function stripMetaInstructions(text: string): string {
     .replace(/\[tilføj [^\]]+\]/gi, '')
     .replace(/<specify [^>]+>/gi, '')
     .replace(/<angiv [^>]+>/gi, '')
-    
-    // Clean up double spaces and trim
+  
+  // FIX 01: Strip fabricated interior atmosphere sentences (factual_constraints violation guard)
+  // Patterns: "morgensolen spiller", "dugvåde vinduer", "lyset falder", "stemningen inde"
+  const FABRICATED_INTERIOR_PATTERNS = [
+    /morgensolen\s+spiller\b/i,
+    /dugvåde?\s+vinduer\b/i,
+    /lyset\s+falder\b/i,
+    /stemningen\s+inde\b/i,
+    /lysstråler?\s+gennem\b/i,
+    /solopgang\s+kaster\b/i,
+  ]
+
+  const sentences = cleaned.split(/(?<=[.!?])\s+/)
+  const filtered = sentences.filter(
+    s => !FABRICATED_INTERIOR_PATTERNS.some(rx => rx.test(s))
+  )
+  // Only replace if something was actually removed (avoid empty output)
+  if (filtered.length > 0 && filtered.length < sentences.length) {
+    cleaned = filtered.join(' ')
+  }
+  
+  // Clean up double spaces and trim
+  return cleaned
     .replace(/\s{2,}/g, ' ')
     .trim()
 }
@@ -113,16 +134,63 @@ export function stripIncompleteFragments(text: string): string {
 // ── stripBannedClosers ────────────────────────────────────────────────────
 // Remove recurring end-of-copy closers that often survive prompt rules.
 export function stripBannedClosers(text: string): string {
-  return text
+  let cleaned = text
     .replace(/\b(?:læs mere|mere info|book bord|bestil nu|kom forbi)\b\.?\s*$/i, '')
+  
+  // FIX 02: Extend banned closers with dateret sprog from tone_rules
+  // These resist prompt-level bans because they are fluent Danish and the model
+  // treats them as natural — post-processing strip is the reliable fallback.
+  const DATERET_SPROG_PATTERNS = [
+    /\bsvip\s+forbi\b/gi,
+    /\bsvip\s+ind\b/gi,
+    /\bnyd\b/gi,  // "nyd den friske brise" etc.
+    /\btag\s+en\s+pause\s+fra\s+hverdagen\b/gi,
+    /\bvarm\s+omfavnelse\b/gi,
+    /\bforkæl\s+dig\s+selv\b/gi,
+    /\bdu\s+fortjener\s+det\b/gi,
+    /\ben\s+oplevelse\s+for\s+alle\s+sanser\b/gi,
+    /\bperfekt\b/gi,  // Superlative that frequently survives
+  ]
+
+  // Apply: Try to remove just the phrase first, check coherence
+  for (const pattern of DATERET_SPROG_PATTERNS) {
+    const withoutPhrase = cleaned.replace(pattern, '').trim()
+    
+    // Check if removal left a coherent sentence
+    const isCoherent = withoutPhrase.length >= 10 && 
+                       !/^(og|men|eller|til|med|for)\b/i.test(withoutPhrase) &&
+                       !/\s{2,}/.test(withoutPhrase)
+    
+    if (isCoherent && withoutPhrase.length > 0) {
+      cleaned = withoutPhrase
+    } else if (withoutPhrase.length < 10) {
+      // If phrase removal made it too short, remove the entire sentence containing it
+      const sentenceRegex = new RegExp(
+        `[^.!?]*${pattern.source}[^.!?]*[.!?]\\s*`,
+        'gi'
+      )
+      cleaned = cleaned.replace(sentenceRegex, '').trim()
+    }
+  }
+  
+  return cleaned
     .replace(/\s{2,}/g, ' ')
     .trim()
 }
 
 // ── stripAIDashes ─────────────────────────────────────────────────────────
 // Remove AI-style standalone dash connectors between words or clauses.
+// FIX 03-A: Extended to handle first-line dashes (title echoed in caption)
 export function stripAIDashes(text: string): string {
-  return text
+  // First-line dash handling: if first line ends with "—" or "–", remove it
+  const lines = text.split('\n');
+  if (lines.length > 0 && lines[0]) {
+    lines[0] = lines[0].replace(/\s*[–—]\s*$/, '').trim();
+  }
+  const processed = lines.join('\n');
+  
+  // Original dash stripping logic
+  return processed
     .replace(/\s*[–—]\s+/g, '. ')
     .replace(/\s+-\s+/g, '. ')
     .replace(/\s{2,}/g, ' ')
@@ -175,12 +243,14 @@ function getContentDomain(keyword: string): 'coffee' | 'drinks' | 'food' | 'bake
 }
 
 // ── generateHashtags ───────────────────────────────────────────────────────
+// FIX 03-B: Extended to accept locationVocabulary for location-specific hashtags
 export function generateHashtags(
   city: string,
   contentType: string,
   extractedKeyword?: string,
   businessName?: string,
-  context: Partial<PlatformHashtagContext> = {}
+  context: Partial<PlatformHashtagContext> = {},
+  locationVocabulary?: string[] | null
 ): { facebook: string[], instagram: string[] } {
   return buildPlatformHashtagSets({
     city,
@@ -189,6 +259,7 @@ export function generateHashtags(
     extractedKeyword,
     vertical: context.vertical,
     businessCharacter: context.businessCharacter,
+    locationVocabulary,
     text: context.text,
     detectedDishName: context.detectedDishName,
     detectedDishDescription: context.detectedDishDescription,

@@ -1358,14 +1358,9 @@ export type Database = {
       cleanup_old_daily_suggestions: { Args: never; Returns: undefined }
       create_business_onboarding: {
         Args: {
-          p_business_name: string
-          p_business_vertical: string
-          p_city: string
-          p_country: string
-          p_postal_code: string
-          p_selected_platforms: string[]
           p_user_id: string
-          p_website_url?: string
+          p_business_name: string
+          p_selected_platforms: string[]
         }
         Returns: string
       }

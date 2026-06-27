@@ -325,7 +325,7 @@ serve(async (req)=>{
     const [{ data: locationIntel }, { data: operations, error: operationsError }, { data: openingHours }, { data: brandProfile, error: brandProfileError }, { data: businessProfileSignal }, { data: menuItemsNormalized }, { data: menuItems }, { data: businessProgrammes }, { data: profileData }, { data: businessTier, error: businessTierError }] = await Promise.all([
       dataClient.from('business_location_intelligence').select('neighborhood, area_type, category_scores, location_marketing_hooks, latitude, longitude, local_location_reference').eq('business_id', body.business_id).single(),
       dataClient.from('business_operations').select('has_outdoor_seating, establishment_type, reservation_required, accepts_walk_ins, enabled_menu_languages, kitchen_close_time, has_takeaway, has_table_service').eq('business_id', body.business_id).maybeSingle(),
-      dataClient.from('opening_hours').select('weekday, closed, open_time, close_time').eq('business_id', body.business_id).eq('kind', 'normal'),
+      dataClient.from('opening_hours').select('weekday, open_time, close_time').eq('business_id', body.business_id).eq('kind', 'normal'),
       dataClient.from('business_brand_profile').select(`
           business_character,
           business_archetype,
@@ -338,11 +338,9 @@ serve(async (req)=>{
           busy_pattern,
           voice_guardrails,
           business_identity_persona,
-          booking_link,
+          marketing_manager_brief,
           content_strategy,
           recognizable_interior_identity,
-          never_say,
-          typical_openings,
           things_to_avoid,
           content_focus,
           core_offerings,
@@ -352,7 +350,7 @@ serve(async (req)=>{
           enhanced_avoid_examples,
           updated_at
         `).eq('business_id', body.business_id).maybeSingle(),
-      dataClient.from('business_profile').select('menu_signal').eq('business_id', body.business_id).maybeSingle(),
+      dataClient.from('business_profile').select('menu_signal, booking_url').eq('business_id', body.business_id).maybeSingle(),
       dataClient.from('menu_items_normalized').select('id, item_name, item_description, category_name, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', body.business_id).eq('menu_language', expectedLanguage),
       dataClient.from('menu_results_v2').select('id, language_code, structured_data, service_periods, is_signature, ai_summary, source_url, service_period_name').eq('business_id', body.business_id).eq('status', 'done').limit(20),
       dataClient.from('business_programme_profiles').select('programme_type, programme_name, time_windows, operating_days, is_active, decision_timing, accepts_reservations, baseline_goal_split, audience_segments').eq('business_id', body.business_id).eq('is_active', true),
@@ -375,6 +373,16 @@ serve(async (req)=>{
 
       console.warn('[get-weekly-strategy] Brand profile fetch error:', brandProfileError);
     }
+    
+    // Debug: Check booking data retrieval
+    console.log('[get-weekly-strategy] Booking data:', {
+      has_business_profile: !!businessProfileSignal,
+      booking_url: businessProfileSignal?.booking_url,
+      has_operations: !!operations,
+      accepts_walk_ins: operations?.accepts_walk_ins,
+      reservation_required: operations?.reservation_required
+    });
+    
     console.log('[get-weekly-strategy] Brand profile:', {
       found: !!brandProfile,
       has_v5: !!brandProfile?.brand_profile_v5,
@@ -622,13 +630,58 @@ serve(async (req)=>{
       }
       console.log('[Phase C Setup] Programme goal splits loaded:', Object.keys(programmeGoalSplits).join(', '));
     }
-    // Map service_period to programme_type for backwards compatibility
-    const servicePeriodMap: Record<string, string> = {
-      brunch: 'brunch',
-      lunch: 'lunch',
-      dinner: 'dinner',
-      breakfast: 'brunch'
-    };
+    // DYNAMIC: Map generic service_period names to business's actual programme types
+    // This ensures "lunch" maps to "FROKOST" if that's the actual programme name
+    const servicePeriodMap: Record<string, string> = {};
+    
+    if (businessProgrammes && businessProgrammes.length > 0) {
+      businessProgrammes.forEach((prog) => {
+        const progType = prog.programme_type;
+        const timeWindows = prog.time_windows || [];
+        
+        // Parse time windows to determine which generic periods this programme covers
+        timeWindows.forEach((window: string) => {
+          const [start, end] = window.split('-');
+          if (!start || !end) return;
+          
+          const [startH, startM] = start.split(':').map(Number);
+          const [endH, endM] = end.split(':').map(Number);
+          const startMin = startH * 60 + (startM || 0);
+          const endMin = endH * 60 + (endM || 0);
+          
+          // Map based on time overlap:
+          // Breakfast/Brunch: 07:00-11:00 (420-660 min)
+          // Lunch: 11:00-16:00 (660-960 min)
+          // Dinner: 17:00-23:00 (1020-1380 min)
+          
+          if (startMin <= 660 && endMin >= 420) {
+            // Overlaps breakfast/brunch hours
+            servicePeriodMap['breakfast'] = progType;
+            servicePeriodMap['brunch'] = progType;
+          }
+          
+          if (startMin <= 960 && endMin >= 660) {
+            // Overlaps lunch hours
+            servicePeriodMap['lunch'] = progType;
+          }
+          
+          if (startMin <= 1380 && endMin >= 1020) {
+            // Overlaps dinner hours
+            servicePeriodMap['dinner'] = progType;
+          }
+        });
+      });
+    }
+    
+    // Fallback: if no mappings were created, use generic names
+    if (Object.keys(servicePeriodMap).length === 0) {
+      servicePeriodMap['brunch'] = 'brunch';
+      servicePeriodMap['lunch'] = 'lunch';
+      servicePeriodMap['dinner'] = 'dinner';
+      servicePeriodMap['breakfast'] = 'brunch';
+    }
+    
+    console.log('[get-weekly-strategy] Service period mapping:', servicePeriodMap);
     // Filter available days by opening hours (critical: don't suggest posts on closed days)
     const weekdayMap = [
       'sunday',
@@ -641,10 +694,9 @@ serve(async (req)=>{
     ];
     const openDays = new Set();
     if (openingHours && openingHours.length > 0) {
+      // All rows in opening_hours represent open days (closed days have no row)
       openingHours.forEach((h)=>{
-        if (!h.closed) {
-          openDays.add(h.weekday.toLowerCase());
-        }
+        openDays.add(h.weekday.toLowerCase());
       });
     } else {
       // If no opening hours configured, assume all days open (fallback)
@@ -702,9 +754,8 @@ serve(async (req)=>{
         thursday:'Tor', friday:'Fre', saturday:'Lør', sunday:'Søn'
       };
       const fmt = (t: string) => t ? t.replace(/:\d\d$/, '') : ''; // strip seconds
-      // Sort rows by weekday order; skip closed days
+      // Sort rows by weekday order (all rows are open days - closed days have no row)
       const sorted = [...(openingHours as any[])]
-        .filter(h => !h.closed)
         .sort((a, b) => dayOrder.indexOf(a.weekday) - dayOrder.indexOf(b.weekday));
       if (sorted.length === 0) return '';
       // Group consecutive days with identical open+close
@@ -976,12 +1027,12 @@ serve(async (req)=>{
         ascending: false
       }).limit(4),
       // Query published posts for menu item deduplication (14 days)
-      supabaseClient.from('published_posts').select('menu_item_name, content_type, posted_at').eq('business_id', body.business_id).gte('posted_at', fourteenDaysAgoISO).order('posted_at', {
+      supabaseClient.from('posts').select('menu_item_name, content_type, posted_at').eq('business_id', body.business_id).gte('posted_at', fourteenDaysAgoISO).order('posted_at', {
         ascending: false
       }),
       // Query scheduled posts for upcoming week (to pass to AI context)
       // NEW: Include menu_item_id for UUID-first matching (replaces fragile caption text extraction)
-      supabaseClient.from('published_posts').select('menu_item_id, menu_item_name, caption, content_type, scheduled_for').eq('business_id', body.business_id).eq('status', 'scheduled').gte('scheduled_for', toLocalISO(weekStartDate)).lte('scheduled_for', queryWeekEndISO).order('scheduled_for', {
+      supabaseClient.from('posts').select('menu_item_id, menu_item_name, caption, content_type, scheduled_for').eq('business_id', body.business_id).eq('status', 'scheduled').gte('scheduled_for', toLocalISO(weekStartDate)).lte('scheduled_for', queryWeekEndISO).order('scheduled_for', {
         ascending: true
       })
     ]);
@@ -997,7 +1048,7 @@ serve(async (req)=>{
     const { data: pastStrategiesForMenuDedup } = pastStrategiesResult;
     const menuItemsFromStrategies = (pastStrategiesForMenuDedup ?? []).slice(0, 2) // Only the 2 most recent past weeks
     .flatMap((s)=>s.post_ideas || []).map((idea)=>idea.menu_item_used).filter(Boolean);
-    // Extract menu items from published_posts (what's actually been posted via Quick Suggestions or manual)
+    // Extract menu items from posts (what's actually been posted via Quick Suggestions or manual)
     // NEW: Use menu_item_id when available for more reliable tracking
     const menuItemsFromPublished = (publishedPosts ?? [])
       .map((p)=> p.menu_item_id || p.menu_item_name)
@@ -1188,18 +1239,18 @@ serve(async (req)=>{
       daily_open_time: dailyOpenTime,
       daily_close_time: dailyCloseTime,
       opening_hours_summary: openingHoursSummary || undefined,
-      booking_link: brandProfile?.booking_link ?? null,
+      booking_link: businessProfileSignal?.booking_url ?? null,
       // Booking model — drives CTA type selection in Phase 1 and Phase 2b
       booking_model: {
         reservation_required: operations?.reservation_required ?? false,
         accepts_walk_ins: operations?.accepts_walk_ins ?? true,
-        has_booking_link: !!brandProfile?.booking_link,
+        has_booking_link: !!businessProfileSignal?.booking_url,
       },
       // Derived CTA rules — consumed by Phase 1 strategy prompt and Phase 2b slot logic.
       // These translate the raw booking model into explicit AI instructions so the prompt
       // does not have to reason about the three-field matrix itself.
       cta_rules: (()=>{
-        const hasLink = !!brandProfile?.booking_link;
+        const hasLink = !!businessProfileSignal?.booking_url;
         const walkIn = operations?.accepts_walk_ins ?? true;
         const required = operations?.reservation_required ?? false;
 
@@ -1207,7 +1258,7 @@ serve(async (req)=>{
           return {
             mode: 'reservation_only',
             instruction:
-              'Every post MUST include a booking CTA using one of the approved booking_cta_phrases. ' +
+              'Every post MUST include a booking CTA using brand-specific phrases from the CTA library. ' +
               'Walk-in language ("kom forbi", "kig ind") is NOT permitted as a primary CTA.',
             booking_nudge_capable: true,
             booking_nudge_lead_days: 2, // post this many days before target visit day
@@ -1219,7 +1270,7 @@ serve(async (req)=>{
             mode: 'mixed',
             instruction:
               'Use walk-in CTA ("kom forbi") for same-day or next-day posts. ' +
-              'Use booking CTA (approved phrases only) for posts targeting a visit 2+ days ahead, ' +
+              'Use booking CTA (brand-specific phrases from CTA library) for posts targeting a visit 2+ days ahead, ' +
               'especially Thursday/Friday/Saturday evening slots. ' +
               'Never combine both CTAs in a single post.',
             booking_nudge_capable: true,
@@ -1252,10 +1303,11 @@ serve(async (req)=>{
       // REAL: Business data (Step 1)
       business_name: businessName,
       business_type: businessType,
-      // AI-generated plain-text description of what this business is.
+      // V5.6 (June 23, 2026): SHORT business type reasoning (~20-70 chars)
+      business_character: brandProfile?.business_character || undefined,
+      // V5.6 (June 23, 2026): LONG strategic marketing guidance (separate from business_character)
       // Replaces the deprecated framework/alias system in Phase 1 & 2 strategy prompts.
-      // NEW (June 12, 2026): Use flattened business_identity_persona, fallback to nested
-      business_character: (brandProfile as any)?.business_identity_persona || brandProfile?.business_character || undefined,
+      marketing_guidance: (brandProfile as any)?.marketing_manager_brief || (brandProfile as any)?.business_identity_persona || undefined,
       // WP4: Operational programme signals from menu_signal extraction
       menu_programmes: businessProfileSignal?.menu_signal?.programmes ?? null,
       // WP5: Late-night signal derived from opening_hours
@@ -1315,8 +1367,10 @@ serve(async (req)=>{
         tone_rules: brandProfile.brand_profile_v5?.voice?.tone_rules || [],
         // Extract tone positioning from Tone DNA
         tone_positioning: brandProfile.brand_profile_v5?.voice?.tone_dna?.recommended_tone?.tone_positioning || '',
-        // Map brand essence to voice style
-        voice_style: brandProfile.brand_essence || '',
+        // FIXED: Use V5 formality level instead of incorrectly mapping brand_essence (V5-ONLY cleanup June 23, 2026)
+        voice_style: brandProfile.brand_profile_v5?.voice?.formality_level || 
+                     brandProfile.formality_level || 
+                     '',
         // Parse things_to_avoid as do_not_say
         do_not_say: (()=>{
           const avoid = brandProfile.things_to_avoid;
@@ -1343,7 +1397,6 @@ serve(async (req)=>{
         })(),
         // V5 specific enrichment fields
         never_say: brandProfile.voice_guardrails?.never_say || brandProfile.never_say || [],
-        typical_openings: brandProfile.typical_openings || [],
         core_offerings: (()=>{
           const co = brandProfile.core_offerings;
           if (typeof co === 'string') {
@@ -1394,11 +1447,9 @@ serve(async (req)=>{
           }
           return ex || [];
         })(),
-        // Approved booking CTA phrases — used when booking_link is present.
-        // These override the generic_marketing banned list for booking-specific posts.
-        booking_cta_phrases: brandProfile?.booking_link
-          ? ['Reservér dit bord her', 'Book via link i bio', 'Book bord til weekenden']
-          : [],
+        // V5.6 CTA Library — brand-specific CTAs for different intents (visit, booking, engagement, social_media)
+        cta_library: brandProfile.brand_profile_v5?.voice?.writing_examples?.cta_library || null,
+        cta_preferences: brandProfile.brand_profile_v5?.voice?.writing_examples?.cta_preferences || null,
         // Identity fields for Phase 1 strategy grounding
         gastronomic_profile: (brandProfile as any).gastronomic_profile || null,
         tone_model: (()=>{
@@ -1895,6 +1946,15 @@ serve(async (req)=>{
         // Continue without type allocation - posts will not have content_type field
         }
         // ===== END PHASE C =====
+        
+        // DEBUG: Verify weekContext has booking data before saving
+        console.log('[get-weekly-strategy] About to save weekContext:', {
+          has_weekContext: !!weekContext,
+          booking_link: weekContext?.booking_link,
+          booking_model: weekContext?.booking_model,
+          cta_rules_mode: weekContext?.cta_rules?.mode
+        });
+        
         const { error: saveError } = await dataClient.from('weekly_strategies').upsert({
           business_id: body.business_id,
           week_number: weekNumber,
@@ -1927,12 +1987,17 @@ serve(async (req)=>{
           onConflict: 'business_id,week_start'
         });
         if (saveError) {
-          console.error('[get-weekly-strategy] Background: failed to save strategy:', saveError);
+          console.error('[get-weekly-strategy] Background: failed to save strategy:', {
+            error: saveError,
+            message: saveError.message,
+            code: saveError.code,
+            details: saveError.details
+          });
           await dataClient.from('weekly_strategies').update({
             status: 'error'
           }).eq('id', strategyRowId);
         } else {
-          console.log('[get-weekly-strategy] Background: strategy saved, status=generated, ID:', strategyRowId);
+          console.log('[get-weekly-strategy] Background: strategy saved successfully, ID:', strategyRowId);
         }
       } catch (bgError) {
         const errMsg = bgError instanceof Error ? bgError.message : String(bgError);

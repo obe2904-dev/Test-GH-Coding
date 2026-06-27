@@ -9,8 +9,8 @@ Last updated: 2026-05-26
 Main business entity table
 - `id` (uuid, PK)
 - `name`, `city`, `business_type`
-- `vertical` (e.g., 'food_beverage')
-- **`category`** (text) ← Specific business type (café, restaurant, bar) - used for AI context
+- `business_type_hybrid` (JSONB) - Hybrid business type structure: `{ primary: string, secondary: string[], hybridLabel: string, cuisineType?: string, conceptTags?: string[] }`
+- **`category`** (text) ← Legacy field; migrating to business_type_hybrid for richer context
 - `price_level` (1-4)
 
 ### business_brand_profile

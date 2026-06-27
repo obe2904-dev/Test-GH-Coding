@@ -91,6 +91,10 @@ export interface WeeklyPlanSuggestion {
   strategyBrief?: string         // Phase 2b compact directive: what caption should achieve + weather/timing/role context
   mediaDirection?: string        // Phase 2b photo/scene direction — what to photograph and how
   sceneSpec?: string              // Phase 2b scene specification — who/action/setting for experience posts
+  // Strategic Slot Architecture (Phase 1 → Phase 2a → Phase 2b → Weekly Plan Generator)
+  slotId?: string | number       // Slot identifier (e.g., "A", "B", "C", "D" or 1, 2, 3, 4)
+  strategicIntent?: string       // What this slot aims to achieve (from Phase 1)
+  slotReasoning?: string         // Why this strategic slot exists - the "because" (from Phase 1)
 }
 
 export interface PhotoAdjustments {

@@ -12,6 +12,7 @@ import { optimizeWeeklySchedule } from './post-slot-optimizer.ts'
 import { assembleContentBrief } from './content-brief-assembler.ts'
 import { filterAudienceLabels } from '../utils/audience-filter.ts'
 import { detectServicePeriod } from '../content-planning/service-period-detector.ts'
+import { matchTimingToSegment } from '../utils/segment-timing-matcher.ts'
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3'
 import type { 
   WeeklyStrategy, 
@@ -195,6 +196,18 @@ export interface PostSpecification {
     booking_nudge_warranted?: boolean | null    // AI decision this week
   }
 
+  // Segment coverage context (NEW - June 27, 2026)
+  // Indicates whether this post targets a strategic audience segment or gap-time capacity
+  segmentCoverage?: {
+    mode: 'strategic_segment' | 'gap_capacity'  // Strategic segment match or gap-time capacity
+    matchedSegment?: {
+      people_type: string                        // e.g., "Familier", "Par", "Vennegrupper"
+      timing: string                             // e.g., "Lør-Søn 17:00-20:00"
+      situation?: string                         // e.g., "Familier med børn der spiser middag i weekenden"
+    }
+    gapRationale?: string                        // Only for gap_capacity: why format appeal is used instead
+  }
+
   // Frontend compatibility fields (flattened for easier access)
   idea_id?: number
   title?: string
@@ -316,6 +329,22 @@ function convertTimeToCategory(time: string): 'morning' | 'lunch' | 'afternoon' 
   if (hour >= 14 && hour < 17) return 'afternoon'
   if (hour >= 17 && hour < 20) return 'dinner'
   return 'evening'
+}
+
+/**
+ * Convert Danish day name to English (for segment timing matcher)
+ */
+function convertDanishDayToEnglish(danishDay: string): string {
+  const dayMap: Record<string, string> = {
+    'Mandag': 'Monday',
+    'Tirsdag': 'Tuesday',
+    'Onsdag': 'Wednesday',
+    'Torsdag': 'Thursday',
+    'Fredag': 'Friday',
+    'Lørdag': 'Saturday',
+    'Søndag': 'Sunday',
+  }
+  return dayMap[danishDay] || danishDay
 }
 
 /**
@@ -561,7 +590,20 @@ async function mapIdeaToEnrichedSlot(
   const [_yr, _mo, _dy] = idea.suggested_day.split('-').map(Number)
   const suggestedDate = new Date(_yr, _mo - 1, _dy)
   const dayOfWeek = (suggestedDate.getDay() + 6) % 7 // Mon=0 … Sun=6 (matches optimizer offset convention)
-  const hour = parseInt(idea.suggested_time.split(':')[0])
+  
+  // ✨ TIMING INTELLIGENCE: Use context-driven timing if available
+  const timingIntelligence = (idea as any).timing_intelligence
+  let hour: number
+  let timingRationale: string | undefined
+  
+  if (timingIntelligence?.suggested_post_time) {
+    hour = parseInt(timingIntelligence.suggested_post_time.split(':')[0])
+    timingRationale = timingIntelligence.timing_rationale
+    console.log(`[WeeklyPlan] ⏰ Using timing intelligence for "${idea.title}": ${timingIntelligence.suggested_post_time} (${timingRationale})`)
+  } else {
+    hour = parseInt(idea.suggested_time.split(':')[0])
+    console.log(`[WeeklyPlan] ⏰ Using default timing for "${idea.title}": ${idea.suggested_time}`)
+  }
   
   // Build location context from available data
   // Note: DB columns are area_type (not location_type) and location_marketing_hooks (not location_amplifiers)
@@ -800,6 +842,8 @@ async function mapIdeaToEnrichedSlot(
       peak_day: (idea as any).peak_day ?? null,
       lead_days_used: (idea as any).lead_days_used ?? null,
       booking_nudge_warranted: (idea as any).booking_nudge_warranted ?? null,
+      // ✨ TIMING INTELLIGENCE: Context-driven timing rationale
+      timing_rationale: timingRationale ?? null,
     }
   }
 }
@@ -1122,6 +1166,50 @@ export async function generateWeeklyPlan(
         editHistory: [],
       },
       
+      // Segment coverage matching (NEW - June 27, 2026)
+      // Determines if this post targets a strategic segment or gap-time capacity
+      ...((() => {
+        try {
+          // Extract strategic segments from brand profile
+          const segments = brandProfile?.strategic_audience_segments 
+            || brandProfile?.brand_profile_v5?.layer_1_programmes?.[0]?.audienceProfile?.audience_segments
+            || []
+          
+          if (segments.length === 0) {
+            console.log('[WeeklyPlan] No strategic segments found - skipping segment coverage matching')
+            return {}
+          }
+          
+          // Convert Danish day to English for matcher
+          const englishDay = convertDanishDayToEnglish(scheduleSlot.day)
+          
+          // Match timing to segment
+          const segmentMatch = matchTimingToSegment(englishDay, scheduleSlot.time, segments)
+          
+          console.log(`[WeeklyPlan] Segment match for ${scheduleSlot.day} ${scheduleSlot.time}: ${segmentMatch.mode}`,
+            segmentMatch.matchedSegment ? `(${segmentMatch.matchedSegment.people_type})` : `(${segmentMatch.gapRationale})`)
+          
+          return {
+            segmentCoverage: {
+              mode: segmentMatch.mode,
+              ...(segmentMatch.matchedSegment ? {
+                matchedSegment: {
+                  people_type: segmentMatch.matchedSegment.people_type,
+                  timing: segmentMatch.matchedSegment.timing,
+                  situation: segmentMatch.matchedSegment.situation
+                }
+              } : {}),
+              ...(segmentMatch.gapRationale ? {
+                gapRationale: segmentMatch.gapRationale
+              } : {})
+            }
+          }
+        } catch (err) {
+          console.error('[WeeklyPlan] Segment coverage matching failed:', err)
+          return {}
+        }
+      })()),
+      
       // Layer 0 strategic context
       idea_id: layer0.id,
       strategicContext: {
@@ -1145,6 +1233,8 @@ export async function generateWeeklyPlan(
           : null,
         // Strategic intent — Phase 1 narrative purpose for this post (booking driver, occasion, etc.)
         strategic_intent: (layer0 as any).strategic_intent ?? null,
+        // Slot reasoning — the "because" from Phase 1 strategic slot
+        slot_reasoning: (layer0 as any).slot_reasoning ?? null,
         // Booking nudge display metadata — surfaced in UI for transparency
         nudge_rationale: (layer0 as any).nudge_rationale ?? null,
         peak_day: (layer0 as any).peak_day ?? null,

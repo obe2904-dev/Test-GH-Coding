@@ -44,18 +44,24 @@ export function useProgrammeProfiles(businessId: string | undefined) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  const fetchProgrammes = useCallback(async () => {
+  const fetchProgrammes = useCallback(async (bustCache = false) => {
     if (!businessId) {
       console.log('[useProgrammeProfiles] No businessId provided, skipping fetch');
       setLoading(false);
       return;
     }
 
-    console.log('[useProgrammeProfiles] 🔍 Fetching programmes for business:', businessId);
+    const timestamp = bustCache ? `?_t=${Date.now()}` : '';
+    console.log('[useProgrammeProfiles] 🔍 Fetching programmes for business:', businessId, timestamp ? '(cache busted)' : '');
 
     try {
       setLoading(true);
       setError(null);
+
+      // Add small delay if cache busting to ensure writes are committed
+      if (bustCache) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
 
       const { data, error: fetchError } = await supabase
         .from('business_programme_profiles')
@@ -63,7 +69,18 @@ export function useProgrammeProfiles(businessId: string | undefined) {
         .eq('business_id', businessId)
         .order('programme_type');
 
-      console.log('[useProgrammeProfiles] 📥 Raw response:', { data, error: fetchError, count: data?.length });
+      console.log('[useProgrammeProfiles] 📥 Raw response:', { 
+        data, 
+        error: fetchError, 
+        count: data?.length,
+        businessId,
+        errorDetails: fetchError ? {
+          message: fetchError.message,
+          details: fetchError.details,
+          hint: fetchError.hint,
+          code: fetchError.code
+        } : null
+      });
 
       if (fetchError) {
         throw fetchError;

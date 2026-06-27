@@ -74,6 +74,9 @@ function normalizeSuggestionInput(rawSuggestion: any): any {
     strategyBrief: rawSuggestion.strategyBrief || rawSuggestion.strategy_brief || undefined,
     mediaDirection: rawSuggestion.mediaDirection || rawSuggestion.media_direction || undefined,
     sceneSpec: rawSuggestion.sceneSpec || rawSuggestion.scene_spec || undefined,
+    slotId: rawSuggestion.slotId || rawSuggestion.slot_id || undefined,
+    strategicIntent: rawSuggestion.strategicIntent || rawSuggestion.strategic_intent || undefined,
+    slotReasoning: rawSuggestion.slotReasoning || rawSuggestion.slot_reasoning || undefined,
   }
 }
 
@@ -111,10 +114,16 @@ serve(async (req) => {
 
     // 3. Content context — hook, contentBlock, dish lookup, signature phrase filtering
     console.log('📝 Resolving content context...')
-    const content = await resolveContentContext(supabase, businessId, suggestion, source, biz.brandSignaturePhrases, isPaid)
+    const content = await resolveContentContext(supabase, businessId, suggestion, source, biz.brandSignaturePhrases, isPaid, {
+      locationVocabulary: biz.locationVocabulary,
+      locationIntelligenceNarrative: biz.locationIntelligenceNarrative,
+      venueScene: biz.venueScene,
+      venueIdentity: biz.venueIdentity,
+      tone_dna: biz.tone_dna
+    })
     console.log('✅ Content context resolved')
 
-    // 4. CTA selection (with booking pattern awareness + content type)
+    // 4. CTA selection (with booking pattern awareness + content type + brand CTA library)
     const { selectedCta, ctaStyle, ctaIntent } = selectCTA({
       typicalClosings: biz.typicalClosings,
       language: biz.language,
@@ -125,7 +134,9 @@ serve(async (req) => {
       suggestionId: suggestion.id,
       reservationRequired: biz.reservationRequired,
       acceptsWalkIns: biz.acceptsWalkIns,
-      contentType: content.contentType,  // NEW: content type determines CTA necessity
+      contentType: content.contentType,
+      ctaLibrary: biz.ctaLibrary,        // NEW v5.6: Brand-specific CTA library
+      ctaPreferences: biz.ctaPreferences, // NEW v5.6: CTA preferences
     })
 
     // 4b. Fetch V5 profile for tone DNA and examples (paid tier only)
@@ -178,6 +189,7 @@ serve(async (req) => {
     const toneDontList = toneDNA?.tone_dont_list || null
     const locationNaturalVocab = toneDNA?.location_driver?.natural_vocabulary || null
     const locationAvoidVocab = toneDNA?.location_driver?.avoid_vocabulary || null
+    const humorCharacter = toneDNA?.humor_character || null
     
     // Extract humor_style from brand_profile_v5.voice (separate from tone_dna)
     const humorStyle = brandProfileV5?.voice?.humor_style || null
@@ -216,6 +228,7 @@ serve(async (req) => {
             ? biz.kitchenCloseTime  // BTS about food prep → kitchen hours
             : biz.todayCloseTime     // BTS about bar/service or atmosphere → venue hours
       ),
+      hasOutdoorSeating: biz.hasOutdoorSeating,
       selectedCta,
       businessName: biz.businessName,
       city: biz.city,
@@ -262,8 +275,9 @@ serve(async (req) => {
       location_natural_vocab: locationNaturalVocab,
       location_avoid_vocab: locationAvoidVocab,
       humor_style: humorStyle,
+      humor_character: humorCharacter,
       locationIntelligenceNarrative: biz.locationIntelligenceNarrative,  // Fix 4: geo narrative for atmosphere posts
-      business_identity_persona: biz.businessIdentityPersona,  // From BusinessContext now
+      business_identity_persona: biz.marketingManagerBrief || biz.businessIdentityPersona,  // V5.3: Prioritize marketing_manager_brief (synthesized) over business_identity_persona
       enhanced_social_examples: enhancedSocialExamples,
       enhanced_avoid_examples: enhancedAvoidExamples,
     })
@@ -449,10 +463,10 @@ serve(async (req) => {
     const extractedKeyword = extractTopicKeyword(content.contentBlock, content.menuItemName, aiKeyword)
     const hashtags = generateHashtags(biz.city, content.contentType, extractedKeyword, biz.businessName, {
       vertical: biz.vertical,
-      text: content.contentBlock,
+      text: cleanText,
       detectedDishName: content.menuItemName || undefined,
       detectedDishDescription: content.menuItemDescription || undefined,
-    })
+    }, locationNaturalVocab)  // FIX 03-B: Pass location vocabulary for location-specific hashtags
 
     // 9. Response
     const isBookingIntent = ctaIntent === 'visit' && !!biz.bookingLink

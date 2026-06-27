@@ -522,7 +522,7 @@ export function buildPromptB(
   const locationPhrase = renderLocationPhrase(areaType, langCode, nearbySignal)
 
 
-  const rawVenueType = (profile as any)?.business_category || business?.vertical || 'Café'
+  const rawVenueType = (profile as any)?.business_category || business?.business_type_hybrid?.primary || 'café'
   const venueTypeMap: Record<string, string> = {
     'hospitality': 'Café', 'food_service': 'Restaurant', 'cafe': 'Café',
     'restaurant': 'Restaurant', 'bar': 'Bar', 'bistro': 'Bistro'
@@ -739,7 +739,8 @@ No saved social posts exist. Derive tone_of_voice rules using this strict proces
   // Late-night from website openingHours object: {friday: {close: "02:00"}, ...}
   const waOpeningHours: Record<string, any> = waAnalysis?.openingHours || {}
   const waHasLateNight = Object.values(waOpeningHours).some((day: any) => {
-    if (!day || day.closed) return false
+    // Skip if explicitly closed or missing close time
+    if (!day || day.closed === true || !day.close) return false
     const closeStr: string = day.close || ''
     const h = parseInt(closeStr.split(':')[0], 10)
     return !isNaN(h) && h >= 0 && h < 6
@@ -1005,7 +1006,7 @@ ${location?.enrichment ? `LOCATION ENRICHMENT (deterministic — COPY VERBATIM):
 - area_type: ${location.enrichment.micro.area_type}${location.enrichment.micro.waterfront_term ? ` → use "${location.enrichment.micro.waterfront_term}" (NEVER generic "ved vandet" or "waterfront")` : location.enrichment.micro.area_type === 'waterfront' ? ' (use specific waterway term if mentioned elsewhere)' : ''}
 - nearby_signals: ${location.enrichment.micro.nearby_signals.join(', ')}
 - confidence: ${location.enrichment.micro.confidence}
-- neighborhood: ${neighborhood || '—'}
+- neighborhood: ${locIntelRow?.local_location_reference || neighborhood || cityName || '—'}
 
 CONCURRENT VISITOR AUDIENCE (category_scores — all true simultaneously, not a ranked list):
 ${sortedCategories.length > 0

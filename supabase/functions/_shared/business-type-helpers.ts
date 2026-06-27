@@ -257,7 +257,7 @@ export function detectEffectiveVertical(
   if (isBar)    return 'bar'
   if (isBakery) return 'bakery'
   if (isCoffee) return 'coffee_shop'
-  return vertical || 'cafe'
+  return vertical || '' // No hardcoded default - empty if not detected
 }
 
 /**
@@ -281,10 +281,10 @@ export function detectHybridVerticals(
   if (/\bkaffebar\b|coffee.?shop|coffeeshop|\bespresso\b|specialkaffe|kafferi\b|coffee.?bar/.test(combined)) matched.push('coffee_shop')
 
   // Include the base vertical unless it's already covered by a more specific match
-  const base = vertical || 'cafe'
+  const base = vertical || ''
   if (base && !matched.includes(base)) matched.push(base)
 
-  return matched.length > 0 ? matched : ['cafe']
+  return matched.length > 0 ? matched : [] // Return empty array if no detection
 }
 
 /**
@@ -303,7 +303,7 @@ export function resolveActiveVertical(
   openTime: string | null,
   closeTime: string | null,
 ): string {
-  if (hybrids.length <= 1) return hybrids[0] || 'cafe'
+  if (hybrids.length <= 1) return hybrids[0] || '' // No hardcoded default
 
   const hasBar    = hybrids.includes('bar')
   const hasCafe   = hybrids.includes('cafe') || hybrids.includes('restaurant')

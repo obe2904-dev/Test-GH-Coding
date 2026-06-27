@@ -43,9 +43,10 @@ interface MediaSuggestion {
 
 interface PostSuggestion {
   id: number
-  title: string
-  rationale: string
-  whyExplanation?: string
+  // Phase 3: title/rationale/captionBase removed from quick suggestions, kept for weekly plan compatibility
+  title?: string
+  rationale?: string
+  whyExplanation: string  // Phase 3: Now the primary explanation field
   occasionContext?: string
   photoIdea?: string
   mediaSuggestion?: MediaSuggestion | null
@@ -139,7 +140,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
   const hasMinimumProfileData = Boolean(
     profile?.website_url ||
     business?.website_url ||
-    profile?.about_text?.trim() ||
+    profile?.user_about_text?.trim() ||
     profile?.business_name?.trim() ||
     profile?.business_offerings ||
     profile?.opening_hours ||
@@ -407,19 +408,44 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
     if (!businessId || !isInitialLoad) return
     fetchUsageStats()
     const todayISO = toLocalISODate()
+    
+    // First try today's suggestions, then fall back to most recent unconsumed ones
+    // This prevents losing suggestions at midnight if they haven't been used yet
     supabase
       .from('daily_suggestions')
       .select('*')
       .eq('business_id', businessId)
       .eq('date', todayISO)
-      .eq('status', 'available')
+      .in('status', ['available', 'selected'])
       .eq('source', 'quick_suggestions')
+      .is('consumed_at', null)  // Only show unconsumed suggestions
       .order('position', { ascending: true })
       .limit(3)
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
+        // If no suggestions for today, try to get the most recent unconsumed batch
+        if ((!error && (!data || data.length === 0)) || error) {
+          console.log('[AiSuggestionsCard] No suggestions for today, checking for recent unconsumed batch')
+          const { data: recentData, error: recentError } = await supabase
+            .from('daily_suggestions')
+            .select('*')
+            .eq('business_id', businessId)
+            .in('status', ['available', 'selected'])
+            .eq('source', 'quick_suggestions')
+            .is('consumed_at', null)
+            .order('created_at', { ascending: false })
+            .limit(3)
+          
+          if (!recentError && recentData && recentData.length > 0) {
+            data = recentData
+            console.log('[AiSuggestionsCard] Loaded recent unconsumed suggestions from', recentData[0]?.date)
+          }
+        }
+        
         if (!error && data && data.length > 0) {
-          // Today's suggestions already exist — map directly, no edge function call
-          console.log('[AiSuggestionsCard] Today suggestions loaded from DB:', data.length)
+          // Suggestions exist — map directly, no edge function call
+          const isFromToday = data[0]?.date === todayISO
+          console.log('[AiSuggestionsCard] Suggestions loaded from DB:', data.length, 
+            isFromToday ? '(today)' : `(from ${data[0]?.date})`)
           const mapped: PostSuggestion[] = data.map((row: any) => ({
             id: row.id,
             title: row.title,
@@ -608,22 +634,6 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
   
   return (
     <div className="space-y-4">
-      {/* Usage Stats Banner */}
-      {usageStats && currentTier === 'free' && (
-        <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-purple-700">
-              {t('dashboard.usageToday')} {suggestionsUsed}/{suggestionsMax}.
-            </span>
-            {isAtRegenerationLimit && (
-              <span className="text-sm text-amber-700">
-                {t('dashboard.usageLimitReached')}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-      
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-base font-semibold text-[#0F172A]">
@@ -683,14 +693,16 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
                 Alternativt forslag
               </span>
             )}
-            <div className="flex items-start gap-3">
+            <div className={`flex items-start gap-3 ${idx > 0 ? 'pr-32' : ''}`}>
               <ContentTypeIcon contentType={suggestion.contentType} className="w-5 h-5 mt-0.5 text-text" />
               <div className="flex-1 min-w-0">
+                {/* Phase 3: Use whyExplanation as primary display (first sentence as title) */}
                 <p className="font-semibold text-gray-900 mb-2">
-                  {suggestion.title.replace(/\.$/, '')}
+                  {(suggestion.title || suggestion.whyExplanation.split(/[.!?]\s+/)[0]).replace(/\.$/, '')}
                 </p>
                 
-                {suggestion.whyExplanation && (
+                {/* Show full explanation if it has multiple sentences */}
+                {suggestion.whyExplanation.split(/[.!?]\s+/).filter(s => s.trim()).length > 1 && (
                   <div className="mb-3">
                     <p className="flex items-center gap-1.5 text-xs font-medium text-brand mb-1">
                       <LightBulbIcon className="w-3.5 h-3.5" />
@@ -748,7 +760,8 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
                   </div>
                 )}
 
-                {suggestion.suggestedTime && (() => {
+                {/* Hide timing for Free tier - keep it clean and simple */}
+                {currentTier !== 'free' && suggestion.suggestedTime && (() => {
                   // Round time for clean display:
                   // Slot A (idx=0): round UP to nearest 15-min mark (00,15,30,45)
                   // Slots B/C (idx>0): round to nearest :00 or :30 — labeled as alternatives

@@ -47,14 +47,19 @@ export async function generateCrossMenuSummary(
   language: string = 'da'
 ): Promise<CrossMenuSummary | null> {
   
-  // Validation: Need at least 2 menus for cross-summary
-  if (!menuSummaries || menuSummaries.length < 2) {
-    console.log('[CrossMenu] Skipping cross-summary: fewer than 2 menus');
+  // Validation: Need at least 1 menu (single-menu support added for buffet-style venues)
+  if (!menuSummaries || menuSummaries.length < 1) {
+    console.log('[CrossMenu] Skipping: no menus available');
     return null;
   }
 
   // Calculate aggregated statistics
   const totalMenus = menuSummaries.length;
+  const isSingleMenu = totalMenus === 1;
+  
+  if (isSingleMenu) {
+    console.log('[CrossMenu] Single-menu mode: generating profile from 1 menu (buffet/all-day venue)');
+  }
   let totalItems = 0;
   let totalPriceSum = 0;
   let priceCount = 0;
@@ -124,6 +129,8 @@ function buildCrossMenuPrompt(
                        language === 'no' ? 'norsk' :
                        language === 'de' ? 'tysk' : 'dansk';
 
+  const isSingleMenu = menuBreakdown.length === 1;
+
   // Build menu breakdown text
   const menuBreakdownText = menuBreakdown.map((menu, idx) => {
     const priceText = menu.avg_price > 0 ? ` · Ø ${menu.avg_price} DKK` : '';
@@ -131,17 +138,28 @@ function buildCrossMenuPrompt(
    ${menu.ai_summary}`;
   }).join('\n\n');
 
+  const taskDescription = isSingleMenu
+    ? 'OPGAVE: Analyser denne menu og udled stedets kulinariske identitet.'
+    : 'OPGAVE: Konsolidér alle menu-analyser til samlet kulinarisk identitet.';
+
+  const identifySection = isSingleMenu
+    ? `Identificer:
+- Hvilke madkulturer eller stile præsenteres?
+- Hvilke signatur-elementer eller unikke tilbud definerer stedet?
+- Service-model: All-day buffet, familie-dining, casual dining?`
+    : `Identificer:
+- Hvilke madkulturer eller stile kombineres på tværs af menuer?
+- Hvilke signatur-elementer eller unikke tilbud definerer stedet?
+- Service-model: All-day, brunch-fokus, bar-program?`;
+
   return `Du er gastronomisk konsulent med indsigt i kulinariske trends og menupositionering.
 
 ${businessName}
 ${menuBreakdownText}
 
-OPGAVE: Konsolidér alle menu-analyser til samlet kulinarisk identitet.
+${taskDescription}
 
-Identificer:
-- Hvilke madkulturer eller stile kombineres på tværs af menuer?
-- Hvilke signatur-elementer eller unikke tilbud definerer stedet?
-- Service-model: All-day, brunch-fokus, bar-program?
+${identifySection}
 
 Illustrer med konkrete eksempler i parentes hvor relevant.
 
@@ -150,19 +168,20 @@ DÅRLIGT: "Moderne tilgang med fokus på variation" (for generisk)
 
 REGLER:
 - Faktuel analyse - ingen subjektive ord
-- Syntetiser højniveau-mønstre fra alle menu-analyser
+- Syntetiser højniveau-mønstre fra ${isSingleMenu ? 'menu-analysen' : 'alle menu-analyser'}
 - Brug konkrete eksempler sparsomt til at illustrere karakter
 - Start DIREKTE med første bullet - ingen introduktion
 
 SIGNATUR-TEMAER:
-- Vælg 2-10 labels baseret på etablissementets kompleksitet
+- Vælg MINIMUM 2 og MAXIMUM 10 labels baseret på etablissementets kompleksitet
 - Tilpas antal efter hvor mange unikke karakteristika der faktisk findes
 - Du må opfinde nye labels hvis de beskriver stedet præcist
+- VIGTIGT: Du skal ALTID returnere mindst 2 temaer - selv simple steder har minimum 2 karakteristika
 
 Returner JSON:
 {
   "summary": "• Bullet 1\\n• Bullet 2\\n...",
-  "signature_themes": ["Label 1", "Label 2", ...]
+  "signature_themes": ["Label 1", "Label 2", ...]  // MINIMUM 2 labels påkrævet!
 }`;
 }
 
@@ -197,6 +216,7 @@ Regler:
 - Brug eksempler i parentes til at illustrere stil, ikke sælge retter
 - Opfind intet - kun hvad der fremgår af menu-data
 - Returner valid JSON med "summary" og "signature_themes"
+- MINIMUM 2 signature_themes er PÅKRÆVET - selv simple steder har mindst 2 karakteristika
 
 Kvalitet:
 ✅ "Traditionel dansk madkultur (smørrebrød, pariserbøf) kombineret med international café (falafel, eggs benedict)"
@@ -210,6 +230,7 @@ Rules:
 - Use examples in parentheses to illustrate style, not sell dishes
 - Invent nothing - only what appears in menu data
 - Return valid JSON with "summary" and "signature_themes"
+- MINIMUM 2 signature_themes are REQUIRED - even simple places have at least 2 characteristics
 
 Quality:
 ✅ "Traditional cuisine (smørrebrød, classics) combined with international café (falafel, eggs benedict)"
@@ -257,8 +278,35 @@ Quality:
       console.warn(`[CrossMenu] Unusual summary length: ${wordCount} words`);
     }
     
-    if (parsed.signature_themes.length < 1 || parsed.signature_themes.length > 15) {
-      console.warn(`[CrossMenu] Unusual theme count: ${parsed.signature_themes.length}`);
+    // CRITICAL FIX: Enforce minimum theme count
+    if (parsed.signature_themes.length < 1) {
+      console.warn(`[CrossMenu] AI returned 0 themes - generating fallback themes`);
+      
+      // Generate basic fallback themes from summary content
+      const fallbackThemes: string[] = [];
+      const summaryLower = parsed.summary.toLowerCase();
+      
+      // Infer themes from summary content
+      if (summaryLower.includes('brunch')) fallbackThemes.push('Brunch');
+      if (summaryLower.includes('frokost') || summaryLower.includes('lunch')) fallbackThemes.push('Frokost');
+      if (summaryLower.includes('aften') || summaryLower.includes('middag') || summaryLower.includes('dinner')) fallbackThemes.push('Aftensmad');
+      if (summaryLower.includes('dansk') || summaryLower.includes('traditionel')) fallbackThemes.push('Dansk madkultur');
+      if (summaryLower.includes('international')) fallbackThemes.push('International café');
+      if (summaryLower.includes('all-day') || summaryLower.includes('hele dagen')) fallbackThemes.push('All-day dining');
+      
+      // Ensure at least 2 generic themes if none detected
+      if (fallbackThemes.length === 0) {
+        fallbackThemes.push('Café-tilbud', 'Casual dining');
+      } else if (fallbackThemes.length === 1) {
+        fallbackThemes.push('Varieret menu');
+      }
+      
+      parsed.signature_themes = fallbackThemes;
+      console.warn(`[CrossMenu] Using ${fallbackThemes.length} fallback themes: ${fallbackThemes.join(', ')}`);
+    }
+    
+    if (parsed.signature_themes.length > 15) {
+      console.warn(`[CrossMenu] Unusually high theme count: ${parsed.signature_themes.length}`);
     }
     
     return parsed;

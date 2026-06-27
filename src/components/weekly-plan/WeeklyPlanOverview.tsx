@@ -709,6 +709,11 @@ export function WeeklyPlanOverview({
                   <div className="flex-shrink-0 w-16 text-center">
                     <div className="text-[11px] font-semibold text-slate-500 uppercase leading-none">{dayLabel} {dayNum}</div>
                     <div className="text-base font-bold text-slate-900 mt-0.5">{post.timing.time}</div>
+                    {post.timing.timingRationale && (
+                      <div className="text-[9px] text-purple-600 font-medium mt-1 leading-tight" title={post.timing.timingRationale}>
+                        🧠 AI
+                      </div>
+                    )}
                   </div>
 
                   {/* Vertical divider */}
@@ -738,6 +743,14 @@ export function WeeklyPlanOverview({
 
                   {/* Chips */}
                   <div className="flex-shrink-0 flex items-center gap-2">
+                    {post.strategicContext?.slot_id && (
+                      <span 
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-600 text-white"
+                        title={post.strategicContext.strategic_intent || `Strategic Slot ${post.strategicContext.slot_id}`}
+                      >
+                        #{post.strategicContext.slot_id}
+                      </span>
+                    )}
                     {isLocked && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200 text-slate-700">{t('weeklyPlan.overview.lockedBadge', { defaultValue: 'Låst' })}</span>
                     )}

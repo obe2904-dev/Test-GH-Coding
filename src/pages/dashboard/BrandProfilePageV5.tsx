@@ -152,7 +152,6 @@ function transformProfile(dbProfile: any) {
     // ENRICHMENT FIELDS
     signature_phrases: dbProfile.signature_phrases || [],
     never_say: dbProfile.never_say || [],
-    typical_openings: dbProfile.typical_openings || [],
     typical_closings: dbProfile.typical_closings || [],
     humor_level: dbProfile.humor_level,
     formality: dbProfile.formality,
@@ -279,12 +278,25 @@ export function BrandProfilePageV5() {
   // Handle V5 regeneration
   const handleRegenerateV5 = async () => {
     if (!businessId) return;
+    console.log('[BrandProfilePageV5] 🚀 Starting V5 regeneration...');
     const result = await generateV5(businessId, true);
+    console.log('[BrandProfilePageV5] 📦 Generation result:', result);
+    
     if (result) {
+      // Add delay to ensure database writes are fully committed
+      console.log('[BrandProfilePageV5] ⏳ Waiting 1.5s for database commit...');
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
       // Refetch both profile and programmes
-      refetch();
-      refetchProgrammes();
+      console.log('[BrandProfilePageV5] 🔄 Refetching data (with cache bust)...');
+      await Promise.all([
+        refetch(),
+        refetchProgrammes(true) // Pass true to bust cache
+      ]);
+      console.log('[BrandProfilePageV5] ✅ Refetch complete');
       setShowV5Generator(false);
+    } else {
+      console.error('[BrandProfilePageV5] ❌ Generation result was falsy, skipping refetch');
     }
   };
 

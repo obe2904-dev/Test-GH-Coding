@@ -272,6 +272,52 @@ export function inferLocationType(reference: string | null): LocationContext {
   };
 }
 
+/**
+ * Determine waterfront subtype to prevent semantic errors.
+ * 
+ * Distinguishes between:
+ * - 'river': å, bæk, kanal (calm river/stream) - NEVER use "vandet"
+ * - 'open_water': havn, strand, sø, hav (open water) - "vandet" acceptable
+ * - 'unknown': unclear or no waterfront reference
+ * 
+ * Used by location-phrase-resolver to select appropriate Danish terms.
+ */
+export function getWaterfrontSubtype(
+  reference: string | null,
+  city?: string
+): 'river' | 'open_water' | 'unknown' {
+  if (!reference) return 'unknown'
+  
+  const ref = reference.toLowerCase()
+  
+  // River/stream patterns - "vandet" is WRONG for these
+  if (ref.match(/\båen\b|åen|bækken|kanalen|strømmen|floden/)) {
+    return 'river'
+  }
+  
+  // Open water patterns - "vandet" is acceptable
+  if (ref.match(/havnen|stranden|søen|vandet|havet|fjorden|bugten|kysten/)) {
+    return 'open_water'
+  }
+  
+  // City-specific context clues (Aarhus has "åen", Copenhagen has harbor)
+  if (city) {
+    const cityLower = city.toLowerCase()
+    
+    // Aarhus waterfront almost always means "åen"
+    if (cityLower === 'aarhus' && ref.match(/ved|langs|nær|vand|water/)) {
+      return 'river'
+    }
+    
+    // Copenhagen waterfront usually means harbor/canal (open water)
+    if (cityLower.match(/copenhagen|københavn/) && ref.match(/ved|langs|nær|vand|water/)) {
+      return 'open_water'
+    }
+  }
+  
+  return 'unknown'
+}
+
 // ============================================================================
 // CITY PROFILE LOOKUP
 // ============================================================================

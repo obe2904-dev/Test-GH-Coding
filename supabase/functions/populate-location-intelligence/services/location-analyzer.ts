@@ -17,6 +17,24 @@ interface NearbyHospitality {
   fetched_at: string;
 }
 
+interface PhysicalContext {
+  pedestrian_flow: 'very_high' | 'high' | 'medium' | 'low';
+  transit_within_150m: boolean;
+  nearest_transit: { name: string; distance_meters: number } | null;
+  parking_within_300m: boolean;
+  street_level: boolean | null; // Google doesn't provide floor info - can be set manually
+}
+
+interface RawCompetitiveVenue {
+  name: string;
+  distance_meters: number;
+  rating?: number;
+  user_ratings_total?: number;
+  price_level?: number; // 1-4 Google scale
+  place_id: string;
+  types: string[];
+}
+
 interface AnalyzedLocation {
   neighborhood: string | null;
   neighborhood_character: string | null;
@@ -27,6 +45,8 @@ interface AnalyzedLocation {
   latitude: number;
   longitude: number;
   nearby_hospitality: NearbyHospitality;
+  physical_context?: PhysicalContext; // NEW: Objective physical environment facts
+  raw_competitive_venues?: RawCompetitiveVenue[]; // NEW: Raw competitor data (no AI interpretation)
   landmarks_nearby: Array<{
     name: string;
     type: string;
@@ -66,57 +86,53 @@ export class LocationAnalyzer {
 
   /**
    * Analyze and structure location data
+   * NOTE: Score computation moved to AI+web search (with POI fallback in index.ts)
+   * This method only extracts factual data that Google Places provides reliably
    */
   analyze(geocodeResult: any, nearbyPlaces: any[], hospitalityPlaces?: any[]): AnalyzedLocation {
-    // Extract landmarks and categorize them
-    const landmarks = this.categorizeLandmarks(nearbyPlaces);
+    // Extract landmarks — factual, not scored
+    const landmarks = nearbyPlaces
+      .filter(p => ['tourist_attraction', 'museum', 'park', 'church',
+                    'stadium', 'university', 'train_station'].includes(p.type))
+      .sort((a, b) => a.distance_meters - b.distance_meters)
+      .slice(0, 8)
+      .map(p => ({
+        name: p.name,
+        type: this.mapPlaceType(p.type),
+        walking_distance_minutes: p.walking_minutes || Math.round(p.distance_meters / 80),
+        walking_distance_meters: p.distance_meters,
+        marketing_angle: this.getMarketingAngle(p),
+      }));
 
-    // Count POIs by category
+    // Hospitality density — factual count, reliable from Google
+    const hospitalityCount = (hospitalityPlaces ?? nearbyPlaces.filter(p => 
+      ['restaurant', 'cafe', 'bar'].includes(p.type)
+    )).length;
+
+    // Count POIs by category (for logging/analysis only)
     const poiCounts = this.countPOIsByCategory(nearbyPlaces);
-
-    // Determine area type with weighted scoring (returns geographic scores + demographic proximity)
-    const { primaryAreaType, allScores, demographicProximity } = this.improvedDetermineAreaType(nearbyPlaces);
-
-    // Generate rich neighborhood character
-    const neighborhoodCharacter = this.generateNeighborhoodCharacter(
-      geocodeResult,
-      landmarks,
-      primaryAreaType
-    );
-
-    // Assess street visibility
-    const streetVisibility = this.assessStreetVisibility(landmarks);
-
-    // Generate categorized marketing hooks
-    const marketingHooks = this.generateCategorizedMarketingHooks(
-      geocodeResult,
-      landmarks,
-      primaryAreaType,
-      streetVisibility
-    );
 
     // Extract public transport
     const publicTransport = this.extractPublicTransport(nearbyPlaces);
 
     // Compute hospitality density within 300m for competitive context
-    // Use dedicated hospitalityPlaces (300m hospitality-only API call) when available;
-    // fall back to filtering the general nearbyPlaces array.
     const nearbyHospitality = this.computeHospitalityDensity(hospitalityPlaces ?? nearbyPlaces, !hospitalityPlaces);
 
+    // All scoring is now done by AI in index.ts — not here
     return {
       neighborhood: geocodeResult.neighborhood || null,
-      neighborhood_character: neighborhoodCharacter,
-      area_type: primaryAreaType,
-      category_scores: allScores, // Geographic location types only (WHERE)
-      demographic_proximity: demographicProximity, // NEW: WHO is nearby (students, tourists, etc.)
+      neighborhood_character: null, // AI-generated
+      area_type: null, // AI-determined
+      category_scores: {}, // Populated by AI call in index.ts
+      demographic_proximity: {}, // Populated by AI call in index.ts
       latitude: geocodeResult.latitude,
       longitude: geocodeResult.longitude,
       nearby_hospitality: nearbyHospitality,
       landmarks_nearby: landmarks,
       poi_counts: poiCounts,
       public_transport: publicTransport,
-      location_marketing_hooks: marketingHooks,
-      street_visibility: streetVisibility,
+      location_marketing_hooks: [], // Populated after scores available
+      street_visibility: null,
     };
   }
 

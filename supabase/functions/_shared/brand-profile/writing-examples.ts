@@ -187,6 +187,24 @@ export async function generateWritingExamples(
     }
   }
   
+  // 3.5. Generate CTA library (NEW v5.6)
+  console.log('🎯 Generating brand-specific CTA library...')
+  const ctaResult = await aiGenerateCTALibrary(
+    input.voice,
+    {
+      business_name: input.business.business_name,
+      business_category: input.business.business_category,
+      location_reference: input.business.location_reference,
+      archetype: input.businessTypeDetection?.archetype,
+      city: input.geographicContext?.location_context.city
+    },
+    input.businessTypeDetection?.commercial_baseline_mode,
+    openAiKey,
+    language
+  )
+  examples.cta_library = ctaResult.cta_library
+  examples.cta_preferences = ctaResult.cta_preferences
+  
   // 4. Generate complete caption examples (good_examples)
   console.log('🤖 Generating complete caption examples...')
   const cleanedNeverSay = cleanNeverSayRules(input.legacy_never_say || [])
@@ -594,6 +612,234 @@ Fokuser på autentiske, brand-specifikke udtryk.`
   }
   
   return ['hjemmelavet', 'regionale råvarer', 'frisk hver dag']
+}
+
+/**
+ * NEW v5.6: AI-generate brand-specific CTA library
+ * 
+ * Creates intent-based, context-aware CTAs that:
+ * - Match the business's voice and archetype
+ * - Reference specific attributes (location, cuisine, service style)
+ * - Use modern Danish (no 1990s slang like "svip forbi")
+ * - Adapt to regional preferences
+ */
+async function aiGenerateCTALibrary(
+  voice: V5Voice,
+  business: {
+    business_name: string;
+    business_category?: string;
+    location_reference?: string;
+    archetype?: string;
+    city?: string;
+  },
+  commercialMode?: string,  // 'premium' | 'balanced' | 'walk-in'
+  openAiKey: string,
+  language: string = 'da'
+): Promise<{
+  cta_library: V5WritingExamples['cta_library'];
+  cta_preferences: V5WritingExamples['cta_preferences'];
+}> {
+  
+  const systemPrompt = language === 'da'
+    ? `Du er ekspert i at skrive call-to-action (CTA) tekster for danske restauranter og cafeer.
+
+Din opgave er at generere BRAND-SPECIFIKKE CTAs der:
+✅ Matcher virksomhedens stemme og arketype
+✅ Henviser til specifikke egenskaber (lokation, mad, service)
+✅ Bruger MODERNE dansk (2024-2026 konventioner)
+✅ Undgår forældede vendinger (FORBUDT: "svip forbi", "få fingrene i")
+✅ Lyder naturlige og autentiske
+
+VIGTIGT:
+- CTAs skal være specifikke for DENNE virksomhed
+- Brug location_reference hvis relevant
+- Tilpas til archetype (fine dining = formelt, café = casual)
+- Vær regional bevidst (København = international, Aarhus = traditionel)
+- Generer 3-5 variationer per intent/style`
+    : `You are an expert at writing call-to-action (CTA) texts for Danish restaurants and cafes.
+
+Your task is to generate BRAND-SPECIFIC CTAs that:
+✅ Match the business's voice and archetype
+✅ Reference specific attributes (location, food, service)
+✅ Use MODERN Danish (2024-2026 conventions)
+✅ Avoid outdated phrases (FORBIDDEN: "svip forbi", "få fingrene i")
+✅ Sound natural and authentic
+
+IMPORTANT:
+- CTAs must be specific to THIS business
+- Use location_reference when relevant
+- Adapt to archetype (fine dining = formal, café = casual)
+- Be regionally aware (Copenhagen = international, Aarhus = traditional)
+- Generate 3-5 variations per intent/style`
+
+  const archetypeGuidance = business.archetype || business.business_category || 'restaurant'
+  const locationPhrase = business.location_reference ? `ved ${business.location_reference}` : ''
+  const toneStyle = voice.formality_level === 'formal' || voice.formality_level === 'sophisticated' ? 'formal' : 'casual'
+
+  const userPrompt = language === 'da'
+    ? `Generer brand-specifikke CTAs for ${business.business_name}.
+
+=== BUSINESS CONTEXT ===
+Archetype: ${archetypeGuidance}
+Lokation: ${locationPhrase || business.city || 'ikke angivet'}
+Commercial Mode: ${commercialMode || 'balanced'}
+Formality: ${voice.formality_level}
+Personality: ${voice.personality_traits.slice(0, 3).join(', ')}
+
+=== VOICE RULES (SKAL MATCHES) ===
+${voice.tone_rules.slice(0, 3).map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+=== CTA REQUIREMENTS ===
+
+1. VISIT CTAs (casual style):
+   - Uformelle "kom forbi" vendinger
+   - Reference lokation hvis relevant: "${locationPhrase || 'i [område]'}"
+   - Eksempel: "Kom forbi ${locationPhrase}" eller "Vi ses snart!"
+   - Generer 3-4 variationer
+
+2. VISIT CTAs (formal style):
+   - Mere sofistikerede vendinger
+   - Passer til fine dining/premium
+   - Eksempel: "Besøg os ${locationPhrase}" eller "Velkommen til ${business.business_name}"
+   - Generer 3-4 variationer
+
+3. BOOKING CTAs (soft style):
+   - Blide opfordringer til reservation
+   - Ikke presserende
+   - Eksempel: "Book bord hvis du vil være sikker"
+   - Generer 3-4 variationer
+
+4. BOOKING CTAs (urgent style):
+   - Mere presserende
+   - Skaber urgency
+   - Eksempel: "Book nu – få pladser tilbage"
+   - Generer 3-4 variationer
+
+5. ENGAGEMENT CTAs (question style):
+   - Spørgsmål der inviterer til interaktion
+   - Eksempel: "Hvad synes du?" eller "Hvad ville du vælge?"
+   - Generer 3-4 variationer
+
+6. ENGAGEMENT CTAs (social style):
+   - Social deling og tag-a-friend
+   - Eksempel: "Tag en ven med" eller "Del med en foodie"
+   - Generer 3-4 variationer
+
+7. SOCIAL MEDIA CTAs:
+   - Platform-specifikke (Instagram/Facebook)
+   - Eksempel: "Tag os med i dit billede" eller "Del din oplevelse"
+   - Generer 2-3 variationer
+
+8. SIGNATURE CLOSING (optional):
+   - Brand's egen signatur-afslutning
+   - Unik til denne virksomhed
+   - Eksempel baseret på voice + lokation
+   - Generer 1 signatur
+
+9. AVOID PHRASES:
+   - List 2-3 forældede vendinger at undgå
+   - Baseret på moderne dansk standard
+   - Eksempel: "Svip forbi" (for gammeldags)
+
+RETURN AS JSON:
+{
+  "visit_casual": ["CTA 1", "CTA 2", "CTA 3"],
+  "visit_formal": ["CTA 1", "CTA 2", "CTA 3"],
+  "booking_soft": ["CTA 1", "CTA 2", "CTA 3"],
+  "booking_urgent": ["CTA 1", "CTA 2", "CTA 3"],
+  "engagement_question": ["CTA 1", "CTA 2", "CTA 3"],
+  "engagement_social": ["CTA 1", "CTA 2", "CTA 3"],
+  "social_media": ["CTA 1", "CTA 2"],
+  "signature_closing": "Brand-specifik signatur",
+  "avoid_phrases": ["Forældet phrase 1", "Forældet phrase 2"],
+  "default_style": "casual" eller "formal",
+  "booking_priority": "soft" eller "urgent"
+}`
+    : `Generate brand-specific CTAs for ${business.business_name}.
+[English version of same prompt structure...]`
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openAiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 1500,
+        response_format: { type: 'json_object' }
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`OpenAI API error: ${response.status}`)
+    }
+
+    const data = await response.json()
+    const content = data.choices[0].message.content
+    const parsed = JSON.parse(cleanLLMResponse(content))
+
+    // Structure the response
+    const cta_library: V5WritingExamples['cta_library'] = {
+      visit: {
+        casual: Array.isArray(parsed.visit_casual) ? parsed.visit_casual : [],
+        formal: Array.isArray(parsed.visit_formal) ? parsed.visit_formal : []
+      },
+      booking: {
+        soft: Array.isArray(parsed.booking_soft) ? parsed.booking_soft : [],
+        urgent: Array.isArray(parsed.booking_urgent) ? parsed.booking_urgent : []
+      },
+      engagement: {
+        question: Array.isArray(parsed.engagement_question) ? parsed.engagement_question : [],
+        social: Array.isArray(parsed.engagement_social) ? parsed.engagement_social : []
+      },
+      social_media: Array.isArray(parsed.social_media) ? parsed.social_media : [],
+      signature_closing: parsed.signature_closing || undefined
+    }
+
+    const cta_preferences: V5WritingExamples['cta_preferences'] = {
+      default_style: parsed.default_style === 'formal' ? 'formal' : 'casual',
+      booking_priority: parsed.booking_priority === 'urgent' ? 'urgent' : 'soft',
+      avoid_phrases: Array.isArray(parsed.avoid_phrases) ? parsed.avoid_phrases : ['Svip forbi']
+    }
+
+    console.log(`✅ Generated CTA library: ${Object.keys(cta_library).length} categories`)
+    
+    return { cta_library, cta_preferences }
+
+  } catch (error) {
+    console.error('❌ CTA library generation failed:', error)
+    
+    // Return minimal fallback
+    return {
+      cta_library: {
+        visit: {
+          casual: ['Kom forbi!', 'Vi ses snart', 'Hop forbi'],
+          formal: [`Besøg os ${locationPhrase}`, `Velkommen til ${business.business_name}`]
+        },
+        booking: {
+          soft: ['Book bord online', 'Book dit bord'],
+          urgent: ['Book nu', 'Sikr dig et bord']
+        },
+        engagement: {
+          question: ['Hvad synes du?', 'Hvad ville du vælge?'],
+          social: ['Tag en ven med', 'Del med en foodie']
+        },
+        social_media: ['Tag os med i dit billede', 'Del din oplevelse']
+      },
+      cta_preferences: {
+        default_style: toneStyle as 'casual' | 'formal',
+        booking_priority: commercialMode === 'premium' ? 'urgent' : 'soft',
+        avoid_phrases: ['Svip forbi', 'Få fingrene i']
+      }
+    }
+  }
 }
 
 /**

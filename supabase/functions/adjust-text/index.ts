@@ -4,6 +4,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { extractBrandEssence } from '../_shared/brand-profile/v5-extractors.ts'
 import { getHospitalityRegisterBlock } from '../_shared/utils/hospitality-register.ts'
 
 const corsHeaders = {
@@ -59,12 +60,10 @@ function extractBrandTone(brandVoice: Record<string, any>): {
   let businessCharacter = ''
   let emojiInstruction = '1-2 emojis naturligt placeret'
 
-  // V5 FALLBACK 1: Brand essence
-  if (v5Identity?.brand_essence) {
-    brandTone = v5Identity.brand_essence.trim().slice(0, 200)
-  } else if (brandVoice.brand_essence) {
-    const be = brandVoice.brand_essence
-    brandTone = typeof be === 'object' && be?.value ? String(be.value).slice(0, 200) : String(be || '').slice(0, 200)
+  // V5-first extraction: brand_profile_v5.identity.brand_essence → legacy fallback
+  const essence = extractBrandEssence(brandVoice)
+  if (essence) {
+    brandTone = essence.trim().slice(0, 200)
   }
 
   // V5 FALLBACK 2: Tone rules (writing rules)

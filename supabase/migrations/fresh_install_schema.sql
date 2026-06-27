@@ -596,17 +596,16 @@ $$;
 ALTER FUNCTION "public"."classify_media_category"("category_name" "text", "item_name" "text", "item_description" "text") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_business_vertical" "text", "p_postal_code" "text", "p_city" "text", "p_country" "text", "p_selected_platforms" "text"[]) RETURNS "uuid"
+CREATE OR REPLACE FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_selected_platforms" "text"[]) RETURNS "uuid"
     LANGUAGE "plpgsql" SECURITY DEFINER
     AS $$
 DECLARE
   v_business_id UUID;
 BEGIN
-  -- Create business record
+  -- Create business record with minimal fields
   INSERT INTO public.businesses (
     owner_id,
     name,
-    vertical,
     primary_language,
     plan,
     created_at,
@@ -614,8 +613,7 @@ BEGIN
   )
   VALUES (
     p_user_id,
-    p_business_name,
-    p_business_vertical,
+    COALESCE(NULLIF(p_business_name, ''), 'My Business'),
     'da', -- Danish default
     'free', -- Free tier by default
     NOW(),
@@ -623,29 +621,10 @@ BEGIN
   )
   RETURNING id INTO v_business_id;
 
-  -- Create business location record
-  INSERT INTO public.business_locations (
-    business_id,
-    postal_code,
-    city,
-    country,
-    is_primary,
-    created_at
-  )
-  VALUES (
-    v_business_id,
-    p_postal_code,
-    p_city,
-    p_country,
-    TRUE, -- First location is primary
-    NOW()
-  );
-
-  -- Store selected platforms in profiles for backward compatibility
-  -- (Keep profiles table for auth metadata until full migration)
+  -- Store selected platforms in profiles
   UPDATE public.profiles
   SET
-    selected_platforms = p_selected_platforms,
+    selected_platforms = to_jsonb(COALESCE(NULLIF(p_selected_platforms, ARRAY[]::TEXT[]), ARRAY['facebook'])),
     onboarding_completed = TRUE,
     updated_at = NOW()
   WHERE id = p_user_id;
@@ -655,7 +634,7 @@ END;
 $$;
 
 
-ALTER FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_business_vertical" "text", "p_postal_code" "text", "p_city" "text", "p_country" "text", "p_selected_platforms" "text"[]) OWNER TO "postgres";
+ALTER FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_selected_platforms" "text"[]) OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."derive_service_periods"("business_id_param" "uuid") RETURNS TABLE("service_periods" "text"[], "primary_period" "text", "posting_windows" "jsonb")
@@ -5864,9 +5843,9 @@ GRANT ALL ON FUNCTION "public"."classify_category_type"("category_name" "text") 
 
 
 
-GRANT ALL ON FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_business_vertical" "text", "p_postal_code" "text", "p_city" "text", "p_country" "text", "p_selected_platforms" "text"[]) TO "anon";
-GRANT ALL ON FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_business_vertical" "text", "p_postal_code" "text", "p_city" "text", "p_country" "text", "p_selected_platforms" "text"[]) TO "authenticated";
-GRANT ALL ON FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_business_vertical" "text", "p_postal_code" "text", "p_city" "text", "p_country" "text", "p_selected_platforms" "text"[]) TO "service_role";
+GRANT ALL ON FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_selected_platforms" "text"[]) TO "anon";
+GRANT ALL ON FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_selected_platforms" "text"[]) TO "authenticated";
+GRANT ALL ON FUNCTION "public"."create_business_onboarding"("p_user_id" "uuid", "p_business_name" "text", "p_selected_platforms" "text"[]) TO "service_role";
 
 
 

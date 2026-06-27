@@ -1,8 +1,27 @@
 /**
  * AI Analyzer Service
- * Uses GPT-4o to enhance location intelligence with cultural context
+ * Uses GPT-4o + Brave Search to analyze location intelligence
  */
 
+// NEW: Location Context Input - streamlined for scoring
+export interface LocationContextInput {
+  formatted_address: string;
+  neighborhood: string | null;
+  landmarks: Array<{ name: string; type: string }>;
+  business_category: string;
+  area_type?: string | null;
+  hospitality_count?: number;
+}
+
+// NEW: Location Analysis Output - scores + character
+export interface LocationAnalysis {
+  category_scores: Record<string, number>;
+  demographic_proximity: Record<string, number>;
+  area_type: string;
+  rich_neighborhood_character: string;
+}
+
+// DEPRECATED: Old interfaces kept for backward compatibility
 export interface ClaudeAnalysisInput {
   formatted_address: string;
   neighborhood: string | null;
@@ -16,6 +35,7 @@ export interface ClaudeAnalysisInput {
   area_type: string | null;
   opening_hours?: any;
   late_night_hours?: boolean;
+  hospitality_count?: number;
 }
 
 export interface ClaudeAnalysisOutput {
@@ -27,6 +47,9 @@ export interface ClaudeAnalysisOutput {
     trigger_type: 'weather' | 'time_of_day' | 'event' | 'seasonal';
     suggestion: string;
   }>;
+  category_scores?: Record<string, number>;
+  demographic_proximity?: Record<string, number>;
+  area_type?: string;
 }
 
 export interface MenuCategory {
@@ -123,12 +146,31 @@ export class AIAnalyzer {
   }
 
   /**
-   * Analyze location with GPT-4o to extract deep cultural context
+   * Analyze location with GPT-4o + Brave Search
+   * Returns ALL scores (geographic + demographic) + neighborhood character
    */
-  async analyzeLocationContext(input: ClaudeAnalysisInput): Promise<ClaudeAnalysisOutput> {
-    const prompt = this.buildPrompt(input);
+  async analyzeLocationContext(input: LocationContextInput): Promise<LocationAnalysis> {
+    const messages: any[] = [
+      { role: 'user', content: this.buildLocationPrompt(input) }
+    ];
 
-    try {
+    const tools = [{
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description: 'Search for information about a location, city, or neighbourhood',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Search query' }
+          },
+          required: ['query']
+        }
+      }
+    }];
+
+    // Loop: AI may call web_search multiple times before returning JSON
+    for (let i = 0; i < 3; i++) {  // max 3 iterations
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -137,46 +179,148 @@ export class AIAnalyzer {
         },
         body: JSON.stringify({
           model: 'gpt-4o',
-          max_tokens: 1500,
-          temperature: 0.7,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a location analysis assistant. Always respond with valid JSON matching the requested structure.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
+          messages,
+          tools,
+          tool_choice: 'auto',
+          temperature: 0.2,
+          max_tokens: 1000,
         }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
         console.error('OpenAI API error response:', errorText);
-        throw new Error(`OpenAI API error: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
-      const content = data.choices[0].message.content;
+      const message = data.choices[0].message;
+      messages.push(message);
 
-      // Parse the structured JSON response
-      const analysis = JSON.parse(content);
+      // No tool calls → AI is done, parse the JSON response
+      if (!message.tool_calls || message.tool_calls.length === 0) {
+        const content = message.content;
+        if (!content) throw new Error('Empty response from AI');
+        
+        // Strip markdown code fences if present (AI sometimes wraps JSON in ```json ... ```)
+        const cleanContent = content.trim().replace(/^```json\s*\n?/i, '').replace(/\n?```$/, '');
+        
+        const result = JSON.parse(cleanContent);
+        return {
+          category_scores: result.category_scores || {},
+          demographic_proximity: result.demographic_proximity || {},
+          area_type: result.area_type || 'mixed_use',
+          rich_neighborhood_character: result.neighborhood_character || '',
+        };
+      }
 
-      // STEP 2: Proofread the Danish text with GPT-4o
-      console.log('📝 Proofreading Danish text...');
-      const proofreadText = await this.proofreadDanishText(analysis.rich_neighborhood_character);
-      analysis.rich_neighborhood_character = proofreadText;
+      // Handle each tool call
+      for (const toolCall of message.tool_calls) {
+        if (toolCall.function.name === 'web_search') {
+          const args = JSON.parse(toolCall.function.arguments);
+          
+          let searchResult: string;
+          try {
+            searchResult = await this.performWebSearch(args.query);
+          } catch (err) {
+            searchResult = 'Search failed — use available data only';
+            console.warn('Web search failed:', err);
+          }
 
-      return analysis;
-    } catch (error) {
-      console.error('Error calling OpenAI API:', error);
-      
-      // Return fallback if OpenAI fails (don't break the entire flow)
-      return this.createFallbackAnalysis(input);
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: searchResult,
+          });
+        }
+      }
     }
+
+    throw new Error('AI did not return location analysis after 3 iterations');
+  }
+
+  /**
+   * Perform web search using Brave Search API
+   */
+  private async performWebSearch(query: string): Promise<string> {
+    const braveApiKey = Deno.env.get('BRAVE_SEARCH_API_KEY');
+    if (!braveApiKey) {
+      throw new Error('BRAVE_SEARCH_API_KEY not configured');
+    }
+
+    const response = await fetch(
+      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&text_decorations=false`,
+      { headers: { 'X-Subscription-Token': braveApiKey } }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Brave search failed: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // Extract top 3 results as context
+    const results = data.web?.results?.slice(0, 3) || [];
+    return results.map((r: any) => 
+      `${r.title}\n${r.description}`
+    ).join('\n\n') || 'No results found';
+  }
+
+  /**
+   * Build the analysis prompt for GPT-4o
+   */
+  private buildLocationPrompt(input: LocationContextInput): string {
+    return `You are a location analyst for a restaurant marketing platform.
+
+Analyze the character and demographics of this location using web search if needed.
+Return a JSON object with scores and a description.
+
+LOCATION:
+Address: ${input.formatted_address}
+Area: ${input.neighborhood || 'Unknown neighbourhood'}
+Hospitality venues within 300m: ${input.hospitality_count || 0}
+Nearby landmarks: ${input.landmarks?.slice(0, 6).map(l => l.name).join(', ') || 'none'}
+
+TASK:
+Search for context about this location and area if needed, then return:
+
+1. category_scores (geographic character, each 0-100):
+   - city_centre: how central/urban is this? (100 = heart of city)
+   - waterfront: proximity to water (sea, river, lake, canal)?
+   - residential: neighbourhood feel, people live nearby?
+   - office: business district, offices dominant?
+   - transport_hub: near major train/metro/bus terminal?
+   - shopping_district: retail concentration?
+   - tourist_destination: tourist attractions dominant?
+   - nature_park: parks, forests, nature nearby?
+
+2. demographic_proximity (who PASSES BY this area, 0-100):
+   - local_resident: do locals use this area daily?
+   - tourist: do tourists visit this area?
+   - student: is this a student area (university-dominant)?
+   - business_professional: office workers in the area?
+   - family: family-oriented area (schools, parks)?
+
+   IMPORTANT: Base demographic scores on actual area character,
+   not just proximity to one institution. A single university campus
+   in a non-student city should score LOW (10-25), not high.
+   Aarhus is a student city. Silkeborg is not.
+
+3. area_type: the single best description from:
+   city_centre / waterfront / residential / office / transport_hub /
+   shopping_district / tourist_destination / nature_park / mixed_use
+
+4. neighborhood_character: 2-3 sentences in Danish describing the area.
+   What kind of place is this? What surrounds it? What is the atmosphere?
+   Do NOT mention the specific business. Do NOT give marketing advice.
+
+Return ONLY valid JSON:
+{
+  "category_scores": { "city_centre": 0-100, "waterfront": 0-100, ... },
+  "demographic_proximity": { "local_resident": 0-100, "tourist": 0-100, ... },
+  "area_type": "city_centre",
+  "neighborhood_character": "dansk tekst..."
+}`;
   }
 
   /**

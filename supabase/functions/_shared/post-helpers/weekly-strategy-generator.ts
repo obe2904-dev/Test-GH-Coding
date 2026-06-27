@@ -26,6 +26,17 @@ import { validateBusinessIntelligenceUsage, logValidationResults } from './strat
 import { allocateTypesToPosts } from './strategy/phaseC.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+/**
+ * FIX 03-A: Strip dash separators from post titles before DB save
+ * Removes "—" and "–" characters that bypass caption-level stripAIDashes.
+ */
+function sanitiseIdeaTitle(title: string): string {
+  return title
+    .replace(/\s*[–—]\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 // ============================================================
 // MAIN EXPORT
 // ============================================================
@@ -105,6 +116,12 @@ export async function generateWeeklyStrategy(
   // Post-process consultant-speak
   const cleanedContent = postProcessConsultantSpeak(rawContent);
 
+  // FIX 03-A: Sanitise post titles to remove dash separators before DB save
+  const sanitisedPostIdeas = cleanedContent.post_ideas.map(idea => ({
+    ...idea,
+    title: sanitiseIdeaTitle(idea.title),
+  }));
+
   // Assemble final WeeklyStrategy
   const strategy: WeeklyStrategy = {
     contextual_analysis: contextualAnalysis,
@@ -113,7 +130,7 @@ export async function generateWeeklyStrategy(
     strategic_brief_raw: strategicBriefRaw,
     narrative: cleanedContent.narrative,
     strategic_priorities: cleanedContent.strategic_priorities,
-    post_ideas: cleanedContent.post_ideas,
+    post_ideas: sanitisedPostIdeas,
     generated_at: new Date().toISOString(),
     week_number: context.week_number,
     business_type: context.business_type,

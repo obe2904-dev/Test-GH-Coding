@@ -2087,11 +2087,11 @@
         "optimal": "Optimal timing"
       },
       "cta": {
-        "booking": "🔔 Book a table",
+        "booking": "� Reserve",
         "event": "🎉 Event",
-        "engagement": "💬 Engagement",
-        "awareness": "👁️ Share",
-        "traffic": "⚡ Drive traffic",
+        "engagement": "💭 Engage",
+        "awareness": "📢 Awareness",
+        "traffic": "🚶 Drive visits",
         "default": "✨ Visit us"
       },
       "status": {

@@ -63,39 +63,92 @@ export function validatePublicUrl(url: string): void {
  * Detects if HTML content appears to be a login/authentication page.
  * Prevents accidentally extracting password fields or protected content.
  * 
+ * Updated to allow business websites with customer login features (online ordering, reservations)
+ * Only blocks PRIMARILY admin/login pages that lack business content.
+ * 
  * @param html - HTML content to check
  * @param url - URL of the page (for path-based detection)
- * @returns true if page appears to be a login/auth page
+ * @returns true if page appears to be a login/auth page (not a business site with login features)
  */
 export function looksLikeLoginPage(html: string, url: string): boolean {
   const htmlLower = html.toLowerCase()
   
+  // Check URL path for admin/login indicators - only check the actual path, not the full URL
+  try {
+    const urlObj = new URL(url)
+    const pathLower = urlObj.pathname.toLowerCase()
+    const hostnameLower = urlObj.hostname.toLowerCase()
+    
+    // Block obvious admin paths (exact matches or path segments)
+    if (pathLower === '/admin' || 
+        pathLower === '/login' || 
+        pathLower === '/wp-admin' ||
+        pathLower === '/wp-login' ||
+        pathLower === '/auth' ||
+        pathLower.startsWith('/admin/') ||
+        pathLower.startsWith('/login/') ||
+        pathLower.startsWith('/wp-admin/') ||
+        pathLower.startsWith('/wp-login/') ||
+        pathLower.startsWith('/auth/')) {
+      return true
+    }
+    
+    // Block admin/auth subdomains
+    if (hostnameLower.startsWith('admin.') || 
+        hostnameLower.startsWith('auth.') ||
+        hostnameLower.startsWith('login.')) {
+      return true
+    }
+  } catch {
+    // Invalid URL - let it fail elsewhere
+    return false
+  }
+
   // Check for password input fields
-  if (htmlLower.includes('<input type="password"') || 
-      htmlLower.includes('type=password') ||
-      htmlLower.includes('type="password"')) {
-    return true
-  }
-
-  // Check for common login/auth keywords in combination
-  const hasLogin = htmlLower.includes('login') || htmlLower.includes('log ind') || htmlLower.includes('sign in')
-  const hasPassword = htmlLower.includes('password') || htmlLower.includes('adgangskode') || htmlLower.includes('kodeord')
+  const hasPasswordField = htmlLower.includes('<input type="password"') || 
+                          htmlLower.includes('type=password') ||
+                          htmlLower.includes('type="password"')
   
-  if (hasLogin && hasPassword) {
-    return true
+  if (!hasPasswordField) {
+    return false // No password field = not a login page
   }
 
-  // Check URL path for admin/login indicators
-  const pathLower = url.toLowerCase()
-  if (pathLower.includes('/admin') || 
-      pathLower.includes('/login') || 
-      pathLower.includes('/wp-admin') ||
-      pathLower.includes('/wp-login') ||
-      pathLower.includes('/auth')) {
-    return true
+  // Has password field - check if it's a business site with customer login or an admin panel
+  // Business sites often have login widgets for online ordering, table reservations, loyalty programs
+  const businessKeywords = [
+    'menu', 'bestil', 'book', 'reserve', 'order', 'åbningstider', 'opening',
+    'restaurant', 'cafe', 'café', 'bar', 'hotel', 'mad', 'food', 'drikke', 'drink',
+    'kontakt', 'contact', 'lokation', 'location', 'adresse', 'address',
+    'takeaway', 'take-away', 'delivery', 'levering', 'catering',
+    'bord', 'table', 'reservation', 'bordbestilling'
+  ]
+  
+  const adminKeywords = [
+    'dashboard', 'admin panel', 'wp-admin', 'wordpress', 'control panel',
+    'administrator', 'backend', 'cms', 'content management', 'administration'
+  ]
+  
+  const businessMatches = businessKeywords.filter(kw => htmlLower.includes(kw)).length
+  const adminMatches = adminKeywords.filter(kw => htmlLower.includes(kw)).length
+  
+  // Allow if business content is dominant (even with password field for customer login)
+  if (businessMatches >= 3) {
+    return false // Business site with customer login features (e.g., online ordering)
   }
-
-  return false
+  
+  // Block if clear admin panel indicators
+  if (adminMatches >= 2) {
+    return true // Admin panel
+  }
+  
+  // Edge case: password field but no clear business or admin indicators
+  // Check if it's a standalone login page (minimal content, just login form)
+  const hasLogin = htmlLower.includes('log ind') || htmlLower.includes('login') || htmlLower.includes('sign in')
+  const hasPasswordText = htmlLower.includes('password') || htmlLower.includes('adgangskode') || htmlLower.includes('kodeord')
+  
+  // Only block if both login AND password text present AND lacking business content
+  // This allows business homepages with login widgets to pass through
+  return hasLogin && hasPasswordText && businessMatches < 2
 }
 
 /**

@@ -8,6 +8,8 @@
  * @date May 9, 2026
  */
 
+import type { LocationStrategyOutput } from './location-strategy.ts';
+
 // ============================================================================
 // LAYER 1-4: Programme Detection, Commercial Orientation, Identity, Audience
 // ============================================================================
@@ -196,6 +198,10 @@ export interface V5Voice {
   emoji_level: 'none' | 'minimal' | 'moderate' | 'expressive';  // Research-backed emoji frequency
   emoji_reasoning?: string;             // Why this emoji level (category + formality logic)
   content_anchors: string[];            // Factual boundaries: ["Brunch", "Frokost", "Bar"] (prevents hallucination)
+  team_people_anchors?: string[];       // NEW (v5.6): Verified team roles and processes for BTS content
+                                        // Prevents hallucination in brand_behind/team_people posts
+                                        // Examples: ["Bartender med cocktailprogram", "Køkken der tilbereder hjemmelavede elementer", "Barista med specialty coffee"]
+                                        // Extracted from menu (craft signals) and vertical/programme (roles)
   menu_description_examples?: string[]; // NEW (v5.2): 2-3 examples showing how to describe menu items in this voice (casual + culinary awareness)
   social_writing_examples?: string[];   // NEW (v5.4): 8 tone-demonstrating phrases for social media (not CTAs/emojis - just tone) - LEGACY
   menu_description_metadata?: {         // NEW (v5.3): Origin mention strategy guidance
@@ -223,6 +229,31 @@ export interface V5WritingExamples {
   avoid_vocabulary?: string[];          // Off-brand words (max 8)
   good_examples?: string[];             // Optional: Full post examples (good)
   bad_examples?: string[];              // Optional: Full post examples (bad)
+  
+  // NEW v5.6: Intent-based CTA library (brand-specific call-to-action texts)
+  cta_library?: {
+    visit?: {
+      casual?: string[];                // Informal visit CTAs: "Kom forbi!"
+      formal?: string[];                // Formal visit CTAs: "Besøg os på [location]"
+    };
+    booking?: {
+      soft?: string[];                  // Gentle booking CTAs: "Book bord hvis du vil være sikker"
+      urgent?: string[];                // Urgent booking CTAs: "Book nu – få pladser tilbage"
+    };
+    engagement?: {
+      question?: string[];              // Question-based CTAs: "Hvad synes du?"
+      social?: string[];                // Social sharing CTAs: "Tag en ven med"
+    };
+    social_media?: string[];            // Platform-specific CTAs: "Tag os med @handle"
+    signature_closing?: string;         // Brand's signature CTA (optional)
+  };
+  
+  // NEW v5.6: CTA selection preferences
+  cta_preferences?: {
+    default_style?: 'casual' | 'formal';        // Default tone for visit CTAs
+    booking_priority?: 'soft' | 'urgent';       // Default booking intensity
+    avoid_phrases?: string[];                    // Phrases to never use (e.g., "Svip forbi")
+  };
 }
 
 export interface V5Guardrails {
@@ -359,6 +390,8 @@ export interface V5BrandProfile {
       cached_until: string;
       ai_generated: boolean;
     } | null;
+    // NEW V5.7: Location Strategy (reachable demographics + positioning angles + content triggers)
+    location_strategy?: LocationStrategyOutput;
   };
   
   programmes: V5Programme[];            // Layer 1-2-4 combined

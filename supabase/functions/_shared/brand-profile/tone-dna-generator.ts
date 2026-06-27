@@ -32,7 +32,8 @@ import type {
   V5ToneDNAOwnerVoice,
   V5ToneDNAMarketContext,
   V5EnhancedSocialExample,
-  V5EnhancedAvoidExample
+  V5EnhancedAvoidExample,
+  V5Guardrails
 } from './types-v5.ts';
 import { getV5Prompt } from './v5-prompts.ts';
 
@@ -49,10 +50,18 @@ export interface ToneDNAInput {
   };
   
   location_intelligence?: {
-    category_scores?: Record<string, number>;
+    category_scores: Record<string, number>;        // Geographic types only (city_centre, waterfront, etc.)
+    demographic_proximity?: Record<string, number>;  // WHO nearby (student, tourist, etc.)
     neighborhood_character?: string;
     area_type?: string;
     location_marketing_hooks?: string[];
+    physical_context?: {
+      pedestrian_flow?: string;
+      transit_within_150m?: boolean;
+      nearest_transit?: { name: string; distance_meters: number } | null;
+      parking_within_300m?: boolean;
+      street_level?: string;
+    } | null;
     local_location_reference?: string;  // Operator-set factual phrase (e.g. "ved åen") — non-negotiable
   };
   
@@ -239,6 +248,47 @@ async function callToneDNAAI(
       }
     }
     
+    // BLACKLIST: Remove forbidden generic location terms
+    // AI often ignores prompt warnings and adds these anyway despite being told not to
+    const FORBIDDEN_GENERIC_TERMS = [
+      'ved vandet',
+      'havnefronten',
+      'waterfront',
+      'udsigt',
+      'udsigten',
+      'havudsigt',
+      'vandkanten',
+      'ved havet',
+      'ved søen',
+      'på vandkanten'
+    ];
+    
+    if (parsed.location_driver?.natural_vocabulary) {
+      const beforeCount = parsed.location_driver.natural_vocabulary.length;
+      const removed: string[] = [];
+      
+      parsed.location_driver.natural_vocabulary = 
+        parsed.location_driver.natural_vocabulary.filter((term: string) => {
+          const termLower = term.toLowerCase().trim();
+          
+          // Check if term contains ANY forbidden phrase (not just exact match)
+          const containsForbidden = FORBIDDEN_GENERIC_TERMS.some(forbidden => 
+            termLower.includes(forbidden)
+          );
+          
+          if (containsForbidden) {
+            removed.push(term);
+            return false;
+          }
+          return true;
+        });
+      
+      if (removed.length > 0) {
+        console.log(`[ToneDNA] ⚠️ Removed ${removed.length} forbidden generic terms:`, removed);
+        console.log(`[ToneDNA] ✅ Cleaned vocabulary from ${beforeCount} to ${parsed.location_driver.natural_vocabulary.length} terms`);
+      }
+    }
+    
     return parsed as V5ToneDNA;
     
   } catch (error) {
@@ -286,6 +336,12 @@ function validateToneDNA(toneDNA: V5ToneDNA): void {
 export async function generateEnhancedExamples(
   toneDNA: V5ToneDNA,
   businessIdentityPersona: string,
+  voiceConstraints: {
+    tone_rules: string[];
+    formality_level: string;
+    personality_traits: string[];
+  },
+  guardrails: Pick<V5Guardrails, 'never_say' | 'avoid_patterns'>,
   openaiClient: OpenAI,
   language: string = 'da',
   programmes?: Array<{ type: string; name: string; audienceSegments?: Array<{ segment_name: string }> }>
@@ -295,6 +351,7 @@ export async function generateEnhancedExamples(
 }> {
   
   console.log('[ToneDNA] Generating enhanced examples with reasoning...');
+  console.log(`[ToneDNA] Constraints: ${voiceConstraints.tone_rules.length} tone rules, ${guardrails.never_say.length} never-say rules, formality=${voiceConstraints.formality_level}`);
   
   // Build prompt
   let prompt = getV5Prompt('enhanced_examples', language);
@@ -313,10 +370,60 @@ export async function generateEnhancedExamples(
     });
   }
   
+  // CRITICAL: Add voice constraints and guardrails to prompt
+  let constraintsContext = '\n\n🔴 KRITISKE CONSTRAINTS (SKAL OVERHOLDES):\n\n';
+  
+  // Tone rules
+  constraintsContext += '**TONE RULES (må ikke bryde):**\n';
+  voiceConstraints.tone_rules.forEach(rule => {
+    constraintsContext += `• ${rule}\n`;
+  });
+  
+  // Never-say rules (top 15 to avoid token bloat)
+  constraintsContext += '\n**FORBUDTE ORD/FRASER (må aldrig bruge):**\n';
+  guardrails.never_say.slice(0, 15).forEach(rule => {
+    constraintsContext += `• ${rule}\n`;
+  });
+  
+  // Avoid patterns (from strip_from_output only)
+  if (guardrails.avoid_patterns?.strip_from_output) {
+    constraintsContext += '\n**UNDGÅ MØNSTRE:**\n';
+    Object.entries(guardrails.avoid_patterns.strip_from_output).forEach(([category, patterns]) => {
+      if (patterns && patterns.length > 0) {
+        constraintsContext += `• ${category}: ${patterns.slice(0, 4).join(', ')}\n`;
+      }
+    });
+  }
+  
+  // Formality level
+  constraintsContext += `\n**FORMALITY LEVEL:** ${voiceConstraints.formality_level}\n`;
+  
+  // CRITICAL: Add explicit imperative ban if present in tone_rules
+  const hasImperativeBan = voiceConstraints.tone_rules.some(rule =>
+    /aldrig imperative|never imperative|undgå imperative|avoid imperative/i.test(rule)
+  );
+  
+  if (hasImperativeBan) {
+    constraintsContext += '\n🚨 **IMPERATIVE BAN (KRITISK):**\n';
+    constraintsContext += '• ALDRIG start med imperative verber (kom, tag, nyd, prøv, smag, oplev, book, bestil, se, hør, find, få, bliv, gå, lad, slå, stik)\n';
+    constraintsContext += '• Brug ALTID deklarative sætninger: "Vi har...", "I dag serverer vi...", "Vores [...] er klar"\n';
+    constraintsContext += '• Eksempel GOD: "Vores brunch ved åen er klar 🌊"\n';
+    constraintsContext += '• Eksempel DÅRLIG: "Prøv vores brunch ved åen 🌊" ❌ IMPERATIV FORBUDT\n\n';
+  }
+  
+  constraintsContext += '\n⚠️  Generer 8 posts der FØLGER alle ovenstående regler. Hvis en post bryder en regel, må den IKKE inkluderes.\n';
+  
   // Replace placeholders
   prompt = prompt
     .replace(/{tone_dna_json}/g, JSON.stringify(toneDNA, null, 2))
-    .replace(/{business_identity_persona}/g, businessIdentityPersona + programmeContext);
+    .replace(/{business_identity_persona}/g, businessIdentityPersona + programmeContext + constraintsContext);
+  
+  // Build system message with imperative ban if needed
+  let systemMessage = 'You generate social media examples with detailed reasoning for why they work or fail. You demonstrate tone DNA in practice. You MUST output valid JSON with exactly these fields: {"social_examples": [...], "avoid_examples": [...]}. Each array must contain 8-10 objects (social) and 5-6 objects (avoid).';
+  
+  if (hasImperativeBan) {
+    systemMessage += '\n\n🚨 CRITICAL IMPERATIVE BAN: You are ABSOLUTELY FORBIDDEN from starting any example with imperative verbs (kom, tag, nyd, prøv, smag, oplev, book, bestil, se, hør, find, få, bliv, gå, lad, slå, stik). Use ONLY declarative sentences starting with "Vi har...", "I dag serverer vi...", "Vores [...]". Any example with an imperative verb will be REJECTED.';
+  }
   
   // Call AI
   try {
@@ -325,7 +432,7 @@ export async function generateEnhancedExamples(
       messages: [
         { 
           role: 'system', 
-          content: 'You generate social media examples with detailed reasoning for why they work or fail. You demonstrate tone DNA in practice. You MUST output valid JSON with exactly these fields: {"social_examples": [...], "avoid_examples": [...]}. Each array must contain 8-10 objects (social) and 5-6 objects (avoid).'
+          content: systemMessage
         },
         { role: 'user', content: prompt }
       ],
@@ -364,9 +471,126 @@ export async function generateEnhancedExamples(
     console.log(`[ToneDNA] ✅ Generated ${parsed.social_examples?.length || 0} social examples`);
     console.log(`[ToneDNA] ✅ Generated ${parsed.avoid_examples?.length || 0} avoid examples`);
     
+    // STEP 1: NORMALIZE - Ensure all examples are proper objects {text, rationale}
+    // AI sometimes returns strings instead of objects, which breaks validation
+    let normalizedSocialExamples = (parsed.social_examples || []).map((ex: any, index: number) => {
+      if (typeof ex === 'object' && ex.text && ex.rationale) {
+        return ex; // Already correct structure
+      } else if (typeof ex === 'string') {
+        console.warn(`[ToneDNA] ⚠️  Example ${index+1} is string, normalizing to object`);
+        return { text: ex, rationale: 'AI-generated example' };
+      } else if (typeof ex === 'object' && ex.text) {
+        // Has text but missing rationale
+        return { text: ex.text, rationale: ex.rationale || 'AI-generated example' };
+      } else {
+        console.error(`[ToneDNA] ❌ Invalid example structure at ${index+1}:`, ex);
+        return null;
+      }
+    }).filter((ex: any) => ex !== null); // Remove invalid entries
+    
+    // STEP 2: FILTER IMPERATIVES - Remove examples with imperative verbs in ANY sentence
+    if (hasImperativeBan && normalizedSocialExamples.length > 0) {
+      const imperativeVerbs = ['kom', 'tag', 'nyd', 'prøv', 'smag', 'oplev', 'book', 'bestil', 'se', 'hør', 'find', 'få', 'bliv', 'gå', 'lad', 'slå', 'stik'];
+      const imperativePattern = new RegExp(`^(${imperativeVerbs.join('|')})\\s`, 'i');
+      
+      const beforeImperative = normalizedSocialExamples.length;
+      normalizedSocialExamples = normalizedSocialExamples.filter((ex: V5EnhancedSocialExample) => {
+        // Split into sentences and check EACH sentence (not just start of entire text)
+        const sentences = ex.text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+        const hasImperative = sentences.some(sentence => imperativePattern.test(sentence));
+        
+        if (hasImperative) {
+          // Find which sentence contains the imperative
+          const imperativeSentence = sentences.find(s => imperativePattern.test(s));
+          const match = imperativeSentence?.match(imperativePattern);
+          console.warn(`[ToneDNA] 🚫 Filtered imperative example: "${ex.text.substring(0, 60)}..." (verb: ${match?.[1]} in sentence: "${imperativeSentence?.substring(0, 40)}...")`);
+        }
+        
+        return !hasImperative;
+      });
+      
+      if (beforeImperative > normalizedSocialExamples.length) {
+        console.log(`[ToneDNA] ✅ Filtered ${beforeImperative - normalizedSocialExamples.length} imperative examples (${beforeImperative} → ${normalizedSocialExamples.length})`);
+      }
+    }
+    
+    // STEP 3: FILTER BANNED WORDS - Remove examples containing never_say words
+    // AI often ignores never_say constraints in prompt, so we filter post-generation
+    if (guardrails?.never_say && guardrails.never_say.length > 0 && normalizedSocialExamples.length > 0) {
+      // Extract banned words from never_say rules (format: "word → replacement" or just "word")
+      const bannedWords = guardrails.never_say.map(rule => {
+        let word = null;
+        
+        // Try multiple arrow formats: →, ->, –>, etc.
+        if (rule.includes('→')) {
+          word = rule.split('→')[0];
+        } else if (rule.includes('->')) {
+          word = rule.split('->')[0];
+        } else if (rule.includes('–>')) {
+          word = rule.split('–>')[0];
+        } else {
+          // No arrow found, use entire rule as banned word
+          word = rule;
+        }
+        
+        return word ? word.trim().toLowerCase() : null;
+      }).filter((word): word is string => word !== null && word.length > 0);
+      
+      console.log(`[ToneDNA] 🔍 Checking ${bannedWords.length} banned words against ${normalizedSocialExamples.length} examples...`);
+      if (bannedWords.length > 0) {
+        console.log(`[ToneDNA]    First 5 banned words:`, bannedWords.slice(0, 5));
+      }
+      
+      const beforeBanned = normalizedSocialExamples.length;
+      normalizedSocialExamples = normalizedSocialExamples.filter((ex: V5EnhancedSocialExample) => {
+        const lowerText = ex.text.toLowerCase();
+        
+        for (const bannedWord of bannedWords) {
+          // Check for whole word match (not substring)
+          // Escape special regex characters in banned word
+          const escaped = bannedWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const wordPattern = new RegExp(`\\b${escaped}\\b`, 'i');
+          
+          if (wordPattern.test(lowerText)) {
+            console.warn(`[ToneDNA] 🚫 Filtered banned word "${bannedWord}" in example: "${ex.text.substring(0, 60)}..."`);
+            return false;
+          }
+        }
+        
+        return true;
+      });
+      
+      if (beforeBanned > normalizedSocialExamples.length) {
+        console.log(`[ToneDNA] ✅ Filtered ${beforeBanned - normalizedSocialExamples.length} examples with banned words (${beforeBanned} → ${normalizedSocialExamples.length})`);
+      } else {
+        console.log(`[ToneDNA] ℹ️  No banned words found in examples`);
+      }
+    }
+    
+    // STEP 4: VALIDATE MINIMUM COUNT
+    if (normalizedSocialExamples.length < 5) {
+      console.warn(`[ToneDNA] ⚠️  Only ${normalizedSocialExamples.length} examples remain after filtering (need 8). AI may not be respecting constraints.`);
+    }
+    
+    // STEP 5: NORMALIZE AVOID EXAMPLES - Ensure proper {text, why_avoid} structure
+    const normalizedAvoidExamples = (parsed.avoid_examples || []).map((ex: any, index: number) => {
+      if (typeof ex === 'object' && ex.text && ex.why_avoid) {
+        return ex; // Already correct structure
+      } else if (typeof ex === 'string') {
+        console.warn(`[ToneDNA] ⚠️  Avoid example ${index+1} is string, normalizing to object`);
+        return { text: ex, why_avoid: 'Generic or inappropriate tone' };
+      } else if (typeof ex === 'object' && ex.text) {
+        // Has text but missing why_avoid
+        return { text: ex.text, why_avoid: ex.why_avoid || 'Generic or inappropriate tone' };
+      } else {
+        console.error(`[ToneDNA] ❌ Invalid avoid example structure at ${index+1}:`, ex);
+        return null;
+      }
+    }).filter((ex: any) => ex !== null); // Remove invalid entries
+    
     return {
-      social_examples: parsed.social_examples || [],
-      avoid_examples: parsed.avoid_examples || []
+      social_examples: normalizedSocialExamples,
+      avoid_examples: normalizedAvoidExamples
     };
     
   } catch (error) {

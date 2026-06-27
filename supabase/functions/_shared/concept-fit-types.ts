@@ -10,7 +10,7 @@ export interface ConceptFitInput {
   // Business data (from your existing tables)
   businessData: {
     // From business_operations
-    openingHours: Record<string, { open: string; close: string; closed: boolean }>;
+    openingHours: Record<string, { open: string; close: string; closed?: boolean }>;
     servicePeriods?: any;
     priceLevel: string;  // Budget/Mid-range/Premium/Fine Dining
     establishmentType: string;

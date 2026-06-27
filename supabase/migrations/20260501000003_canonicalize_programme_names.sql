@@ -51,8 +51,7 @@ COMMENT ON FUNCTION canonicalize_programme IS 'Task 3.2: Normalize programme nam
 
 -- Update existing audience_framework.timeSlots to canonicalize programme names
 UPDATE business_brand_profile
-SET audience_framework = (
-  SELECT jsonb_build_object(
+SET audience_framework = jsonb_build_object(
     'timeSlots', (
       SELECT jsonb_agg(
         CASE 
@@ -74,16 +73,13 @@ SET audience_framework = (
             slot
         END
       )
-      FROM jsonb_array_elements(audience_framework->'timeSlots') AS slot
+      FROM jsonb_array_elements(business_brand_profile.audience_framework->'timeSlots') AS slot
     ),
-    'primaryAudiences', COALESCE(audience_framework->'primaryAudiences', '[]'::jsonb),
-    'locationContexts', COALESCE(audience_framework->'locationContexts', '[]'::jsonb),
-    'seasonalVariation', COALESCE(audience_framework->'seasonalVariation', 'null'::jsonb),
-    'complexity', COALESCE(audience_framework->'complexity', 'null'::jsonb)
+    'primaryAudiences', COALESCE(business_brand_profile.audience_framework->'primaryAudiences', '[]'::jsonb),
+    'locationContexts', COALESCE(business_brand_profile.audience_framework->'locationContexts', '[]'::jsonb),
+    'seasonalVariation', COALESCE(business_brand_profile.audience_framework->'seasonalVariation', 'null'::jsonb),
+    'complexity', COALESCE(business_brand_profile.audience_framework->'complexity', 'null'::jsonb)
   )
-  FROM business_brand_profile AS bbp
-  WHERE bbp.id = business_brand_profile.id
-)
 WHERE 
   audience_framework IS NOT NULL 
   AND audience_framework->'timeSlots' IS NOT NULL

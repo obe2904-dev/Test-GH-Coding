@@ -3,6 +3,7 @@
 // Exports two async functions consumed by the orchestrator in index.ts.
 
 import type { Suggestion } from './types.ts'
+import { extractBrandEssence, extractVoiceRationale } from '../_shared/brand-profile/v5-extractors.ts'
 
 // ── extractFirstSentence ────────────────────────────────────────────────
 // Extract the first CONCRETE sentence from caption_base without AI.
@@ -87,6 +88,30 @@ export interface BusinessContext {
   voiceConstraints: string
   emojiInstruction: string
   typicalClosings: string[]
+  
+  // NEW v5.6: Brand-specific CTA library
+  ctaLibrary?: {
+    visit?: {
+      casual?: string[]
+      formal?: string[]
+    }
+    booking?: {
+      soft?: string[]
+      urgent?: string[]
+    }
+    engagement?: {
+      question?: string[]
+      social?: string[]
+    }
+    social_media?: string[]
+    signature_closing?: string
+  }
+  ctaPreferences?: {
+    default_style?: 'casual' | 'formal'
+    booking_priority?: 'soft' | 'urgent'
+    avoid_phrases?: string[]
+  }
+  
   bookingLink: string | null
   todayOpenTime: string
   todayCloseTime: string
@@ -107,7 +132,8 @@ export interface BusinessContext {
   businessCharacter: string
   venueCharacter: string
   venueScene: string
-  businessIdentityPersona: string        // Full persona with strategic segments (paid only)
+  businessIdentityPersona: string        // Full persona with strategic segments (paid only) - DEPRECATED in favor of marketingManagerBrief
+  marketingManagerBrief: string          // V5.3: Synthesized marketing guidance (~200 words, includes USPs + customer situations)
   identityKeywords: string[]
   // NEW v5.5: Tone DNA fields from brand_profile_v5
   humorLevel: string                     // v5: voice.humor_style ('playful', 'dry', 'serious', etc.)
@@ -142,13 +168,14 @@ export async function fetchBusinessContext(
 ): Promise<BusinessContext> {
   // 1. Business name + location (parallel)
   const [businessResult, locationResult, locationIntelResult] = await Promise.all([
-    supabase.from('businesses').select('name, vertical').eq('id', businessId).single(),
+    supabase.from('businesses').select('name, business_type_hybrid').eq('id', businessId).single(),
     supabase.from('business_locations').select('city, country').eq('business_id', businessId).eq('is_primary', true).single(),
     supabase.from('business_location_intelligence').select('local_location_reference').eq('business_id', businessId).maybeSingle()
   ])
 
   const businessName = businessResult.data?.name || 'din virksomhed'
-  const vertical = businessResult.data?.vertical || 'cafe'
+  const businessTypeHybrid = businessResult.data?.business_type_hybrid || null
+  const vertical = businessTypeHybrid?.primary || ''
   const city = locationResult.data?.city || ''
   const country = locationResult.data?.country || 'Denmark'
   const language = country === 'Denmark' ? 'da'
@@ -189,7 +216,8 @@ export async function fetchBusinessContext(
   let businessCharacter = ''
   let venueCharacter = ''
   let venueScene = ''
-  let businessIdentityPersona = ''        // Full persona with strategic segments (paid only)
+  let businessIdentityPersona = ''        // Full persona with strategic segments (paid only) - DEPRECATED
+  let marketingManagerBrief = ''          // V5.3: Synthesized marketing guidance (PREFERRED)
   let identityKeywords: string[] = []
   let geoNarrative: string | null = null
   // NEW (June 12, 2026): Voice guardrails from voice_guardrails column
@@ -202,6 +230,8 @@ export async function fetchBusinessContext(
   let humorLevel = ''
   let formalityLevel = ''
   let tone_dna: any = null
+  // NEW v5.6: Brand Profile V5 reference (used across paid/free branches)
+  let brandProfileV5: any | undefined = undefined
   // NEW (June 14, 2026): operator-set location phrase (source of truth for location references)
   const localLocationReference: string | null = locationIntelResult?.data?.local_location_reference ?? null
   if (localLocationReference) {
@@ -212,11 +242,12 @@ export async function fetchBusinessContext(
     // 2. Brand voice
     const { data: brandProfile } = await supabase
       .from('business_brand_profile')
-      .select('brand_essence, tone_of_voice, tone_model, content_strategy, things_to_avoid, voice_constraints, voice_examples, booking_link, voice_rationale, recognizable_interior_identity, business_identity_persona, identity_keywords, voice_guardrails, brand_profile_v5')
+      .select('brand_essence, tone_of_voice, tone_model, content_strategy, things_to_avoid, voice_constraints, voice_examples, booking_link, voice_rationale, recognizable_interior_identity, business_identity_persona, marketing_manager_brief, identity_keywords, voice_guardrails, brand_profile_v5')
       .eq('business_id', businessId)
       .single()
 
-    const brandProfileV5 = (brandProfile as any)?.brand_profile_v5 as any | undefined
+    // Extract V5 profile for use across function scope
+    brandProfileV5 = (brandProfile as any)?.brand_profile_v5 as any | undefined
 
     if (brandProfile) {
       bookingLink = (brandProfile as any).booking_link ?? null
@@ -242,12 +273,12 @@ export async function fetchBusinessContext(
         brandTone = tov
       }
     }
-    if (!brandTone && brandProfile?.brand_essence) {
-      // Fallback: extract .value from v5 object, or use string directly
-      const be = brandProfile.brand_essence as any
-      brandTone = typeof be === 'object' && be?.value
-        ? String(be.value).slice(0, 200)
-        : extractFirstSentence(String(be || ''))
+    if (!brandTone) {
+      // V5-first extraction: brand_profile_v5.identity.brand_essence → legacy fallback
+      const essence = extractBrandEssence(brandProfile)
+      if (essence) {
+        brandTone = extractFirstSentence(essence)
+      }
     }
 
     // v5: tone_model — writing rules, examples, emoji level
@@ -312,10 +343,8 @@ export async function fetchBusinessContext(
         brandAvoidVocab = ve.vocabulary.avoid.filter((s: any) => typeof s === 'string').slice(0, 8)
       }
     }
-    // v5: voice_rationale — "Hvorfor denne anbefaling?" — register constraint for atmosphere posts
-    if (brandProfile?.voice_rationale) {
-      voiceRationale = typeof (brandProfile as any).voice_rationale === 'string' ? (brandProfile as any).voice_rationale.trim() : ''
-    }
+    // V5-first extraction: voice_rationale from brand_profile_v5.voice.voice_reasoning → legacy fallback
+    voiceRationale = extractVoiceRationale(brandProfile)
     // v5: recognizable_interior_identity — factual venue/interior description from photo analysis
     if ((brandProfile as any)?.recognizable_interior_identity) {
       const rii = (brandProfile as any).recognizable_interior_identity as any
@@ -323,7 +352,14 @@ export async function fetchBusinessContext(
         : (typeof rii === 'object' && typeof rii?.value === 'string') ? rii.value.trim()
         : ''
     }
-    // v5.5: business_identity_persona — full persona with strategic segments
+    // V5.3 (June 21, 2026): marketing_manager_brief — synthesized guidance with USPs + customer situations
+    // Priority: marketing_manager_brief (V5.3 synthesized) > business_identity_persona (V5 legacy) > V5 JSONB nested
+    if (typeof (brandProfile as any)?.marketing_manager_brief === 'string' && (brandProfile as any).marketing_manager_brief.trim().length > 0) {
+      marketingManagerBrief = String((brandProfile as any).marketing_manager_brief).trim()
+      console.log('✅ V5.3 marketing_manager_brief loaded (synthesized guidance)')
+    }
+    
+    // v5.5: business_identity_persona — full persona with strategic segments (FALLBACK)
     // Paid tiers use the Brand Profile V5 persona as the primary prompt input.
     const v5BusinessIdentityPersona = brandProfileV5
       ?.layer_0_intelligence
@@ -448,10 +484,48 @@ export async function fetchBusinessContext(
       })
     }
 
+    // FIX 02: HARDCODED BANNED WORDS - Danish-specific additions
+    // These appear in tone_rules prose but are not in voice_guardrails.avoid_patterns.strip_from_output,
+    // so they survive generation. Adding here ensures they are injected as explicit prompt constraints.
+    const ALWAYS_BANNED_DK = [
+      'svip',
+      'svip forbi',
+      'svip ind',
+      'tag en pause fra hverdagen',
+      'varm omfavnelse',
+      'nyd',  // Often survives as "nyd den friske brise"
+    ]
+
+    // Merge with existing brandAvoidVocab
+    if (language === 'da') {
+      // Read from DB first, then add hardcoded
+      const dbBannedGeneric = avoid_patterns?.generic_marketing ?? []
+      const dbBannedSuperlatives = avoid_patterns?.superlatives ?? []
+      
+      brandAvoidVocab = [
+        ...(brandAvoidVocab ?? []),
+        ...dbBannedGeneric,
+        ...dbBannedSuperlatives,
+        ...ALWAYS_BANNED_DK
+      ]
+      
+      console.log('🚫 Extended banned vocabulary with', ALWAYS_BANNED_DK.length, 'hardcoded Danish patterns')
+    } else {
+      // Still merge DB patterns for other languages
+      const dbBannedGeneric = avoid_patterns?.generic_marketing ?? []
+      const dbBannedSuperlatives = avoid_patterns?.superlatives ?? []
+      
+      brandAvoidVocab = [
+        ...(brandAvoidVocab ?? []),
+        ...dbBannedGeneric,
+        ...dbBannedSuperlatives
+      ]
+    }
+
     // NEW v5.5: Extract tone_dna from brand_profile_v5 (authoritative V5.5 source)
     // This replaces legacy flat columns (tone_of_voice, tone_model) with strategic synthesis
     
-    if ((brandProfile as any)?.brand_profile_v5?.voice) {
+    if (brandProfileV5?.voice) {
       const v5Voice = brandProfileV5.voice
       
       // Extract humor and formality from V5 voice level (always present)
@@ -520,12 +594,26 @@ export async function fetchBusinessContext(
           }
         }
         
+        // V5.6 humor_character — extract execution guidance (minimal conservative approach)
+        let humorCharacter = null
+        if (tone_dna.humor_character && tone_dna.humor_character.permission_level !== 'none') {
+          humorCharacter = {
+            permission_level: tone_dna.humor_character.permission_level,
+            execution_style: tone_dna.humor_character.execution_style || null,
+            tone_descriptors: Array.isArray(tone_dna.humor_character.tone_descriptors)
+              ? tone_dna.humor_character.tone_descriptors.filter((s: any) => typeof s === 'string')
+              : []
+          }
+          console.log('✅ V5.6 humor_character extracted:', humorCharacter)
+        }
+        
         console.log('✅ V5.5 tone_dna loaded:', {
           has_strategic_summary: !!tone_dna.strategic_summary,
           tone_do_list: toneDNARules.length,
           tone_dont_list: tone_dna.tone_dont_list?.length || 0,
           has_location_driver: !!tone_dna.location_driver,
-          has_culinary_character: !!tone_dna.culinary_character
+          has_culinary_character: !!tone_dna.culinary_character,
+          has_humor_character: !!humorCharacter
         })
       } else {
         console.log('⚠️ V5.5 tone_dna not found - using legacy tone_model')
@@ -593,13 +681,14 @@ export async function fetchBusinessContext(
     const todayName = dayNames[new Date().getDay()]
     const { data: hoursRows } = await supabase
       .from('opening_hours')
-      .select('open_time, close_time, closed')
+      .select('open_time, close_time')
       .eq('business_id', businessId)
       .eq('kind', 'normal')
       .eq('weekday', todayName)
       .limit(1)
     const todayHours = hoursRows?.[0]
-    if (todayHours && !todayHours.closed) {
+    // If row exists, business is open (closed days have no row)
+    if (todayHours) {
       todayOpenTime = todayHours.open_time || ''
       console.log('⏰ Opening hours:', todayOpenTime)
     }
@@ -619,7 +708,7 @@ export async function fetchBusinessContext(
         .maybeSingle(),
       supabase
         .from('opening_hours')
-        .select('open_time, close_time, closed')
+        .select('open_time, close_time')
         .eq('business_id', businessId)
         .eq('kind', 'normal')
         .eq('weekday', todayName)
@@ -672,7 +761,8 @@ export async function fetchBusinessContext(
     hasParking = operationsRow?.has_parking ?? false
     kitchenCloseTime = operationsRow?.kitchen_close_time ?? ''
 
-    if (todayHours && !todayHours.closed) {
+    // If row exists, business is open (closed days have no row)
+    if (todayHours) {
       todayOpenTime = todayHours.open_time || ''
       todayCloseTime = todayHours.close_time || ''
       console.log('⏰ Free-tier opening hours:', todayOpenTime, todayCloseTime)
@@ -713,6 +803,26 @@ export async function fetchBusinessContext(
       }
     }
   }
+  
+  // NEW v5.6: Extract CTA library from brand_profile_v5.voice.writing_examples
+  let ctaLibrary: BusinessContext['ctaLibrary'] | undefined
+  let ctaPreferences: BusinessContext['ctaPreferences'] | undefined
+  
+  if (brandProfileV5?.voice?.writing_examples) {
+    const writingExamples = brandProfileV5.voice.writing_examples
+    
+    // Extract structured CTA library
+    if (writingExamples.cta_library && typeof writingExamples.cta_library === 'object') {
+      ctaLibrary = writingExamples.cta_library
+      console.log('✅ V5.6 CTA library extracted from voice.writing_examples')
+    }
+    
+    // Extract CTA preferences
+    if (writingExamples.cta_preferences && typeof writingExamples.cta_preferences === 'object') {
+      ctaPreferences = writingExamples.cta_preferences
+      console.log('✅ V5.6 CTA preferences extracted:', ctaPreferences)
+    }
+  }
 
   return {
     businessName, vertical, city, language,
@@ -720,10 +830,13 @@ export async function fetchBusinessContext(
     brandPreferVocab, brandAvoidVocab, locationVocabulary, brandSignaturePhrases, contentAnchors,
     thingsToAvoid, forbidden_phrases, technical_terms, weather_cliches, avoid_patterns, seasonal_notes,
     voiceConstraints, emojiInstruction,
-    typicalClosings, bookingLink, todayOpenTime, todayCloseTime, kitchenCloseTime,
+    typicalClosings,
+    ctaLibrary,
+    ctaPreferences,
+    bookingLink, todayOpenTime, todayCloseTime, kitchenCloseTime,
     reservationRequired, acceptsWalkIns, hasTableService, hasTakeaway, hasDelivery, hasOutdoorSeating, hasParking,
     keyOfferings, menuDescription, userAboutText,
-    voiceRationale, venueIdentity, businessIdentityPersona, identityKeywords,
+    voiceRationale, venueIdentity, businessIdentityPersona, marketingManagerBrief, identityKeywords,
     businessCharacter, venueCharacter, venueScene,
     humorLevel, formalityLevel, tone_dna,
     localLocationReference,
@@ -742,7 +855,14 @@ export async function resolveContentContext(
   suggestion: Suggestion,
   source: string,
   rawBrandSignaturePhrases: string[],
-  isPaid: boolean
+  isPaid: boolean,
+  businessContext?: {
+    locationVocabulary?: string[],
+    locationIntelligenceNarrative?: string | null,
+    venueScene?: string,
+    venueIdentity?: string,
+    tone_dna?: any
+  }
 ): Promise<ContentContext> {
   // Hook — for Weekly Plan non-menu posts, captionFirstLine gives a richer scene opener
   // for SCENE:/STEMNING: in contentBlock than the bare title.
@@ -1009,6 +1129,55 @@ export async function resolveContentContext(
     )
     if (brandSignaturePhrases.length < before) {
       console.log('🔦 Filtered', before - brandSignaturePhrases.length, 'outdoor signature phrase(s) — indoor warmth hook:', hook)
+    }
+  }
+
+  // FIX 01: ATMOSPHERE ANCHOR GUARD
+  // When there is no verified interior description (recognizable_interior_identity is null)
+  // and the contentType is atmosphere/availability, the model free-improvises atmospheric
+  // detail that violates factual_constraints. Inject a concrete location anchor instead.
+  if (
+    (contentType === 'atmosphere' || contentType === 'availability') &&
+    businessContext &&
+    !businessContext.venueScene &&
+    !businessContext.venueIdentity
+  ) {
+    // Build anchor from tone_dna.location_driver.natural_vocabulary if available,
+    // otherwise fall back to locationIntelligenceNarrative, otherwise leave as-is.
+    const locationVocab: string[] | null =
+      businessContext.tone_dna?.location_driver?.natural_vocabulary ?? null
+
+    const narrativeFallback: string | null =
+      businessContext.locationIntelligenceNarrative ?? null
+
+    if (locationVocab && locationVocab.length > 0) {
+      // Rotate through vocab so repeated atmosphere posts don't all use the same phrase.
+      // Use suggestion.id (or Date.now()) as a simple deterministic index.
+      const suggestionIdNum = typeof suggestion.id === 'number' ? suggestion.id : (typeof suggestion.id === 'string' ? [...suggestion.id].reduce((a, c) => a + c.charCodeAt(0), 0) : Math.floor(Date.now() / 1000))
+      const idx = suggestionIdNum % locationVocab.length
+      const locationPhrase = locationVocab[idx] // e.g. "ved åen", "udsigt over vandet"
+
+      // Only extend contentBlock if it doesn't already contain a location reference.
+      const alreadyHasLocation =
+        contentBlock?.toLowerCase().includes('åen') ||
+        contentBlock?.toLowerCase().includes('vandet') ||
+        contentBlock?.toLowerCase().includes('åboulevarden')
+
+      if (!alreadyHasLocation) {
+        contentBlock = contentBlock
+          ? `${contentBlock}\n\nLokation: ${locationPhrase}`
+          : `Lokation: ${locationPhrase}`
+      }
+    } else if (narrativeFallback) {
+      const alreadyHasLocation =
+        contentBlock?.toLowerCase().includes('åen') ||
+        contentBlock?.toLowerCase().includes('vandet')
+
+      if (!alreadyHasLocation) {
+        contentBlock = contentBlock
+          ? `${contentBlock}\n\n${narrativeFallback}`
+          : narrativeFallback
+      }
     }
   }
 

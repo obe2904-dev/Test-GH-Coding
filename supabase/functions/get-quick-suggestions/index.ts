@@ -2,11 +2,21 @@
 // Lightweight AI suggestion generator for post-onboarding dashboard
 // Returns 3 simple suggestions based on weather + top 5 menu items
 // NOT full Layer 0 - just enough for quick suggestions
-// Version: 2026-05-12-v2 - Force redeploy
+// Version: 2026-06-24-refactored - Modularized architecture
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// New modular imports (June 24, 2026 refactoring)
+import type { QuickSuggestionsRequest, QuickSuggestionsResponse } from './types.ts'
+import { checkCache, buildCachedResponse } from './cache-manager.ts'
+import { fetchAllBusinessContext } from './context-fetcher.ts'
+import { buildBrandContext } from './brand-context-builder.ts'
+import { persistAndAssemble, determineContentAngle } from './suggestion-persister.ts'
+import { callGemini, callGeminiArray, getGeminiApiKey } from './ai-client.ts'
+import { buildDagensSystemInstruction, generateDayFraming } from './prompt-builder.ts'
 import { detectHybridVerticals, resolveActiveVertical } from '../_shared/business-type-helpers.ts'
+import { isValidBusinessCharacter } from '../_shared/brand-profile/business-type-detection.ts'
+import { extractBrandEssence, extractPositioning, extractUSP } from '../_shared/brand-profile/v5-extractors.ts'
 import { countryToLangCode } from '../_shared/utils/hospitality-register.ts'
 import { countryToLanguageCode } from '../_shared/helpers/country-to-language.ts'
 import { matchPersonaToCurrentHour, matchActiveSegment, matchPersonaWithV5Programmes, type PersonaMatchResult, type AudienceSegment, type V5ProgrammeProfile, type BusinessOperations } from '../_shared/persona-matcher.ts'
@@ -24,12 +34,16 @@ import {
   buildMenuBlock,
   buildMenuBlockExcluding,
   buildSharedContext,
+  buildFreeSharedContext,
   buildSharedRules,
+  buildFreeSharedRules,
   buildComprehensiveNeverSayList,
   runSlotPlanner,
   buildSlotAPrompt,
   buildSlotBPrompt,
   buildSlotCPrompt,
+  buildUnifiedPrompt,
+  buildUnifiedPromptBC,
   normalizeDishName,
 } from '../_shared/dagens-forslag-prompt-builder.ts'
 import { createSecurityAuditLog, isBusinessAccessDenied, redactIdentifier } from './security-audit.ts'
@@ -38,29 +52,15 @@ import { calculateSlots, type SlotCalculationResult, type SlotTiming as NewSlotT
 import { validateAndRepair } from './output-validator.ts'
 import { assessOutdoorComfort } from '../_shared/post-helpers/strategy/weather-comfort-tiers.ts'
 import { fetchWeatherFromCoordinates, createSeasonalFallbackWeather } from '../get-weekly-strategy/weather-fetcher.ts'
-import dagensSystemPromptDa from '../_shared/prompts/languages/da/dagens-forslag-system.ts'
 import { needsSpellingCheck } from '../generate-text-from-idea/post-process.ts'
 import { silentCorrect } from '../_shared/utils/silent-correct.ts'
+// NEW: Dynamic suggestion count + behavioral logic (June 2026)
+import { calculateDynamicSuggestions, type CalculationContext } from '../_shared/content-planning/dynamic-suggestion-calculator.ts'
+import { analyzeBehavioralContext, type BehavioralAnalysisInput, type MenuItem as BehavioralMenuItem } from '../_shared/content-planning/behavioral-context-analyzer.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-/**
- * Builds Gemini system instruction using multilingual prompt system
- * 
- * @param language - Language code ('da', 'en', 'sv')
- * @returns Complete system instruction text for Gemini API
- */
-async function buildDagensSystemInstruction(language: string = 'da'): Promise<string> {
-  // Currently only Danish is supported - static import ensures bundler includes it
-  if (language !== 'da') {
-    console.warn(`Language ${language} not yet supported, falling back to Danish`)
-  }
-  
-  // Use static import - guaranteed to be in bundle
-  return dagensSystemPromptDa.system + ' ' + dagensSystemPromptDa.closer
 }
 
 // ── Safe Hospitality Fallback for FREE tier ──
@@ -71,42 +71,6 @@ const SAFE_HOSPITALITY_FALLBACK = {
   sentenceStyle: 'beskrivende',
   personalityTraits: ['venlig', 'informativ'],  // Positive uden at være for følelsesladet
   brandVoiceSummary: null,       // Opfind ikke noget
-}
-
-// ── Helper: Determine content angle from context ──
-// Returns strategic angle for post based on weather and dish characteristics
-function determineContentAngle(
-  weatherDesc: string,
-  dishName: string,
-  servicePeriod: string | null
-): string {
-  const weather = weatherDesc.toLowerCase()
-  const dish = dishName.toLowerCase()
-  
-  // Weather-based angles
-  if (weather.includes('regn') || weather.includes('rain') || weather.includes('torden')) {
-    return 'Rainy-day comfort classic'
-  }
-  if (weather.includes('sol') || weather.includes('sun') || weather.includes('clear')) {
-    return 'Perfect summer dish'
-  }
-  if (weather.includes('sne') || weather.includes('snow') || weather.includes('frost')) {
-    return 'Winter warming favorite'
-  }
-  
-  // Service period angles
-  if (servicePeriod === 'brunch' || dish.includes('brunch') || dish.includes('morgenmad')) {
-    return 'Weekend brunch favorite'
-  }
-  if (servicePeriod === 'lunch' || dish.includes('frokost') || dish.includes('lunch')) {
-    return 'Midday satisfaction'
-  }
-  if (servicePeriod === 'dinner' || dish.includes('aften') || dish.includes('dinner')) {
-    return 'Evening indulgence'
-  }
-  
-  // Default
-  return 'Signature menu highlight'
 }
 
 // ── Helper: Content-aware suggested time ──
@@ -133,13 +97,15 @@ function getContentAwareTime(
   const fromMinutes = (mins: number) =>
     `${Math.floor(mins / 60).toString().padStart(2, '0')}:${(mins % 60).toString().padStart(2, '0')}`
 
+  // Timing helpers (declared in function scope for reuse)
+  const nowMins = nowOverrideMins ?? (new Date().getHours() * 60 + new Date().getMinutes())
+  // Midnight-safe end time helper (bars / clubs closing at 01:00, 02:00 etc.)
+  const safeEnd = (hhmm: string) => { const m = toMinutes(hhmm); return m < 600 ? m + 1440 : m }
+
   // Try to match content to a specific program from menu.
   // Three-pass strategy so any business — regardless of how they name their programs — gets
   // program-aware timing rather than a hardcoded hour guess.
   if (programs && programs.length > 0) {
-    const nowMins = nowOverrideMins ?? (new Date().getHours() * 60 + new Date().getMinutes())
-    // Midnight-safe end time helper (bars / clubs closing at 01:00, 02:00 etc.)
-    const safeEnd = (hhmm: string) => { const m = toMinutes(hhmm); return m < 600 ? m + 1440 : m }
     // Remaining programs (active or not yet started)
     const remaining = programs.filter(p => safeEnd(p.end) > nowMins)
 
@@ -512,377 +478,6 @@ function repairSuggestions(suggestions: any[], confirmedFacts: string[]): any[] 
   })
 }
 
-// ── persistAndAssemble ───────────────────────────────────────────────────────
-// Saves validated suggestions to daily_suggestions, then assembles the final
-// response array with all grounding fields re-attached. Also increments the
-// business's daily quota counter.
-// Returns the final suggestions array (with DB-assigned ids if insert succeeded).
-async function persistAndAssemble(
-  suggestions: any[],
-  count: number,
-  supabase: ReturnType<typeof createClient>,
-  businessId: string,
-  today: string,
-  weatherForecast: string | null,
-  menuDescriptionMap: Map<string, string>,
-  slotExpectedContentTypes: string[],
-  todayOpenTime: string | null | undefined,
-  todayCloseTime: string | null | undefined,
-  kitchenCloseTime: string | null | undefined,
-  regenerate: boolean,
-  plannerRationale: string,
-  programsFromMenu?: Array<{name: string; start: string; end: string}>,
-  clientNow?: Date,
-  confirmedSlotTimings?: import('./operational-timeline.ts').SlotTiming[],  // pre-computed times from OperationalTimeline
-  rotationQueue?: RotationQueueItem[],  // NEW: rotation queue for metadata
-  currentServicePeriod?: string | null,  // NEW: detected service period
-  weatherDesc?: string,  // NEW: weather description for content angle
-): Promise<any[]> {
-  // Preserve Gemini-provided dish fields before the insert row-builder overwrites them
-  const menuItemNames: Record<number, string> = {}
-  const menuItemDescriptions: Record<number, string> = {}
-  const dishTextBriefs: Record<number, string> = {}
-  
-  // Generate a new batch ID for this regeneration
-  const generationBatchId = crypto.randomUUID()
-  console.log(`🔄 Generation batch ID: ${generationBatchId}`)
-
-  // If regenerating, deactivate old suggestions before inserting new ones
-  if (regenerate) {
-    try {
-      await supabase.rpc('deactivate_old_suggestions', {
-        p_business_id: businessId,
-        p_date: today
-      })
-      console.log('✅ Deactivated old suggestions for new batch')
-    } catch (deactivateError) {
-      console.warn('⚠️ Failed to deactivate old suggestions:', deactivateError)
-      // Continue anyway - upsert will handle it
-    }
-  }
-  
-  suggestions.slice(0, count).forEach((s: any, idx: number) => {
-    if (s.menu_item_name) {
-      menuItemNames[idx] = s.menu_item_name
-      const trustedDesc = menuDescriptionMap.get(s.menu_item_name)
-      menuItemDescriptions[idx] = trustedDesc || ''
-      // DB description takes priority over Gemini's dish_text_brief: Gemini invents
-      // ingredients from its training data (e.g. "løgringe, bacon, cheddar") rather than
-      // reading the actual menu description. Only fall back to Gemini's version when no
-      // DB description exists for this item.
-      dishTextBriefs[idx] = trustedDesc || s.dish_text_brief || ''
-    } else if (s.dish_text_brief) {
-      dishTextBriefs[idx] = s.dish_text_brief
-    }
-  })
-
-  const slotForPosition = (pos: number) => pos === 1 ? 'offering' : pos === 2 ? 'guest_moment' : 'brand_behind'
-
-  // Helper: Normalize content_type to match daily_suggestions constraint
-  // Constraint allows: 'product', 'atmosphere', 'bts', 'event', 'offer'
-  const normalizeContentType = (type: string): string => {
-    const typeMap: Record<string, string> = {
-      'menu_item': 'product',
-      'product_menu': 'product',
-      'craving_visual': 'product',
-      'behind_scenes': 'bts',
-      'brand_behind': 'bts',
-      'atmosphere': 'atmosphere',
-      'guest_moment': 'atmosphere',
-      'event': 'event',
-      'offer': 'offer',
-      'product': 'product',
-      'bts': 'bts'
-    }
-    return typeMap[type] || 'product'  // Default to 'product' if unknown
-  }
-
-  const suggestionRows = suggestions.slice(0, count).map((s: any, idx: number) => {
-    const expectedType = slotExpectedContentTypes[idx] ?? s.content_type
-    const normalizedType = normalizeContentType(expectedType)
-    
-    if (expectedType !== s.content_type) {
-      console.log(`⚠️ Slot ${idx + 1}: Gemini returned content_type="${s.content_type}", clamped to "${expectedType}"`)
-    }
-    if (expectedType !== normalizedType) {
-      console.log(`🔄 Content type normalized: "${expectedType}" → "${normalizedType}"`)
-    }
-    console.log(`🕐 Getting suggested_time for "${s.title}" with ${programsFromMenu?.length || 0} programs`)
-    
-    // ── NEW: Determine metadata from rotation queue ────────────────────────
-    const dishName = menuItemNames[idx] || s.menu_item_name || ''
-    let menuItemId: string | null = null
-    let contentAngle: string | null = null
-    let dishServicePeriod: string | null = null  // Ground truth from menu data
-    
-    // FIX #3: Check if slot allows food content (kitchen closed = no food)
-    const slotAllowsFood = confirmedSlotTimings?.[idx]?.isFoodEligible ?? true
-    
-    // Extract slot's target period hint (for validation, not as source of truth)
-    const slotTargetPeriodHint = confirmedSlotTimings?.[idx]?.serviceWindow?.name.toLowerCase()
-      || confirmedSlotTimings?.[idx]?.eligiblePeriods?.[0]
-      || null
-    
-    if (dishName && rotationQueue && Array.isArray(rotationQueue)) {
-      // Strategy: Match dish by name FIRST, then use its service_period as ground truth
-      // The slot timing is a scheduling hint, not the source of service period metadata
-      
-      // Primary match: by dish name (source of truth for service period)
-      const queueItem = rotationQueue.find(item => 
-        item.menu_item_name === dishName && slotAllowsFood
-      )
-      
-      if (queueItem) {
-        menuItemId = queueItem.menu_item_id || null
-        dishServicePeriod = queueItem.service_period || null  // Ground truth from menu
-        
-        // Validation: warn if dish's period doesn't match slot's target
-        if (slotTargetPeriodHint && dishServicePeriod && slotTargetPeriodHint !== 'all_day') {
-          if (dishServicePeriod !== slotTargetPeriodHint) {
-            console.warn(`⚠️ Period mismatch for "${dishName}": dish="${dishServicePeriod}", slot hint="${slotTargetPeriodHint}" (using dish's period as ground truth)`)
-          } else {
-            console.log(`✅ Period match: "${dishName}" [${dishServicePeriod}] → ${menuItemId || 'no UUID'}`)
-          }
-        } else {
-          console.log(`✅ Matched: "${dishName}" [${dishServicePeriod || 'no period'}] → ${menuItemId || 'no UUID'}`)
-        }
-      } else if (dishName) {
-        if (!slotAllowsFood) {
-          console.warn(`❌ No match for "${dishName}" — slot ${idx + 1} is after kitchen close (not food-eligible)`)
-        } else {
-          console.warn(`❌ Dish "${dishName}" not found in rotation queue (${rotationQueue.length} items)`)
-        }
-      }
-      
-      // Determine content angle based on weather + dish's actual service period
-      if (weatherDesc && normalizedType === 'product' && dishServicePeriod) {
-        try {
-          contentAngle = determineContentAngle(weatherDesc, dishName, dishServicePeriod)
-        } catch (angleErr) {
-          console.warn(`⚠️ Failed to determine content angle for "${dishName}":`, angleErr)
-          contentAngle = 'Signature menu highlight'  // Safe fallback
-        }
-      }
-    }
-    // ────────────────────────────────────────────────────────────────────────
-    
-    return ({
-      business_id: businessId,
-      title: s.title,
-      rationale: s.rationale || s.why_explanation || '',
-      why_explanation: s.why_explanation || '',
-      occasion_context: s.occasion_context || '',
-      photo_idea: s.media_suggestion?.primary?.instruction || s.photo_idea || '',
-      content_type: normalizedType,
-      planner_rationale: idx === 0 ? plannerRationale : null,  // Store on Slot A only
-      suggested_time: (confirmedSlotTimings && confirmedSlotTimings[idx])
-        // ✅ Use the pre-computed time from OperationalTimeline (fixes kitchen-close spread bug)
-        ? confirmedSlotTimings[idx].postAt
-        // Fallback: legacy getContentAwareTime (for callers that don't pass timeline)
-        : getContentAwareTime(expectedType, s.title || '', todayOpenTime, todayCloseTime, kitchenCloseTime, programsFromMenu, clientNow ? clientNow.getHours() * 60 + clientNow.getMinutes() : undefined),
-      date: today,
-      position: idx + 1,
-      source: 'quick_suggestions',
-      status: 'available',
-      generation_batch_id: generationBatchId,
-      weather_forecast: weatherForecast ? JSON.parse(weatherForecast) : null,
-      menu_item_id: menuItemId,  // NEW: UUID from rotation queue
-      menu_item_name: dishName,
-      service_period: dishServicePeriod,  // FIXED: Use dish's actual service period from menu data (ground truth)
-      content_angle: contentAngle,  // NEW: strategic angle
-      menu_item_description: dishTextBriefs[idx] || menuItemDescriptions[idx] || '',
-      // For menu posts: caption_base = ingredient brief (drives sensory detail in text generator).
-      // For non-menu posts: caption_base = concrete_anchor (confirmed venue/service fact; drives
-      // ANKER: injection in resolve-context so text generator has a documented anchor to build from).
-      caption_base: normalizedType === 'product'
-        ? (dishTextBriefs[idx] || menuItemDescriptions[idx] || '')
-        : (s.concrete_anchor || ''),
-      cta_intent: s.slot === 'guest_moment' ? 'social' : s.slot === 'brand_behind' ? 'engagement' : 'visit',
-      media_suggestion: s.media_suggestion || null,
-    })
-  })
-
-  console.log('💾 Attempting to save suggestions:', { count: suggestionRows.length, businessId, date: today })
-
-  // ── Time slot collision guard ──
-  // Ensure no two suggestions share the same suggested_time.
-  // When Slot B and C are both non-menu (atmosphere/BTS), getContentAwareTime returns
-  // the same fallback (14:00). Nudge each duplicate forward by 60 min.
-  // When confirmedSlotTimings are available the times are already deduplicated by
-  // OperationalTimeline — this guard is only a safety net for the fallback path.
-  const seenTimes = new Set<string>()
-  for (let i = 0; i < suggestionRows.length; i++) {
-    const row = suggestionRows[i]
-    const slotTiming = confirmedSlotTimings?.[i] ?? null
-    // Venue deadline: close - 30 min (or "23:30" as a safe universal cap)
-    const venueCap = kitchenCloseTime
-      ? (() => { const [h, m = 0] = kitchenCloseTime.split(':').map(Number); return h * 60 + m - 30 })()
-      : 23 * 60 + 30
-
-    let t = row.suggested_time
-    while (seenTimes.has(t)) {
-      const [h, m] = t.split(':').map(Number)
-      const nudgedMins = h * 60 + (m || 0) + 60
-      // Cap: never nudge past venue deadline (fixes the "+60 indefinitely" bug)
-      if (nudgedMins > venueCap) {
-        // Walk back instead — find a gap before the first seen time
-        const firstSeen = Array.from(seenTimes)[0]
-        const [fh, fm] = firstSeen.split(':').map(Number)
-        const earlierMins = fh * 60 + (fm || 0) - 45
-        t = earlierMins > 0
-          ? `${Math.floor(earlierMins / 60).toString().padStart(2, '0')}:${(earlierMins % 60).toString().padStart(2, '0')}`
-          : t  // last resort: keep as-is and break
-        break
-      }
-      const wrapped = nudgedMins % (24 * 60)
-      t = `${Math.floor(wrapped / 60).toString().padStart(2, '0')}:${(wrapped % 60).toString().padStart(2, '0')}`
-      console.log(`⏩ Collision nudge: ${row.suggested_time} → ${t} for "${row.title}"`)
-    }
-    seenTimes.add(t)
-    row.suggested_time = t
-  }
-
-  const { data: savedSuggestions, error: saveError } = await supabase
-    .from('daily_suggestions')
-    .upsert(suggestionRows, { onConflict: 'business_id,date,position,source,status' })
-    .select('id, title, rationale, why_explanation, occasion_context, photo_idea, media_suggestion, content_type, suggested_time, menu_item_id, menu_item_name, menu_item_description, service_period, content_angle, caption_base, cta_intent, position')
-
-  if (saveError) {
-    console.error('❌ Failed to save suggestions:', {
-      code: saveError.code,
-      message: saveError.message,
-      details: saveError.details,
-      hint: saveError.hint,
-    })
-    throw new Error(`Failed to persist suggestions: ${saveError.message}`)
-  } else {
-    console.log(`✅ Successfully saved ${savedSuggestions?.length || 0} suggestions to cache`)
-    if (savedSuggestions && savedSuggestions.length > 0) {
-      suggestions = [...savedSuggestions].sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
-    } else {
-      throw new Error('Failed to persist suggestions: no rows returned from upsert')
-    }
-  }
-
-  // Re-attach grounding fields (DB values take priority if insert succeeded)
-  const finalSuggestions = suggestions.map((s: any, idx: number) => ({
-    ...s,
-    slot: s.slot || slotForPosition(s.position || idx + 1),
-    menu_item_name: s.menu_item_name || menuItemNames[idx] || '',
-    menu_item_description: s.menu_item_description || dishTextBriefs[idx] || menuItemDescriptions[idx] || '',
-    caption_base: s.caption_base || (['menu_item', 'product_menu', 'craving_visual'].includes(s.content_type) ? (dishTextBriefs[idx] || menuItemDescriptions[idx] || '') : ''),
-    cta_intent: s.cta_intent || (s.slot === 'guest_moment' ? 'social' : s.slot === 'brand_behind' ? 'engagement' : 'visit'),
-    media_suggestion: s.media_suggestion || null,
-    suggestion_date: today,
-  }))
-
-  // ── Increment daily quota counter (only on regenerate) ──
-  if (regenerate) {
-    try {
-      const { data: currentBiz } = await supabase
-        .from('businesses')
-        .select('quick_suggestions_today')
-        .eq('id', businessId)
-        .single()
-      const newCount = (currentBiz?.quick_suggestions_today || 0) + 1
-      const { error: incrementError } = await supabase
-        .from('businesses')
-        .update({ quick_suggestions_today: newCount })
-        .eq('id', businessId)
-      if (!incrementError) {
-        console.log(`📊 Incremented quick_suggestions_today counter to ${newCount}`)
-      } else {
-        console.warn('⚠️ Failed to increment counter:', incrementError)
-      }
-    } catch (e) {
-      console.warn('⚠️ Error incrementing counter:', e)
-    }
-  }
-
-  return finalSuggestions
-}
-
-// ── Day Framing Generator ──
-// Generates contextual framing for the day (what makes today special/relevant)
-// Used for all tiers to provide context above suggestions in the UI
-function generateDayFraming(
-  clientNow: Date,
-  businessName: string,
-  timeline: OperationalTimeline,
-  weather: { city: string; temperature: string; conditions: string; tier?: string; score?: number; recommendation?: string } | null,
-  hasSpecialPrograms: boolean
-): string {
-  const dayOfWeek = clientNow.getDay()
-  const month = clientNow.getMonth() + 1
-  const day = clientNow.getDate()
-  
-  const dayNames = ['søndag', 'mandag', 'tirsdag', 'onsdag', 'torsdag', 'fredag', 'lørdag']
-  const dayName = dayNames[dayOfWeek]
-  
-  // Check for Danish public holidays
-  const danishHolidays: Record<string, string> = {
-    '1-1': 'Nytårsdag',
-    '6-5': 'Grundlovsdag',
-    '12-24': 'juleaften',
-    '12-25': 'juledag',
-    '12-26': '2. juledag',
-    '12-31': 'nytårsaften',
-    // Easter is moveable - simplified for now
-  }
-  
-  const dateKey = `${month}-${day}`
-  const holiday = danishHolidays[dateKey]
-  
-  const parts: string[] = []
-  
-  // Start with day of week or holiday
-  if (holiday) {
-    parts.push(`I dag er det ${holiday}`)
-    // Add context about operational impact if relevant
-    if (holiday === 'Grundlovsdag' || holiday === 'juleaften' || holiday === 'nytårsaften') {
-      if (timeline.isLateNight || timeline.isSocialDeadZone) {
-        parts.push('– mange steder holder lukket eller har kortere åbningstider')
-      } else {
-        parts.push('– en festdag hvor mange danskere har fri')
-      }
-    }
-  } else {
-    // Regular day
-    if (dayOfWeek === 5) { // Friday
-      parts.push('I dag er det fredag – weekend-stemningen er i gang')
-    } else if (dayOfWeek === 6) { // Saturday
-      parts.push('I dag er det lørdag')
-    } else if (dayOfWeek === 0) { // Sunday
-      parts.push('I dag er det søndag')
-    } else {
-      parts.push(`I dag er det ${dayName}`)
-    }
-  }
-  
-  // Add weather context if good and relevant
-  if (weather && timeline.slots.length > 0) {
-    const temp = parseInt(weather.temperature)
-    const conditions = weather.conditions.toLowerCase()
-    const weatherTier = weather.tier || ''
-    const shouldMentionWeather = weatherTier
-      ? weatherTier === 'premium' || weatherTier === 'viable'
-      : temp >= 18 && !conditions.includes('regn') && !conditions.includes('rain')
-
-    if (shouldMentionWeather) {
-      parts.push(`og vejret er godt (${weather.temperature}, ${weather.conditions})`)
-    } else if (weatherTier === 'unviable' && weather.recommendation) {
-      parts.push(`og vejret kalder på indehygge (${weather.temperature}, ${weather.conditions})`)
-    }
-  }
-  
-  // Add program context if special events today
-  if (hasSpecialPrograms) {
-    parts.push('. Der er særlige programmer i dag')
-  }
-  
-  return parts.join(' ')
-}
-
 // ── Request handler ──────────────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -1071,272 +666,68 @@ serve(async (req) => {
     }
 
     // ── Check for existing suggestions (unless regenerate = true) ──
-    let skipCacheReturn = regenerate
-    console.log('🔍 Cache check:', { businessId, date: today, regenerate: skipCacheReturn, count })
-    
-    if (!skipCacheReturn) {
-      try {
-        const { data: existingSuggestions, error: dbError } = await supabase
-          .from('daily_suggestions')
-          .select('id, title, rationale, why_explanation, occasion_context, photo_idea, media_suggestion, content_type, suggested_time, position, menu_item_name, menu_item_description, caption_base, cta_intent, weather_forecast, planner_rationale, created_at, status')
-          .eq('business_id', businessId)
-          .eq('date', today)
-          .eq('status', 'available')
-          .order('position', { ascending: true })
-          .limit(count)  // Only return the requested number of suggestions
-
-        console.log('📊 Cache lookup result:', { 
-          found: existingSuggestions?.length || 0, 
-          hasError: !!dbError,
-          errorCode: dbError?.code,
-          errorMessage: dbError?.message 
-        })
-
-        if (!dbError && existingSuggestions && existingSuggestions.length > 0) {
-          // Check if suggestions are stale relative to the current local time.
-          // Use 45-min threshold: suggestions older than 45 min auto-regenerate so the
-          // content reflects the current time window and slot times stay relevant.
-          // This does NOT consume the daily quota (quota only increments on explicit regenerate=true).
-          const createdAt = new Date(existingSuggestions[0].created_at)
-          const hoursOld = (clientNow.getTime() - createdAt.getTime()) / (1000 * 60 * 60)
-          
-          if (hoursOld > 0.75) {
-            console.log(`⏰ Suggestions are ${hoursOld.toFixed(1)} hours old (>45min) - auto-regenerating for current time context`)
-            // Auto-regenerate by continuing to generation flow (non-destructive).
-            // Fresh rows are persisted via upsert on (business_id, date, position).
-            skipCacheReturn = true
-          } else {
-            // Guard: if any cached why_explanation looks like a caption/promotional copy,
-            // force regeneration — bad Gemini output may have slipped into the cache.
-            const IMPERATIVE_CAPTION_RE = /^(forkæl|kom ind|nyd |prøv |bestil|book |ring |spar |tilbyd|giv dig selv|få en |lad os|se vores|\✅|💡|🥗|🍽️)/i
-            const hasCorruptExplanation = existingSuggestions.some(
-              (s: any) => s.why_explanation && IMPERATIVE_CAPTION_RE.test(s.why_explanation.trim())
-            )
-            if (hasCorruptExplanation) {
-              console.log('⚠️ Cached why_explanation looks like promotional copy — forcing regeneration')
-              skipCacheReturn = true
-              // Fall through to generation (non-destructive upsert path)
-            } else {
-            console.log(`✅ RETURNING CACHED SUGGESTIONS (${hoursOld.toFixed(1)} hours old, <45min)`)
-            console.log(`📋 Cached suggestion IDs: ${existingSuggestions.map(s => s.id).join(', ')}`)
-            console.log(`📋 Cached suggestion titles: ${existingSuggestions.map(s => s.title).join(' | ')}`)
-            const suggestions = existingSuggestions.map(s => ({
-              id: s.id,
-              title: s.title,
-              rationale: s.rationale,
-              why_explanation: s.why_explanation,
-              photo_idea: s.photo_idea,
-              media_suggestion: s.media_suggestion || null,
-              content_type: s.content_type,
-              suggested_time: s.suggested_time,
-              suggestion_date: today,
-              slot: (s as any).slot || (s.position === 1 ? 'offering' : s.position === 2 ? 'guest_moment' : 'brand_behind'),
-              menu_item_name: s.menu_item_name || '',
-              menu_item_description: s.menu_item_description || '',
-              caption_base: s.caption_base || '',
-              cta_intent: s.cta_intent || 'visit'
-            }))
-            
-            // Return stored weather forecast and planner rationale from when ideas were generated
-            const weatherForecast = existingSuggestions[0].weather_forecast || null
-            const cachedPlannerRationale = (existingSuggestions[0] as any).planner_rationale || ''
-            
-            // Query Weekly Plan ideas for today (cross-system awareness)
-            const { data: weeklyPlanIdeas } = await supabase
-              .from('daily_suggestions')
-              .select('title, rationale, content_type')
-              .eq('business_id', businessId)
-              .eq('source', 'weekly_plan')
-              .eq('date', today)
-              .limit(3)
-            
-            return new Response(JSON.stringify({ 
-              suggestions, 
-              cached: true, 
-              weatherForecast, 
-              plannerRationale: cachedPlannerRationale,
-              weeklyPlanIdeas: weeklyPlanIdeas || [],
-              debug: debug ? {
-                tier,
-                regenerate,
-                count,
-                cachedSuggestionCount: suggestions.length,
-              } : undefined,
-            }), {
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            })
-            } // end hasCorruptExplanation else
-          }
-        }
-        
-        if (dbError) {
-          console.log('⚠️ Cache lookup error:', dbError)
-        } else {
-          console.log('💡 No cached suggestions found, will generate fresh')
-        }
-      } catch (e) {
-        console.log('❌ Error checking cache:', e)
-      }
-    } else {
-      console.log('🔄 Regeneration requested - generating fresh suggestions and upserting by (business_id,date,position)')
-    }
-
-    // Get business info
-    const { data: business } = await supabase
-      .from('businesses')
-      .select('name, vertical, website_url, country, local_location_reference')
-      .eq('id', businessId)
-      .single()
-
-    if (!business) {
-      return new Response(JSON.stringify({ error: 'Business not found' }), {
-        status: 404,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // Derive language from business country
-    const language = countryToLangCode(business?.country)
-
-    // Get operations data (outdoor seating, kids menu, takeaway) (1B)
-    const { data: operations } = await supabase
-      .from('business_operations')
-      .select('has_outdoor_seating, has_kids_menu, has_takeaway, has_table_service, kitchen_close_time, weekly_programme, price_level')
-      .eq('business_id', businessId)
-      .single()
-    
-    console.log(`🔍 Business operations data:`, {
-      found: !!operations,
-      kitchen_close_time_raw: operations?.kitchen_close_time,
-      has_outdoor_seating: operations?.has_outdoor_seating
+    // Use cache-manager module (refactored June 24, 2026)
+    const cacheResult = await checkCache({
+      businessId,
+      today,
+      count,
+      clientNow,
+      regenerate,
+      supabase,
+      debug,
     })
-    
-    const hasOutdoorSeating = operations?.has_outdoor_seating || false
-    const hasKidsMenu = operations?.has_kids_menu || false
-    const hasTakeaway = operations?.has_takeaway || false
-    const hasTableService = operations?.has_table_service !== false // default true if null
-    const kitchenCloseTime: string | null = operations?.kitchen_close_time
-      ? operations.kitchen_close_time.replace(/:\d{2}$/, '') // strip seconds (DB stores HH:MM:SS)
-      : null
-    const weeklyProgramme: string | null = operations?.weekly_programme?.trim() || null
-    
-    console.log(`   kitchen_close_time processed: "${kitchenCloseTime}" (${typeof kitchenCloseTime})`)
 
-    // ── Fetch today's opening hours (all tiers — 1E) ──
-    let todayOpenTime: string | null = null
-    let todayCloseTime: string | null = null
-    // Layer 2: explicit closed flag — distinguishes "confirmed closed today" from "no hours data"
-    let isClosedToday = false
-    {
-      const dowNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-      const todayDow = dowNames[clientNow.getDay()]
-      try {
-        const { data: hoursRows } = await supabase
-          .from('opening_hours')
-          .select('open_time, close_time, closed')
-          .eq('business_id', businessId)
-          .eq('kind', 'normal')
-          .eq('weekday', todayDow)
-          .limit(1)
-        const todayHours = hoursRows?.[0]
-        if (todayHours?.closed) {
-          isClosedToday = true
-          console.log(`🚫 Business is closed today (${todayDow}) — programs will be suppressed`)
-        } else if (todayHours) {
-          // PostgreSQL `time` type serialises as HH:MM:SS — strip the trailing :SS.
-          const stripSecs = (t: string | null) => t ? t.replace(/:\d{2}$/, '') : t
-          todayOpenTime = stripSecs(todayHours.open_time ?? null)
-          todayCloseTime = stripSecs(todayHours.close_time ?? null)
-          console.log(`⏰ Today's hours: ${todayOpenTime}–${todayCloseTime}`)
-        }
-      } catch (e) {
-        console.warn('⚠️ Failed to fetch opening hours:', e)
-      }
-    }
-
-    // Get location
-    const { data: location } = await supabase
-      .from('business_locations')
-      .select('postal_code, city, country')
-      .eq('business_id', businessId)
-      .eq('is_primary', true)
-      .single()
-
-    const { data: locationIntelCoords } = await supabase
-      .from('business_location_intelligence')
-      .select('latitude, longitude')
-      .eq('business_id', businessId)
-      .maybeSingle()
-    
-    const expectedLanguage = countryToLanguageCode(location?.country)
-    console.log('🌐 Language filter:', { country: location?.country, expectedLanguage })
-
-    // ── NEW: Detect service period and get rotation queue ──────────────────────
-    // This replaces manual menu fetching with smart rotation-based selection
-    const currentTimeHHMM = `${clientNow.getHours().toString().padStart(2, '0')}:${clientNow.getMinutes().toString().padStart(2, '0')}`
-    let currentServicePeriod: string | null = null
-    let currentServicePeriods: string[] = []  // NEW: All active periods (handles overlaps)
-    let rotationQueue: RotationQueueItem[] = []
-    
-    // ── Declare menuDescriptionMap early (used by rotation queue and menu extraction) ──
-    const menuDescriptionMap = new Map<string, string>()
-    
-    try {
-      const servicePeriodResult = await detectServicePeriod(supabase, businessId, currentTimeHHMM)
-      currentServicePeriod = servicePeriodResult.currentPeriod  // Backward compatibility
-      currentServicePeriods = servicePeriodResult.currentPeriods  // NEW: Array of active periods
-      console.log(`🍽️ Current service period(s): ${currentServicePeriods.length > 0 ? currentServicePeriods.join(', ') : 'unknown (business may be closed)'}`)
-      
-      // FIX: Fetch ALL configured service periods (not just current) to support cross-period slot targeting
-      // This ensures slot 3 at 18:00 can get dinner dishes even if generated at 10:00 (brunch time)
-      const { data: allProgrammes } = await supabase
-        .from('business_programme_profiles')
-        .select('programme_type')
-        .eq('business_id', businessId)
-      
-      const allConfiguredPeriods = allProgrammes
-        ? Array.from(new Set(allProgrammes.map(p => p.programme_type).filter(Boolean)))
-        : currentServicePeriods
-      
-      if (allConfiguredPeriods.length > currentServicePeriods.length) {
-        console.log(`📅 Fetching rotation queue for ALL configured periods: ${allConfiguredPeriods.join(', ')} (not just current: ${currentServicePeriods.join(', ')})`)
-      }
-      
-      // Get rotation queue (dishes that haven't been posted recently)
-      // FIXED: Fetch for ALL periods so slots can target any service period
-      rotationQueue = await getMenuRotationQueue(supabase, {
+    if (cacheResult.shouldUseCache && cacheResult.cachedSuggestions) {
+      return buildCachedResponse(cacheResult.cachedSuggestions, {
         businessId,
-        servicePeriods: allConfiguredPeriods.length > 0 ? allConfiguredPeriods : null,
-        menuLanguage: expectedLanguage,  // Filter by business country language
-        lookbackDays: 90,
-        limit: 100  // Get all available dishes (ensures full rotation coverage)
+        today,
+        supabase,
+        tier,
+        regenerate,
+        count,
+        debug,
       })
-      console.log(`🔄 Rotation queue: ${rotationQueue.length} dishes available (from ${allConfiguredPeriods.length} service periods)`)
-      if (rotationQueue.length > 0) {
-        console.log(`   Top priority: "${rotationQueue[0].menu_item_name}" (last posted: ${rotationQueue[0].days_since_posted || 'never'} days ago)`)
-      }
-      if (currentServicePeriods.length > 1) {
-        console.log(`   ✨ Multiple active periods: ${currentServicePeriods.join(' + ')} (overlapping menus)`)
-      }
-      
-      // OPTIMIZED: Build menuDescriptionMap and menuCategoryMap from rotation queue (single source)
-      // Rotation queue now includes item_description and category_name, eliminating redundant query
-      const menuCategoryMap = new Map<string, string>()  // dish name -> category name (e.g., "Focaccia" -> "SANDWICHES")
-      for (const item of rotationQueue) {
-        if (item.item_description?.trim()) {
-          menuDescriptionMap.set(item.menu_item_name, item.item_description.trim())
-        }
-        if (item.category_name?.trim()) {
-          menuCategoryMap.set(item.menu_item_name, item.category_name.trim())
-        }
-      }
-      console.log(`📋 Loaded ${menuDescriptionMap.size} menu descriptions and ${menuCategoryMap.size} category labels from rotation queue`)
-    } catch (err) {
-      console.warn('⚠️ Failed to get rotation queue, falling back to legacy menu fetch:', err)
-      // Ensure rotationQueue is empty array, not undefined
-      rotationQueue = []
     }
-    // ────────────────────────────────────────────────────────────────────────
+
+    // ── Fetch all business context in parallel ──
+    // Use context-fetcher module (refactored June 24, 2026)
+    const context = await fetchAllBusinessContext(supabase, businessId, clientNow, today, regenerate)
+    
+    const business = context.business
+    const language = context.language
+    const operations = context.operations.operations
+    const hasOutdoorSeating = context.operations.hasOutdoorSeating
+    const hasKidsMenu = context.operations.hasKidsMenu
+    const hasTakeaway = context.operations.hasTakeaway
+    const hasTableService = context.operations.hasTableService
+    const kitchenCloseTime = context.operations.kitchenCloseTime
+    const weeklyProgramme = context.operations.weeklyProgramme
+    const todayOpenTime = context.hours.todayOpenTime
+    const todayCloseTime = context.hours.todayCloseTime
+    const isClosedToday = context.hours.isClosedToday
+    const location = context.location.location
+    const expectedLanguage = context.location.expectedLanguage
+    const locationIntelCoords = (context.location.latitude && context.location.longitude) 
+      ? { latitude: context.location.latitude, longitude: context.location.longitude }
+      : null
+    const currentServicePeriod = context.rotation.currentServicePeriod
+    const currentServicePeriods = context.rotation.currentServicePeriods
+    const rotationQueue = context.rotation.rotationQueue
+    const menuDescriptionMap = context.rotation.menuDescriptionMap
+    const menuCategoryMap = context.rotation.menuCategoryMap
+    // Note: brandProfile and recentSuggestions are fetched later for tier-specific logic
+
+    // Build dish name lookup map for text-based dish extraction
+    const dishNameLookup = new Map<string, { id: string | null; name: string }>()
+    for (const item of rotationQueue) {
+      const normalizedName = item.menu_item_name.toLowerCase().trim()
+      dishNameLookup.set(normalizedName, { id: item.menu_item_id, name: item.menu_item_name })
+      // Also store without accents for fuzzy matching
+      const withoutAccents = normalizedName.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      if (withoutAccents !== normalizedName) {
+        dishNameLookup.set(withoutAccents, { id: item.menu_item_id, name: item.menu_item_name })
+      }
+    }
 
     // Get menu items (top 5 for free tier)
     const maxItems = tier === 'free' ? 5 : 100
@@ -1347,10 +738,10 @@ serve(async (req) => {
     // Paid tiers: rotation queue → menu_results_v2 → key_offerings → menu_signal
     
     if (tier === 'free') {
-      // Free tier: ONLY use key_offerings (user-entered simple list)
+      // Free tier: Fetch key_offerings + descriptive fields for Slot B atmosphere generation
       const { data: profile } = await supabase
         .from('business_profile')
-        .select('key_offerings')
+        .select('key_offerings, menu_description, user_about_text, long_description, ai_place_synopsis')
         .eq('business_id', businessId)
         .single()
 
@@ -1365,6 +756,19 @@ serve(async (req) => {
           signatureItems = offerings.slice(0, maxItems)
           console.log(`📋 Using key_offerings (Free tier): ${signatureItems.length} items`)
         }
+      }
+      
+      // Store descriptive fields for Free tier Slot B atmosphere generation
+      // These will be added to confirmedFactsSlotB later in the flow
+      if (tier === 'free') {
+        // Store in module-level variable for later use
+        (globalThis as any).__freeTierProfile = {
+          menuDescription: profile?.menu_description?.trim() || null,
+          userAboutText: profile?.user_about_text?.trim() || null,
+          longDescription: profile?.long_description?.trim() || null,
+          aiPlaceSynopsis: profile?.ai_place_synopsis?.trim() || null,
+        }
+        console.log(`📝 Free tier profile loaded: menu_description=${!!(profile?.menu_description)}, user_about_text=${!!(profile?.user_about_text)}, long_description=${!!(profile?.long_description)}, ai_place_synopsis=${!!(profile?.ai_place_synopsis)}`)
       }
     } else if (rotationQueue.length > 0) {
       // Paid tiers: Use rotation queue first (fair rotation enabled)
@@ -1670,6 +1074,8 @@ serve(async (req) => {
         // ── Hybrid business cocktail/drinks boost (Friday/Saturday afternoons) ──
         // For hybrid businesses with both food AND drinks menus, prioritize cocktails/drinks
         // on Friday afternoon/evening and Saturday afternoon/evening until closing.
+        // TODO: Re-enable after moving hybridVerticals detection earlier in code
+        /*
         const dayOfWeek = clientNow.getDay() // 0 = Sunday, 6 = Saturday
         const isFridayOrSaturday = dayOfWeek === 5 || dayOfWeek === 6
         const isAfternoonOrEvening = currentHourQS >= 16
@@ -1700,6 +1106,7 @@ serve(async (req) => {
             console.log(`🍸 Hybrid business boost: Added ${drinkItemsAdded} drink/cocktail items for ${dayOfWeek === 5 ? 'Friday' : 'Saturday'} evening (kl. ${currentHourQS})`)
           }
         }
+        */
         
         const socialLeadBoostApplied = socialLeadSourceId && signatureItems.length > menuCategoryEntries.reduce((sum, cat) => sum + cat.items.length, 0)
         console.log(`📋 Using menu_results_v2 (paid tier): ${signatureItems.length} items across ${menuCategoryEntries.length} categories (from ${promptResultsSet.size} time-relevant menus; map covers ${menuDescriptionMap.size} items total)${socialLeadBoostApplied ? ' — social lead menu items boosted 2x ✨' : ''}`)
@@ -2041,11 +1448,13 @@ serve(async (req) => {
           ? `Vi har udeservering - GODT VEJR til outdoor-opslag (${weatherInfo})` 
           : `Vi har udeservering - men vejret passer IKKE til outdoor-opslag (${weatherInfo})`)
       : 'Ingen udeservering'
-    // When weather is unsuitable, add an explicit hard prohibition so Gemini doesn't pick up the
-    // 'Vi har udeservering' signal from outdoorNote and suggest an outdoor idea anyway.
-    const outdoorProhibitionBlock = (!outdoorSuitability && hasOutdoorSeating)
-      ? `\n🚫 FORBUDT I DAG: Forslå IKKE udeservering eller udendørs-ophold som indholds-ide. Vejret kvalificerer IKKE (${weatherInfo}). Gæsterne sidder ikke udenfor — udelad dette fra alle tre slots.`
-      : ''
+    // When weather is unsuitable OR business doesn't have outdoor seating, add an explicit hard prohibition
+    // so Gemini doesn't suggest outdoor content inappropriately.
+    const outdoorProhibitionBlock = !hasOutdoorSeating
+      ? `\n🚫 FORBUDT I DAG: Forretningen HAR IKKE udeservering. Forslå ALDRIG udeservering, udendørs servering, terrasse, gårdhave eller udendørs-relaterede idéer. Fokusér kun på indendørs oplevelser.`
+      : (!outdoorSuitability && hasOutdoorSeating)
+        ? `\n🚫 FORBUDT I DAG: Forslå IKKE udeservering eller udendørs-ophold som indholds-ide. Vejret kvalificerer IKKE (${weatherInfo}). Gæsterne sidder ikke udenfor — udelad dette fra alle tre slots.`
+        : ''
 
     // ── Fetch contextual calendar events (2A) ──
     // Pulls upcoming events relevant to this business (next 7 days, matching country).
@@ -2220,13 +1629,12 @@ serve(async (req) => {
     let businessCharacterText = ''
     let targetAudienceText = ''
     let activeSegmentAngleText = ''
-    let audienceBreadthQS = ''
-    let businessModelTypeQS = ''
     let primaryCopyHookQS = ''
     // V5 behavioral guidance variables
     let v5ToneNote: string | undefined = undefined
     let v5CTAType: string | undefined = undefined
     let v5ContentAngles: string[] = []
+    let v5Voice: any = undefined  // Declare at function scope for later use
     let communicationGoalText = ''
     let identityKeywordsText = ''
     let ownerDifferentiatorText = ''
@@ -2241,6 +1649,7 @@ serve(async (req) => {
     let emotionalPromiseText = ''
     let contentExclusionsText = ''
     let locationMotivationsText = ''
+    let businessIdentityPersona = ''  // V5 business identity persona, used for prompt context
     let touristContext = false  // set from location_intelligence.tourist_context below
     // price_level from business_operations \u2014 mapped to Danish register label
     const priceLevelMap: Record<number, string> = {
@@ -2291,7 +1700,7 @@ serve(async (req) => {
     if (isPaidTier) {
       const { data: _bp } = await supabase
         .from('business_brand_profile')
-        .select('brand_profile_v5, brand_essence, tone_of_voice, tone_keywords, tone_model, things_to_avoid, content_strategy, content_strategy_confirmed, communication_goal, target_audience, identity_keywords, business_character, humor_level, voice_rationale, recognizable_interior_identity, location_intelligence, posting_occasions, audience_segments, voice_guardrails, business_identity_persona')
+        .select('brand_profile_v5, brand_essence, tone_of_voice, tone_keywords, tone_model, things_to_avoid, content_strategy, communication_goal, target_audience, business_character, voice_rationale, posting_occasions, audience_segments, voice_guardrails, business_identity_persona, marketing_manager_brief')
         .eq('business_id', businessId)
         .single()
       brandProfile = _bp
@@ -2303,26 +1712,40 @@ serve(async (req) => {
         // NEW (June 12, 2026): Use flattened columns first, fall back to nested structure
         const v5 = brandProfile.brand_profile_v5
         const v5Identity = v5?.identity
-        const v5Voice = v5?.voice
+        v5Voice = v5?.voice  // Assign to function-scoped variable
         const v5WritingExamples = v5?.writing_examples
         const v5Guardrails = (brandProfile as any).voice_guardrails || v5?.guardrails
         const v5Programme = Array.isArray(v5?.programmes) && v5.programmes.length > 0 ? v5.programmes[0] : null
         const v5BusinessIdentityPersona = v5?.layer_0_intelligence?.business_identity?.system_persona
         const v5GeoNarrative = v5?.layer_0_intelligence?.geographic_context?.narrative
+        const v5MarketingManagerBrief = v5?.marketing_manager_brief || (brandProfile as any).marketing_manager_brief
 
+        // ══════════════════════════════════════════════════════════════════════
+        // MARKETING MANAGER BRIEF (NEW V5.3 - June 21, 2026)
+        // ══════════════════════════════════════════════════════════════════════
+        // HIGHEST PRIORITY: Use synthesized marketing manager role instruction
+        // This replaces scattered 15+ field assembly with ONE clear Danish brief.
+        
+        if (v5MarketingManagerBrief && typeof v5MarketingManagerBrief === 'string' && v5MarketingManagerBrief.trim().length > 100) {
+          // ✅ MARKETING MANAGER BRIEF AVAILABLE - Use as primary system context
+          parts.push(`MARKETING MANAGER BRIEF:\n${v5MarketingManagerBrief.trim()}`)
+          
+          // Extract business name for businessCharacterText if needed
+          const briefFirstLine = v5MarketingManagerBrief.split('\n')[0]
+          businessCharacterText = briefFirstLine || v5MarketingManagerBrief.substring(0, 150).trim()
+          
+          console.log('✅ Using marketing_manager_brief (V5.3 synthesized guidance)')
+        } 
         // ══════════════════════════════════════════════════════════════════════
         // BUSINESS IDENTITY PERSONA INTEGRATION (June 12, 2026)
         // ══════════════════════════════════════════════════════════════════════
-        // Use full multi-paragraph persona as foundation instead of assembling piecemeal.
+        // FALLBACK: Use full multi-paragraph persona if no marketing brief available.
         // Includes: venue description + strategic segments + communication strategy.
         // Falls back to legacy assembly for businesses without regenerated V5 profiles.
         
-        const businessIdentityPersona =
-          (typeof v5BusinessIdentityPersona === 'string' && v5BusinessIdentityPersona.trim().length > 50)
-            ? v5BusinessIdentityPersona.trim()
-            : (brandProfile as any).business_identity_persona
-        
-        if (businessIdentityPersona && typeof businessIdentityPersona === 'string' && businessIdentityPersona.trim().length > 50) {
+        else if ((typeof v5BusinessIdentityPersona === 'string' && v5BusinessIdentityPersona.trim().length > 50)) {
+          businessIdentityPersona = v5BusinessIdentityPersona.trim()
+          
           // ✅ PERSONA AVAILABLE - Use full strategic context
           parts.push(`BUSINESS IDENTITY PERSONA:\n${businessIdentityPersona.trim()}`)
           
@@ -2340,12 +1763,9 @@ serve(async (req) => {
           console.log('⚠️ business_identity_persona not available - using legacy assembly')
           
           // ── 1. Brand identity anchor ──
-          // V5-first fallback: v5Identity.brand_essence → legacy brand_essence
-          const brandEssence = v5Identity?.brand_essence
-            ?? (brandProfile.brand_essence as any)?.value
-            ?? brandProfile.brand_essence
-            ?? ''
-          if (brandEssence && typeof brandEssence === 'string' && brandEssence.trim()) {
+          // V5-first extraction: brand_profile_v5.identity.brand_essence → legacy fallback
+          const brandEssence = extractBrandEssence(brandProfile)
+          if (brandEssence && brandEssence.trim()) {
             parts.push(`BRAND IDENTITET (hvad stedet ER — lad dette styre ide-valget):\n${brandEssence.trim()}`)
           }
 
@@ -2453,12 +1873,27 @@ serve(async (req) => {
 
           // ── 5. Business character (AI plain-text description) ──
           // Fallback chain: v5Identity.business_description → business_character
+          // V5.6 (June 22, 2026): Validate business_character to prevent persona corruption
           const businessCharacter = v5Identity?.business_description
             ?? (typeof (brandProfile as any).business_character === 'string' ? (brandProfile as any).business_character
               : (typeof (brandProfile as any).business_character === 'object' && (brandProfile as any).business_character?.value)
                 ? String((brandProfile as any).business_character.value) : '')
-          if (businessCharacter) {
+          
+          // Validate: business_character should be SHORT (< 200 chars), not the full persona
+          if (businessCharacter && isValidBusinessCharacter(businessCharacter)) {
             businessCharacterText = businessCharacter.trim()
+          } else if (businessCharacter && businessCharacter.length > 0) {
+            // Corrupted (contains full persona) - extract first meaningful line
+            console.warn('⚠️ business_character corrupted (contains persona), extracting first line')
+            const firstLine = businessCharacter.split('\n').find(line => 
+              line.trim() && 
+              !line.includes('Du er Marketing ekspert') &&
+              !line.includes('FORRETNING:') &&
+              !line.includes('LOKATION:')
+            )
+            if (firstLine && firstLine.length < 200) {
+              businessCharacterText = firstLine.trim()
+            }
           }
         }
         
@@ -2480,8 +1915,8 @@ serve(async (req) => {
         }
 
         // ── 5b. Brand differentiator ──
-        // V5-first: what_makes_us_different is the live source of truth
-        const differentiator = v5Identity?.what_makes_us_different || ''
+        // V5-first extraction: brand_profile_v5.identity.what_makes_us_different → legacy fallback
+        const differentiator = extractUSP(brandProfile)
         if (differentiator && differentiator.trim().length > 5) {
           brandContextDifferentiator = differentiator.trim()
         }
@@ -2544,11 +1979,6 @@ serve(async (req) => {
         // Extract additional metadata for legacy compatibility and prompt enrichment
         if (personaMatch.source === 'segments') {
           // B5 audience_segments schema provides classification metadata
-          // These fields guide content strategy (breadth, business model, copy approach)
-          audienceBreadthQS = typeof rawAudienceSegments?.audience_breadth === 'string'
-            ? rawAudienceSegments.audience_breadth : ''
-          businessModelTypeQS = typeof rawAudienceSegments?.business_model_type === 'string'
-            ? rawAudienceSegments.business_model_type : ''
           primaryCopyHookQS = typeof rawAudienceSegments?.primary_copy_hook === 'string'
             ? rawAudienceSegments.primary_copy_hook : ''
           
@@ -2646,9 +2076,9 @@ serve(async (req) => {
         if (registerGuidance && typeof registerGuidance === 'string') voiceRationaleText = registerGuidance.trim()
 
         // ── 11. Emotional promise + content exclusions (Stage B3) ──
-        // V5-first: positioning is the live source of truth
-        const positioning = v5Identity?.positioning || ''
-        if (typeof positioning === 'string' && positioning.trim()) emotionalPromiseText = positioning.trim()
+        // V5-first extraction: brand_profile_v5.identity.positioning → legacy fallback
+        const positioning = extractPositioning(brandProfile)
+        if (positioning && positioning.trim()) emotionalPromiseText = positioning.trim()
         // V5-first: content exclusions come from structured V5 guardrails only
         const exclusions = v5Guardrails?.content_exclusions
         if (Array.isArray(exclusions) && exclusions.length > 0) {
@@ -2668,17 +2098,18 @@ serve(async (req) => {
         }
         
         // ── 12. Location intelligence motivations + proximity anchor ──
-        const liRaw = (brandProfile as any).location_intelligence
-        if (typeof liRaw === 'object' && liRaw !== null) {
-          if (Array.isArray(liRaw.matched_motivations)) {
-            const motivations = liRaw.matched_motivations.filter((s: unknown) => typeof s === 'string').slice(0, 3) as string[]
+        // Read from business_location_intelligence table (not brand_profile flat column which is NULL in V5)
+        const businessLocationIntel = businessIntel.locationPositioning
+        if (businessLocationIntel) {
+          if (Array.isArray(businessLocationIntel.matched_motivations)) {
+            const motivations = businessLocationIntel.matched_motivations.filter((s: unknown) => typeof s === 'string').slice(0, 3) as string[]
             if (motivations.length > 0) locationMotivationsText = motivations.join(', ')
           }
           // location_proximity_fact: inject area type and top marketing hook as confirmed Slot C fact.
           // primary_type gives AI the venue context (waterfront, city_centre etc.);
           // marketing_focus is the owner's own location hook (e.g. 'Den eneste café med udsigt over åen').
-          const primaryType = typeof liRaw.primary_type === 'string' ? liRaw.primary_type.trim() : ''
-          const marketingFocus = typeof liRaw.marketing_focus === 'string' ? liRaw.marketing_focus.trim() : ''
+          const primaryType = typeof businessLocationIntel.primary_type === 'string' ? businessLocationIntel.primary_type.trim() : ''
+          const marketingFocus = typeof businessLocationIntel.marketing_focus === 'string' ? businessLocationIntel.marketing_focus.trim() : ''
           if (primaryType && primaryType !== 'unknown') {
             confirmedFacts.push(`Beliggenheds-type: ${primaryType}`)
           }
@@ -2686,8 +2117,8 @@ serve(async (req) => {
             confirmedFacts.push(`Beliggenheds-hook: ${marketingFocus}`)
           }
           // Extract tourist context — used to frame English-named dishes appropriately
-          if (liRaw.tourist_context === true
-            || (typeof liRaw.tourist_factor === 'string' && liRaw.tourist_factor !== 'none')) {
+          if (businessLocationIntel.tourist_context === true
+            || (typeof businessLocationIntel.tourist_factor === 'string' && businessLocationIntel.tourist_factor !== 'none')) {
             touristContext = true
           }
         }
@@ -2802,15 +2233,8 @@ serve(async (req) => {
       }
     }
 
-    // ── Fetch recent menu suggestions to avoid repetition ──
-    const { data: recentSuggestions, error: recentError } = await supabase
-      .from('daily_suggestions')
-      .select('title, content_type, photo_idea, menu_item_name, created_at')
-      .eq('business_id', businessId)
-      .eq('content_type', 'menu_item')
-      .gte('created_at', (() => { const d = new Date(clientNow); d.setDate(d.getDate() - 14); return d.toISOString() })())
-      .order('created_at', { ascending: false })
-      .limit(42) // Up to 14 days × 3 suggestions/day — matches postedRecencyMap window
+    // ── Use recent suggestions from context (fetched earlier) ──
+    const recentSuggestions = context.recentSuggestions
 
     // ── Fetch actually-posted dishes from the last 14 days ──
     const fourteenDaysAgo = new Date(clientNow)
@@ -2819,7 +2243,7 @@ serve(async (req) => {
     // Query 1: Published posts (for recency claims like "postet 3 dage siden")
     // NOW INCLUDES posts without menu_item_name for manual post tracking
     const { data: recentPosts, error: postsError } = await supabase
-      .from('published_posts')
+      .from('posts')
       .select('menu_item_id, menu_item_name, posted_at, status, post_text')
       .eq('business_id', businessId)
       .eq('status', 'published')  // Only actually published posts for recency claims
@@ -2829,7 +2253,7 @@ serve(async (req) => {
     // Query 2: Scheduled posts (to exclude from suggestions, but don't use for recency claims)
     // NOW INCLUDES posts without menu_item_name for manual post tracking
     const { data: scheduledPosts } = await supabase
-      .from('published_posts')
+      .from('posts')
       .select('menu_item_id, menu_item_name, scheduled_for, post_text')
       .eq('business_id', businessId)
       .eq('status', 'scheduled')
@@ -2837,9 +2261,7 @@ serve(async (req) => {
       .order('scheduled_for', { ascending: true })
 
     let avoidSection = ''
-    if (recentError) {
-      console.warn('⚠️ Could not fetch recent suggestions:', recentError)
-    }
+    // Recent suggestions are now loaded from context
     if (postsError) {
       console.warn('⚠️ Could not fetch published posts:', postsError)
     }
@@ -3076,6 +2498,46 @@ serve(async (req) => {
       confirmedFactsSlotB.push('Tilbyder også takeaway')
       confirmedFacts.push('Tilbyder også takeaway')
     }
+    
+    // ── Free Tier Enhancement: Add descriptive text facts for Slot B atmosphere ──
+    if (tier === 'free') {
+      const freeProfile = (globalThis as any).__freeTierProfile
+      if (freeProfile) {
+        // Priority order: ai_place_synopsis > user_about_text > menu_description > long_description
+        // ai_place_synopsis: AI-generated concise place summary (ideal for atmosphere)
+        if (freeProfile.aiPlaceSynopsis) {
+          confirmedFactsSlotB.push(`Om stedet: ${freeProfile.aiPlaceSynopsis}`)
+          confirmedFacts.push(`Om stedet: ${freeProfile.aiPlaceSynopsis}`)
+          console.log('✅ Free tier: Using ai_place_synopsis for Slot B')
+        }
+        // user_about_text: Owner's own description (authentic voice)
+        else if (freeProfile.userAboutText) {
+          confirmedFactsSlotB.push(`Stedet er: ${freeProfile.userAboutText}`)
+          confirmedFacts.push(`Stedet er: ${freeProfile.userAboutText}`)
+          console.log('✅ Free tier: Using user_about_text for Slot B')
+        }
+        // menu_description: AI-generated menu overview
+        else if (freeProfile.menuDescription) {
+          confirmedFactsSlotB.push(`Stedet er: ${freeProfile.menuDescription}`)
+          confirmedFacts.push(`Stedet er: ${freeProfile.menuDescription}`)
+          console.log('✅ Free tier: Using menu_description for Slot B')
+        }
+        // long_description: Website "about" section (detailed but may be lengthy)
+        else if (freeProfile.longDescription) {
+          // Truncate if too long (keep first 200 chars for atmosphere context)
+          const truncated = freeProfile.longDescription.length > 200
+            ? freeProfile.longDescription.slice(0, 200) + '...'
+            : freeProfile.longDescription
+          confirmedFactsSlotB.push(`Beskrivelse: ${truncated}`)
+          confirmedFacts.push(`Beskrivelse: ${truncated}`)
+          console.log('✅ Free tier: Using long_description (truncated) for Slot B')
+        }
+        
+        // Clean up global variable
+        delete (globalThis as any).__freeTierProfile
+      }
+    }
+    
     // 4D: If kitchen closes significantly before venue, inject bar-stays-open fact
     // BUT: Skip on Sundays (dag 0) — bar/drinks content doesn't fit Sunday brunch/family vibe
     if (kitchenCloseTime && todayCloseTime) {
@@ -3233,18 +2695,8 @@ serve(async (req) => {
     const recencyMap = new Map<string, { daysAgo: number; name: string }>() // For filtering
     const publishedOnlyMap = new Map<string, { daysAgo: number; name: string }>() // For recency claims
 
-    // Build a lookup map from rotation queue for text-based dish extraction
-    const dishNameLookup = new Map<string, { id: string; name: string }>()
-    for (const item of rotationQueue) {
-      const normalizedName = item.menu_item_name.toLowerCase().trim()
-      dishNameLookup.set(normalizedName, { id: item.id, name: item.menu_item_name })
-      // Also store without accents for fuzzy matching
-      const withoutAccents = normalizedName.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      if (withoutAccents !== normalizedName) {
-        dishNameLookup.set(withoutAccents, { id: item.id, name: item.menu_item_name })
-      }
-    }
-
+    // dishNameLookup is now built earlier (after context fetch) for reuse
+    
     // Source 1: Published posts (ground truth - only actual published posts, status='published')
     for (const post of (recentPosts || [])) {
       const daysAgo = Math.ceil((clientNow.getTime() - new Date(post.posted_at).getTime()) / 86_400_000)
@@ -3369,7 +2821,7 @@ serve(async (req) => {
     // Tier 2: ≥3 dishes not posted in 3+ days  → moderate priority guidance
     // Tier 3: all dishes posted within 3 days  → context-first (weather/time beats rotation)
     //
-    // "Posted" = confirmed post (published_posts) OR AI suggestion (daily_suggestions).
+    // "Posted" = confirmed post (posts) OR AI suggestion (daily_suggestions).
     // recencyMap is built above from both sources.
     let rotationGuidance = ''
     {
@@ -3496,8 +2948,6 @@ serve(async (req) => {
       // Audience
       targetAudienceText,
       activeSegmentAngle: activeSegmentAngleText,
-      audienceBreadth: audienceBreadthQS,
-      businessModelType: businessModelTypeQS,
       primaryCopyHook: primaryCopyHookQS,
       
       // V5 Behavioral Guidance (June 2026)
@@ -3545,6 +2995,9 @@ serve(async (req) => {
       isPaidTier,
       touristContext: touristContext ? 'yes' : undefined,
       userContext: userContext?.trim() || undefined,
+      
+      // NEW V5.6: Team/people content anchors
+      teamPeopleAnchors: v5Voice?.team_people_anchors || undefined,
     }
 
     // ── Build never-say list, shared context, menu block, and rules using module ──
@@ -3553,36 +3006,84 @@ serve(async (req) => {
     const userContextNote = userContext?.trim()
       ? `\n\n──── STYRENDE KONTEKST FRA VIRKSOMHEDEN ────\n${userContext.trim().slice(0, 120)}\n⚠️ Lad denne kontekst STYRE idévalget — den overstyrer generiske anbefalinger.`
       : ''
-    const sharedCtx = buildSharedContext(promptContext) + userContextNote
-    const sharedRules = buildSharedRules(promptContext, neverSayBlock)
+    
+    // FREE TIER: Strip timing references for clean, simple prompts
+    const sharedCtx = tier === 'free' 
+      ? buildFreeSharedContext(promptContext) + userContextNote
+      : buildSharedContext(promptContext) + userContextNote
+    
+    const sharedRules = tier === 'free'
+      ? buildFreeSharedRules(promptContext, neverSayBlock)
+      : buildSharedRules(promptContext, neverSayBlock)
 
     // ── GEMINI_API_KEY ──
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')
-    if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured')
+    const GEMINI_API_KEY = getGeminiApiKey()
 
-    // ── Slot Calculator — hours-based formula with multi-period support ──
-    // NEW: Uses slot-calculator.ts instead of operational-timeline.ts
+    // ── Dynamic Suggestion Calculator (June 2026) ──
+    // NEW: Replaces fixed slot-calculator with dynamic 1-3 suggestion count
     // Implements:
-    //   • Hours-based slot count (>8h→3, 5-8h→2, <5h→1)
-    //   • Strict 2-hour minimum spacing
-    //   • Per-slot service period targeting
-    //   • Midnight-crossing normalization
-    //   • Social dead zone detection (00:00-05:59)
-    console.log(`🔧 Slot calculator inputs:`)
+    //   • Dynamic suggestion count (1-3) based on available time window
+    //   • Decision tree logic (Q1-Q6) from specification
+    //   • Content type selection (OFFERING vs ATMOSPHERE)
+    //   • Smart closing time detection (kitchen vs business hours)
+    //   • Timing rules: 30-60min immediate, 180min spacing, closing buffers
+    console.log(`🎯 Dynamic suggestion calculator inputs:`)
     console.log(`   Current time: ${clientNow.toISOString()} (${clientNow.getHours()}:${clientNow.getMinutes().toString().padStart(2, '0')})`)
     console.log(`   Kitchen close: ${kitchenCloseTime || 'NOT SET'}`)
     console.log(`   Today hours: ${todayOpenTime} - ${todayCloseTime}`)
     console.log(`   Programs: ${programsFromMenu.map(p => `${p.name} (${p.start}-${p.end})`).join(', ')}`)
+    console.log(`   V5 Programmes: ${v5Programmes?.length || 0}`)
     
-    const slotResult: SlotCalculationResult = calculateSlots(
-      clientNow,
-      programsFromMenu,
-      todayOpenTime ?? null,
-      todayCloseTime ?? null,
-      kitchenCloseTime ?? null,
-      currentServicePeriods,
-      isPaidTier,
-    )
+    // Build programmes array from v5Programmes for dynamic calculator
+    const programmesForCalculator = (v5Programmes || []).map(p => ({
+      name: p.programme_name || p.programme_type,
+      type: p.programme_type,
+      time_windows: p.time_windows || [],
+      operating_days: p.operating_days || []
+    }))
+    
+    // Get weekday name for calculator
+    const weekdayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    const currentWeekday = weekdayNames[clientNow.getDay()]
+    
+    const dynamicSuggestionContext: CalculationContext = {
+      now: clientNow,
+      weekday: currentWeekday,
+      openingTime: todayOpenTime ?? null,
+      closingTime: todayCloseTime ?? null,
+      programmes: programmesForCalculator,
+      kitchenCloseTime: kitchenCloseTime ?? null,
+      isClosedToday: isClosedToday
+    }
+    
+    const dynamicResult = calculateDynamicSuggestions(dynamicSuggestionContext)
+    
+    console.log(`📊 Dynamic suggestion result: ${dynamicResult.suggestionCount} ideas`)
+    console.log(`   Reasoning: ${dynamicResult.reasoning}`)
+    
+    // Legacy adapter: Create slotResult for backward compatibility
+    const slotResult: SlotCalculationResult = {
+      slotCount: dynamicResult.suggestionCount,
+      availableHours: dynamicResult.metadata.availableHours,
+      reasoning: dynamicResult.reasoning,
+      slots: dynamicResult.ideas.map(idea => ({
+        position: idea.ideaNumber,
+        postAtMins: idea.postingTimeMins,
+        postAt: idea.postingTime,
+        serviceWindow: idea.eligibleProgrammes.length > 0 ? {
+          name: idea.eligibleProgrammes[0],
+          start: '00:00',  // Placeholder - not used downstream
+          end: '23:59'     // Placeholder - not used downstream
+        } : null,
+        isFoodEligible: idea.contentType === 'OFFERING',
+        allowedContentTypes: idea.contentType === 'OFFERING' ? ['menu_item', 'product'] : ['atmosphere', 'guest_moment', 'brand_behind'],
+        isBarOnly: false,  // Deprecated
+        label: idea.contentType
+      })),
+      activePeriods: currentServicePeriods,
+      upcomingPeriods: [],
+      isSocialDeadZone: clientNow.getHours() >= 0 && clientNow.getHours() < 6
+    }
 
     // Create adapter for backward compatibility with existing code
     const nowMins = clientNow.getHours() * 60 + clientNow.getMinutes()
@@ -3630,7 +3131,26 @@ serve(async (req) => {
     console.log(`   Reasoning: ${slotResult.reasoning}`)
 
     const routerHour = clientNow.getHours()
-    const effectiveSlotCount = timeline.effectiveSlotCount
+    const routerMins = clientNow.getMinutes()
+    let effectiveSlotCount = timeline.effectiveSlotCount
+    
+    // Enhanced slot count logging (June 24, 2026)
+    console.log(`🎯 Slot Count Decision:
+      Timeline result: ${timeline.effectiveSlotCount}
+      Current time: ${routerHour}:${routerMins.toString().padStart(2, '0')}
+      Kitchen close: ${kitchenCloseTime || 'NOT SET'}
+      Today close: ${todayCloseTime || 'NOT SET'}
+      isLateNight: ${timeline.isLateNight}
+      Service state: ${timeline.serviceState}
+      Tier: ${tier}`)
+    
+    // FREE TIER OVERRIDE: Always generate 2 suggestions (1 menu + 1 atmosphere)
+    // regardless of dynamic calculator result
+    if (tier === 'free') {
+      effectiveSlotCount = 2
+      console.log(`📋 Free tier override: forcing 2 slots (1 menu + 1 atmosphere)`)
+    }
+    
     // FIX: Late night mode based on CURRENT hour, not future slot content
     // Late night: 21:00-05:59 (low social media reach, different framing)
     const isLateNightMode = routerHour >= 21 || routerHour < 6
@@ -3675,7 +3195,11 @@ serve(async (req) => {
       const audienceNote = audienceTextForSlotB && slotBTargetHour !== null && slotBTargetHour !== routerHour
         ? `\n👥 MÅLGRUPPE PÅ DET TIDSPUNKT: Beskriv hvad der gør dette relevant for målgruppen PÅ kl. ${slotB.postAt} — ikke for folk der er ude nu kl. ${routerHour}:00.`
         : ''
-      smartSlotBTimeHint = `\n\n🕑 MÅLRETTET POSTETID: Opslaget er beregnet til kl. ${slotB.postAt}${preOpenNote}${gapNote}.${audienceNote} Skriv title og why_explanation specifikt til DETTE tidspunkt — ikke til genereringstidspunktet.`
+      // If we're in pre-planning mode (before opening), emphasize future framing
+      const tenseGuidanceB = timeline.isSocialDeadZone
+        ? ` 🚫 STRENGT FORBUDT: Nutidsformuleringer som "Nu er det...", "Nu, hvor...", "I øjeblikket...", "Lige nu..." — Skriv ALTID fremtidsrettet: "Klokken ${slotB.postAt} er det tidspunkt, hvor...", "Når klokken runder ${slotB.postAt}..."`
+        : ' Skriv fra perspektivet af at poste PÅ dette tidspunkt.'
+      smartSlotBTimeHint = `\n\n🕑 MÅLRETTET POSTETID: Opslaget postes kl. ${slotB.postAt}${preOpenNote}${gapNote}.${audienceNote}${tenseGuidanceB}`
     }
     if (isPaidTier && !isProTier && !isLateNightMode && slotC && effectiveSlotCount >= 3) {
       const preOpenNote = timeline.serviceState === 'pre_opening'
@@ -3698,7 +3222,11 @@ serve(async (req) => {
       const audienceNote = audienceTextForSlotC && slotCTargetHour !== null && slotCTargetHour !== routerHour
         ? `\n👥 MÅLGRUPPE PÅ DET TIDSPUNKT: Beskriv hvad der gør dette relevant for målgruppen PÅ kl. ${slotC.postAt} — ikke for folk der er ude nu kl. ${routerHour}:00.`
         : ''
-      smartSlotCTimeHint = `\n\n🕒 MÅLRETTET POSTETID: Opslaget er beregnet til kl. ${slotC.postAt}${preOpenNote}${barOnlyNote}.${audienceNote} Skriv title og why_explanation specifikt til DETTE tidspunkt — ikke til genereringstidspunktet.`
+      // If we're in pre-planning mode (before opening), emphasize future framing
+      const tenseGuidanceC = timeline.isSocialDeadZone
+        ? ` 🚫 STRENGT FORBUDT: Nutidsformuleringer som "Nu er det...", "Nu, hvor...", "I øjeblikket...", "Lige nu..." — Skriv ALTID fremtidsrettet: "Klokken ${slotC.postAt} er det tidspunkt, hvor...", "Når klokken runder ${slotC.postAt}..."`
+        : ' Skriv fra perspektivet af at poste PÅ dette tidspunkt.'
+      smartSlotCTimeHint = `\n\n🕒 MÅLRETTET POSTETID: Opslaget postes kl. ${slotC.postAt}${preOpenNote}${barOnlyNote}.${audienceNote}${tenseGuidanceC}`
     }
 
     // Augment avoidSection: tell Gemini which named service periods are already over.
@@ -3718,7 +3246,7 @@ serve(async (req) => {
         // Pre-opening dead zone: user is planning ahead. Gemini needs to know
         // the suggestions are for upcoming service windows, not right now.
         const nowHHMMavoid = `${String(clientNow.getHours()).padStart(2, '0')}:${String(clientNow.getMinutes()).padStart(2, '0')}`
-        avoidSection += `\n\n📅 FORHÅNDSPLANLÆGNING: Det er kl. ${nowHHMMavoid}. Operatøren planlægger dagens opslag på forhånd. Forslagene er til dagens service-perioder (tidspunkterne er bekræftede nedenfor). Brug fremtidig tid: "klar til", "venter på dig", "kom forbi" — ikke "nu" eller "i øjeblikket".`
+        avoidSection += `\n\n📅 FORHÅNDSPLANLÆGNING: Det er kl. ${nowHHMMavoid} (før åbning). Operatøren planlægger dagens opslag på forhånd. 🚫 FORBUDT: "nu", "i øjeblikket", "nu er det" — brug fremtid: "klar til", "venter på dig", "kom forbi", "klokken X er det tidspunkt, hvor..."`
       } else if (routerHour >= 15) {
         avoidSection += `\n\n⛔ AKTUEL TID: kl. ${routerHour}:00 — Morgenmad, brunch og frokost er typisk afsluttet. Fokusér på eftermiddag og aftenservice.`
       } else if (routerHour >= 11) {
@@ -3734,51 +3262,6 @@ serve(async (req) => {
 
     // ── Load language-specific system instruction ──
     const systemInstruction = await buildDagensSystemInstruction(language)
-
-    // ── callGeminiForSlot: issues one Gemini request, returns one suggestion object ──
-    const callGeminiForSlot = async (slotPrompt: string, slotLabel: string, fallback: any, maxTokens = 4096): Promise<any> => {
-      if (Deno.env.get('DEBUG_PROMPT_LOGGING') === 'true') {
-        console.log(`═══ PROMPT [${slotLabel}] ═══\n`, slotPrompt)
-      }
-      try {
-        const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              systemInstruction: {
-                parts: [{ text: systemInstruction }],
-              },
-              contents: [{ role: 'user', parts: [{ text: slotPrompt }] }],
-              generationConfig: { temperature: 0.85, maxOutputTokens: maxTokens, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } },
-            }),
-          }
-        )
-        if (!geminiRes.ok) {
-          console.error(`❌ Gemini API Error [${slotLabel}]:`, await geminiRes.text())
-          return fallback
-        }
-        const gData = await geminiRes.json()
-        const rText: string | undefined = gData.candidates?.[0]?.content?.parts?.[0]?.text
-        if (!rText) { console.error(`❌ Empty Gemini response [${slotLabel}]`); return fallback }
-        const clean = rText.trim()
-          .replace(/^```(?:json)?\s*/i, '')
-          .replace(/\s*```\s*$/, '')
-        const s = clean.indexOf('{')
-        const e = clean.lastIndexOf('}')
-        if (s < 0 || e < 0) {
-          console.error(`❌ Unparseable [${slotLabel}]:`, rText.substring(0, 300))
-          return fallback
-        }
-        const parsed = JSON.parse(clean.slice(s, e + 1))
-        console.log(`✅ [${slotLabel}] OK: "${parsed.title}"`)
-        return parsed
-      } catch (err) {
-        console.error(`❌ [${slotLabel}] exception:`, err)
-        return fallback
-      }
-    }
 
     // ── Day Framing (All Tiers) ──
     // Generate contextual framing for the day to display in UI
@@ -3797,12 +3280,12 @@ serve(async (req) => {
     const dayFraming = generateDayFraming(clientNow, business?.name || '', timeline, weatherParsed, hasSpecialPrograms)
     
     // ── Slot planner ───────────────────────────────────────────────────────
-    // Free tier: fixed 2-slot mix = one menu item + one non-menu suggestion.
+    // Free tier: fixed 2-slot mix = one menu item + one atmosphere/behind_scenes.
     // Smart tier (standardplus): menu_item only — no planner, no atmosphere/BTS.
     // Pro tier (premium): full planner decides content mix (atmosphere, BTS, etc.).
     let plannerResult: SlotPlannerResult = isPaidTier
       ? { slot_types: ['menu_item', 'menu_item', 'menu_item'], rationale: '' }
-      : { slot_types: ['menu_item', 'atmosphere', 'atmosphere'], rationale: 'Free tier fixed to one menu item and one non-menu suggestion.' }
+      : { slot_types: ['menu_item', 'atmosphere'], rationale: 'Free tier: one menu item + one atmosphere/behind_scenes based on web analysis.' }
     if (isProTier && effectiveSlotCount > 1) {
       plannerResult = await runSlotPlanner(promptContext, GEMINI_API_KEY)
     }
@@ -3876,18 +3359,53 @@ serve(async (req) => {
     const slotA = timeline.slots[0] ?? null
     const slotATime = slotA?.postAt ?? todayOpenTime ?? '12:00'
     
-    // Build timing context for Slot A
+    // Build timing context for Slot A — SEPARATED BY TIER
     let slotATimeHint = ''
-    if (!isLateNightMode && slotA) {
-      // Determine time of day category
-      const hourNum = Math.floor(slotA.postAtMins / 60)
-      const timeOfDay = hourNum < 11 ? 'morgen/formiddag' 
-        : hourNum < 14 ? 'frokosttid'
-        : hourNum < 17 ? 'eftermiddag'
-        : hourNum < 21 ? 'aftensmad'
-        : 'sen aften'
-      
-      slotATimeHint = `\n\n🕐 MÅLRETTET POSTETID: Opslaget er beregnet til kl. ${slotATime} (${timeOfDay}). Skriv title og why_explanation specifikt til DETTE tidspunkt og publikum — ikke til genereringstidspunktet. Undgå at nævne tidspunkter eller målgrupper der IKKE passer til kl. ${slotATime}.`
+    
+    if (isPaidTier) {
+      // ═══════════════════════════════════════════════════════════════════════
+      // PAID TIER (Smart + Pro): Time-aware slot positioning
+      // ═══════════════════════════════════════════════════════════════════════
+      // Uses calculated posting times from dynamic suggestion calculator
+      // AI is instructed to write for specific audience at that time
+      if (!isLateNightMode && slotA) {
+        // Determine time of day category
+        const hourNum = Math.floor(slotA.postAtMins / 60)
+        const timeOfDay = hourNum < 11 ? 'morgen/formiddag' 
+          : hourNum < 14 ? 'frokosttid'
+          : hourNum < 17 ? 'eftermiddag'
+          : hourNum < 21 ? 'aftensmad'
+          : 'sen aften'
+        
+        // If we're in pre-planning mode (before opening), emphasize future framing
+        const tenseGuidance = timeline.isSocialDeadZone
+          ? ` 🚫 STRENGT FORBUDT: Nutidsformuleringer som "Nu er det...", "Nu, hvor...", "I øjeblikket...", "Lige nu..." — Skriv ALTID fremtidsrettet: "Klokken ${slotATime} er det tidspunkt, hvor...", "Når klokken runder ${slotATime}..."`
+          : ' Skriv fra perspektivet af at poste PÅ dette tidspunkt.'
+        
+        slotATimeHint = `\n\n🕐 MÅLRETTET POSTETID: Opslaget postes kl. ${slotATime} (${timeOfDay}). Skriv title og why_explanation om publikummet på DETTE tidspunkt.${tenseGuidance} Undgå at nævne tidspunkter eller målgrupper der IKKE passer til kl. ${slotATime}.`
+      }
+    } else {
+      // ═══════════════════════════════════════════════════════════════════════
+      // FREE TIER: Simple "post now" suggestion
+      // ═══════════════════════════════════════════════════════════════════════
+      // Slot A = immediate menu item suggestion (no specific timing references)
+      // TODO: Remove time-specific guidance for Free tier
+      if (!isLateNightMode && slotA) {
+        // Determine time of day category
+        const hourNum = Math.floor(slotA.postAtMins / 60)
+        const timeOfDay = hourNum < 11 ? 'morgen/formiddag' 
+          : hourNum < 14 ? 'frokosttid'
+          : hourNum < 17 ? 'eftermiddag'
+          : hourNum < 21 ? 'aftensmad'
+          : 'sen aften'
+        
+        // If we're in pre-planning mode (before opening), emphasize future framing
+        const tenseGuidance = timeline.isSocialDeadZone
+          ? ` 🚫 STRENGT FORBUDT: Nutidsformuleringer som "Nu er det...", "Nu, hvor...", "I øjeblikket...", "Lige nu..." — Skriv ALTID fremtidsrettet: "Klokken ${slotATime} er det tidspunkt, hvor...", "Når klokken runder ${slotATime}..."`
+          : ' Skriv fra perspektivet af at poste PÅ dette tidspunkt.'
+        
+        slotATimeHint = `\n\n🕐 MÅLRETTET POSTETID: Opslaget postes kl. ${slotATime} (${timeOfDay}). Skriv title og why_explanation om publikummet på DETTE tidspunkt.${tenseGuidance} Undgå at nævne tidspunkter eller målgrupper der IKKE passer til kl. ${slotATime}.`
+      }
     }
 
     // Late-night / social dead zone: give Gemini full situational awareness and
@@ -3936,7 +3454,13 @@ serve(async (req) => {
     )
 
     console.log(`🤖 Generating Slot A [${slotAType}] via Gemini${isLateNightMode ? ' (late-night framing)' : ''}`)
-    const rawSlotA = await callGeminiForSlot(menuPrompt, 'SlotA', menuFallback)
+    const rawSlotA = await callGemini({
+      apiKey: GEMINI_API_KEY,
+      systemInstruction,
+      userPrompt: menuPrompt,
+      slotLabel: 'SlotA',
+      fallback: menuFallback,
+    })
     let suggestions: any[] = [rawSlotA]
     
     // Declare slot variables outside conditional blocks so they're accessible later
@@ -3948,13 +3472,15 @@ serve(async (req) => {
       a.toLowerCase().includes(b.toLowerCase()) || b.toLowerCase().includes(a.toLowerCase())
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SLOT B — Secondary menu item (when effectiveSlotCount >= 2)
+    // SLOTS B+C — UNIFIED GENERATION (Phase 1 Hybrid - June 2026)
     // ═══════════════════════════════════════════════════════════════════════════
+    // Generate Slots B and C together in a single AI call for 50% latency reduction
+    // Preserves Slot A deduplication logic by building avoidance rules first
+    
     if (effectiveSlotCount >= 2) {
       const slotBType = activeSlotTypes[1] ?? 'menu_item'
-      
       const slotBIsMenu = slotBType === 'menu_item'
-
+      
       // Session deduplication for Slot B: exclude the dish already chosen in Slot A
       const sessionAvoidB = rawSlotA?.menu_item_name
         ? `\n\n⛔ DISSE RETTER ER ALLEREDE VALGT I DETTE SÆT — vælg en HELT ANDEN ret (inkl. alle variationer og kombinationer med dette navn):\n- ${rawSlotA.menu_item_name}\n\n⛔ TIDSANCHOR: "Køkkenet holder/lukker åbent til kl. X" er allerede brugt i Slot A. Brug et ANDET tidspunkt som anchor — fx service-periodens start, åbningstid, eller det nuværende klokkeslæt.`
@@ -3986,7 +3512,6 @@ serve(async (req) => {
       }
 
       // Build a context for Slot B that strips the Slot-A dish from the recency signal.
-      // Without this, "Æggekage (10d siden)" is a positive data signal that overrides the text avoid rule.
       const ctxForSlotB = slotAUsedNames.length > 0
         ? {
             ...promptContext,
@@ -3999,78 +3524,142 @@ serve(async (req) => {
           }
         : promptContext
 
-      const slotBPrompt = buildSlotBPrompt(
-        ctxForSlotB,
-        slotBType,
-        slotBIsMenu,
-        sharedCtx,
-        sharedRules,
-        menuBlockForB,
-        recentSlotASection,
-        confirmedFactsSlotBBlock,
-        avoidSection + sessionAvoidB + smartSlotBTimeHint,
-        slotB?.postAt,
-        audienceTextForSlotB,
-        slotB?.serviceWindow ? {
-          name: slotB.serviceWindow.name,
-          start: slotB.serviceWindow.start,
-          end: slotB.serviceWindow.end
-        } : undefined
-      )
+      // Prepare Slot C (if needed)
+      const hasMenuBasedSlotA = rawSlotA?.content_type === 'menu_item'
+      const shouldGenerateSlotC = effectiveSlotCount >= 3 && hasMenuBasedSlotA
+      
+      if (shouldGenerateSlotC) {
+        // Slot C generation
+        const slotCType = primaryCopyHookQS === 'identity' ? 'behind_scenes' : 'atmosphere'
+        const slotCSlot = slotCType === 'behind_scenes' ? 'brand_behind' : 'guest_moment'
+        const slotCAnchor = venueIdentityText || activeSegmentAngleText || businessCharacterText || confirmedFacts[0] || business.name
 
-      console.log(`🤖 Generating Slot B [${slotBType}] via Gemini`)
-      rawSlotB = await callGeminiForSlot(slotBPrompt, 'SlotB', slotBFallback)
-      suggestions.push(rawSlotB)
-    }
+        const slotCFallback = {
+          title: slotCType === 'behind_scenes' ? 'Bag facaden i dag' : 'Stedets stemning i dag',
+          concrete_anchor: slotCAnchor,
+          why_explanation: slotCType === 'behind_scenes'
+            ? `Brug den levende identitet bag stedet som vinkel, så generate-text-from-idea kan bygge videre på en konkret, menneskelig idé.`
+            : `Brug stedets identitet, lokationssignal og aktive gæstevinkel som anker, så generate-text-from-idea kan gøre ideen til en tekst uden at falde tilbage på menuen.`,
+          occasion_context: slotCType === 'behind_scenes'
+            ? `En bag-facaden-vinkel baseret på stedets aktive identitetsfelter.`
+            : `En stemningsvinkel baseret på stedets aktive identitetsfelter og lokationssignaler.`,
+          content_type: slotCType,
+          slot: slotCSlot,
+        }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // SLOT C — Third idea (non-menu when the live brand fields support it)
-    // ═══════════════════════════════════════════════════════════════════════════
-    const hasMenuBasedSlotA = rawSlotA?.content_type === 'menu_item'
+        // ═══ UNIFIED B+C CALL ═══
+        console.log(`🤖 Generating Slots B+C [${slotBType}, ${slotCType}] via Gemini (unified)`)
+        
+        const unifiedPromptBC = buildUnifiedPromptBC(
+          ctxForSlotB,
+          slotBType,
+          slotCType,
+          slotBIsMenu,
+          sharedCtx,
+          sharedRules,
+          menuBlockForB,
+          recentSlotASection,
+          confirmedFactsSlotBBlock,
+          confirmedFactsSlotCBlock,
+          menuIntelligenceBlock,
+          avoidSection + sessionAvoidB + smartSlotBTimeHint,
+          slotB ? {
+            targetPostTime: slotB.postAt,
+            targetSegmentTime: audienceTextForSlotB,
+            targetServiceWindow: slotB.serviceWindow ? {
+              name: slotB.serviceWindow.name,
+              start: slotB.serviceWindow.start,
+              end: slotB.serviceWindow.end
+            } : undefined
+          } : undefined,
+          slotC ? {
+            targetPostTime: slotC.postAt,
+            targetSegmentTime: audienceTextForSlotC,
+            targetServiceWindow: slotC.serviceWindow ? {
+              name: slotC.serviceWindow.name,
+              start: slotC.serviceWindow.start,
+              end: slotC.serviceWindow.end
+            } : undefined
+          } : undefined
+        )
 
-    if (effectiveSlotCount >= 3 && hasMenuBasedSlotA) {
-      const slotCType = primaryCopyHookQS === 'identity' ? 'behind_scenes' : 'atmosphere'
-      const slotCSlot = slotCType === 'behind_scenes' ? 'brand_behind' : 'guest_moment'
-      const slotCAnchor = venueIdentityText || activeSegmentAngleText || businessCharacterText || confirmedFacts[0] || business.name
+        const [slotBResult, slotCResult] = await callGeminiArray({
+          apiKey: GEMINI_API_KEY,
+          systemInstruction,
+          userPrompt: unifiedPromptBC,
+          slotLabel: 'Slots-B+C',
+          fallback: slotBFallback, // Legacy parameter
+          fallbacks: [slotBFallback, slotCFallback],
+        })
 
-      let slotCPrompt: string
-      let slotCFallback: any
+        rawSlotB = slotBResult
+        rawSlotC = slotCResult
+        suggestions.push(rawSlotB, rawSlotC)
+        
+      } else if (effectiveSlotCount >= 3) {
+        console.log('⏭️ Skipping Slot C because Slot A is not a menu_item — generating Slot B only')
+        
+        // Generate Slot B only (fallback to old single-slot logic)
+        const slotBPrompt = buildSlotBPrompt(
+          ctxForSlotB,
+          slotBType,
+          slotBIsMenu,
+          sharedCtx,
+          sharedRules,
+          menuBlockForB,
+          recentSlotASection,
+          confirmedFactsSlotBBlock,
+          avoidSection + sessionAvoidB + smartSlotBTimeHint,
+          slotB?.postAt,
+          audienceTextForSlotB,
+          slotB?.serviceWindow ? {
+            name: slotB.serviceWindow.name,
+            start: slotB.serviceWindow.start,
+            end: slotB.serviceWindow.end
+          } : undefined
+        )
 
-      slotCFallback = {
-        title: slotCType === 'behind_scenes' ? 'Bag facaden i dag' : 'Stedets stemning i dag',
-        concrete_anchor: slotCAnchor,
-        why_explanation: slotCType === 'behind_scenes'
-          ? `Brug den levende identitet bag stedet som vinkel, så generate-text-from-idea kan bygge videre på en konkret, menneskelig idé.`
-          : `Brug stedets identitet, lokationssignal og aktive gæstevinkel som anker, så generate-text-from-idea kan gøre ideen til en tekst uden at falde tilbage på menuen.`,
-        occasion_context: slotCType === 'behind_scenes'
-          ? `En bag-facaden-vinkel baseret på stedets aktive identitetsfelter.`
-          : `En stemningsvinkel baseret på stedets aktive identitetsfelter og lokationssignaler.`,
-        content_type: slotCType,
-        slot: slotCSlot,
+        console.log(`🤖 Generating Slot B [${slotBType}] via Gemini`)
+        rawSlotB = await callGemini({
+          apiKey: GEMINI_API_KEY,
+          systemInstruction,
+          userPrompt: slotBPrompt,
+          slotLabel: 'SlotB',
+          fallback: slotBFallback,
+        })
+        suggestions.push(rawSlotB)
+        
+      } else {
+        // Only Slot B needed (effectiveSlotCount === 2)
+        const slotBPrompt = buildSlotBPrompt(
+          ctxForSlotB,
+          slotBType,
+          slotBIsMenu,
+          sharedCtx,
+          sharedRules,
+          menuBlockForB,
+          recentSlotASection,
+          confirmedFactsSlotBBlock,
+          avoidSection + sessionAvoidB + smartSlotBTimeHint,
+          slotB?.postAt,
+          audienceTextForSlotB,
+          slotB?.serviceWindow ? {
+            name: slotB.serviceWindow.name,
+            start: slotB.serviceWindow.start,
+            end: slotB.serviceWindow.end
+          } : undefined
+        )
+
+        console.log(`🤖 Generating Slot B [${slotBType}] via Gemini`)
+        rawSlotB = await callGemini({
+          apiKey: GEMINI_API_KEY,
+          systemInstruction,
+          userPrompt: slotBPrompt,
+          slotLabel: 'SlotB',
+          fallback: slotBFallback,
+        })
+        suggestions.push(rawSlotB)
       }
-
-      slotCPrompt = buildSlotCPrompt(
-        promptContext,
-        slotCType,
-        sharedCtx,
-        sharedRules,
-        confirmedFactsSlotCBlock,
-        menuIntelligenceBlock,
-        avoidSection,
-        slotC?.postAt,
-        audienceTextForSlotC,
-        slotC?.serviceWindow ? {
-          name: slotC.serviceWindow.name,
-          start: slotC.serviceWindow.start,
-          end: slotC.serviceWindow.end
-        } : undefined
-      )
-
-      console.log(`🤖 Generating Slot C [${slotCType}] via Gemini`)
-      rawSlotC = await callGeminiForSlot(slotCPrompt, 'SlotC', slotCFallback)
-      suggestions.push(rawSlotC)
-    } else if (effectiveSlotCount >= 3) {
-      console.log('⏭️ Skipping Slot C because Slot A is not a menu_item')
     }
 
     // ── Spell check titles with surface-level error signals ─────────────────

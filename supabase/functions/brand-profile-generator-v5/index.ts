@@ -95,6 +95,10 @@ import { generateLocationStrategy } from '../_shared/brand-profile/location-stra
 // Import drinks filter from shared data-gatherer
 import { isDrinksOnlyMenu } from '../_shared/brand-profile/data-gatherer.ts'
 
+// Import segment timing utilities for gap-time handling
+import { buildStrategicCoverage } from '../_shared/utils/segment-timing-matcher.ts'
+import type { StrategicCoverage } from '../_shared/utils/segment-timing-matcher.ts'
+
 // ============================================================================
 // PHASE 2: Pipeline Types, Validators, and Auditors (June 23, 2026)
 // ============================================================================
@@ -1219,6 +1223,20 @@ serve(async (req) => {
     
     console.log(`[${requestId}] ✅ Strategic segments extracted:`, strategicSegments);
 
+    // ===== STEP 4A.1: BUILD STRATEGIC COVERAGE MAP =====
+    // Generate coverage map showing which day/time slots are covered by strategic segments
+    // This is used by content generation systems to distinguish strategic vs. gap-time content
+    console.log(`[${requestId}] 🎯 Step 4a.1: Building strategic coverage map...`)
+    
+    const strategicCoverage: StrategicCoverage = buildStrategicCoverage(allSegments);
+    
+    console.log(`[${requestId}] ✅ Strategic coverage map built:`);
+    console.log(`[${requestId}]    • Covered slots: ${strategicCoverage.covered_slots.length}`);
+    strategicCoverage.covered_slots.forEach(slot => {
+      console.log(`[${requestId}]      - ${slot.day} ${slot.time_range}: ${slot.segment_name} (${slot.people_type})`);
+    });
+    console.log(`[${requestId}]    • Gap strategy: ${strategicCoverage.gap_strategy}`);
+
     // ===== STEP 4B: LAYER 0 - USP EXTRACTION (NEW V5.3) =====
     console.log(`[${requestId}] 🎯 Step 4b: Layer 0 - USP Extraction...`)
     
@@ -2165,6 +2183,8 @@ serve(async (req) => {
         // NEW V5-ONLY CLEANUP: Commercial baseline mode from aggregated programme goals (June 23, 2026)
         commercial_baseline_mode: commercialMode,
         strategic_audience_segments: strategicSegments,
+        // NEW: Strategic coverage map for gap-time handling (June 27, 2026)
+        strategic_coverage: strategicCoverage,
         // Phase 2: Location strategy columns (June 25, 2026)
         location_strategy: locationStrategy,
         generation_status: generationStatus,

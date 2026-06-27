@@ -58,9 +58,9 @@ export async function analyzePostingPatterns(
   cutoffDate.setDate(cutoffDate.getDate() - lookbackDays)
 
   // Step 1: Fetch recent posts with content_type
-  // Uses idx_published_posts_pattern_history (business_id, posted_at DESC, content_type)
+  // Uses idx_posts_pattern_history (business_id, posted_at DESC, content_type)
   const { data: posts, error } = await supabase
-    .from('published_posts')
+    .from('posts')
     .select('posted_at, content_type, menu_item_name')
     .eq('business_id', businessId)
     .gte('posted_at', cutoffDate.toISOString())
@@ -184,7 +184,7 @@ export async function getWeekdayFrequency(
   cutoffDate.setDate(cutoffDate.getDate() - lookbackDays)
 
   const { data: posts, error } = await supabase
-    .from('published_posts')
+    .from('posts')
     .select('posted_at')
     .eq('business_id', businessId)
     .gte('posted_at', cutoffDate.toISOString())
@@ -242,7 +242,7 @@ export async function shouldAvoidPattern(
 
   // Count how many times this content_type was posted on this weekday
   const { data: posts, error } = await supabase
-    .from('published_posts')
+    .from('posts')
     .select('posted_at')
     .eq('business_id', businessId)
     .eq('content_type', contentType)

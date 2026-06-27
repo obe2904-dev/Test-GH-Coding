@@ -13,8 +13,7 @@ The root table. One row per business account.
 | `id` | uuid PK | |
 | `owner_id` | uuid | FK → auth.users |
 | `name` | text | |
-| `vertical` | text | e.g. `restaurant`, `cafe` |
-| `category` | text | Sub-category |
+| `business_type_hybrid` | jsonb | `{ primary, secondary[], hybridLabel, cuisineType?, conceptTags[] }` |
 | `website_url` | text | |
 | `logo_url` | text | |
 | `primary_language` | text | `da`, `en`, etc. |
