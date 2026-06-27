@@ -1108,6 +1108,16 @@ ${breadthTier === 'narrow' ? `This is a FOCUSED brand (fine dining, tasting menu
 • Primary segments should have strong concept_fit
 • Secondary segments can be more opportunistic if they fill important gaps
 `}
+CHOOSE FROM THESE CANONICAL TYPES:
+You MUST select from exactly one of these 7 universal types for each segment:
+• Familier — parents with children or multi-generational groups
+• Par — two people on a date, anniversary, or regular outing
+• Vennegrupper — 3–8 peers celebrating, social ritual, spontaneous evening
+• Erhverv — colleagues, client dinners, team lunches
+• Solo — solo diner for work lunch, self-care, third place
+• Turister — travelers seeking local experience or familiar comfort
+• Lokale — neighborhood residents or nearby workers with repeat visits
+
 For each potential segment, reason through the following:
 
 1. Does the business FORMAT suit this type of person?
@@ -1139,6 +1149,7 @@ PRIMARY AXIS (social context + occasion):
 
 EVIDENCE & CONCEPT FIT REQUIREMENTS (NEW REQUIREMENT):
 Each segment MUST include:
+• "people_type": Exactly one of the 7 canonical types above (e.g., "Familier", "Par", "Vennegrupper")
 • "concept_fit_reason": One-line justification referencing BOTH business format 
   (from Section A) AND location signal (from Section B)
   Example: "AYCE + table grill is a social group format — fits friends looking for 
@@ -1146,10 +1157,10 @@ Each segment MUST include:
 • "evidence": Concrete facts from Section A (menu items, hours, programme type)
 
 LANGUAGE REQUIREMENTS:
-- TEXT fields in ${language === 'da' ? 'DANISH' : 'ENGLISH'}: label, content_angles, evidence, segment_reasoning, concept_fit_reason
+- TEXT fields in ${language === 'da' ? 'DANISH' : 'ENGLISH'}: people_type, label, content_angles, evidence, segment_reasoning, concept_fit_reason
 - ENUM fields in ENGLISH: motivation, decision_timing, goal_contribution, segment_size
 
-Generate ${targetSegmentCount} segments with complete concept_fit_reason and evidence chain.`;
+Generate ${targetSegmentCount} segments with complete people_type, concept_fit_reason and evidence chain.`;
 }
 
 // ===== VALIDATION =====

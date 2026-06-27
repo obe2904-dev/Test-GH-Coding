@@ -311,6 +311,7 @@ Du SKAL returnere valid JSON i PRÆCIS dette format:
 {
   "audience_segments": [
     {
+      "people_type": "Familier",
       "label": "Weekend-brunch-familier",
       "timing_windows": ["Lør-Søn 10:00-13:00"],
       "content_angles": ["Børnevenlig brunchmenu", "Hyggelige weekender ved åen", "Plads til barnevogne"],
@@ -318,7 +319,8 @@ Du SKAL returnere valid JSON i PRÆCIS dette format:
       "motivation": "social_gathering",
       "decision_timing": "planned",
       "goal_contribution": "strengthen_brand",
-      "evidence": ["Menu har børneportioner (pandekager, mini smørrebrød)", "Weekend åbningstider 10:00-13:00", "Familie-venligt område ved vandet"]
+      "evidence": ["Menu har børneportioner (pandekager, mini smørrebrød)", "Weekend åbningstider 10:00-13:00", "Familie-venligt område ved vandet"],
+      "concept_fit_reason": "Brunchmenu med børneportioner + weekend hours + waterfront location gør dette perfekt til familier"
     }
   ],
   "segment_confidence": 0.85,
@@ -326,7 +328,7 @@ Du SKAL returnere valid JSON i PRÆCIS dette format:
 }
 
 KRITISK SPROG REGEL:
-- TEXT-felter SKAL være på DANSK (label, content_angles, evidence, segment_reasoning)
+- TEXT-felter SKAL være på DANSK (people_type, label, content_angles, evidence, segment_reasoning, concept_fit_reason)
 - ENUM-felter SKAL være på ENGELSK (motivation, decision_timing, goal_contribution, segment_size) - disse er database-værdier, ikke brugervendt tekst
   
 Eksempel:
