@@ -18,6 +18,14 @@ import { PROGRAMME_TIME_WINDOWS, type ProgrammeType } from './programme-detectio
 
 // ===== TYPES =====
 
+export type MealPeriod = 'morgenmad' | 'brunch' | 'frokost' | 'eftermiddag' | 'aftensmad' | 'natbar'
+
+export type DayPattern = 
+  | 'all_week'       // Mon–Sun, no strong skew
+  | 'weekday'        // Mon–Fri only or dominant
+  | 'weekend'        // Sat–Sun only
+  | 'weekend_heavy'  // Mon–Sun but weekend drives volume (brunch signal)
+
 export interface MenuResult {
   id: string
   business_id: string
@@ -57,6 +65,8 @@ export interface Programme {
   daysOfWeek: string[]
   menuEvidence: string[]
   confidence: 'high' | 'medium' | 'low'
+  meal_periods: MealPeriod[]  // Derived from time window overlap (e.g., ['frokost', 'aftensmad'])
+  day_pattern: DayPattern     // Derived from operating days (e.g., 'weekend_heavy')
   metadata?: {
     source: 'extraction' | 'url' | 'legacy'
     menuResultId?: string
@@ -274,7 +284,11 @@ function menuResultToProgramme(
   // Step 7: Calculate confidence score
   const confidence = calculateConfidence(data, menuResult)
   
-  // Step 8: Build programme object
+  // Step 8: Derive meal periods and day pattern
+  const mealPeriods = deriveMealPeriods(timeWindow.start, timeWindow.end)
+  const dayPattern = deriveDayPattern(daysOfWeek, mealPeriods)
+  
+  // Step 9: Build programme object
   return {
     type: programmeType,
     label: programmeName,  // Use extracted menu title, not hardcoded fallback
@@ -282,6 +296,8 @@ function menuResultToProgramme(
     daysOfWeek,
     menuEvidence,
     confidence,
+    meal_periods: mealPeriods,
+    day_pattern: dayPattern,
     metadata: {
       source: 'extraction',
       menuResultId: menuResult.id,
@@ -734,4 +750,73 @@ function minutesToTime(minutes: number): string {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
+}
+
+/**
+ * Derive which meal periods a programme covers based on time window overlap.
+ * A period is included if the programme overlaps it by >= 60 minutes.
+ * 
+ * Examples:
+ * - K-BBQ 12:00–22:00 → ['frokost', 'eftermiddag', 'aftensmad']
+ * - Café Faust brunch 09:30–14:00 → ['brunch', 'frokost']
+ * - Café Faust cocktails 20:00–02:00 → ['aftensmad', 'natbar']
+ */
+function deriveMealPeriods(start: string, end: string): MealPeriod[] {
+  const startMin = timeToMinutes(start)
+  let endMin = timeToMinutes(end)
+  
+  // Handle midnight crossover (e.g., 20:00–02:00)
+  if (endMin < startMin) {
+    endMin += 1440 // Add 24 hours
+  }
+  
+  /**
+   * Check if programme overlaps a time zone by at least 60 minutes
+   */
+  function overlapsBy60(zoneStart: number, zoneEnd: number): boolean {
+    const overlapStart = Math.max(startMin, zoneStart)
+    const overlapEnd = Math.min(endMin, zoneEnd)
+    return overlapEnd - overlapStart >= 60
+  }
+  
+  const periods: MealPeriod[] = []
+  
+  // Meal period definitions (start and end in minutes from midnight)
+  if (overlapsBy60(360, 660))   periods.push('morgenmad')    // 06:00–11:00
+  if (overlapsBy60(540, 840))   periods.push('brunch')       // 09:00–14:00
+  if (overlapsBy60(690, 960))   periods.push('frokost')      // 11:30–16:00
+  if (overlapsBy60(840, 1020))  periods.push('eftermiddag')  // 14:00–17:00
+  if (overlapsBy60(1020, 1290)) periods.push('aftensmad')    // 17:00–21:30
+  if (overlapsBy60(1320, 1560)) periods.push('natbar')       // 22:00–02:00 (26:00 = 1560)
+  
+  return periods
+}
+
+/**
+ * Derive the day pattern from operating days and meal periods.
+ * 
+ * Examples:
+ * - Mon–Fri only → 'weekday'
+ * - Sat–Sun only → 'weekend'
+ * - Mon–Sun with brunch → 'weekend_heavy' (brunch drives weekend volume)
+ * - Mon–Sun without brunch → 'all_week'
+ */
+function deriveDayPattern(operatingDays: string[], mealPeriods: MealPeriod[]): DayPattern {
+  const daysLower = operatingDays.map(d => d.toLowerCase())
+  
+  const weekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'mon', 'tue', 'wed', 'thu', 'fri']
+  const weekendDays = ['saturday', 'sunday', 'sat', 'sun']
+  
+  const hasWeekday = daysLower.some(d => weekdays.includes(d))
+  const hasWeekend = daysLower.some(d => weekendDays.includes(d))
+  
+  // Pure weekday or weekend
+  if (hasWeekday && !hasWeekend) return 'weekday'
+  if (!hasWeekday && hasWeekend) return 'weekend'
+  
+  // Both weekday and weekend: check if weekend-heavy
+  // Brunch is a strong weekend volume driver
+  if (mealPeriods.includes('brunch')) return 'weekend_heavy'
+  
+  return 'all_week'
 }

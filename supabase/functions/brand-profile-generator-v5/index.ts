@@ -58,15 +58,15 @@ import type { CrossMenuSummary } from '../_shared/brand-profile/menu-overview-su
 
 // Layer 5 modules (NEW)
 import { generateVoiceProfile } from '../_shared/brand-profile/voice-profile.ts'
-import { generateWritingExamples } from '../_shared/brand-profile/writing-examples.ts'
 import { generateGuardrails } from '../_shared/brand-profile/guardrails.ts'
 import type { V5BrandProfile } from '../_shared/brand-profile/types-v5.ts'
+import { auditBrandProfileConsistency, formatAuditReport } from '../_shared/brand-profile/consistency-audit.ts'
 
 // Legacy compatibility: derive content_strategy for Weekly Plan
 import { deriveContentStrategy } from '../_shared/brand-profile/v5-transformers.ts'
 
 // NEW V5.1: Business Intelligence modules (Layer 0)
-import { detectBusinessType } from '../_shared/brand-profile/business-type-detection.ts'
+import { detectBusinessType, generateFallbackBusinessCharacter, isValidBusinessCharacter } from '../_shared/brand-profile/business-type-detection.ts'
 import { enrichGeographicContext } from '../_shared/brand-profile/geographic-context.ts'
 import { getProfessionalPersona } from '../_shared/brand-profile/professional-persona.ts'
 import { getVoiceArchetype } from '../_shared/brand-profile/voice-archetypes.ts'
@@ -76,6 +76,16 @@ import { getCityContext, getCityFromPostalCode } from '../_shared/brand-profile/
 import { generateBusinessIdentityPersona } from '../_shared/brand-profile/business-identity-persona.ts'
 import type { BusinessData } from '../_shared/brand-profile/business-identity-persona.ts'
 
+// NEW V5.3: Layer 0 Enhancements + Layer 6 Marketing Manager Brief
+import { extractUSPs, formatUSPsForBrief } from '../_shared/brand-profile/usp-extractor.ts'
+import { analyzeProgrammePricing } from '../_shared/brand-profile/programme-price-analyzer.ts'
+import type { ExtractedUSPs } from '../_shared/brand-profile/usp-extractor.ts'
+import { deriveCustomerSituations } from '../_shared/brand-profile/customer-situations.ts'
+import { generateMarketingManagerBrief, extractCommercialMode } from '../_shared/brand-profile/marketing-manager-brief-generator.ts'
+
+// Phase 2: Location Strategy (Geography × Business Facts)
+import { generateLocationStrategy } from '../_shared/brand-profile/location-strategy.ts'
+
 // V5 ARCHITECTURE (June 2026):
 // - Strategic segments extracted from Layer 4 and saved to strategic_audience_segments
 // - business_identity_persona contains core business facts only (FORRETNING, LOKATION, TILBUD, KULINARISK)
@@ -84,6 +94,38 @@ import type { BusinessData } from '../_shared/brand-profile/business-identity-pe
 
 // Import drinks filter from shared data-gatherer
 import { isDrinksOnlyMenu } from '../_shared/brand-profile/data-gatherer.ts'
+
+// ============================================================================
+// PHASE 2: Pipeline Types, Validators, and Auditors (June 23, 2026)
+// ============================================================================
+// NEW: Import comprehensive TypeScript types for all layers
+import type {
+  Layer0Output,
+  Layer1Output,
+  Layer2Output,
+  Layer4Output,
+  Layer5Output,
+  Layer5_5Output,
+  Layer6Output
+} from '../_shared/brand-profile/types-v5-pipeline.ts'
+
+// NEW: Import validators for each layer
+import {
+  validateLayer0Output,
+  validateLayer1Output,
+  validateLayer2Output,
+  validateLayer4Output,
+  validateLayer5Output,
+  validateLayer5_5Output,
+  validateLayer6Output
+} from '../_shared/brand-profile/layer-validators.ts'
+
+// NEW: Import auditors for quality checks between layers
+import {
+  auditVoiceProfileInternal,
+  auditToneDNAAgainstVoice,
+  auditCrossLayerConsistency
+} from '../_shared/brand-profile/layer-auditors.ts'
 
 // ============================================================================
 // HELPER FUNCTIONS (V5.5)
@@ -253,6 +295,13 @@ serve(async (req) => {
 
   const requestStartTime = Date.now()
   const requestId = `bp-v5-${crypto.randomUUID().slice(0, 8)}`
+
+  // Generation status tracking (complete | partial)
+  let generationStatus: 'complete' | 'partial' = 'complete';
+
+  // Tone DNA and examples — declared at function scope, populated by respective steps
+  let toneDNA: any = null;
+  let enhancedExamples: { social_examples: any[]; avoid_examples: any[] } | null = null;
 
   try {
     const { businessId, forceRegenerate = false, menuOverviewSummary = null } = await req.json()
@@ -555,7 +604,7 @@ serve(async (req) => {
                 normalizedMenuItems.push({
                   name: item.name,
                   description: item.description,
-                  price: item.price ? `${item.price}` : null,
+                  price: item.price ? parseFloat(item.price) : null,  // FIX: Store as number, not string
                   currency: item.currency || 'DKK',
                   category: category.name,
                   service_periods: menuResult.service_periods || [],
@@ -590,14 +639,45 @@ serve(async (req) => {
       console.log(`[${requestId}] ⚠️ No cross-menu summary found - call menu-overview-summary Edge Function first`)
     }
 
-    // Fetch location intelligence
-    const { data: location } = await supabaseClient
+    // Fetch location intelligence (Phase 2: includes demographic_proximity, physical_context, raw_competitive_venues)
+    const { data: location, error: locationError } = await supabaseClient
       .from('business_location_intelligence')
-      .select('*')
+      .select(`
+        neighborhood,
+        neighborhood_character,
+        area_type,
+        category_scores,
+        demographic_proximity,
+        physical_context,
+        raw_competitive_venues,
+        landmarks_nearby,
+        nearby_hospitality,
+        category_modifiers,
+        location_marketing_hooks,
+        local_location_reference,
+        concept_fit_by_category,
+        latitude,
+        longitude
+      `)
       .eq('business_id', businessId)
-      .single()
+      .maybeSingle()
 
-    console.log(`[${requestId}] ✅ Location: ${location?.neighborhood || location?.area_type || 'N/A'}`)
+    if (locationError) {
+      console.error(`[${requestId}] ❌ Location intelligence query failed:`, locationError);
+      console.warn(`[${requestId}] ⚠️ Proceeding without location intelligence - demographic guard will not activate`);
+    }
+
+    console.log(`[${requestId}] 📍 Location query result: ${location ? 'FOUND' : 'NULL'}`)
+    console.log(`[${requestId}] ✅ Location WHERE: ${JSON.stringify(location?.category_scores || {})}`)
+    console.log(`[${requestId}] ✅ Location WHO nearby: ${JSON.stringify(location?.demographic_proximity || {})}`)
+    console.log(`[${requestId}] ✅ Pedestrian flow: ${location?.physical_context?.pedestrian_flow || 'unknown'}`)
+    
+    // Validate location context is present (critical for prompt quality)
+    if (location && !location.neighborhood && !location.local_location_reference) {
+      console.warn(`[${requestId}] ⚠️ LOCATION QUALITY WARNING: Neither neighborhood nor local_location_reference is set.`);
+      console.warn(`[${requestId}] → Prompts will fall back to city: ${business?.city || 'unknown'}`);
+      console.warn(`[${requestId}] → Consider refreshing location intelligence with force_refresh=true`);
+    }
 
     // Fetch business operations (features, kitchen hours)
     const { data: operations } = await supabaseClient
@@ -658,6 +738,16 @@ serve(async (req) => {
     programmes.forEach(p => {
       console.log(`[${requestId}]    • ${p.label} (${p.type})`)
     })
+
+    // ===== VALIDATION: LAYER 1 =====
+    console.log(`[${requestId}] 🔍 Validating Layer 1 output...`)
+    
+    const layer1Output: Layer1Output = {
+      programmes
+    }
+    
+    validateLayer1Output(layer1Output, requestId)
+    console.log(`[${requestId}] ✅ Layer 1 validation passed - ${programmes.length} programmes detected`)
 
     // ===== STEP 2.5: LAYER 0 - BUSINESS INTELLIGENCE (NEW V5.2 - HYBRID) =====
     console.log(`[${requestId}] 🧠 Step 2.5: Layer 0 - Business Intelligence (HYBRID)...`)
@@ -770,135 +860,9 @@ serve(async (req) => {
     console.log(`[${requestId}]    • Location context weight: ${voiceArchetype.location_context_weight}`)
     console.log(`[${requestId}]    • Base rules: ${voiceArchetype.base_rules.length} Danish rules`)
 
-    // ===== STEP 3: LAYER 2 - COMMERCIAL ORIENTATION (PER PROGRAMME) =====
-    console.log(`[${requestId}] 💼 Step 3: Layer 2 - Commercial Orientation (per programme)...`)
-
-    // OPTIMIZATION: Run all programme commercial orientations in parallel
-    const commercialPromises = programmes.map(async (programme) => {
-      const commercialOrientation = await generateCommercialOrientation(
-        {
-          name: programme.label,
-          type: programme.type,
-          timeWindow: programme.timeWindow,
-          operatingDays: programme.daysOfWeek,
-          confidence: programme.confidence,
-          languageVariants: programme.metadata?.languageVariants
-        },
-        {
-          name: business.name,
-          category: business.category || business.business_category || '',
-          price_level: business.price_level,
-          establishment_type: business.establishment_type,
-          reservation_required: operations?.reservation_required,
-          accepts_walkins: operations?.accepts_walkins
-        },
-        {
-          area_type: location?.area_type,
-          neighborhood: location?.neighborhood,
-          local_location_reference: business.local_location_reference || location?.local_location_reference,  // Source of truth: businesses table
-          nearby_hospitality: location?.nearby_hospitality
-        },
-        {
-          price_range: normalizedMenuItems && normalizedMenuItems.length > 0 ? {
-            min: Math.min(...normalizedMenuItems.map(m => m.price || 0)),
-            max: Math.max(...normalizedMenuItems.map(m => m.price || 0))
-          } : undefined,
-          item_count: normalizedMenuItems?.length || 0,
-          has_alcohol: normalizedMenuItems?.some(m => 
-            m.category?.toLowerCase().includes('drinks') || 
-            m.category?.toLowerCase().includes('bar')
-          ),
-          primary_categories: normalizedMenuItems ? 
-            [...new Set(normalizedMenuItems.map(m => m.category).filter(Boolean))].slice(0, 5) : 
-            []
-        },
-        language  // Multi-language support
-      )
-
-      console.log(`[${requestId}] ✅ ${programme.label}: ${commercialOrientation.decision_timing}`)
-
-      return {
-        programme,
-        commercialOrientation
-      }
-    })
-
-    const programmesWithLayer2 = await Promise.all(commercialPromises)
-
-    // ===== STEP 4: LAYER 3 - IDENTITY PROFILE =====
-    // DEPRECATED: Identity layer removed - replaced by signature_themes + gastronomic_profile
-    // These provide more specific, actionable intelligence without generic summaries
-    console.log(`[${requestId}] ⏭️  Step 4: Skipping identity generation (using signature themes instead)...`)
-
-    // ===== STEP 5: LAYER 4 - AUDIENCE SEGMENTATION (PER PROGRAMME) =====
-    console.log(`[${requestId}] 👥 Step 5: Layer 4 - Audience Segmentation (per programme)...`)
-
-    // OPTIMIZATION: Run all programme audience generations in parallel
-    const audiencePromises = programmesWithLayer2.map(async ({ programme, commercialOrientation }) => {
-      const audienceProfile = await generateAudienceSegments(
-        {
-          business_name: business.name,
-          business_category: business.category || business.business_category || '',
-          city: businessCity || '',
-          establishment_type: business.establishment_type
-        },
-        {
-          items: normalizedMenuItems ? normalizedMenuItems.map(m => ({
-            name: m.name,
-            description: m.description,
-            category: m.category,
-            price: m.price
-          })) : []
-        },
-        {
-          programme_type: programme.type,
-          programme_name: programme.label,
-          time_windows: [`${programme.timeWindow.start}-${programme.timeWindow.end}`],
-          operating_days: programme.daysOfWeek,
-          menu_evidence: programme.menuEvidence,
-          confidence: programme.confidence === 'high' ? 0.9 : programme.confidence === 'medium' ? 0.7 : 0.5,
-          languageVariants: programme.metadata?.languageVariants
-        },
-        {
-          baseline_goal_split: commercialOrientation.baseline_goal_split,
-          decision_timing: commercialOrientation.decision_timing,
-          content_type_affinity: commercialOrientation.content_type_affinity
-        },
-        undefined,  // DEPRECATED: identity removed - using signature themes instead
-        {
-          neighborhood: location?.neighborhood,
-          area_type: location?.area_type,
-          local_location_reference: business.local_location_reference || location?.local_location_reference,  // Source of truth: businesses table
-          tourist_context: location?.tourist_context,
-          landmarks: location?.landmarks
-        },
-        openAiKey,
-        language  // Multi-language support
-      )
-
-      console.log(`[${requestId}] ✅ ${programme.label}: ${audienceProfile.audience_segments.length} segments`)
-
-      return {
-        programme,
-        commercialOrientation,
-        audienceProfile
-      }
-    })
-
-    const programmesWithLayer4 = await Promise.all(audiencePromises)
-
-    // ===== STEP 4A: EXTRACT STRATEGIC SEGMENTS & GENERATE PERSONA =====
-    // MOVED HERE (after Layer 4) so persona includes strategic segments
-    console.log(`[${requestId}] 🎯 Step 4a: Extracting strategic segments...`)
-    
-    // Combine all segments from all programmes and extract primary + secondary only
-    const allSegments = programmesWithLayer4.flatMap(p => p.audienceProfile.audience_segments);
-    const strategicSegments = extractStrategicSegments(allSegments);
-    
-    console.log(`[${requestId}] ✅ Strategic segments extracted:`, strategicSegments);
-    
-    // NOW: Generate business identity persona WITH strategic segments
-    console.log(`[${requestId}] 👤 Generating business identity persona with strategic segments...`)
+    // ===== STEP 2.6: LAYER 0C - BUSINESS IDENTITY PERSONA =====
+    // Runs before Layer 4 — persona is business facts only, does not need segments
+    console.log(`[${requestId}] 👤 Step 2.6 (Layer 0c): Generating Business Identity Persona...`)
     
     // Build business data for persona generation
     const businessDataForPersona: BusinessData = {
@@ -913,17 +877,12 @@ serve(async (req) => {
         neighborhood: location.neighborhood,
         neighborhood_character: location.neighborhood_character,
         area_type: location.area_type,
-        category_scores: location.category_scores ? {
-          waterfront: location.category_scores.waterfront,
-          city_centre: location.category_scores.city_centre,
-          tourist: location.category_scores.tourist,
-          student: location.category_scores.student,
-          residential: location.category_scores.residential
-        } : undefined,
+        // Geographic scores only (city_centre, waterfront, residential, etc.)
+        category_scores: location.category_scores || {},
+        // Demographic proximity — separate field post-migration 20260522000002
+        demographic_proximity: location.demographic_proximity || {},
         location_marketing_hooks: location.location_marketing_hooks,
-        is_strategy_driver: location.location_type_matches 
-          ? Object.entries(location.location_type_matches).find(([_, data]: [string, any]) => data?.is_strategy_driver)?.[0]
-          : undefined
+        physical_context: location.physical_context || null,
       } : undefined,
       
       // Menu Intelligence (NEW - cross-menu synthesis)
@@ -971,15 +930,329 @@ serve(async (req) => {
       openaiClient
     )
 
-    console.log(`[${requestId}] ✅ Business identity persona generated (enhanced):`);
+    console.log(`[${requestId}] ✅ Business identity persona generated:`);
     console.log(`[${requestId}]    • Word count: ${businessIdentityPersona.metadata.word_count}`);
     console.log(`[${requestId}]    • Om Os length: ${businessIdentityPersona.metadata.om_os_length}`);
     console.log(`[${requestId}]    • Location intelligence: ${businessIdentityPersona.metadata.has_location_intelligence ? 'YES' : 'NO'}`);
     console.log(`[${requestId}]    • Menu overview: ${businessIdentityPersona.metadata.has_menu_overview ? 'YES' : 'NO'}`);
     console.log(`[${requestId}]    • Location dimensions: ${businessIdentityPersona.metadata.location_dimensions}`);
     console.log(`[${requestId}]    • Signature themes: ${businessIdentityPersona.metadata.signature_themes_count}`);
-    console.log(`[${requestId}]    • Strategic segments in persona: NO (stored separately)`);
     console.log(`[${requestId}] 📝 Persona preview: ${businessIdentityPersona.system_persona.substring(0, 150)}...`);
+
+    // ===== STEP 2.7: LOCATION STRATEGY — Cross Location × Business Facts =====
+    console.log(`[${requestId}] 📍 Step 2.7: Location Strategy...`)
+
+    let locationStrategy: Awaited<ReturnType<typeof generateLocationStrategy>> | null = null;
+
+    try {
+      if (!location) {
+        console.warn(`[${requestId}] ⚠️  No location data — skipping location strategy`);
+      } else {
+        locationStrategy = await generateLocationStrategy({
+          location_scores: location.category_scores || {},
+          demographic_proximity: location.demographic_proximity || {},
+          physical_context: location.physical_context || null,
+          business: {
+            name: business.name,
+            category: business.category || business.business_category || '',
+            avg_price: crossMenuSummary?.overall_avg_price || null,
+            booking_required: operations?.reservation_required ?? false,
+            accepts_walkins: operations?.reservation_required ? false : true,  // Infer: if booking required, walk-ins not accepted
+            has_outdoor_seating: operations?.has_outdoor_seating ?? location?.outdoor_seating ?? false,
+            programmes: programmes.map(p => ({
+              type: p.type,
+              label: p.label,
+              time_windows: p.timeWindow ? [`${p.timeWindow.start}-${p.timeWindow.end}`] : []
+            }))
+          },
+          neighborhood: location.neighborhood || null,
+          neighborhood_character: location.neighborhood_character || null,
+          local_location_reference: business.local_location_reference
+            || location.local_location_reference
+            || null,
+          raw_competitive_venues: location.raw_competitive_venues || null,
+          openai_client: openaiClient,  // For competitive gap analysis
+        });
+
+        if (locationStrategy) {
+          const reachable = locationStrategy.reachable_demographics.filter(d => d.is_reachable);
+          const filtered = locationStrategy.reachable_demographics.filter(d => !d.is_reachable);
+
+          console.log(`[${requestId}] ✅ Location strategy:`);
+          console.log(`[${requestId}]    Reachable: ${reachable.map(d => d.demographic).join(', ') || 'none'}`);
+          if (filtered.length > 0) {
+            console.log(`[${requestId}]    Filtered:  ${filtered.map(d => `${d.demographic} (${d.filter_reason})`).join(', ')}`);
+          }
+          console.log(`[${requestId}]    Positioning angles: ${locationStrategy.positioning_angles.length}`);
+          console.log(`[${requestId}]    Content triggers: ${locationStrategy.content_triggers.length}`);
+          if (locationStrategy.competitive_gap) {
+            console.log(`[${requestId}]    Competitive gap: ${locationStrategy.competitive_gap}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`[${requestId}] ⚠️  Location strategy failed (non-fatal):`, error);
+      console.log(`[${requestId}]    Continuing without location strategy`);
+      // Use empty default
+      locationStrategy = {
+        reachable_demographics: [],
+        positioning_angles: [],
+        content_triggers: [],
+        physical_opportunities: [],
+        competitive_gap: null
+      };
+    }
+
+    // ===== STEP 3: LAYER 2 - COMMERCIAL ORIENTATION (PER PROGRAMME) =====
+    console.log(`[${requestId}] 💼 Step 3: Layer 2 - Commercial Orientation (per programme)...`)
+
+    // Calculate global average price for fallback
+    const globalAvgPrice = normalizedMenuItems && normalizedMenuItems.length > 0
+      ? Math.round(
+          normalizedMenuItems
+            .map(m => m.price)
+            .filter((p): p is number => p != null && p > 0)
+            .reduce((sum, p, _, arr) => sum + p / arr.length, 0)
+        )
+      : null
+
+    // OPTIMIZATION: Run all programme commercial orientations in parallel
+    const commercialPromises = programmes.map(async (programme) => {
+      const commercialOrientation = await generateCommercialOrientation(
+        {
+          name: programme.label,
+          type: programme.type,
+          timeWindow: programme.timeWindow,
+          operatingDays: programme.daysOfWeek,
+          confidence: programme.confidence,
+          languageVariants: programme.metadata?.languageVariants
+        },
+        {
+          name: business.name,
+          category: business.category || business.business_category || '',
+          price_level: business.price_level,
+          establishment_type: business.establishment_type,
+          reservation_required: operations?.reservation_required,
+          accepts_walkins: operations?.accepts_walkins
+        },
+        {
+          area_type: location?.area_type,
+          neighborhood: location?.neighborhood,
+          local_location_reference: business.local_location_reference || location?.local_location_reference,  // Source of truth: businesses table
+          nearby_hospitality: location?.nearby_hospitality
+        },
+        {
+          price_range: normalizedMenuItems && normalizedMenuItems.length > 0 ? {
+            min: Math.min(...normalizedMenuItems.map(m => m.price || 0)),
+            max: Math.max(...normalizedMenuItems.map(m => m.price || 0))
+          } : undefined,
+          item_count: normalizedMenuItems?.length || 0,
+          has_alcohol: normalizedMenuItems?.some(m => 
+            m.category?.toLowerCase().includes('drinks') || 
+            m.category?.toLowerCase().includes('bar')
+          ),
+          primary_categories: normalizedMenuItems ? 
+            [...new Set(normalizedMenuItems.map(m => m.category).filter(Boolean))].slice(0, 5) : 
+            []
+        },
+        language  // Multi-language support
+      )
+
+      console.log(`[${requestId}] ✅ ${programme.label}: ${commercialOrientation.decision_timing}`)
+
+      // NEW V5.3: Calculate programme-specific price positioning
+      const pricePositioning = analyzeProgrammePricing(
+        normalizedMenuItems || [],
+        programme.type,
+        programme.label,
+        globalAvgPrice
+      )
+
+      return {
+        programme,
+        commercialOrientation: {
+          ...commercialOrientation,
+          price_positioning: pricePositioning.tier  // Extract tier field from price analysis object
+        }
+      }
+    })
+
+    const programmesWithLayer2 = await Promise.all(commercialPromises)
+
+    // ===== VALIDATION: LAYER 2 =====
+    console.log(`[${requestId}] 🔍 Validating Layer 2 output...`)
+    
+    const layer2Output: Layer2Output = {
+      enrichedProgrammes: programmesWithLayer2.map(({ programme, commercialOrientation }) => ({
+        programme,
+        commercialOrientation
+      }))
+    }
+    
+    validateLayer2Output(layer2Output.enrichedProgrammes, requestId)
+    console.log(`[${requestId}] ✅ Layer 2 validation passed - ${programmesWithLayer2.length} programmes with commercial orientation`)
+
+    // ===== STEP 4: LAYER 3 - IDENTITY PROFILE =====
+    // DEPRECATED: Identity layer removed - replaced by signature_themes + gastronomic_profile
+    // These provide more specific, actionable intelligence without generic summaries
+    console.log(`[${requestId}] ⏭️  Step 4: Skipping identity generation (using signature themes instead)...`)
+
+    // ===== STEP 5: LAYER 4 - AUDIENCE SEGMENTATION (PER PROGRAMME) =====
+    console.log(`[${requestId}] 👥 Step 5: Layer 4 - Audience Segmentation (per programme)...`)
+
+    // OPTIMIZATION: Run all programme audience generations in parallel
+    const audiencePromises = programmesWithLayer2.map(async ({ programme, commercialOrientation }) => {
+      const audienceProfile = await generateAudienceSegments(
+        {
+          business_name: business.name,
+          business_category: business.category || business.business_category || '',
+          city: businessCity || '',
+          establishment_type: business.establishment_type
+        },
+        {
+          items: normalizedMenuItems ? normalizedMenuItems.map(m => ({
+            name: m.name,
+            description: m.description,
+            category: m.category,
+            price: m.price
+          })) : []
+        },
+        {
+          programme_type: programme.type,
+          programme_name: programme.label,
+          time_windows: [`${programme.timeWindow.start}-${programme.timeWindow.end}`],
+          operating_days: programme.daysOfWeek,
+          menu_evidence: programme.menuEvidence,
+          confidence: programme.confidence === 'high' ? 0.9 : programme.confidence === 'medium' ? 0.7 : 0.5,
+          languageVariants: programme.metadata?.languageVariants,
+          meal_periods: programme.meal_periods,      // NEW: Derived meal periods (e.g., ['frokost', 'aftensmad'])
+          day_pattern: programme.day_pattern         // NEW: Derived day pattern (e.g., 'weekend_heavy')
+        },
+        {
+          baseline_goal_split: commercialOrientation.baseline_goal_split,
+          decision_timing: commercialOrientation.decision_timing,
+          content_type_affinity: commercialOrientation.content_type_affinity
+        },
+        undefined,  // DEPRECATED: identity removed - using signature themes instead
+        {
+          neighborhood: location?.neighborhood,
+          area_type: location?.area_type,
+          local_location_reference: business.local_location_reference || location?.local_location_reference,  // Source of truth: businesses table
+          tourist_context: location?.tourist_context,
+          landmarks: location?.landmarks,
+          // V5.7: Pass reachable_demographics from location strategy (generated in Step 2.7)
+          reachable_demographics: locationStrategy?.reachable_demographics,
+          physical_context: location?.physical_context
+        },
+        openAiKey,
+        language  // Multi-language support
+      )
+
+      console.log(`[${requestId}] ✅ ${programme.label}: ${audienceProfile.audience_segments.length} segments`)
+
+      // NEW V5.3: Add customer situations to each segment
+      audienceProfile.audience_segments = audienceProfile.audience_segments.map(segment => {
+        const situations = deriveCustomerSituations({
+          timingPreference: segment.timing_preference || segment.timing_windows?.[0] || '',
+          motivation: segment.motivation as any,
+          programmeType: programme.type as any,
+          decisionTiming: segment.decision_timing as any,
+          segmentLabel: segment.label,
+          language  // Multi-language support: da, sv, no, de, en
+        })
+        
+        return {
+          ...segment,
+          situations  // Add situations array to segment
+        }
+      })
+
+      console.log(`[${requestId}]    Enhanced with customer situations (${audienceProfile.audience_segments.map(s => s.situations?.length || 0).join(', ')} situations per segment)`)
+
+      return {
+        programme,
+        commercialOrientation,
+        audienceProfile
+      }
+    })
+
+    const programmesWithLayer4 = await Promise.all(audiencePromises)
+
+    // ===== VALIDATION: LAYER 4 =====
+    console.log(`[${requestId}] 🔍 Validating Layer 4 output...`)
+    
+    const layer4Output: Layer4Output = {
+      enrichedProgrammes: programmesWithLayer4.map(({ programme, commercialOrientation, audienceProfile }) => ({
+        programme,
+        commercialOrientation,
+        audienceSegments: audienceProfile.audience_segments.map(seg => ({
+          segment_name: seg.label,
+          motivation: seg.motivation,
+          timing_preference: seg.decision_timing,
+          content_angle: seg.content_angles[0] || '',
+          confidence: audienceProfile.segment_confidence
+        }))
+      }))
+    }
+    
+    validateLayer4Output(layer4Output.enrichedProgrammes, requestId)
+    console.log(`[${requestId}] ✅ Layer 4 validation passed - ${programmesWithLayer4.length} programmes with audience segments`)
+
+    // ===== STEP 4A: EXTRACT STRATEGIC SEGMENTS =====
+    // Persona already generated at Step 2.6
+    console.log(`[${requestId}] 🎯 Step 4a: Extracting strategic segments...`)
+    
+    // Combine all segments from all programmes and extract primary + secondary only
+    const allSegments = programmesWithLayer4.flatMap(p => p.audienceProfile.audience_segments);
+    const strategicSegments = extractStrategicSegments(allSegments);
+    
+    console.log(`[${requestId}] ✅ Strategic segments extracted:`, strategicSegments);
+
+    // ===== STEP 4B: LAYER 0 - USP EXTRACTION (NEW V5.3) =====
+    console.log(`[${requestId}] 🎯 Step 4b: Layer 0 - USP Extraction...`)
+    
+    const extractedUSPs: ExtractedUSPs = extractUSPs({
+      signatureThemes: crossMenuSummary?.signature_themes,
+      locationMarketingHooks: location?.location_marketing_hooks,
+      locationScores: location?.category_scores,
+      gastronomicProfile: crossMenuSummary?.gastronomic_profile,
+      businessName: business.name,
+      businessCategory: business.category || business.business_category || ''
+    })
+    
+    console.log(`[${requestId}] ✅ USPs extracted:`)
+    console.log(`[${requestId}]    • Primary USP: "${extractedUSPs.primary_usp.text}" (score: ${extractedUSPs.primary_usp.score}, source: ${extractedUSPs.primary_usp.source})`)
+    console.log(`[${requestId}]    • Secondary USPs: ${extractedUSPs.secondary_usps.length} (${extractedUSPs.secondary_usps.map(u => u.text).join(', ')})`)
+    console.log(`[${requestId}]    • Reasoning: ${extractedUSPs.synthesis_reasoning}`)
+
+    // ===== VALIDATION: LAYER 0 =====
+    console.log(`[${requestId}] 🔍 Validating Layer 0 output...`)
+    
+    const layer0Output: Layer0Output = {
+      businessIdentityPersona,  // Pass entire object with system_persona + metadata
+      geographicContext: {
+        city: geographicContext.city_profile.city,
+        population: geographicContext.city_profile.population,
+        location_type: geographicContext.location_context.type,
+        signature_reference: geographicContext.location_context.signature
+      },
+      menuOverview: crossMenuSummary ? {
+        signature_themes: crossMenuSummary.signature_themes,
+        gastronomic_profile: crossMenuSummary.gastronomic_profile,
+        total_items: crossMenuSummary.total_items,
+        total_menus: crossMenuSummary.menu_count || 0,
+        overall_avg_price: crossMenuSummary.overall_avg_price
+      } : null,
+      extractedUSPs,
+      metadata: {
+        generated_at: new Date().toISOString(),
+        model_version: 'v5.3',
+        business_id: businessId
+      }
+    }
+    
+    validateLayer0Output(layer0Output, requestId)
+    console.log(`[${requestId}] ✅ Layer 0 validation passed`)
 
     // ===== STEP 5A: LAYER 5 - VOICE PROFILE =====
     console.log(`[${requestId}] 📢 Step 5a: Layer 5 - Voice Profile...`)
@@ -1028,11 +1301,79 @@ serve(async (req) => {
       console.log(`[${requestId}]    This means Danish menus haven't been analyzed yet or representative_dishes is NULL`)
     }
 
-    console.log(`[${requestId}] 🎯 About to call generateVoiceProfile with sample_items.length = ${sampleMenuItems.length}`)
+    // ===== LAYER 0B: TONE DNA — Strategic Foundation for Voice =====
+    // MUST run before Voice Profile so voice has Tone DNA as input
+    console.log(`[${requestId}] 🧬 Layer 0b: Strategic Tone DNA...`)
 
-    // Declare Tone DNA variables (will be populated after programmes are deduped)
-    let toneDNA: any = null;
-    let enhancedExamples: { social_examples: any[]; avoid_examples: any[] } | null = null;
+    try {
+      const { generateToneDNA } = await import('../_shared/brand-profile/tone-dna-generator.ts');
+
+      const locationScores = location?.category_scores || {};
+      const demographicScores = location?.demographic_proximity || {};
+
+      const pricePositioning = determinePricePositioning(crossMenuSummary?.overall_avg_price);
+      console.log(`[${requestId}] 💰 Price positioning: ${pricePositioning} (avg: ${crossMenuSummary?.overall_avg_price || 'unknown'})`);
+
+      // NOTE: Tone DNA runs before Layer 4, so we cannot check PRIMARY segments yet
+      // Pass empty array — tone DNA doesn't need segment analysis at this stage
+      const toneRelevantDemographics = extractToneRelevantDemographics(
+        demographicScores,
+        [],  // Empty — programmes not available yet at Layer 0b (runs before Layer 4)
+        pricePositioning
+      );
+
+      toneDNA = await generateToneDNA(
+        {
+          business: {
+            name: business.name,
+            city: geographicContext?.city_profile?.city || business.city || 'Unknown',
+            country: 'Danmark',
+            om_os_text: omOsText || 'Not provided'
+          },
+          location_intelligence: location ? {
+            category_scores: locationScores,
+            demographic_proximity: demographicScores,
+            neighborhood_character: location.neighborhood_character,
+            area_type: location.area_type,
+            location_marketing_hooks: location.location_marketing_hooks,
+            physical_context: location.physical_context || null,
+            local_location_reference: business.local_location_reference
+              || location.local_location_reference
+              || undefined,
+          } : undefined,
+          menu_overview_summary: crossMenuSummary ? {
+            cross_menu_summary: crossMenuSummary.cross_menu_summary,
+            signature_themes: crossMenuSummary.signature_themes,
+            gastronomic_profile: crossMenuSummary.gastronomic_profile,
+            overall_avg_price: crossMenuSummary.overall_avg_price
+          } : undefined,
+          commercial_orientation: pricePositioning ? {
+            price_positioning: pricePositioning,
+            primary_hook: 'product',  // Default — Layer 2 not available yet
+            business_model: 'offer_led'  // Default — can be enhanced post-Layer 2 if needed
+          } : undefined,
+          demographic_signals: toneRelevantDemographics,
+          market_context: geographicContext ? {
+            competition_level: geographicContext.city_profile.competition_level,
+            cultural_context: geographicContext.city_profile.cultural_context
+          } : undefined
+        },
+        openaiClient,
+        language
+      );
+
+      console.log(`[${requestId}] ✅ Tone DNA: ${toneDNA.recommended_tone.tone_positioning}`);
+      console.log(`[${requestId}]    Location driver: ${toneDNA.location_driver.primary_dimension} (${toneDNA.location_driver.score})`);
+      console.log(`[${requestId}]    Price positioning: ${toneDNA.culinary_character.price_positioning}`);
+      console.log(`[${requestId}]    Owner register: ${toneDNA.owner_voice.register_level}`);
+
+    } catch (error) {
+      console.error(`[${requestId}] ⚠️  Tone DNA generation failed (non-fatal):`, error);
+      console.log(`[${requestId}]    Voice Profile will run without Tone DNA (reduced quality)`);
+      toneDNA = null;
+    }
+
+    console.log(`[${requestId}] 🎯 About to call generateVoiceProfile with sample_items.length = ${sampleMenuItems.length}`)
 
     const voiceProfile = await generateVoiceProfile(
       {
@@ -1057,23 +1398,21 @@ serve(async (req) => {
         businessTypeDetection,
         cityContext: cityContextAI,
         locationIntelligence: location ? {
-          // Filter out demographics (student, tourist) - they're not geographic location types
-          // Keep only: waterfront, city_centre, residential, office, transport_hub, shopping_district, mixed_use, destination, nature_park
-          category_scores: location.category_scores 
-            ? Object.fromEntries(
-                Object.entries(location.category_scores)
-                  .filter(([key]) => !['student', 'tourist'].includes(key))
-              )
-            : location.category_scores,
+          // Phase 2: category_scores now contains only geographic types — no filtering needed
+          category_scores: location.category_scores || {},
+          // demographic_proximity is the separate field for student/tourist signals
+          demographic_proximity: location.demographic_proximity || {},
           neighborhood_character: location.neighborhood_character,
-          area_type: location.area_type
+          area_type: location.area_type,
+          physical_context: location.physical_context || null,
         } : undefined,
         menuContext: crossMenuSummary ? {
           overall_avg_price: crossMenuSummary.overall_avg_price,
           signature_themes: crossMenuSummary.signature_themes,
           total_items: crossMenuSummary.total_items,
           sample_items: sampleMenuItems  // NEW V5.2: Representative menu items for description examples
-        } : undefined
+        } : undefined,
+        toneDNA: toneDNA || undefined,  // NEW: Tone DNA as input (null-safe)
       },
       openAiKey,
       language  // Multi-language support
@@ -1081,14 +1420,31 @@ serve(async (req) => {
 
     console.log(`[${requestId}] ✅ Voice: ${voiceProfile.tone_rules.length} tone rules, ${voiceProfile.personality_traits.join(', ')}`)
 
+    // Sync formality_level from tone_dna if available (authoritative source)
+    if (toneDNA) {
+      voiceProfile.tone_dna = toneDNA;
+
+      const rawFormality = (toneDNA.culinary_character?.formality_requirement || '').toLowerCase().trim();
+      const syncedFormality: 'informal' | 'semi-formal' | 'formal' =
+        rawFormality.includes('casual') || rawFormality === 'informal' ? 'informal'
+        : rawFormality.includes('formal') && !rawFormality.includes('elevated') && !rawFormality.includes('semi') ? 'formal'
+        : 'semi-formal';
+
+      if (syncedFormality !== voiceProfile.formality_level) {
+        console.log(`[${requestId}] 🔄 formality_level synced from tone_dna: "${voiceProfile.formality_level}" → "${syncedFormality}"`);
+        voiceProfile.formality_level = syncedFormality;
+      }
+    }
+
     // === MIGRATION: Copy legacy humor_level if exists ===
     if ((existingProfile as any)?.humor_level) {
       (voiceProfile as any).humor_level = (existingProfile as any).humor_level
       console.log(`[${requestId}] 📝 Migrated legacy humor_level: ${(existingProfile as any).humor_level}`)
     }
-
-    // NOTE: Tone DNA generation moved to after programmes are deduped (line ~1036)
-    // to ensure dedupedProgrammes variable exists
+    if ((existingProfile as any)?.humor_level) {
+      (voiceProfile as any).humor_level = (existingProfile as any).humor_level
+      console.log(`[${requestId}] 📝 Migrated legacy humor_level: ${(existingProfile as any).humor_level}`)
+    }
 
     // ===== STEP 5C: LAYER 5 - GUARDRAILS (MOVED BEFORE WRITING EXAMPLES) =====
     console.log(`[${requestId}] 🛡️  Step 5c: Layer 5 - Guardrails...`)
@@ -1127,40 +1483,29 @@ serve(async (req) => {
 
     console.log(`[${requestId}] ✅ Guardrails: ${guardrails.never_say.length} never-say rules, ${guardrails.content_exclusions.length} exclusions`)
 
-    // ===== STEP 5B: LAYER 5 - WRITING EXAMPLES (MOVED AFTER GUARDRAILS) =====
-    console.log(`[${requestId}] ✍️  Step 5b: Layer 5 - Writing Examples...`)
-
-    const writingExamples = await generateWritingExamples(
-      {
-        voice: voiceProfile,
-        legacy_examples: {
-          typical_openings: existingProfile?.typical_openings,
-          typical_closings: existingProfile?.typical_closings
-        },
-        legacy_never_say: guardrails.never_say,  // Use CURRENT never_say rules, not legacy
-        business: {
-          business_name: business.name,
-          menu_highlights: normalizedMenuItems?.map(m => m.name).slice(0, 5),
-          location_reference: location?.local_location_reference,
-          business_category: business.category || business.business_category || ''
-        },
-        // NEW V5.1: Professional persona, archetype, validation
-        professionalPersona,
-        voiceArchetype,
-        geographicContext,
-        businessTypeDetection
-      },
-      openAiKey,
-      language  // Multi-language support
-    )
-
-    console.log(`[${requestId}] ✅ Examples: ${writingExamples.typical_openings.length} openings, ${writingExamples.typical_closings.length} closings`)
-    
-    // NOTE: good_examples will be populated after tone DNA generation (see below)
-    // This allows using the freshly generated enhanced_social_examples
-    {
-      console.log(`[${requestId}] ℹ️  Using AI-generated good_examples from generateWritingExamples (${writingExamples.good_examples.length} examples)`);
+    // Writing examples — populated by generateEnhancedExamples after tone DNA
+    // (Layer 5b generateWritingExamples removed — tone DNA must exist first)
+    const writingExamples: {
+      typical_openings: string[];
+      typical_closings: string[];
+      signature_phrases: string[];
+      good_examples: string[];
+      cta_library?: any;
+      cta_preferences?: any;
+    } = {
+      typical_openings: [],
+      typical_closings: [],
+      signature_phrases: [],
+      good_examples: [],
+      cta_library: undefined,
+      cta_preferences: undefined,
     }
+
+    console.log(`[${requestId}] 📝 Writing examples placeholder created (will be populated by enhanced examples)`)
+
+    // ===== LAYER 5 VALIDATION & AUDIT DEFERRED =====
+    // Validation and audit moved to after enhanced examples generation (Layer 5.5)
+    // because typical_openings is populated from enhanced social examples
 
     // ===== STEP 6: SAVE TO DATABASE =====
     console.log(`[${requestId}] 💾 Step 6: Saving to database...`)
@@ -1247,127 +1592,120 @@ serve(async (req) => {
 
     console.log(`[${requestId}] 📦 Deduplicated ${programmesWithLayer4.length} programmes → ${dedupedProgrammes.length} unique types`)
 
-    // ===== LAYER 5.5: TONE DNA GENERATION (NEW V5.5) =====
-    // NOTE: Moved here so dedupedProgrammes exists for programme-aware examples
-    console.log(`[${requestId}] 🧬 Layer 5.5: Strategic Tone DNA...`)
+    // ===== STEP 5D: LAYER 6 - MARKETING MANAGER BRIEF (NEW V5.3) =====
+    console.log(`[${requestId}] 📋 Step 5d: Layer 6 - Marketing Manager Brief Generation...`)
     
-    try {
-      // Import tone DNA generator
-      const { generateToneDNA, generateEnhancedExamples } = await import('../_shared/brand-profile/tone-dna-generator.ts');
-      
-      // Separate location types from demographic segments in category_scores
-      const LOCATION_TYPES = ['waterfront', 'city_centre', 'residential', 'office', 'transport_hub', 
-                              'shopping_district', 'mixed_use', 'destination', 'nature_park'];
-      const DEMOGRAPHIC_TYPES = ['student', 'tourist'];
-      
-      const locationScores = location?.category_scores 
-        ? Object.fromEntries(
-            Object.entries(location.category_scores)
-              .filter(([key]) => LOCATION_TYPES.includes(key))
-          )
-        : {};
-      
-      const demographicScores = location?.category_scores
-        ? Object.fromEntries(
-            Object.entries(location.category_scores)
-              .filter(([key]) => DEMOGRAPHIC_TYPES.includes(key))
-          )
-        : {};
-      
-      console.log(`[${requestId}] 📍 Location scores:`, Object.keys(locationScores).length > 0 ? 
-        Object.entries(locationScores).map(([k, v]) => `${k}=${v}`).join(', ') : 'None');
-      console.log(`[${requestId}] 👥 Demographic scores (raw):`, Object.keys(demographicScores).length > 0 ?
-        Object.entries(demographicScores).map(([k, v]) => `${k}=${v}`).join(', ') : 'None');
-      
-      // Calculate price positioning once
-      const pricePositioning = determinePricePositioning(crossMenuSummary?.overall_avg_price);
-      console.log(`[${requestId}] 💰 Price positioning: ${pricePositioning} (avg: ${crossMenuSummary?.overall_avg_price || 'unknown'})`);
-      
-      // Extract tone-relevant demographics (checks PRIMARY segments + price relevance)
-      const toneRelevantDemographics = extractToneRelevantDemographics(
-        demographicScores,
-        dedupedProgrammes,
-        pricePositioning
-      );
-      
-      if (toneRelevantDemographics) {
-        console.log(`[${requestId}] ✅ Tone demographics: ${toneRelevantDemographics.primary_demographic} (PRIMARY segment + price match)`);
-      } else {
-        console.log(`[${requestId}] ⚪ Tone demographics: none (student/tourist not PRIMARY segments, or price incompatible)`);
-      }
-      
-      // Generate tone DNA based on business holistic analysis
-      toneDNA = await generateToneDNA(
-        {
-          business: {
-            name: business.name,
-            city: geographicContext?.city_profile?.city || business.city || 'Unknown',
-            country: 'Danmark',
-            om_os_text: omOsText || 'Not provided'
-          },
-          location_intelligence: location ? {
-            category_scores: locationScores,  // ONLY location types (waterfront, city_centre, etc.)
-            neighborhood_character: location.neighborhood_character,
-            area_type: location.area_type,
-            location_marketing_hooks: location.location_marketing_hooks,
-            local_location_reference: business.local_location_reference || location.local_location_reference || undefined,
-          } : undefined,
-          menu_overview_summary: crossMenuSummary ? {
-            cross_menu_summary: crossMenuSummary.cross_menu_summary,
-            signature_themes: crossMenuSummary.signature_themes,
-            gastronomic_profile: crossMenuSummary.gastronomic_profile,
-            overall_avg_price: crossMenuSummary.overall_avg_price
-          } : undefined,
-          commercial_orientation: dedupedProgrammes.length > 0 ? {
-            price_positioning: pricePositioning,
-            primary_hook: 'product',  // Default - could be derived from business model
-            business_model: 'offer_led'  // Default - could be from audience classification
-          } : undefined,
-          demographic_signals: toneRelevantDemographics,  // Only if PRIMARY segment + price match
-          market_context: geographicContext ? {
-            competition_level: geographicContext.city_profile.competition_level,
-            cultural_context: geographicContext.city_profile.cultural_context
-          } : undefined
+    // Derive simple commercial mode from programmes
+    const aggregatedGoalSplit = dedupedProgrammes.reduce((acc, { commercialOrientation }) => {
+      Object.entries(commercialOrientation.baseline_goal_split).forEach(([key, value]) => {
+        acc[key] = (acc[key] || 0) + value
+      })
+      return acc
+    }, {} as Record<string, number>)
+    
+    // Normalize to percentages
+    const total = Object.values(aggregatedGoalSplit).reduce((sum, val) => sum + val, 0)
+    const normalizedGoalSplit = Object.fromEntries(
+      Object.entries(aggregatedGoalSplit).map(([key, value]) => [key, Math.round((value / total) * 100)])
+    )
+    
+    const commercialMode = extractCommercialMode(normalizedGoalSplit)
+    
+    console.log(`[${requestId}]    Commercial mode: ${commercialMode} (from ${dedupedProgrammes.length} programmes)`)
+    console.log(`[${requestId}]    Goal split: ${JSON.stringify(normalizedGoalSplit)}`)
+    
+    const marketingManagerBrief = await generateMarketingManagerBrief(
+      {
+        businessIdentityPersona: businessIdentityPersona.system_persona,
+        voiceProfile: {
+          tone_rules: voiceProfile.tone_rules,
+          personality_traits: voiceProfile.personality_traits,
+          formality_level: voiceProfile.formality_level,
+          humor_style: voiceProfile.humor_style,
+          sentence_structure: voiceProfile.sentence_structure
         },
-        openaiClient,
-        language
-      );
-      
-      console.log(`[${requestId}] ✅ Tone DNA: ${toneDNA.recommended_tone.tone_positioning}`);
-      console.log(`[${requestId}]    Location driver: ${toneDNA.location_driver.primary_dimension} (${toneDNA.location_driver.score})`);
-      console.log(`[${requestId}]    Strategic importance: ${toneDNA.location_driver.strategic_importance}`);
-      console.log(`[${requestId}]    Price positioning: ${toneDNA.culinary_character.price_positioning}`);
-      console.log(`[${requestId}]    Owner register: ${toneDNA.owner_voice.register_level}`);
-      
-      // Save tone DNA immediately (don't wait for examples)
-      voiceProfile.tone_dna = toneDNA;
+        commercialMode,
+        primaryUSP: extractedUSPs.primary_usp.score >= 80 ? extractedUSPs.primary_usp.text : undefined,
+        contentStrategy: {
+          goal_blend: normalizedGoalSplit
+        },
+        locationStrategy: locationStrategy ? {  // V5.7: Add location strategy context
+          positioning_angles: locationStrategy.positioning_angles,
+          content_triggers: locationStrategy.content_triggers,
+          competitive_gap: typeof locationStrategy.competitive_gap === 'string' 
+            ? locationStrategy.competitive_gap 
+            : locationStrategy.competitive_gap?.gap_summary || null,
+          reachable_demographics: locationStrategy.reachable_demographics
+            .filter(d => d.is_reachable)
+            .map(d => d.demographic)
+        } : undefined,
+        programmes: dedupedProgrammes.map(p => {
+          console.log(`[${requestId}] 💰 Programme ${p.programme.label} pricing:`, p.commercialOrientation.price_positioning)
+          return {
+            programme_name: p.programme.label,
+            programme_type: p.programme.type,
+            time_windows: [`${p.programme.timeWindow.start}-${p.programme.timeWindow.end}`],
+            price_positioning: {
+              tier: p.commercialOrientation.price_positioning?.tier || 'moderate',
+              avg: p.commercialOrientation.price_positioning?.avg ?? null,
+              min: p.commercialOrientation.price_positioning?.min ?? null,
+              max: p.commercialOrientation.price_positioning?.max ?? null
+            }
+          }
+        }),
+        businessName: business.name,
+        businessCategory: business.category || business.business_category || '',
+        language  // Multi-language support: da, sv, no, de, en
+      },
+      openaiClient,
+      requestId
+    )
+    
+    console.log(`[${requestId}] ✅ Marketing Manager Brief generated (${marketingManagerBrief.metadata.word_count} words)`)
+    console.log(`[${requestId}]    Preview: ${marketingManagerBrief.marketing_manager_brief.substring(0, 100)}...`)
 
-      // Sync formality_level from tone_dna (authoritative source — richer input than voice profile inference)
-      // tone_dna.culinary_character.formality_requirement uses free-text enum, normalize to V5Voice enum
-      const rawFormality = (toneDNA.culinary_character?.formality_requirement || '').toLowerCase().trim()
-      const syncedFormality: 'informal' | 'semi-formal' | 'formal' =
-        rawFormality.includes('casual') || rawFormality === 'informal' ? 'informal'
-        : rawFormality.includes('formal') && !rawFormality.includes('elevated') && !rawFormality.includes('semi') ? 'formal'
-        : 'semi-formal'
-      if (syncedFormality !== voiceProfile.formality_level) {
-        console.log(`[${requestId}] 🔄 formality_level synced from tone_dna: "${voiceProfile.formality_level}" → "${syncedFormality}" (raw: "${rawFormality}")`)
-        voiceProfile.formality_level = syncedFormality
-      }
-      
-      // Generate enhanced examples with reasoning (programme-aware) - separate try-catch
+    // ===== VALIDATION: LAYER 6 =====
+    console.log(`[${requestId}] 🔍 Validating Layer 6 output...`)
+    
+    const layer6Output: Layer6Output = {
+      marketingManagerBrief  // Pass entire object with {marketing_manager_brief, metadata}
+    }
+    
+    validateLayer6Output(layer6Output, requestId)
+    console.log(`[${requestId}] ✅ Layer 6 validation passed`)
+
+    // ===== LAYER 5.5: ENHANCED EXAMPLES GENERATION (Programme-Aware) =====
+    // NOTE: Requires toneDNA (generated at Layer 0b) and dedupedProgrammes
+    console.log(`[${requestId}] ✍️  Layer 5.5: Enhanced Social Examples...`)
+    
+    if (!toneDNA) {
+      console.warn(`[${requestId}] ⚠️  Skipping enhanced examples - Tone DNA not available`)
+    } else {
       try {
+        const { generateEnhancedExamples } = await import('../_shared/brand-profile/tone-dna-generator.ts');
+        
         const programmeInfo = dedupedProgrammes.map(({ programme, audienceProfile }) => ({
           type: programme.type,
           name: programme.label,
           audienceSegments: audienceProfile.audience_segments.map(seg => ({ segment_name: seg.label }))
         }));
         
+        // CRITICAL FIX v5.2.0: Pass voice constraints and guardrails to prevent contradictions
         enhancedExamples = await generateEnhancedExamples(
           toneDNA,
-          businessIdentityPersona.system_persona,  // Pass the string persona
+          businessIdentityPersona.system_persona,
+          {
+            tone_rules: voiceProfile.tone_rules,
+            formality_level: voiceProfile.formality_level,
+            personality_traits: voiceProfile.personality_traits
+          },
+          {
+            never_say: guardrails.never_say,
+            avoid_patterns: guardrails.avoid_patterns
+          },
           openaiClient,
           language,
-          programmeInfo  // Pass programmes for multi-daypart coverage
+          programmeInfo
         );
         
         console.log(`[${requestId}] ✅ Enhanced examples: ${enhancedExamples.social_examples.length} social, ${enhancedExamples.avoid_examples.length} avoid`);
@@ -1376,26 +1714,90 @@ serve(async (req) => {
         voiceProfile.enhanced_social_examples = enhancedExamples.social_examples;
         voiceProfile.enhanced_avoid_examples = enhancedExamples.avoid_examples;
         
-        // CRITICAL FIX v5.1.4: Populate good_examples with enhanced examples (V5.5 tone DNA)
-        // Priority: enhanced_social_examples (just generated) > AI-generated fallback
+        // Populate writingExamples from enhanced examples (single source of truth)
         if (enhancedExamples.social_examples && enhancedExamples.social_examples.length > 0) {
           // V5.5 enhanced examples (objects with {text, rationale})
           writingExamples.good_examples = enhancedExamples.social_examples
             .map((ex: any) => typeof ex === 'object' ? ex.text : ex)
             .filter((text: string) => text && text.trim().length > 10);
-          console.log(`[${requestId}] ✅ Using enhanced_social_examples: ${writingExamples.good_examples.length} V5.5 tone DNA examples`);
+          
+          // Derive openings from first sentences of good examples
+          writingExamples.typical_openings = writingExamples.good_examples
+            .slice(0, 3)
+            .map((ex: string) => ex.split('.')[0].trim())
+            .filter((s: string) => s.length > 5);
+
+          console.log(`[${requestId}] ✅ Writing examples populated from enhanced examples:`);
+          console.log(`[${requestId}]    good_examples: ${writingExamples.good_examples.length}`);
+          console.log(`[${requestId}]    typical_openings: ${writingExamples.typical_openings.length}`);
         }
+        
+        // ===== VALIDATION & AUDIT: LAYER 5 (NOW WITH POPULATED EXAMPLES) =====
+        console.log(`[${requestId}] 🔍 Validating Layer 5 output...`)
+        
+        const layer5Output: Layer5Output = {
+          voiceProfile: {
+            tone_rules: voiceProfile.tone_rules,
+            personality_traits: voiceProfile.personality_traits,
+            formality_level: voiceProfile.formality_level,
+            humor_style: voiceProfile.humor_style,
+            sentence_structure: voiceProfile.sentence_structure
+          },
+          guardrails: {
+            never_say: guardrails.never_say,
+            content_exclusions: guardrails.content_exclusions,
+            factual_constraints: guardrails.factual_constraints,
+            avoid_patterns: guardrails.avoid_patterns || []
+          },
+          writingExamples: {
+            typical_openings: writingExamples.typical_openings,
+            typical_closings: writingExamples.typical_closings,
+            signature_phrases: writingExamples.signature_phrases || [],
+            good_examples: writingExamples.good_examples || [],
+            cta_library: writingExamples.cta_library || undefined,
+            cta_preferences: writingExamples.cta_preferences || undefined
+          }
+        }
+        
+        validateLayer5Output(layer5Output, requestId)
+        console.log(`[${requestId}] ✅ Layer 5 validation passed`)
+        
+        // Run internal audit on voice profile (checks for self-contradictions)
+        console.log(`[${requestId}] 🔍 Running Layer 5 internal audit...`)
+        auditVoiceProfileInternal(layer5Output, requestId)
+        console.log(`[${requestId}] ✅ Layer 5 internal audit passed - no self-contradictions`)
+        
+        // ===== VALIDATION & AUDIT: LAYER 5.5 =====
+        console.log(`[${requestId}] 🔍 Validating Layer 5.5 output...`)
+        
+        const layer5_5Output: Layer5_5Output = {
+          toneDNA: {
+            tone_positioning: toneDNA.recommended_tone.tone_positioning,
+            culinary_character: {
+              craft_signals: toneDNA.culinary_character.craft_signals,
+              signature_themes: toneDNA.culinary_character.signature_themes
+            },
+            constraints_summary: toneDNA.strategic_summary
+          },
+          enhancedExamples: {
+            social_examples: enhancedExamples.social_examples,
+            avoid_examples: enhancedExamples.avoid_examples
+          }
+        }
+        
+        validateLayer5_5Output(layer5_5Output, requestId)
+        console.log(`[${requestId}] ✅ Layer 5.5 validation passed`)
+        
+        // CRITICAL: Audit tone DNA examples against voice rules (catches imperative violations!)
+        console.log(`[${requestId}] 🔍 Running Layer 5.5 audit against Layer 5...`)
+        auditToneDNAAgainstVoice(layer5_5Output, layer5Output, requestId)
+        console.log(`[${requestId}] ✅ Layer 5.5 audit passed - examples comply with voice rules`)
         
       } catch (examplesError) {
         console.error(`[${requestId}] ⚠️  Enhanced examples generation failed (non-fatal):`, examplesError);
-        console.log(`[${requestId}]    Tone DNA saved, but examples unavailable (will use legacy social_writing_examples)`);
-        // Tone DNA is already saved above, so this is just a partial failure
+        console.log(`[${requestId}]    Tone DNA available but examples generation failed`);
+        generationStatus = 'partial';  // Mark as partial success
       }
-      
-    } catch (error) {
-      console.error(`[${requestId}] ⚠️  Tone DNA generation failed (non-fatal):`, error);
-      console.log(`[${requestId}]    Continuing with legacy voice profile (backward compatibility)`);
-      // Continue without tone DNA - backward compatibility
     }
 
     // Save programme profiles (Layers 1, 2, 4)
@@ -1407,10 +1809,12 @@ serve(async (req) => {
       operating_days: programme.daysOfWeek,
       menu_evidence: programme.menuEvidence,
       confidence: programme.confidence === 'high' ? 0.9 : programme.confidence === 'medium' ? 0.7 : 0.5,
+      is_active: true,  // CRITICAL: Required for RLS policy to return records
       baseline_goal_split: commercialOrientation.baseline_goal_split,
       decision_timing: commercialOrientation.decision_timing,
       content_type_affinity: commercialOrientation.content_type_affinity,
       commercial_reasoning: commercialOrientation.reasoning,
+      price_positioning: commercialOrientation.price_positioning || null,  // NEW V5.3: Per-programme pricing
       audience_segments: audienceProfile.audience_segments,
       segment_confidence: audienceProfile.segment_confidence,
       segment_reasoning: audienceProfile.segment_reasoning,
@@ -1495,6 +1899,16 @@ serve(async (req) => {
           location_advantages: geographicContext.location_context.advantages,
           narrative: geographicContext.narrative  // Full Danish narrative sent to AI
         },
+        // NEW V5.3: Extracted USPs from Layer 0
+        usps: extractedUSPs,
+        // Phase 2: Location strategy (crossing geography × business facts)
+        location_strategy: locationStrategy ? {
+          reachable_demographics: locationStrategy.reachable_demographics,
+          positioning_angles: locationStrategy.positioning_angles,
+          content_triggers: locationStrategy.content_triggers,
+          physical_opportunities: locationStrategy.physical_opportunities,
+          competitive_gap: locationStrategy.competitive_gap,
+        } : null,
         professional_persona: {
           // LEGACY: Keep old consultant persona for backward compatibility
           // NOTE: This is being replaced by business_identity (HYBRID approach)
@@ -1531,31 +1945,190 @@ serve(async (req) => {
         audienceSegments: audienceProfile.audience_segments.map(seg => ({
           segment_name: seg.label,
           motivation: seg.motivation,
-          timing_preference: seg.timing_preference || '',
-          content_angle: seg.content_angle || '',
-          confidence: seg.confidence || 0.7
+          timing_preference: seg.decision_timing,
+          content_angle: seg.content_angles[0] || '',
+          confidence: audienceProfile.segment_confidence
         }))
       })),
       // DEPRECATED: identity layer removed - use signature_themes + gastronomic_profile instead
       voice: voiceProfile,
       writing_examples: writingExamples,
-      guardrails: guardrails
+      guardrails: guardrails,
+      // NEW V5.3: Marketing Manager Brief (Layer 6 - Stage 2 preparation)
+      marketing_manager_brief: marketingManagerBrief.marketing_manager_brief,
+      marketing_manager_brief_metadata: marketingManagerBrief.metadata
     }
 
     // NOTE: Strategic segments and persona already generated at Step 4a (after Layer 4)
     // Just save them to database here
     
     // ═══════════════════════════════════════════════════════════════════════
+    // CROSS-LAYER CONSISTENCY AUDIT (Phase 2 - June 23, 2026)
+    // ═══════════════════════════════════════════════════════════════════════
+    console.log(`[${requestId}] 🔍 Running Phase 2 cross-layer audit...`)
+    
+    // Construct complete layer outputs for cross-layer audit
+    const completeLayer0: Layer0Output = {
+      businessIdentityPersona: businessIdentityPersona.system_persona,
+      geographicContext: {
+        city: geographicContext.city_profile.city,
+        population: geographicContext.city_profile.population,
+        location_type: geographicContext.location_context.type,
+        signature_reference: geographicContext.location_context.signature
+      },
+      menuOverview: crossMenuSummary ? {
+        signature_themes: crossMenuSummary.signature_themes,
+        total_items: crossMenuSummary.total_items,
+        overall_avg_price: crossMenuSummary.overall_avg_price
+      } : null,
+      extractedUSPs
+    }
+    
+    const completeLayer1: Layer1Output = {
+      programmes: dedupedProgrammes.map(p => p.programme)
+    }
+    
+    const completeLayer5: Layer5Output = {
+      voiceProfile: {
+        tone_rules: voiceProfile.tone_rules,
+        personality_traits: voiceProfile.personality_traits,
+        formality_level: voiceProfile.formality_level,
+        humor_style: voiceProfile.humor_style,
+        sentence_structure: voiceProfile.sentence_structure
+      },
+      guardrails: {
+        never_say: guardrails.never_say,
+        content_exclusions: guardrails.content_exclusions,
+        factual_constraints: guardrails.factual_constraints,
+        avoid_patterns: guardrails.avoid_patterns || []
+      },
+      writingExamples: {
+        typical_openings: writingExamples.typical_openings,
+        typical_closings: writingExamples.typical_closings,
+        signature_phrases: writingExamples.signature_phrases || [],
+        good_examples: writingExamples.good_examples || [],
+        cta_library: writingExamples.cta_library || undefined,
+        cta_preferences: writingExamples.cta_preferences || undefined
+      }
+    }
+    
+    const completeLayer6: Layer6Output = {
+      marketingManagerBrief  // Pass entire object with {marketing_manager_brief, metadata}
+    }
+    
+    // Create layer5_5 output for audit (or use empty if tone DNA generation failed)
+    const completeLayer5_5: Layer5_5Output = voiceProfile.tone_dna ? {
+      toneDNA: {
+        tone_positioning: voiceProfile.tone_dna.recommended_tone.tone_positioning,
+        culinary_character: {
+          craft_signals: voiceProfile.tone_dna.culinary_character.craft_signals,
+          signature_themes: voiceProfile.tone_dna.culinary_character.signature_themes
+        },
+        constraints_summary: voiceProfile.tone_dna.strategic_summary
+      },
+      enhancedExamples: {
+        social_examples: voiceProfile.enhanced_social_examples || [],
+        avoid_examples: voiceProfile.enhanced_avoid_examples || []
+      }
+    } : {
+      toneDNA: {
+        tone_positioning: 'Not generated',
+        constraints_summary: 'Tone DNA generation skipped'
+      },
+      enhancedExamples: {
+        social_examples: [],
+        avoid_examples: []
+      }
+    }
+    
+    auditCrossLayerConsistency(
+      completeLayer0,
+      completeLayer1,
+      layer2Output.enrichedProgrammes,
+      completeLayer5,
+      completeLayer5_5,
+      completeLayer6,
+      requestId
+    )
+    
+    console.log(`[${requestId}] ✅ Phase 2 cross-layer audit passed - all layers consistent`)
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONSISTENCY AUDIT - Verify no contradictions before save (V5.2.0)
+    // ═══════════════════════════════════════════════════════════════════════
+    console.log(`[${requestId}] 🔍 Running consistency audit...`)
+    
+    const auditResult = auditBrandProfileConsistency({
+      voiceProfile,
+      guardrails,
+      writingExamples,
+      enhancedExamples: enhancedExamples ? {
+        social_examples: enhancedExamples.social_examples,
+        avoid_examples: enhancedExamples.avoid_examples
+      } : undefined,
+      toneDNA,
+      marketingBrief: marketingManagerBrief.marketing_manager_brief
+    });
+    
+    // Log audit report
+    const auditReport = formatAuditReport(auditResult, requestId);
+    console.log(auditReport);
+    
+    // Handle critical contradictions
+    if (!auditResult.is_consistent) {
+      const criticalCount = auditResult.contradictions.filter(c => c.severity === 'critical').length;
+      const warningCount = auditResult.contradictions.filter(c => c.severity === 'warning').length;
+      
+      console.warn(`[${requestId}] ⚠️  Found contradictions: ${criticalCount} critical, ${warningCount} warnings`);
+      
+      // Log details for manual review
+      for (const contradiction of auditResult.contradictions) {
+        if (contradiction.severity === 'critical') {
+          console.error(`[${requestId}]   🔴 CRITICAL: ${contradiction.description}`);
+          console.error(`[${requestId}]      Field: ${contradiction.field_path}`);
+          if (contradiction.suggested_fix) {
+            console.error(`[${requestId}]      Suggested fix: ${contradiction.suggested_fix}`);
+          }
+        }
+      }
+      
+      // Decision: Block save for critical contradictions
+      if (criticalCount > 0) {
+        throw new Error(
+          `Cannot save brand profile with ${criticalCount} critical contradiction(s). ` +
+          `See audit report above for details. Most common cause: enhanced examples violate tone_rules or never_say constraints.`
+        );
+      }
+    } else {
+      console.log(`[${requestId}] ✅ Consistency audit passed - no contradictions found`);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════
     // DERIVE LEGACY content_strategy FOR WEEKLY PLAN COMPATIBILITY
     // ═══════════════════════════════════════════════════════════════════════
     // Weekly Plan prompts expect content_strategy with goal_blend.
     // Derive from programme commercial orientations to ensure baseline exists.
-    const legacyContentStrategy = deriveContentStrategy(v5Profile.programmes)
+    const menuOverviewForAnchors = v5Profile.layer_0_intelligence?.menu_overview ? {
+      signature_themes: v5Profile.layer_0_intelligence.menu_overview.signature_themes,
+      craft_signals: v5Profile.voice?.tone_dna?.culinary_character?.craft_signals
+    } : undefined
+    
+    const geoContextForAnchors = v5Profile.layer_0_intelligence?.geographic_context ? {
+      signature_reference: v5Profile.layer_0_intelligence.geographic_context.signature_reference,
+      location_type: v5Profile.layer_0_intelligence.geographic_context.location_type
+    } : undefined
+    
+    const legacyContentStrategy = deriveContentStrategy(
+      v5Profile.layer_1_programmes,
+      menuOverviewForAnchors,
+      geoContextForAnchors
+    )
     if (legacyContentStrategy) {
       console.log(`[${requestId}] 📊 Derived content_strategy for Weekly Plan:`, {
         goal_blend: legacyContentStrategy.goal_blend,
         primary_goal: legacyContentStrategy.primary_goal,
-        source: `${v5Profile.programmes.length} programmes`
+        brand_anchors_count: legacyContentStrategy.brand_anchors.length,
+        source: `${v5Profile.layer_1_programmes.length} programmes`
       })
     }
     
@@ -1576,13 +2149,40 @@ serve(async (req) => {
         // NEW: Flattened guardrails and persona for fast validation (June 12, 2026)
         voice_guardrails: v5Profile.guardrails || {},
         business_identity_persona: businessIdentityPersona.system_persona || null,
+        // NEW V5.3: Marketing Manager Brief at top level for fast Stage 2 access (June 21, 2026)
+        marketing_manager_brief: marketingManagerBrief.marketing_manager_brief || null,
+        // NEW V5-ONLY CLEANUP: Commercial baseline mode from aggregated programme goals (June 23, 2026)
+        commercial_baseline_mode: commercialMode,
         strategic_audience_segments: strategicSegments,
+        // Phase 2: Location strategy columns (June 25, 2026)
+        location_strategy: locationStrategy,
+        generation_status: generationStatus,
+        data_sources_used: {
+          menu_data: !!crossMenuSummary,
+          location_intelligence: !!location,
+          business_profile: !!omOsText,
+          operations: !!operations
+        },
         // NEW (June 15, 2026): Legacy content_strategy for Weekly Plan compatibility
         // Derived from programme commercial orientations (baseline_goal_split aggregation)
         content_strategy: legacyContentStrategy || null,
-        // DEPRECATED (v5.1.5): business_character kept for backward compat only (generate-text-from-idea uses business_identity_persona)
-        // Still written to preserve data consistency, but no longer consumed by text generation
-        business_character: businessIdentityPersona.system_persona || businessTypeDetection.reasoning || existingProfile?.business_character,
+        // FIXED (v5.6 - June 22, 2026): business_character should be SHORT reasoning from type detection
+        // NEVER the full persona (that's business_identity_persona)
+        // Priority: type detection reasoning → fallback generator → existing value (if valid)
+        business_character: (() => {
+          const reasoning = businessTypeDetection.reasoning;
+          
+          // Validate and log
+          if (reasoning && reasoning.length < 200) {
+            console.log(`[${requestId}] ✅ business_character set from type detection: "${reasoning.substring(0, 80)}..."`);
+            return reasoning;
+          }
+          
+          // Fallback: generate from business type
+          const fallback = generateFallbackBusinessCharacter(businessTypeDetection.type);
+          console.log(`[${requestId}] ⚠️ business_character using fallback generator: "${fallback}"`);
+          return fallback;
+        })(),
         // DEPRECATED: Nulled June 14, 2026 — use brand_profile_v5.voice.tone_dna instead
         // Writing null explicitly so the old poisoned value doesn't persist across regenerations
         tone_of_voice: null,

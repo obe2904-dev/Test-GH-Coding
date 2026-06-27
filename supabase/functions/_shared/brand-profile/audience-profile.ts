@@ -20,10 +20,99 @@
 import OpenAI from "https://deno.land/x/openai@v4.20.1/mod.ts";
 import { getV5Prompt } from './v5-prompts.ts';
 
+// ===== UNIVERSAL PEOPLE TAXONOMY =====
+
+/**
+ * Seven canonical people types used across all businesses.
+ * This ensures consistent segment IDs for reporting, A/B testing, and content recommendation.
+ */
+export const PEOPLE_TYPES = {
+  familier: {
+    label: 'Familier',
+    label_en: 'Families',
+    social_unit: 'Parents with children or multi-generational groups',
+    decision_style: 'Plan ahead, friction-sensitive, need facilities',
+    strong_format_fit: ['ayce', 'brunch_buffet', 'casual_sitdown'],
+    poor_format_fit: ['late_night_bar', 'tasting_menu', 'ayce_all_you_can_drink'],
+    strong_dayparts: ['brunch', 'frokost', 'aftensmad_early'],
+    poor_dayparts: ['natbar'],
+  },
+  par: {
+    label: 'Par',
+    label_en: 'Couples',
+    social_unit: 'Two people — date, anniversary, regular outing',
+    decision_style: 'Moderate planning, quality and atmosphere sensitive',
+    strong_format_fit: ['a_la_carte', 'casual_sitdown', 'tasting_menu', 'wine_bar'],
+    poor_format_fit: ['fast_casual', 'standing_bar'],
+    strong_dayparts: ['brunch', 'aftensmad', 'eftermiddag'],
+    poor_dayparts: ['morning_utility'],
+  },
+  vennegrupper: {
+    label: 'Vennegrupper',
+    label_en: 'Groups of Friends',
+    social_unit: '3–8 peers — celebration, social ritual, spontaneous evening',
+    decision_style: 'Social coordination, energy-driven, bill-splitting matters',
+    strong_format_fit: ['ayce', 'ayce_all_you_can_drink', 'sharing_plates', 'cocktail_bar'],
+    poor_format_fit: ['tasting_menu', 'quiet_cafe'],
+    strong_dayparts: ['aftensmad', 'natbar'],
+    poor_dayparts: ['morning_utility', 'eftermiddag_work'],
+  },
+  erhverv: {
+    label: 'Erhverv / Kollegaer',
+    label_en: 'Business / Corporate Groups',
+    social_unit: 'Colleagues, client dinners, team lunches',
+    decision_style: 'Booked in advance, expense account, needs quiet and service',
+    strong_format_fit: ['a_la_carte', 'set_menu', 'lunch_casual'],
+    poor_format_fit: ['ayce_all_you_can_drink', 'loud_bar', 'fast_casual'],
+    strong_dayparts: ['frokost'],
+    poor_dayparts: ['natbar', 'brunch_weekend'],
+  },
+  solo: {
+    label: 'Solo / Enkeltgæster',
+    label_en: 'Solo / Singles',
+    social_unit: 'Individual — work lunch, self-care, third-place seeker',
+    decision_style: 'Spontaneous, efficient, comfort or laptop-friendly',
+    strong_format_fit: ['cafe', 'quick_lunch', 'bar_seating'],
+    poor_format_fit: ['ayce_group', 'sharing_plates_only'],
+    strong_dayparts: ['morning', 'frokost', 'eftermiddag'],
+    poor_dayparts: ['natbar'],
+  },
+  turister: {
+    label: 'Turister',
+    label_en: 'Tourists / Out-of-towners',
+    social_unit: 'Leisure travelers seeking local experience or familiar comfort',
+    decision_style: 'Discovery-driven, rely on reviews and visibility',
+    strong_format_fit: ['local_cuisine', 'scenic_location', 'visible_from_street'],
+    poor_format_fit: ['hidden_gem_only', 'booking_weeks_ahead'],
+    strong_dayparts: ['frokost', 'aftensmad', 'eftermiddag'],
+    poor_dayparts: ['natbar'],
+    // CRITICAL: Only surface if concept independently supports tourist appeal.
+    // High city_centre score alone is NOT a tourist signal.
+    location_prerequisite: 'demographic_proximity.tourist >= 65',
+  },
+  lokale: {
+    label: 'Lokale / Stamgæster',
+    label_en: 'Locals / Regulars',
+    social_unit: 'Neighborhood residents or nearby workers — repeat habitual visits',
+    decision_style: 'Habit-driven, loyal, value familiarity',
+    strong_format_fit: ['neighbourhood_cafe', 'lunch_spot', 'after_work'],
+    poor_format_fit: ['destination_only', 'high_booking_friction'],
+    strong_dayparts: ['morning', 'frokost', 'eftermiddag'],
+    poor_dayparts: [],
+  },
+} as const;
+
+export type PeopleTypeId = keyof typeof PEOPLE_TYPES;
+
+// Array of valid people type labels for validation
+export const VALID_PEOPLE_TYPE_LABELS = Object.values(PEOPLE_TYPES).map(t => t.label);
+
 // ===== TYPES =====
 
 export interface AudienceSegment {
-  label: string;                    // "Weekend-familier", "Brunch-entusiaster"
+  people_type: string;              // Must match VALID_PEOPLE_TYPE_LABELS (e.g., "Familier", "Par")
+  people_type_id?: PeopleTypeId;    // Derived in parser from label lookup (e.g., "familier", "par")
+  label: string;                    // DEPRECATED: Use people_type instead. Kept for backward compatibility.
   timing_windows: string[];         // ["Lør-Søn 10:00-13:00"]
   content_angles: string[];         // ["Børnevenlig menu", "Hyggelige weekender"]
   segment_size: string;             // "primary" | "secondary" | "niche"
@@ -32,6 +121,8 @@ export interface AudienceSegment {
   goal_contribution: string;        // "drive_footfall" | "strengthen_brand" | "retain_regulars"
   evidence: string[];               // ["Menu has børneportioner", "Weekend hours 09:00-13:00"]
   concept_fit_reason: string;       // Why this segment fits the business concept + location (REQUIRED)
+  situation?: string;               // Concrete occasion description (e.g., "Familier med børn der ønsker...")
+  validation_failed?: boolean;      // Set by parser if validation fails (does NOT block generation)
 }
 
 export interface ProgrammeAudienceProfile {
@@ -66,6 +157,8 @@ interface ProgrammeData {
   menu_evidence: string[];
   confidence: number;
   languageVariants?: string[];  // e.g., ['da', 'en'] - signals international audience
+  meal_periods?: string[];      // e.g., ['frokost', 'aftensmad'] - derived from time window overlap
+  day_pattern?: string;         // e.g., 'weekend_heavy', 'all_week' - derived from operating days
 }
 
 interface CommercialOrientationData {
@@ -465,7 +558,7 @@ PROGRAM OG TIDSVINDUER:
 Program: ${programme.programme_name} (${programme.programme_type})
 Åbningstider: ${programme.time_windows.join(', ')}
 Åbningsdage: ${programme.operating_days.join(', ')}
-${programme.languageVariants && programme.languageVariants.length > 1 ? `Menusprog: ${programme.languageVariants.join(', ')} (→ internationalt publikum)\n` : ''}
+${programme.meal_periods && programme.meal_periods.length > 0 ? `Måltidsperioder dækket: ${programme.meal_periods.join(', ')} (afledt fra tidsvindue)\n` : ''}${programme.day_pattern ? `Dagsmønster: ${programme.day_pattern}\n` : ''}${programme.languageVariants && programme.languageVariants.length > 1 ? `Menusprog: ${programme.languageVariants.join(', ')} (→ internationalt publikum)\n` : ''}
 MENU FORMAT${detectedFormat ? ` (${detectedFormat})` : ''}:
 ${menuItems}
 
@@ -507,6 +600,16 @@ SEKTION C — ANLEDNINGSLOGIK
 
 OPGAVE: Generer præcis ${targetSegmentCount} målgruppesegmenter for ${programme.programme_name}.
 
+VÆLG FRA DISSE KANONISKE TYPER:
+Du SKAL vælge fra præcis én af disse 7 universelle typer for hver segment:
+• Familier — forældre med børn eller multi-generationelle grupper
+• Par — to personer på date, jubilæum, eller regelmæssig udflugt
+• Vennegrupper — 3–8 jævnaldrende til fejring, socialt ritual, spontan aften
+• Erhverv / Kollegaer — kolleger, kundemiddage, team-frokoster
+• Solo / Enkeltgæster — enkeltperson til arbejdsfrokost, self-care, tredje-sted
+• Turister — rejsende der søger lokal oplevelse eller velkendt komfort
+• Lokale / Stamgæster — nabokvarter-beboere eller nærliggende arbejdende med gentagende besøg
+
 For hvert potentielt segment skal du gennemtænke følgende:
 
 1. PASSER FORRETNINGSFORMATET til denne type person?
@@ -538,6 +641,7 @@ PRIMÆR AKSE (social kontekst + anledning):
 
 BEVIS & CONCEPT FIT KRAV (NYT KRAV):
 Hvert segment SKAL inkludere:
+• "people_type": Præcis én af de 7 kanoniske typer ovenfor (f.eks. "Familier", "Par", "Vennegrupper")
 • "concept_fit_reason": En-linje begrundelse der refererer til BÅDE forretningsformat 
   (fra Sektion A) OG stedssignal (fra Sektion B)
   Eksempel: "AYCE + bordgrill er et socialt gruppeformat — passer til venner der vil 
@@ -545,10 +649,10 @@ Hvert segment SKAL inkludere:
 • "evidence": Konkrete facts fra Sektion A (menupunkter, åbningstider, programtype)
 
 SPROG KRAV:
-- TEXT-felter SKAL være på DANSK: label, content_angles, evidence, segment_reasoning, concept_fit_reason
+- TEXT-felter SKAL være på DANSK: people_type, label, content_angles, evidence, segment_reasoning, concept_fit_reason
 - ENUM-felter SKAL være på ENGELSK: motivation, decision_timing, goal_contribution, segment_size
 
-Generer nu ${targetSegmentCount} segmenter med komplet concept_fit_reason og evidenskæde.`;
+Generer nu ${targetSegmentCount} segmenter med komplet people_type, concept_fit_reason og evidenskæde.`;
   }
   
   
@@ -657,6 +761,43 @@ Generate ${targetSegmentCount} segments with complete concept_fit_reason and evi
 
 // ===== VALIDATION =====
 
+// ===== SEGMENT NORMALIZATION =====
+
+/**
+ * Normalize segments by adding people_type_id from label lookup.
+ * Sets validation_failed flag if people_type is invalid.
+ */
+function normalizeSegments(segments: AudienceSegment[]): AudienceSegment[] {
+  // Create label to ID mapping
+  const labelToId: Record<string, PeopleTypeId> = {};
+  Object.entries(PEOPLE_TYPES).forEach(([id, def]) => {
+    labelToId[def.label] = id as PeopleTypeId;
+  });
+
+  return segments.map(segment => {
+    const normalized = { ...segment };
+
+    // Add people_type_id if people_type is valid
+    if (segment.people_type && labelToId[segment.people_type]) {
+      normalized.people_type_id = labelToId[segment.people_type];
+      normalized.validation_failed = false;
+    } else {
+      // Set validation_failed if people_type is missing or invalid
+      console.warn(`⚠️  Segment "${segment.label || 'unknown'}" has invalid people_type: "${segment.people_type}"`);
+      normalized.validation_failed = true;
+    }
+
+    // Backward compatibility: if label not set but people_type is, copy it
+    if (!normalized.label && normalized.people_type) {
+      normalized.label = normalized.people_type;
+    }
+
+    return normalized;
+  });
+}
+
+// ===== VALIDATION =====
+
 function validateAudienceProfile(
   profile: ProgrammeAudienceProfile,
   commercialOrientation: CommercialOrientationData,
@@ -734,6 +875,13 @@ function validateAudienceProfile(
     // NEW: Validate concept_fit_reason (CRITICAL for new architecture)
     if (!segment.concept_fit_reason || segment.concept_fit_reason.length < 20) {
       errors.push(`Segment ${index + 1}: concept_fit_reason missing or too short (must reference both business format AND location/timing)`);
+    }
+
+    // NEW: Validate people_type (CRITICAL for canonical taxonomy)
+    if (!segment.people_type) {
+      errors.push(`Segment ${index + 1}: people_type missing (must be one of the 7 canonical types)`);
+    } else if (!VALID_PEOPLE_TYPE_LABELS.includes(segment.people_type as any)) {
+      errors.push(`Segment ${index + 1}: invalid people_type "${segment.people_type}" (must be one of: ${VALID_PEOPLE_TYPE_LABELS.join(', ')})`);
     }
 
     if (!["primary", "secondary", "niche"].includes(segment.segment_size)) {
@@ -925,6 +1073,9 @@ export async function generateAudienceSegments(
     filterValidation.warnings.forEach(warning => console.warn(`   ${warning}`));
     // Log warnings but don't fail - AI sometimes uses creative segment names
   }
+
+  // Normalize segments: add people_type_id from label lookup
+  profile.audience_segments = normalizeSegments(profile.audience_segments);
 
   console.log(`✅ Generated ${profile.audience_segments.length} segments (confidence: ${profile.segment_confidence.toFixed(2)})`);
 
