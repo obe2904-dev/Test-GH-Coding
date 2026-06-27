@@ -431,19 +431,158 @@ interface LocationData {
 // ===== SEGMENTATION BREADTH CALCULATOR =====
 
 /**
+ * Market data for percentile-based breadth calculation
+ */
+interface MarketBenchmarks {
+  prices: number[];
+  itemCounts: number[];
+  sampleSize: number;
+}
+
+/**
+ * Calculate percentile rank (0-100) of a value within a dataset
+ */
+function calculatePercentile(value: number, dataset: number[]): number {
+  if (dataset.length === 0) return 50; // Default to median if no data
+  
+  const sorted = [...dataset].sort((a, b) => a - b);
+  const countBelow = sorted.filter(v => v < value).length;
+  
+  return Math.round((countBelow / sorted.length) * 100);
+}
+
+/**
+ * Fetch market benchmarks for similar businesses
+ * Uses business_category, country, and city to find comparable businesses
+ */
+async function fetchMarketBenchmarks(
+  supabaseClient: any,
+  businessCategory: string,
+  country: string,
+  city: string | null,
+  currentBusinessId: string
+): Promise<MarketBenchmarks | null> {
+  try {
+    // Strategy: Start narrow (city + category), expand if insufficient data
+    const minSampleSize = 10;
+    
+    // Try 1: Same city + same category
+    let query = supabaseClient
+      .from('businesses')
+      .select(`
+        id,
+        business_category,
+        city,
+        menu_results_v2!inner(menu_items, structured_data)
+      `)
+      .eq('country', country)
+      .eq('business_category', businessCategory)
+      .neq('id', currentBusinessId);  // Exclude current business
+    
+    if (city) {
+      query = query.eq('city', city);
+    }
+    
+    const { data: cityData } = await query.limit(100);
+    
+    // If we have enough data from city, use it
+    if (cityData && cityData.length >= minSampleSize) {
+      return extractBenchmarks(cityData);
+    }
+    
+    // Try 2: Same country + same category (broader)
+    const { data: countryData } = await supabaseClient
+      .from('businesses')
+      .select(`
+        id,
+        business_category,
+        menu_results_v2!inner(menu_items, structured_data)
+      `)
+      .eq('country', country)
+      .eq('business_category', businessCategory)
+      .neq('id', currentBusinessId)
+      .limit(100);
+    
+    if (countryData && countryData.length >= minSampleSize) {
+      return extractBenchmarks(countryData);
+    }
+    
+    // Try 3: Same country, all categories (fallback)
+    const { data: allData } = await supabaseClient
+      .from('businesses')
+      .select(`
+        id,
+        menu_results_v2!inner(menu_items, structured_data)
+      `)
+      .eq('country', country)
+      .neq('id', currentBusinessId)
+      .limit(100);
+    
+    if (allData && allData.length >= minSampleSize) {
+      return extractBenchmarks(allData);
+    }
+    
+    // Insufficient data - return null to trigger fallback
+    return null;
+    
+  } catch (error) {
+    console.error('⚠️  Failed to fetch market benchmarks:', error);
+    return null;
+  }
+}
+
+/**
+ * Extract price and item count benchmarks from business data
+ */
+function extractBenchmarks(businessData: any[]): MarketBenchmarks {
+  const prices: number[] = [];
+  const itemCounts: number[] = [];
+  
+  businessData.forEach(business => {
+    const menuResults = business.menu_results_v2;
+    if (!menuResults || menuResults.length === 0) return;
+    
+    menuResults.forEach((menu: any) => {
+      // Extract item count
+      if (menu.menu_items && Array.isArray(menu.menu_items)) {
+        itemCounts.push(menu.menu_items.length);
+      }
+      
+      // Extract prices from structured_data or menu_items
+      const items = menu.structured_data?.items || menu.menu_items || [];
+      items.forEach((item: any) => {
+        const price = item.price || item.priceAmount;
+        if (price && typeof price === 'number' && price > 0) {
+          prices.push(price);
+        }
+      });
+    });
+  });
+  
+  return {
+    prices,
+    itemCounts,
+    sampleSize: businessData.length
+  };
+}
+
+/**
  * Calculate how broad or narrow a business's appeal is
  * Returns: { score: 0-100, tier: 'narrow' | 'moderate' | 'broad' }
  * 
  * NARROW (0-33): Fine dining, tasting menus, highly curated experiences
  * MODERATE (34-66): Standard restaurants with clear positioning
  * BROAD (67-100): Casual, AYCE, cafés - fill-the-seats operations
+ * 
+ * NEW: Uses percentile-based scoring relative to market when possible
  */
-function calculateSegmentationBreadth(
+async function calculateSegmentationBreadth(
   programme: ProgrammeData,
   menu: MenuData,
   operations: OperationsData,
-  detectedFormat: string | null
-): { score: number; tier: 'narrow' | 'moderate' | 'broad' } {
+  detectedFormat: string | null,
+  marketBenchmarks: MarketBenchmarks | null
+): Promise<{ score: number; tier: 'narrow' | 'moderate' | 'broad' }> {
   let score = 50; // Start at moderate baseline
 
   // FORMAT SIGNALS (±20 points)
@@ -457,6 +596,7 @@ function calculateSegmentationBreadth(
   }
 
   // PRICE POSITIONING (±15 points)
+  // NEW: Use percentile-based scoring when market data available
   const prices = menu.items
     .map(item => item.price)
     .filter((p): p is number => p !== null && p !== undefined);
@@ -464,17 +604,51 @@ function calculateSegmentationBreadth(
   if (prices.length > 0) {
     const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
     
-    if (avgPrice < 100) score += 15;        // Budget-friendly
-    else if (avgPrice < 200) score += 5;    // Affordable
-    else if (avgPrice > 400) score -= 15;   // High-end
-    else if (avgPrice > 250) score -= 5;    // Premium
+    if (marketBenchmarks && marketBenchmarks.prices.length >= 10) {
+      // PERCENTILE-BASED SCORING (adaptive to market)
+      const pricePercentile = calculatePercentile(avgPrice, marketBenchmarks.prices);
+      
+      if (pricePercentile < 25) score += 15;        // Bottom quartile = budget-friendly
+      else if (pricePercentile < 40) score += 5;    // Below average = affordable
+      else if (pricePercentile > 75) score -= 15;   // Top quartile = premium/exclusive
+      else if (pricePercentile > 60) score -= 5;    // Above average = moderately premium
+      // 40-60 percentile = neutral (no adjustment)
+      
+      console.log(`   💰 Price percentile: ${pricePercentile}% (${avgPrice.toFixed(0)} vs market median ${marketBenchmarks.prices.sort((a,b) => a-b)[Math.floor(marketBenchmarks.prices.length/2)].toFixed(0)})`);
+    } else {
+      // FALLBACK: Hardcoded thresholds (for new markets or sparse data)
+      if (avgPrice < 100) score += 15;        // Budget-friendly
+      else if (avgPrice < 200) score += 5;    // Affordable
+      else if (avgPrice > 400) score -= 15;   // High-end
+      else if (avgPrice > 250) score -= 5;    // Premium
+      
+      console.log(`   💰 Price: ${avgPrice.toFixed(0)} DKK (using hardcoded thresholds - insufficient market data)`);
+    }
   }
 
   // MENU VARIETY (±10 points)
+  // NEW: Use percentile-based scoring when market data available
   const itemCount = menu.items.length;
-  if (itemCount >= 30) score += 10;        // Extensive variety
-  else if (itemCount >= 15) score += 5;    // Good variety
-  else if (itemCount < 8) score -= 10;     // Highly curated
+  
+  if (marketBenchmarks && marketBenchmarks.itemCounts.length >= 10) {
+    // PERCENTILE-BASED SCORING (adaptive to market)
+    const varietyPercentile = calculatePercentile(itemCount, marketBenchmarks.itemCounts);
+    
+    if (varietyPercentile > 75) score += 10;        // Top quartile = extensive variety
+    else if (varietyPercentile > 60) score += 5;    // Above average = good variety
+    else if (varietyPercentile < 25) score -= 10;   // Bottom quartile = highly curated
+    else if (varietyPercentile < 40) score -= 5;    // Below average = limited
+    // 40-60 percentile = neutral (no adjustment)
+    
+    console.log(`   📋 Variety percentile: ${varietyPercentile}% (${itemCount} items vs market median ${marketBenchmarks.itemCounts.sort((a,b) => a-b)[Math.floor(marketBenchmarks.itemCounts.length/2)]})`);
+  } else {
+    // FALLBACK: Hardcoded thresholds
+    if (itemCount >= 30) score += 10;        // Extensive variety
+    else if (itemCount >= 15) score += 5;    // Good variety
+    else if (itemCount < 8) score -= 10;     // Highly curated
+    
+    console.log(`   📋 Variety: ${itemCount} items (using hardcoded thresholds - insufficient market data)`);
+  }
 
   // OPERATIONS MODEL (±10 points)
   if (operations.accepts_walk_ins && !operations.reservation_required) {
@@ -1167,6 +1341,8 @@ export async function generateAudienceSegments(
   location: LocationData,
   operations: OperationsData,
   apiKey: string,
+  supabaseClient?: any,  // NEW: Optional Supabase client for market benchmarks
+  businessId?: string,   // NEW: Business ID for excluding self from benchmarks
   language: string = 'da'  // Multi-language support (default Danish)
 ): Promise<ProgrammeAudienceProfile> {
   // Log demographic guard status
@@ -1182,11 +1358,31 @@ export async function generateAudienceSegments(
     }
   }
 
+  // Fetch market benchmarks for percentile-based breadth calculation (if client provided)
+  let marketBenchmarks: MarketBenchmarks | null = null;
+  
+  if (supabaseClient && businessId && business.business_category && business.city) {
+    console.log(`📊 Fetching market benchmarks (category: ${business.business_category}, city: ${business.city})...`);
+    marketBenchmarks = await fetchMarketBenchmarks(
+      supabaseClient,
+      business.business_category,
+      'Denmark',  // TODO: Get from business.country when available
+      business.city,
+      businessId
+    );
+    
+    if (marketBenchmarks) {
+      console.log(`   ✅ Market data: ${marketBenchmarks.sampleSize} similar businesses, ${marketBenchmarks.prices.length} prices, ${marketBenchmarks.itemCounts.length} menus`);
+    } else {
+      console.log(`   ⚠️  Insufficient market data - using hardcoded thresholds`);
+    }
+  }
+
   // Detect programme format (needed for breadth calculation)
   const detectedFormat = detectProgrammeFormat(menu, programme.programme_type, programme.programme_name);
 
-  // Calculate segmentation breadth
-  const breadthResult = calculateSegmentationBreadth(programme, menu, operations, detectedFormat);
+  // Calculate segmentation breadth (now async with market benchmarks)
+  const breadthResult = await calculateSegmentationBreadth(programme, menu, operations, detectedFormat, marketBenchmarks);
   
   console.log(`📊 Segmentation Breadth: ${breadthResult.tier.toUpperCase()} (score: ${breadthResult.score}/100)`);
   console.log(`   Format: ${detectedFormat || 'none detected'}, Avg price: ${menu.items.filter(i => i.price).length > 0 ? Math.round(menu.items.filter(i => i.price).map(i => i.price!).reduce((a,b) => a+b, 0) / menu.items.filter(i => i.price).length) : 'N/A'} DKK, Items: ${menu.items.length}`);

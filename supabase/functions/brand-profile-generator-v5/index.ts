@@ -1154,7 +1154,9 @@ serve(async (req) => {
           booking_url: bookingUrl
         },
         openAiKey,
-        language  // Multi-language support
+        supabaseClient,  // NEW: Pass Supabase client for market benchmarks
+        businessId,      // NEW: Pass business ID for excluding self from benchmarks
+        language         // Multi-language support
       )
 
       console.log(`[${requestId}] ✅ ${programme.label}: ${audienceProfile.audience_segments.length} segments`)
