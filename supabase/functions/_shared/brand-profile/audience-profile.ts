@@ -442,25 +442,31 @@ function determineSegmentCount(
   if (menuItemCount >= 20) score += 2;
   else if (menuItemCount >= 10) score += 1;
 
-  // Hours span (0-2 points)
+  // Hours span (0-2 points) — UPDATED: Longer hours need more segments for daypart coverage
   const hoursSpan = calculateHoursSpan(programme.time_windows);
-  if (hoursSpan >= 6) score += 2;
-  else if (hoursSpan >= 4) score += 1;
+  if (hoursSpan >= 8) score += 2;  // 8+ hours = likely lunch + dinner → need coverage
+  else if (hoursSpan >= 5) score += 1;
 
-  // Location complexity (0-2 points)
-  if (location.area_type === "tourist_area") score += 2;
+  // Multi-day operation (0-2 points) — UPDATED: 7-day operation needs weekday + weekend coverage
+  const operatingDays = programme.operating_days?.length || 0;
+  if (operatingDays >= 6) score += 2;  // 6-7 days = need weekday + weekend segments
+  else if (operatingDays >= 3) score += 1;
+
+  // Location complexity (0-1 point)
+  if (location.area_type === "tourist_area") score += 1;
   else if (location.area_type === "urban_center") score += 1;
 
-  // Programme type signals (0-2 points)
+  // Programme type signals (0-1 point)
   const complexProgrammes = ["brunch", "lunch", "all_day"];
   const simpleProgrammes = ["bar", "late_night"];
   if (complexProgrammes.includes(programme.programme_type)) score += 1;
   if (simpleProgrammes.includes(programme.programme_type)) score -= 1;
 
   // Map score to segment count (2-4)
-  if (score >= 6) return 4;
-  if (score >= 4) return 3;
-  return 2;
+  // UPDATED scoring: Prioritize time/day coverage over menu variety
+  if (score >= 6) return 4;  // Complex: long hours + multi-day + variety
+  if (score >= 4) return 3;  // Moderate: some coverage needs
+  return 2;                   // Simple: limited hours or days
 }
 
 function calculateHoursSpan(timeWindows: string[]): number {
@@ -514,6 +520,9 @@ function buildAudiencePrompt(
   
   // For mixed programmes, guide AI to be SPECIFIC per segment
   const isMixedProgramme = commercialOrientation.decision_timing === 'mixed';
+
+  // Calculate hours span for daypart coverage requirements
+  const hoursSpan = calculateHoursSpan(programme.time_windows);
 
   // Build demographic proximity signals section (NEW ARCHITECTURE)
   const demographicProximitySection = buildDemographicProximitySignalsSection(location, language);
@@ -615,6 +624,33 @@ SEKTION C — ANLEDNINGSLOGIK
 
 OPGAVE: Generer præcis ${targetSegmentCount} målgruppesegmenter for ${programme.programme_name}.
 
+⏰ KRITISK: DÆKNINGSKRAV FOR TIDSVINDUER
+Dette programme opererer ${programme.time_windows.join(', ')} på ${programme.operating_days.join(', ')}.
+${hoursSpan >= 6 ? `
+Med ${hoursSpan.toFixed(0)} timers åbningstid SKAL dine segmenter dække FORSKELLIGE DAYPARTS:
+• Hvis åbent til frokost (11:00-15:00) → mindst ét segment skal dække dette vindue
+• Hvis åbent til aftensmad (17:00-22:00) → mindst ét segment skal dække dette vindue
+• Hvis åbent alle 7 dage → segmenter skal dække BÅDE hverdage OG weekend (ikke kun weekend)
+
+FORBUDT: Alle segmenter med samme timing (fx alle "Fredag 18:00-22:00")
+PÅKRÆVET: Segmenter skal hjælpe drive business på FORSKELLIGE tidspunkter og dage
+` : ''}
+${programme.operating_days.length >= 6 ? `
+📅 KRITISK: DAG-DÆKNINGSKRAV
+Dette sted er åbent ${programme.operating_days.length} dage om ugen (inkl. hverdage).
+• Mindst ét segment SKAL dække hverdage (Man-Tors) — hjælp fyld hverdagsslots
+• Mindst ét segment SKAL dække weekend (Fre-Søn) — dæk peak demand
+• Forskellige segments kan dække FORSKELLIGE dage baseret på deres motivation og context
+
+Eksempel korrekt fordeling for 7-dages operation:
+✓ Familier på weekendmiddag (Lør-Søn 12:00-16:00) — weekend lunch
+✓ Erhverv på hverdagsfrokost (Man-Fre 12:00-14:00) — weekday lunch  
+✓ Par på hverdagsaften (Tir-Tor 18:00-21:00) — mid-week dinner
+✓ Vennegrupper på fredagsaften (Fre 18:00-22:00) — peak weekend start
+
+Eksempel FORKERT (kun peak times):
+✗ Alle segmenter er Fredag eller Weekend — ignorerer Man-Tors helt
+` : ''}
 VÆLG FRA DISSE KANONISKE TYPER:
 Du SKAL vælge fra præcis én af disse 7 universelle typer for hver segment:
 • Familier — forældre med børn eller multi-generationelle grupper
