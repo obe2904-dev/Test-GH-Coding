@@ -467,102 +467,144 @@ async function fetchMarketBenchmarks(
     const minSampleSize = 10;
     
     // Try 1: Same city + same category
-    let query = supabaseClient
+    // Note: Fetch business IDs first, then menu data separately to avoid join issues
+    let businessQuery = supabaseClient
       .from('businesses')
-      .select(`
-        id,
-        business_category,
-        city,
-        menu_results_v2!inner(menu_items, structured_data)
-      `)
+      .select('id, business_category, city')
       .eq('country', country)
       .eq('business_category', businessCategory)
       .neq('id', currentBusinessId);  // Exclude current business
     
     if (city) {
-      query = query.eq('city', city);
+      businessQuery = businessQuery.eq('city', city);
     }
     
-    const { data: cityData } = await query.limit(100);
+    const { data: cityBusinesses, error: cityError } = await businessQuery.limit(100);
     
-    // If we have enough data from city, use it
-    if (cityData && cityData.length >= minSampleSize) {
-      return extractBenchmarks(cityData);
+    if (cityError) {
+      console.error('⚠️  Error fetching city businesses:', cityError);
+      return null;
+    }
+    
+    // If we have enough businesses, fetch their menus
+    if (cityBusinesses && cityBusinesses.length >= minSampleSize) {
+      const businessIds = cityBusinesses.map((b: any) => b.id);
+      const { data: menuData, error: menuError } = await supabaseClient
+        .from('menu_results_v2')
+        .select('business_id, menu_items, structured_data')
+        .in('business_id', businessIds)
+        .eq('status', 'done')
+        .limit(200);
+      
+      if (!menuError && menuData && menuData.length > 0) {
+        const benchmarks = extractBenchmarks(menuData);
+        if (benchmarks.sampleSize >= minSampleSize) {
+          console.log(`   ✅ Market data from city: ${benchmarks.sampleSize} businesses`);
+          return benchmarks;
+        }
+      }
     }
     
     // Try 2: Same country + same category (broader)
-    const { data: countryData } = await supabaseClient
+    const { data: countryBusinesses, error: countryError } = await supabaseClient
       .from('businesses')
-      .select(`
-        id,
-        business_category,
-        menu_results_v2!inner(menu_items, structured_data)
-      `)
+      .select('id')
       .eq('country', country)
       .eq('business_category', businessCategory)
       .neq('id', currentBusinessId)
       .limit(100);
     
-    if (countryData && countryData.length >= minSampleSize) {
-      return extractBenchmarks(countryData);
+    if (!countryError && countryBusinesses && countryBusinesses.length >= minSampleSize) {
+      const businessIds = countryBusinesses.map((b: any) => b.id);
+      const { data: menuData, error: menuError } = await supabaseClient
+        .from('menu_results_v2')
+        .select('business_id, menu_items, structured_data')
+        .in('business_id', businessIds)
+        .eq('status', 'done')
+        .limit(200);
+      
+      if (!menuError && menuData && menuData.length > 0) {
+        const benchmarks = extractBenchmarks(menuData);
+        if (benchmarks.sampleSize >= minSampleSize) {
+          console.log(`   ✅ Market data from country: ${benchmarks.sampleSize} businesses`);
+          return benchmarks;
+        }
+      }
     }
     
     // Try 3: Same country, all categories (fallback)
-    const { data: allData } = await supabaseClient
+    const { data: allBusinesses, error: allError } = await supabaseClient
       .from('businesses')
-      .select(`
-        id,
-        menu_results_v2!inner(menu_items, structured_data)
-      `)
+      .select('id')
       .eq('country', country)
       .neq('id', currentBusinessId)
       .limit(100);
     
-    if (allData && allData.length >= minSampleSize) {
-      return extractBenchmarks(allData);
+    if (!allError && allBusinesses && allBusinesses.length >= minSampleSize) {
+      const businessIds = allBusinesses.map((b: any) => b.id);
+      const { data: menuData, error: menuError } = await supabaseClient
+        .from('menu_results_v2')
+        .select('business_id, menu_items, structured_data')
+        .in('business_id', businessIds)
+        .eq('status', 'done')
+        .limit(200);
+      
+      if (!menuError && menuData && menuData.length > 0) {
+        const benchmarks = extractBenchmarks(menuData);
+        if (benchmarks.sampleSize >= minSampleSize) {
+          console.log(`   ✅ Market data from all country categories: ${benchmarks.sampleSize} businesses`);
+          return benchmarks;
+        }
+      }
     }
     
     // Insufficient data - return null to trigger fallback
+    console.log('   ⚠️  Insufficient market data (<10 businesses) - using fallback thresholds');
     return null;
     
   } catch (error) {
     console.error('⚠️  Failed to fetch market benchmarks:', error);
+    // CRITICAL: Return null to trigger fallback, don't let error propagate
     return null;
   }
 }
 
 /**
- * Extract price and item count benchmarks from business data
+ * Extract price and item count benchmarks from menu data
+ * @param menuData Array of menu_results_v2 records
  */
-function extractBenchmarks(businessData: any[]): MarketBenchmarks {
+function extractBenchmarks(menuData: any[]): MarketBenchmarks {
   const prices: number[] = [];
   const itemCounts: number[] = [];
+  const businessIds = new Set<string>();
   
-  businessData.forEach(business => {
-    const menuResults = business.menu_results_v2;
-    if (!menuResults || menuResults.length === 0) return;
+  menuData.forEach(menu => {
+    // Track unique businesses
+    if (menu.business_id) {
+      businessIds.add(menu.business_id);
+    }
     
-    menuResults.forEach((menu: any) => {
-      // Extract item count
-      if (menu.menu_items && Array.isArray(menu.menu_items)) {
-        itemCounts.push(menu.menu_items.length);
-      }
-      
-      // Extract prices from structured_data or menu_items
-      const items = menu.structured_data?.items || menu.menu_items || [];
+    // Extract item count from menu_items
+    if (menu.menu_items && Array.isArray(menu.menu_items)) {
+      itemCounts.push(menu.menu_items.length);
+    }
+    
+    // Extract prices from structured_data or menu_items
+    const items = menu.structured_data?.items || menu.menu_items || [];
+    if (Array.isArray(items)) {
       items.forEach((item: any) => {
         const price = item.price || item.priceAmount;
         if (price && typeof price === 'number' && price > 0) {
           prices.push(price);
         }
       });
-    });
+    }
   });
   
   return {
     prices,
     itemCounts,
-    sampleSize: businessData.length
+    sampleSize: businessIds.size,  // Use unique business count
   };
 }
 
@@ -1361,28 +1403,41 @@ export async function generateAudienceSegments(
   // Fetch market benchmarks for percentile-based breadth calculation (if client provided)
   let marketBenchmarks: MarketBenchmarks | null = null;
   
-  if (supabaseClient && businessId && business.business_category && business.city) {
-    console.log(`📊 Fetching market benchmarks (category: ${business.business_category}, city: ${business.city})...`);
-    marketBenchmarks = await fetchMarketBenchmarks(
-      supabaseClient,
-      business.business_category,
-      'Denmark',  // TODO: Get from business.country when available
-      business.city,
-      businessId
-    );
-    
-    if (marketBenchmarks) {
-      console.log(`   ✅ Market data: ${marketBenchmarks.sampleSize} similar businesses, ${marketBenchmarks.prices.length} prices, ${marketBenchmarks.itemCounts.length} menus`);
-    } else {
-      console.log(`   ⚠️  Insufficient market data - using hardcoded thresholds`);
+  try {
+    if (supabaseClient && businessId && business.business_category && business.city) {
+      console.log(`📊 Fetching market benchmarks (category: ${business.business_category}, city: ${business.city})...`);
+      marketBenchmarks = await fetchMarketBenchmarks(
+        supabaseClient,
+        business.business_category,
+        'Denmark',  // TODO: Get from business.country when available
+        business.city,
+        businessId
+      );
+      
+      if (marketBenchmarks) {
+        console.log(`   ✅ Market data: ${marketBenchmarks.sampleSize} similar businesses, ${marketBenchmarks.prices.length} prices, ${marketBenchmarks.itemCounts.length} menus`);
+      } else {
+        console.log(`   ⚠️  Insufficient market data - using hardcoded thresholds`);
+      }
     }
+  } catch (error) {
+    console.error('⚠️  Error fetching market benchmarks, falling back to hardcoded thresholds:', error);
+    marketBenchmarks = null;  // Ensure we use fallback
   }
 
   // Detect programme format (needed for breadth calculation)
   const detectedFormat = detectProgrammeFormat(menu, programme.programme_type, programme.programme_name);
 
   // Calculate segmentation breadth (now async with market benchmarks)
-  const breadthResult = await calculateSegmentationBreadth(programme, menu, operations, detectedFormat, marketBenchmarks);
+  // Wrap in try-catch to ensure graceful degradation if calculation fails
+  let breadthResult: { score: number; tier: 'narrow' | 'moderate' | 'broad' };
+  try {
+    breadthResult = await calculateSegmentationBreadth(programme, menu, operations, detectedFormat, marketBenchmarks);
+  } catch (error) {
+    console.error('⚠️  Error calculating breadth, using default MODERATE tier:', error);
+    // Fallback to moderate tier if calculation fails
+    breadthResult = { score: 50, tier: 'moderate' };
+  }
   
   console.log(`📊 Segmentation Breadth: ${breadthResult.tier.toUpperCase()} (score: ${breadthResult.score}/100)`);
   console.log(`   Format: ${detectedFormat || 'none detected'}, Avg price: ${menu.items.filter(i => i.price).length > 0 ? Math.round(menu.items.filter(i => i.price).map(i => i.price!).reduce((a,b) => a+b, 0) / menu.items.filter(i => i.price).length) : 'N/A'} DKK, Items: ${menu.items.length}`);
