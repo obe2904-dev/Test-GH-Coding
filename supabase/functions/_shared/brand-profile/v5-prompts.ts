@@ -71,9 +71,9 @@ KRITISKE PRINCIPPER:
    NOTE: Walk-in only ≠ automatisk spontaneous (se foodtruck eksempel ovenfor)
 
 3. DECISION TIMING OPTIONS:
-   - "spontaneous_walk_in": Same-day decision (0-2 timer før besøg) → 60-70% footfall baseline
-   - "planned_reservation": Advance booking (1-7 dage før) → 25-35% footfall baseline  
-   - "mixed": BÅDE spontan og planlagt → 40-50% footfall baseline (balanced)
+   - "last_minute": Same-day decision (0-2 timer før besøg) → 60-70% footfall baseline
+   - "planned": Advance booking (1-7 dage før) → 25-35% footfall baseline  
+   - "hybrid": BÅDE spontan og planlagt → 40-50% footfall baseline (balanced)
 
 4. 6 CONTENT TYPES mapper til 3 GOAL MODES:
    - Drive Footfall: Product + Urgency (synlig menu, tidsbegrænset appel)
@@ -92,7 +92,7 @@ OUTPUT FORMAT (JSON):
     "strengthen_brand": <0-100>,
     "retain_regulars": <0-100>
   },
-  "decision_timing": "spontaneous_walk_in" | "planned_reservation" | "mixed",
+  "decision_timing": "last_minute" | "planned" | "hybrid",
   "content_type_affinity": {
     "product": <0-100>,
     "place": <0-100>,
@@ -357,9 +357,17 @@ DECISION_TIMING OPTIONS:
 - "mixed": Begge (nogen booker, nogen dropper ind)
 
 GOAL_CONTRIBUTION OPTIONS:
-- "drive_footfall": Fyld lokalet, øg omsætning, tiltræk nye gæster
-- "strengthen_brand": Byg brand awareness, create content moments
+- "drive_footfall": Fyld lokalet med walk-in gæster (brug KUN hvis accepts_walk_ins = TRUE)
+- "drive_booking": Motivér til at booke bord (brug KUN hvis booking_url findes ELLER reservation_required = TRUE)
+- "strengthen_brand": Byg brand awareness, create content moments  
 - "retain_regulars": Fasthold stamgæster, community building
+
+VIGTIG REGEL FOR MÅL-VALG:
+- Hvis BÅDE accepts_walk_ins OG booking_url findes → segmenter kan have FORSKELLIGE mål afhængigt af kontekst
+  Eksempel: Familier (lørdag frokost) = drive_footfall, Par (fredag aften) = drive_booking
+- Hvis KUN accepts_walk_ins = TRUE (ingen booking_url) → ALLE segmenter SKAL bruge "drive_footfall"
+- Hvis KUN reservation_required = TRUE (booking påkrævet) → ALLE segmenter SKAL bruge "drive_booking"
+- "strengthen_brand" og "retain_regulars" er ALTID tilladte uanset operations setup
 
 VALIDERINGSKRAV:
 1. Antal segments = mellem 2 og 4
@@ -1231,6 +1239,27 @@ Spørgsmål:
 - Hvilken tone passer til denne placering?
 - Hvilke ord/fraser er naturlige vs. unaturlige her?
 
+⚠️ MULTI-DIMENSION LOCATIONS:
+Hvis FLERE dimensioner scorer højt (>= 80):
+- Waterfront 95 + City Centre 85 → BEGGE er relevante
+- Include phrases for BOTH dimensions i natural_vocabulary
+- Eksempel: ["ved åen", "i hjertet af byen", "på Åboulevarden", "ved vandet", "i centrum"]
+
+⚠️ LANDMARKS & SPECIFICITY:
+Tjek location_intelligence.landmarks_nearby for konkrete stednavne:
+- Hvis "Åboulevarden" exists → include "på Åboulevarden" i natural_vocabulary
+- Hvis "Nyhavn" exists → include "i Nyhavn"
+- Brug specifikke stednavne, ikke kun generiske beskrivelser
+
+⚠️ VARIATION REQUIREMENT:
+natural_vocabulary skal have 4-6 VARIEREDE fraser:
+1. Primær dimension (f.eks. "ved åen")
+2. Specifik landmark (f.eks. "på Åboulevarden") 
+3. Sekundær dimension hvis score >= 80 (f.eks. "i centrum")
+4-6. Variations (f.eks. "ved vandet", "i hjertet af Aarhus")
+
+FORMÅL: Undgå repetition - AI skal ROTERE mellem disse fraser i posts
+
 Eksempler:
 - Waterfront 95 score → "Casual-visual", reference location kraftigt, outdoor vibes
 - City centre 85 score → "Urban-energetic", bylivsappel, quick access framing
@@ -1292,6 +1321,29 @@ Spørgsmål:
 - Studerende-demografi = tilgængelighedskrav?
 - Turist-demografi = visual/international appeal?
 
+**F. HUMOR CHARACTER** (kun hvis personality antyder humor)
+
+⚠️ DEFAULT: CONSERVATIVE — de fleste forretninger får 'subtle' eller 'none'
+
+Humor er RISIKABELT. Kun anbefal 'playful' hvis STÆRK evidens fra:
+
+1. **MENU NAMING**: Puns, ordspil, uventede navne?
+   - Nej → subtle/none
+   - Ja → playful (men specificer HOW)
+
+2. **OM OS TONE**: Selvironi? Lettere tone? Entusiasme?
+   - Faktuel/beskrivende → none
+   - Varm men grounded → subtle
+   - Tydelig playfulness → playful
+
+3. **DANSK KULTUR**: Understated > performativ
+   - Default: "Understated confidence"
+   - Undgå: Forced enthusiasm, effusiv tone
+
+OUTPUT (kun hvis humor > 'none'):
+- execution_style: Én sætning om HOW de er sjove (ikke bare at de ER)
+- tone_descriptors: Adjektiver inkl. hvad de skal UNDGÅ ("NOT effusive")
+
 ═══════════════════════════════════════════════════════════
 TRIN 3: SYNTESÉR ANBEFALING
 ═══════════════════════════════════════════════════════════
@@ -1306,7 +1358,7 @@ Kom med KONKRET anbefaling baseret på analyse:
 2. **LOCATION DRIVER GUIDANCE**
    - Primary dimension + strategic importance
    - Tone implications (hvorfor det påvirker tone)
-   - Natural vocabulary (ord der passer)
+   - Natural vocabulary: Array af 4-6 VARIEREDE location phrases (primær dimension, landmarks, sekundær dimension hvis >= 80 score, variations)
    - Avoid vocabulary (ord der clasher)
 
 3. **CULINARY CHARACTER GUIDANCE**
@@ -1378,6 +1430,11 @@ Returner NØJAGTIGT denne JSON struktur:
     "cultural_norms": "Dansk no-hype kultur",
     "competition_differentiation": "Location er primær differentieringsparameter",
     "demographic_implications": ["Student-tilgængelighed", "Turist-visual appeal"]
+  },
+  "humor_character": {
+    "permission_level": "subtle",
+    "execution_style": "Understated confidence — humor i menuvariationen ikke i sproget",
+    "tone_descriptors": ["grounded", "varm", "NOT effusiv", "NOT punny"]
   },
   "strategic_summary": "Given waterfront location (95 score), value price positioning, casual Danish-International fusion menu, and student/tourist demographics, the optimal tone is casual-warm with strong location references because the waterfront is the primary USP that works across all dayparts and audience segments.",
   "tone_do_list": [

@@ -118,7 +118,7 @@ export interface AudienceSegment {
   segment_size: string;             // "primary" | "secondary" | "niche"
   motivation: string;               // "social_gathering" | "convenience" | "experience_seeking"
   decision_timing: string;          // "spontaneous" | "planned" | "mixed"
-  goal_contribution: string;        // "drive_footfall" | "strengthen_brand" | "retain_regulars"
+  goal_contribution: string;        // "drive_footfall" | "drive_booking" | "strengthen_brand" | "retain_regulars"
   evidence: string[];               // ["Menu has børneportioner", "Weekend hours 09:00-13:00"]
   concept_fit_reason: string;       // Why this segment fits the business concept + location (REQUIRED)
   situation?: string;               // Concrete occasion description (e.g., "Familier med børn der ønsker...")
@@ -211,6 +211,14 @@ interface LocationData {
     nearest_transit?: { name: string; distance_meters: number };
     parking_within_300m?: boolean;
   };
+}
+
+interface OperationsData {
+  accepts_walk_ins: boolean;        // TRUE = footfall possible
+  reservation_required: boolean;    // TRUE = booking required (walk-ins false)
+  has_table_service: boolean;       // Affects service style
+  has_takeaway: boolean;            // Enables takeaway goal
+  booking_url: string | null;       // If set, booking goal available
 }
 
 // ===== FORMAT-OCCASION MAPPING =====
@@ -484,6 +492,7 @@ function buildAudiencePrompt(
   commercialOrientation: CommercialOrientationData,
   identity: IdentityData | undefined,
   location: LocationData,
+  operations: OperationsData,
   targetSegmentCount: number,
   language: string = 'da'
 ): string {
@@ -559,6 +568,12 @@ Program: ${programme.programme_name} (${programme.programme_type})
 Åbningstider: ${programme.time_windows.join(', ')}
 Åbningsdage: ${programme.operating_days.join(', ')}
 ${programme.meal_periods && programme.meal_periods.length > 0 ? `Måltidsperioder dækket: ${programme.meal_periods.join(', ')} (afledt fra tidsvindue)\n` : ''}${programme.day_pattern ? `Dagsmønster: ${programme.day_pattern}\n` : ''}${programme.languageVariants && programme.languageVariants.length > 1 ? `Menusprog: ${programme.languageVariants.join(', ')} (→ internationalt publikum)\n` : ''}
+OPERATIONS MODEL:
+Walk-ins: ${operations.accepts_walk_ins ? 'JA (footfall mål tilgængeligt)' : 'NEJ'}
+Bordbooking: ${operations.booking_url ? `JA - booking_url findes (booking mål tilgængeligt)` : operations.reservation_required ? 'PÅKRÆVET (booking mål SKAL bruges)' : 'NEJ'}
+Bordservice: ${operations.has_table_service ? 'JA' : 'NEJ'}
+Takeaway: ${operations.has_takeaway ? 'JA' : 'NEJ'}
+${operations.booking_url ? `→ Dette sted har BÅDE walk-in OG booking → segmenter kan vælge FORSKELLIGE mål afhængigt af timing/kontekst\n` : operations.accepts_walk_ins ? `→ KUN walk-in → brug primært "drive_footfall" mål\n` : operations.reservation_required ? `→ Booking PÅKRÆVET → brug "drive_booking" mål\n` : ''}
 MENU FORMAT${detectedFormat ? ` (${detectedFormat})` : ''}:
 ${menuItems}
 
@@ -896,7 +911,7 @@ function validateAudienceProfile(
       errors.push(`Segment ${index + 1}: invalid decision_timing "${segment.decision_timing}"`);
     }
 
-    if (!["drive_footfall", "strengthen_brand", "retain_regulars"].includes(segment.goal_contribution)) {
+    if (!["drive_footfall", "drive_booking", "strengthen_brand", "retain_regulars"].includes(segment.goal_contribution)) {
       errors.push(`Segment ${index + 1}: invalid goal_contribution "${segment.goal_contribution}"`);
     }
   });
@@ -988,6 +1003,7 @@ export async function generateAudienceSegments(
   commercialOrientation: CommercialOrientationData,
   identity: IdentityData | undefined,
   location: LocationData,
+  operations: OperationsData,
   apiKey: string,
   language: string = 'da'  // Multi-language support (default Danish)
 ): Promise<ProgrammeAudienceProfile> {
@@ -1018,6 +1034,7 @@ export async function generateAudienceSegments(
     commercialOrientation,
     identity,
     location,
+    operations,
     targetSegmentCount,
     language  // Pass language to prompt builder
   );

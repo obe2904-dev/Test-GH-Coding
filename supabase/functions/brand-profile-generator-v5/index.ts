@@ -495,15 +495,17 @@ serve(async (req) => {
 
     console.log(`[${requestId}] ✅ Legacy voice data: ${existingProfile?.tone_model || existingProfile?.voice_constraints ? 'Found (tone_model/constraints)' : 'Not found'}`)
 
-    // Fetch business_profile for Om Os text (user-written about text)
+    // Fetch business_profile for Om Os text (user-written about text) and booking_url
     const { data: businessProfile } = await supabaseClient
       .from('business_profile')
-      .select('long_description')
+      .select('long_description, booking_url')
       .eq('business_id', businessId)
       .maybeSingle()
 
     const omOsText = businessProfile?.long_description || ''
+    const bookingUrl = businessProfile?.booking_url || null
     console.log(`[${requestId}] ✅ Om Os: ${omOsText ? `${omOsText.length} characters` : 'Not set'}`)
+    console.log(`[${requestId}] ✅ Booking URL: ${bookingUrl || 'Not set'}`)
 
     // Fetch menu extraction results with AI summaries and structured data
     // Filter by language to use only Danish menus (exclude English tourist menus)
@@ -1143,6 +1145,13 @@ serve(async (req) => {
           // V5.7: Pass reachable_demographics from location strategy (generated in Step 2.7)
           reachable_demographics: locationStrategy?.reachable_demographics,
           physical_context: location?.physical_context
+        },
+        {
+          accepts_walk_ins: operations?.accepts_walk_ins ?? true,
+          reservation_required: operations?.reservation_required ?? false,
+          has_table_service: operations?.has_table_service ?? true,
+          has_takeaway: operations?.has_takeaway ?? false,
+          booking_url: bookingUrl
         },
         openAiKey,
         language  // Multi-language support
