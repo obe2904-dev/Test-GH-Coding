@@ -428,12 +428,99 @@ interface LocationData {
   };
 }
 
+// ===== SEGMENTATION BREADTH CALCULATOR =====
+
+/**
+ * Calculate how broad or narrow a business's appeal is
+ * Returns: { score: 0-100, tier: 'narrow' | 'moderate' | 'broad' }
+ * 
+ * NARROW (0-33): Fine dining, tasting menus, highly curated experiences
+ * MODERATE (34-66): Standard restaurants with clear positioning
+ * BROAD (67-100): Casual, AYCE, cafés - fill-the-seats operations
+ */
+function calculateSegmentationBreadth(
+  programme: ProgrammeData,
+  menu: MenuData,
+  operations: OperationsData,
+  detectedFormat: string | null
+): { score: number; tier: 'narrow' | 'moderate' | 'broad' } {
+  let score = 50; // Start at moderate baseline
+
+  // FORMAT SIGNALS (±20 points)
+  const broadFormats = ['ayce', 'buffet', 'brunch_buffet', 'fast_casual', 'table_grill'];
+  const narrowFormats = ['tasting_menu'];
+  
+  if (detectedFormat && broadFormats.includes(detectedFormat)) {
+    score += 20;
+  } else if (detectedFormat && narrowFormats.includes(detectedFormat)) {
+    score -= 20;
+  }
+
+  // PRICE POSITIONING (±15 points)
+  const prices = menu.items
+    .map(item => item.price)
+    .filter((p): p is number => p !== null && p !== undefined);
+  
+  if (prices.length > 0) {
+    const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    
+    if (avgPrice < 100) score += 15;        // Budget-friendly
+    else if (avgPrice < 200) score += 5;    // Affordable
+    else if (avgPrice > 400) score -= 15;   // High-end
+    else if (avgPrice > 250) score -= 5;    // Premium
+  }
+
+  // MENU VARIETY (±10 points)
+  const itemCount = menu.items.length;
+  if (itemCount >= 30) score += 10;        // Extensive variety
+  else if (itemCount >= 15) score += 5;    // Good variety
+  else if (itemCount < 8) score -= 10;     // Highly curated
+
+  // OPERATIONS MODEL (±10 points)
+  if (operations.accepts_walk_ins && !operations.reservation_required) {
+    score += 5; // Easy access
+  }
+  if (operations.has_takeaway) {
+    score += 5; // Broader reach
+  }
+  if (operations.reservation_required && !operations.accepts_walk_ins) {
+    score -= 10; // Exclusive
+  }
+
+  // PROGRAMME TYPE (±10 points)
+  const casualProgrammes = ['all_day', 'cafe', 'bar', 'lunch'];
+  const exclusiveProgrammes = ['dinner', 'wine_bar'];
+  
+  if (casualProgrammes.includes(programme.programme_type)) {
+    score += 5;
+  } else if (exclusiveProgrammes.includes(programme.programme_type)) {
+    score -= 5;
+  }
+
+  // HOURS SPAN (±5 points)
+  const hoursSpan = calculateHoursSpan(programme.time_windows);
+  if (hoursSpan >= 10) score += 5;  // All-day operation
+  else if (hoursSpan <= 3) score -= 5;  // Limited service window
+
+  // Clamp to 0-100
+  score = Math.max(0, Math.min(100, score));
+
+  // Map to tiers
+  let tier: 'narrow' | 'moderate' | 'broad';
+  if (score <= 33) tier = 'narrow';
+  else if (score >= 67) tier = 'broad';
+  else tier = 'moderate';
+
+  return { score, tier };
+}
+
 // ===== AI COMPLEXITY DETECTOR =====
 
 function determineSegmentCount(
   programme: ProgrammeData,
   menu: MenuData,
-  location: LocationData
+  location: LocationData,
+  breadth: 'narrow' | 'moderate' | 'broad'
 ): number {
   let score = 0;
 
@@ -462,11 +549,21 @@ function determineSegmentCount(
   if (complexProgrammes.includes(programme.programme_type)) score += 1;
   if (simpleProgrammes.includes(programme.programme_type)) score -= 1;
 
-  // Map score to segment count (2-4)
+  // BREADTH CALIBRATION: Adjust max segments based on business appeal breadth
+  let maxSegments: number;
+  if (breadth === 'narrow') {
+    maxSegments = 2;  // Focused brand - quality over coverage
+  } else if (breadth === 'broad') {
+    maxSegments = 4;  // Fill-the-seats - opportunistic segments allowed
+  } else {
+    maxSegments = 3;  // Moderate - current behavior
+  }
+
+  // Map score to segment count (2-maxSegments)
   // UPDATED scoring: Prioritize time/day coverage over menu variety
-  if (score >= 6) return 4;  // Complex: long hours + multi-day + variety
-  if (score >= 4) return 3;  // Moderate: some coverage needs
-  return 2;                   // Simple: limited hours or days
+  if (score >= 6) return Math.min(maxSegments, 4);  // Complex: long hours + multi-day + variety
+  if (score >= 4) return Math.min(maxSegments, 3);  // Moderate: some coverage needs
+  return 2;                                          // Simple: limited hours or days
 }
 
 function calculateHoursSpan(timeWindows: string[]): number {
@@ -500,6 +597,7 @@ function buildAudiencePrompt(
   location: LocationData,
   operations: OperationsData,
   targetSegmentCount: number,
+  breadthTier: 'narrow' | 'moderate' | 'broad',
   language: string = 'da'
 ): string {
   const menuItems = menu.items.slice(0, 15).map(item => 
@@ -624,6 +722,20 @@ SEKTION C — ANLEDNINGSLOGIK
 
 OPGAVE: Generer præcis ${targetSegmentCount} målgruppesegmenter for ${programme.programme_name}.
 
+🎯 SEGMENTERINGS-BREDDE: ${breadthTier.toUpperCase()}
+${breadthTier === 'narrow' ? `Dette er en FOKUSERET brand (fine dining, tasting menu, eksklusiv oplevelse):
+• KUN segmenter med STÆRK concept_fit (format + location + occasion passer perfekt)
+• Prioritér brand-purity over at fylde alle tidsvinduer
+• Acceptér at nogle slots kan være tomme — det er bedre end at udvande brandopfattelsen
+` : breadthTier === 'broad' ? `Dette er en BRED-APPEL forretning (AYCE, café, casual dining, street food):
+• Acceptable at strække segmenter for at fylde kapacitet
+• Tomme seats = tabt revenue — opportunistiske segmenter er OK hvis concept_fit er rimelig (ikke perfekt)
+• Weekday/off-peak slots SKAL dækkes — hjælp forretningen drive business på stille dage
+` : `Dette er en MODERAT brand (standard restaurant med klar positionering):
+• Balancér brand-fit med kommerciel realitet
+• Primære segmenter skal have stærk concept_fit
+• Sekundære segmenter kan være mere opportunistiske hvis de fylder vigtige gaps
+`}
 ⏰ KRITISK: DÆKNINGSKRAV FOR TIDSVINDUER
 Dette programme opererer ${programme.time_windows.join(', ')} på ${programme.operating_days.join(', ')}.
 ${hoursSpan >= 6 ? `
@@ -766,6 +878,20 @@ SECTION C — OCCASION LOGIC
 
 TASK: Generate exactly ${targetSegmentCount} audience segments for ${programme.programme_name}.
 
+🎯 SEGMENTATION BREADTH: ${breadthTier.toUpperCase()}
+${breadthTier === 'narrow' ? `This is a FOCUSED brand (fine dining, tasting menu, exclusive experience):
+• ONLY segments with STRONG concept_fit (format + location + occasion align perfectly)
+• Prioritize brand purity over filling all time slots
+• Accept that some slots may be empty — better than diluting brand perception
+` : breadthTier === 'broad' ? `This is a BROAD-APPEAL business (AYCE, café, casual dining, street food):
+• Acceptable to stretch segments to fill capacity
+• Empty seats = lost revenue — opportunistic segments OK if concept_fit is reasonable (not perfect)
+• Weekday/off-peak slots MUST be covered — help business drive revenue on quiet days
+` : `This is a MODERATE brand (standard restaurant with clear positioning):
+• Balance brand fit with commercial reality
+• Primary segments should have strong concept_fit
+• Secondary segments can be more opportunistic if they fill important gaps
+`}
 For each potential segment, reason through the following:
 
 1. Does the business FORMAT suit this type of person?
@@ -1056,13 +1182,22 @@ export async function generateAudienceSegments(
     }
   }
 
-  // Determine optimal segment count
-  const targetSegmentCount = determineSegmentCount(programme, menu, location);
+  // Detect programme format (needed for breadth calculation)
+  const detectedFormat = detectProgrammeFormat(menu, programme.programme_type, programme.programme_name);
+
+  // Calculate segmentation breadth
+  const breadthResult = calculateSegmentationBreadth(programme, menu, operations, detectedFormat);
+  
+  console.log(`📊 Segmentation Breadth: ${breadthResult.tier.toUpperCase()} (score: ${breadthResult.score}/100)`);
+  console.log(`   Format: ${detectedFormat || 'none detected'}, Avg price: ${menu.items.filter(i => i.price).length > 0 ? Math.round(menu.items.filter(i => i.price).map(i => i.price!).reduce((a,b) => a+b, 0) / menu.items.filter(i => i.price).length) : 'N/A'} DKK, Items: ${menu.items.length}`);
+
+  // Determine optimal segment count (breadth-calibrated)
+  const targetSegmentCount = determineSegmentCount(programme, menu, location, breadthResult.tier);
 
   console.log(`🎯 AI Complexity Detector: ${targetSegmentCount} segments recommended for ${programme.programme_name}`);
   console.log(`   Menu items: ${menu.items.length}, Hours span: ${calculateHoursSpan(programme.time_windows).toFixed(1)}h, Area: ${location.area_type}`);
 
-  // Build prompt (language-aware)
+  // Build prompt (language-aware, breadth-calibrated)
   const userPrompt = buildAudiencePrompt(
     business,
     menu,
@@ -1072,7 +1207,8 @@ export async function generateAudienceSegments(
     location,
     operations,
     targetSegmentCount,
-    language  // Pass language to prompt builder
+    breadthResult.tier,  // Pass breadth tier for calibration
+    language             // Pass language to prompt builder
   );
 
   // Call OpenAI
