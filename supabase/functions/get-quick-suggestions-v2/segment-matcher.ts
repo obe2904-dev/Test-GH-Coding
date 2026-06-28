@@ -13,7 +13,7 @@ import { TIMING } from './constants.ts'
 interface RealAudienceSegment {
   label: string
   segment_size: 'primary' | 'secondary' | 'niche'
-  timing_windows: string[]  // e.g. ["Mandag-Fredag 12:00-14:00"]
+  timing_windows?: string[]  // OPTIONAL (removed June 28, 2026 for occasion-based segments)
   motivation: string
   decision_timing: string
   content_angles: string[]
@@ -89,6 +89,12 @@ function parseTimingWindow(window: string): ParsedTiming | null {
  * Checks if a segment's timing includes the given date/hour
  */
 function segmentMatchesTime(segment: RealAudienceSegment, date: Date): boolean {
+  // NOTE: timing_windows removed June 28, 2026 for occasion-based segments
+  // For new segments without timing_windows, always return true (occasion-based matching)
+  if (!segment.timing_windows || segment.timing_windows.length === 0) {
+    return true;
+  }
+  
   const dayOfWeek = date.getDay()
   const hour = date.getHours()
   const minute = date.getMinutes()
@@ -145,6 +151,9 @@ function getNextSegment(
   let minMinutesUntil = Infinity
   
   for (const segment of segments) {
+    // Skip segments without timing_windows (occasion-based segments)
+    if (!segment.timing_windows) continue;
+    
     for (const window of segment.timing_windows) {
       const parsed = parseTimingWindow(window)
       if (!parsed) continue
@@ -224,8 +233,8 @@ export function getSegmentContext(
     return null
   }
   
-  // Parse first timing window for context
-  const firstWindow = segment.timing_windows[0]
+  // Parse first timing window for context (if available for old time-based segments)
+  const firstWindow = segment.timing_windows?.[0]
   const parsed = firstWindow ? parseTimingWindow(firstWindow) : null
   
   const nowMinutes = now.getHours() * 60 + now.getMinutes()
@@ -233,7 +242,7 @@ export function getSegmentContext(
   
   const context: SegmentMatchContext = {
     segment: {
-      name: segment.label,
+      name: segment.people_type,
       program: 'main', // TODO: map from programme_name
       timing: parsed || { days: [], startHour: 0, endHour: 24 },
       priority: segment.segment_size as any,
@@ -251,8 +260,8 @@ export function getSegmentContext(
   }
   
   // Logging
-  console.log(`✅ Matched segment: "${segment.label}" (${segment.segment_size})`)
-  console.log(`   Timing: ${segment.timing_windows.join(', ')}`)
+  console.log(`✅ Matched segment: "${segment.people_type}" (${segment.segment_size})`)
+  console.log(`   Timing: ${segment.timing_windows?.join(', ') || 'occasion-based (no time slots)'}`)
   if (context.isPreOpening) {
     console.log(`   ⏰ Pre-opening: Service starts in ${context.minutesUntilStart} mins`)
   }

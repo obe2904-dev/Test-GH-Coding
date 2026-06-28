@@ -115,6 +115,13 @@ export interface PromptOptions {
   humor_style?: string | null           // brand_profile_v5.voice.humor_style
   humor_character?: { permission_level: string, execution_style?: string, tone_descriptors?: string[] } | null  // tone_dna.humor_character
   locationIntelligenceNarrative?: string | null  // Fix 4: geographic_context.narrative for atmosphere posts
+  // FIX 4 (June 27, 2026): Location intelligence fields for buildLocationContext
+  neighborhoodCharacter?: string | null  // AI-generated factual description from business_location_intelligence
+  neighborhood?: string | null           // Google Maps neighborhood or synthesized
+  areaType?: string | null               // Geographic classification (city_centre, waterfront, etc.)
+  localLocationReference?: string | null // Operator-set location phrase (highest priority)
+  locationMarketingHooks?: string[] | null // Owner-validated location copy phrases (approved poetic source)
+  signatureThemes?: string[] | null      // tone_dna.culinary_character.signature_themes (concept anchors)
   business_identity_persona?: string    // V5.5: Full business identity persona
   enhanced_social_examples?: any[]      // V5.5: Enhanced social examples
   enhanced_avoid_examples?: any[]       // V5.5: Enhanced avoid examples

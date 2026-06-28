@@ -9,6 +9,8 @@
  * Layer 4: Audience Segmentation (AI per programme - gpt-4o-mini)
  * Layer 5: Voice (Pending - uses Layer 3 for now)
  * 
+ * Schema V2: Uses demographic_proximity (WHO) + category_scores (WHERE) separately
+ * 
  * Database Tables:
  * - business_programme_profiles (Layers 1, 2, 4)
  * - business_brand_profile.positioning (Layer 3)
@@ -175,23 +177,20 @@ function extractStrategicSegments(segments: Array<{
   const secondary = segments.filter(seg => seg.segment_size === 'secondary');
   
   const formatTiming = (seg: typeof segments[0]) => {
-    // Try timing_windows first (newer format)
-    if (seg.timing_windows && seg.timing_windows.length > 0) {
-      return seg.timing_windows[0]; // e.g. "Mandag-Fredag 12:00-14:00"
-    }
-    // Fallback to timing_preference
-    return seg.timing_preference || null;
+    // NOTE: As of June 28, 2026 - timing_windows removed from AudienceSegment interface
+    // Segments are now occasion-based rather than time-slot based
+    return null;
   };
   
   return {
     primary: primary ? {
-      id: primary.label?.toLowerCase().replace(/\s+/g, '_').replace(/æ/g, 'ae').replace(/ø/g, 'o').replace(/å/g, 'aa'),
-      name: primary.label,
+      id: primary.people_type?.toLowerCase().replace(/\s+/g, '_').replace(/æ/g, 'ae').replace(/ø/g, 'o').replace(/å/g, 'aa'),
+      name: primary.people_type,
       timing: formatTiming(primary)
     } : null,
     secondary: secondary.length > 0 ? secondary.map(seg => ({
-      id: seg.label?.toLowerCase().replace(/\s+/g, '_').replace(/æ/g, 'ae').replace(/ø/g, 'o').replace(/å/g, 'aa'),
-      name: seg.label,
+      id: seg.people_type?.toLowerCase().replace(/\s+/g, '_').replace(/æ/g, 'ae').replace(/ø/g, 'o').replace(/å/g, 'aa'),
+      name: seg.people_type,
       timing: formatTiming(seg)
     })) : null
   };
@@ -219,14 +218,14 @@ function extractToneRelevantDemographics(
   const hasPrimaryStudent = programmes.some(p => 
     p.audienceProfile.audience_segments.some(seg => 
       seg.segment_size === 'primary' && 
-      /student|studerende/i.test(seg.label)
+      /student|studerende/i.test(seg.people_type)
     )
   );
   
   const hasPrimaryTourist = programmes.some(p =>
     p.audienceProfile.audience_segments.some(seg =>
       seg.segment_size === 'primary' &&
-      /tourist|turister/i.test(seg.label)
+      /tourist|turister/i.test(seg.people_type)
     )
   );
   
@@ -283,6 +282,107 @@ function extractToneRelevantDemographics(
 }
 
 // ============================================================================
+// FETCH BUSINESS DATA - Extract all DB reads into one parallel fetch
+// ============================================================================
+
+async function fetchBusinessData(
+  supabaseClient: ReturnType<typeof createClient>,
+  businessId: string,
+  language: string
+): Promise<{
+  business: any
+  primaryLocation: any
+  postalCode: string | null
+  existingProfile: any
+  businessProfile: any
+  menuResultsRaw: any[]
+  menuResultsWithDishes: any[]
+  location: any
+  operations: any
+  openingHours: any[]
+}> {
+  const [
+    { data: businessData, error: businessError },
+    { data: existingProfile },
+    { data: businessProfile },
+    { data: menuResultsRaw, error: menuFetchError },
+    { data: location, error: locationError },
+    { data: operations },
+    { data: openingHours },
+    { data: menuResultsWithDishes }
+  ] = await Promise.all([
+    supabaseClient
+      .from('businesses')
+      .select('*, local_location_reference, business_locations!inner(postal_code, city)')
+      .eq('id', businessId)
+      .eq('business_locations.is_primary', true)
+      .single(),
+    supabaseClient
+      .from('business_brand_profile')
+      .select('tone_of_voice, tone_keywords, tone_model, typical_openings, things_to_avoid, voice_constraints, target_audience, communication_goal, emotional_promise, brand_context, recognizable_interior_identity, visual_character, venue_scene, humor_level, menu_overview_summary, gastronomic_profile, signature_themes, strategic_audience_segments, business_character')
+      .eq('business_id', businessId)
+      .single(),
+    supabaseClient
+      .from('business_profile')
+      .select('long_description, booking_url')
+      .eq('business_id', businessId)
+      .maybeSingle(),
+    supabaseClient
+      .from('menu_results_v2')
+      .select('id, business_id, ai_summary, structured_data, service_periods, service_period_name, completed_at, source_url, status, language_code, menu_sources!menu_results_v2_source_id_fkey(label, menu_type)')
+      .eq('business_id', businessId)
+      .eq('status', 'done')
+      .eq('language_code', language)
+      .order('completed_at', { ascending: false }),
+    supabaseClient
+      .from('business_location_intelligence')
+      .select('neighborhood, neighborhood_character, area_type, category_scores, demographic_proximity, physical_context, raw_competitive_venues, landmarks_nearby, nearby_hospitality, category_modifiers, location_marketing_hooks, local_location_reference, concept_fit_by_category, latitude, longitude')
+      .eq('business_id', businessId)
+      .maybeSingle(),
+    supabaseClient
+      .from('business_operations')
+      .select('*')
+      .eq('business_id', businessId)
+      .single(),
+    supabaseClient
+      .from('opening_hours')
+      .select('*')
+      .eq('business_id', businessId),
+    supabaseClient
+      .from('menu_results_v2')
+      .select('representative_dishes, language_code, service_period_name')
+      .eq('business_id', businessId)
+      .eq('language_code', language)
+      .eq('status', 'done')
+      .not('representative_dishes', 'is', null)
+      .order('completed_at', { ascending: false })
+  ])
+
+  if (businessError || !businessData) {
+    throw new Error(`Business not found: ${businessError?.message || 'Unknown error'}`)
+  }
+  if (locationError) {
+    console.warn('⚠️ Location intelligence query failed — proceeding without it')
+  }
+  if (menuFetchError) {
+    console.warn('⚠️ Menu fetch error:', menuFetchError)
+  }
+
+  return {
+    business: businessData,
+    primaryLocation: businessData.business_locations?.[0] || null,
+    postalCode: businessData.business_locations?.[0]?.postal_code || null,
+    existingProfile: existingProfile || null,
+    businessProfile: businessProfile || null,
+    menuResultsRaw: menuResultsRaw || [],
+    menuResultsWithDishes: menuResultsWithDishes || [],
+    location: location || null,
+    operations: operations || null,
+    openingHours: openingHours || []
+  }
+}
+
+// ============================================================================
 // CORS HEADERS
 // ============================================================================
 
@@ -300,12 +400,10 @@ serve(async (req) => {
   const requestStartTime = Date.now()
   const requestId = `bp-v5-${crypto.randomUUID().slice(0, 8)}`
 
-  // Generation status tracking (complete | partial)
-  let generationStatus: 'complete' | 'partial' = 'complete';
-
   // Tone DNA and examples — declared at function scope, populated by respective steps
   let toneDNA: any = null;
   let enhancedExamples: { social_examples: any[]; avoid_examples: any[] } | null = null;
+  let enhancedExamplesSucceeded = false
 
   try {
     const { businessId, forceRegenerate = false, menuOverviewSummary = null } = await req.json()
@@ -419,9 +517,6 @@ serve(async (req) => {
       }
     }
 
-    // ===== STEP 1: FETCH ALL REQUIRED DATA =====
-    console.log(`[${requestId}] 📊 Step 1: Fetching business data...`)
-
     // Fetch business with location data (single source of truth for postal_code)
     const { data: businessData, error: businessError } = await supabaseClient
       .from('businesses')
@@ -438,129 +533,53 @@ serve(async (req) => {
       throw new Error(`Business not found: ${businessError?.message || 'Unknown error'}`)
     }
 
-    // Extract business and location data
-    const business = businessData
-    const primaryLocation = businessData.business_locations?.[0] || null
-    const postalCode = primaryLocation?.postal_code || null
+    // Detect language for V5 generation (multi-language support)
+    const language = businessData.primary_language 
+      || (businessData.country === 'Sweden' ? 'sv'
+        : businessData.country === 'Germany' ? 'de'
+        : businessData.country === 'Norway' ? 'no'
+        : businessData.country === 'Netherlands' ? 'nl'
+        : 'da')  // Default to Danish
     
-    console.log(`[${requestId}] ✅ Business: ${business.name}`)
-    console.log(`[${requestId}] 📍 Local reference: ${business.local_location_reference || 'Not set'}`)
-    console.log(`[${requestId}] 📮 Postal code: ${postalCode || 'Not set'} (from business_locations)`)
+    console.log(`[${requestId}] 🌐 Language detected: ${language} (from ${businessData.primary_language ? 'business.primary_language' : 'country mapping'})`)
 
-    // Extract city - single source of truth: business_locations table
-    let businessCity = primaryLocation?.city || null
+    // Fetch all business data in parallel
+    const fetchedData = await fetchBusinessData(supabaseClient, businessId, language)
     
-    // Priority 1: Use postal code to determine city (imported getCityFromPostalCode)
+    // Overwrite with fresh data from parallel fetch
+    const business = fetchedData.business
+    const primaryLocation = fetchedData.primaryLocation
+    const postalCode = fetchedData.postalCode
+    const existingProfile = fetchedData.existingProfile
+    const businessProfile = fetchedData.businessProfile
+    const menuResultsRaw = fetchedData.menuResultsRaw
+    const menuResultsWithDishes = fetchedData.menuResultsWithDishes
+    const location = fetchedData.location
+    const operations = fetchedData.operations
+    const openingHours = fetchedData.openingHours
+
+    // Extract additional data from fetched results
+    const omOsText = businessProfile?.long_description || ''
+    const bookingUrl = businessProfile?.booking_url || null
+
+    // Extract city from postal code
+    let businessCity = primaryLocation?.city || null
     if (postalCode) {
       const { getCityFromPostalCode } = await import('../_shared/brand-profile/geographic-context.ts')
       const cityFromPostal = getCityFromPostalCode(postalCode)
       if (cityFromPostal) {
         businessCity = cityFromPostal
-        console.log(`[${requestId}] 🏙️  City determined from postal code: ${businessCity}`)
       }
     }
 
-    // Detect language for V5 generation (multi-language support)
-    const language = business.primary_language 
-      || (business.country === 'Sweden' ? 'sv'
-        : business.country === 'Germany' ? 'de'
-        : business.country === 'Norway' ? 'no'
-        : business.country === 'Netherlands' ? 'nl'
-        : 'da')  // Default to Danish
-    
-    console.log(`[${requestId}] 🌐 Language detected: ${language} (from ${business.primary_language ? 'business.primary_language' : 'country mapping'})`)
-
-    // Fetch existing brand profile (for legacy voice data + migration data + menu overview)
-    const { data: existingProfile } = await supabaseClient
-      .from('business_brand_profile')
-      .select(`
-        tone_of_voice,
-        tone_keywords,
-        tone_model,
-        typical_openings,
-        things_to_avoid,
-        voice_constraints,
-        target_audience,
-        communication_goal,
-        emotional_promise,
-        brand_context,
-        recognizable_interior_identity,
-        visual_character,
-        venue_scene,
-        humor_level,
-        menu_overview_summary,
-        gastronomic_profile,
-        signature_themes,
-        strategic_audience_segments,
-        business_character
-      `)
-      .eq('business_id', businessId)
-      .single()
-
-    console.log(`[${requestId}] ✅ Legacy voice data: ${existingProfile?.tone_model || existingProfile?.voice_constraints ? 'Found (tone_model/constraints)' : 'Not found'}`)
-
-    // Fetch business_profile for Om Os text (user-written about text) and booking_url
-    const { data: businessProfile } = await supabaseClient
-      .from('business_profile')
-      .select('long_description, booking_url')
-      .eq('business_id', businessId)
-      .maybeSingle()
-
-    const omOsText = businessProfile?.long_description || ''
-    const bookingUrl = businessProfile?.booking_url || null
-    console.log(`[${requestId}] ✅ Om Os: ${omOsText ? `${omOsText.length} characters` : 'Not set'}`)
-    console.log(`[${requestId}] ✅ Booking URL: ${bookingUrl || 'Not set'}`)
-
-    // Fetch menu extraction results with AI summaries and structured data
-    // Filter by language to use only Danish menus (exclude English tourist menus)
-    // JOIN with menu_sources to get label for drinks filtering
-    const { data: menuResultsRaw, error: menuFetchError } = await supabaseClient
-      .from('menu_results_v2')
-      .select(`
-        id, 
-        business_id, 
-        ai_summary, 
-        structured_data, 
-        service_periods, 
-        service_period_name, 
-        completed_at, 
-        source_url, 
-        status, 
-        language_code,
-        menu_sources!menu_results_v2_source_id_fkey(label, menu_type)
-      `)
-      .eq('business_id', businessId)
-      .eq('status', 'done')
-      .eq('language_code', language)
-      .order('completed_at', { ascending: false })
-
-    console.log(`[${requestId}] 🔍 Menu extraction query:`)
-    console.log(`[${requestId}]    - business_id filter: ${businessId}`)
-    console.log(`[${requestId}]    - status filter: 'done'`)
-    console.log(`[${requestId}]    - language filter: ${language}`)
-    console.log(`[${requestId}]    - Results: ${menuResultsRaw?.length || 0} menu(s)`)
-    if (menuFetchError) console.error(`[${requestId}]    - Query error:`, menuFetchError)
-    if (menuResultsRaw && menuResultsRaw.length > 0) {
-      console.log(`[${requestId}]    - IDs: ${menuResultsRaw.map(m => m.id.substring(0, 8)).join(', ')}`)
-      console.log(`[${requestId}]    - Statuses: ${menuResultsRaw.map(m => m.status).join(', ')}`)
-    }
-
-    // 🍸 FILTER OUT DRINKS-ONLY MENUS (cocktails, wine cards, bar menus)
+    // Filter out drinks-only menus
     const menuResults = menuResultsRaw?.filter(menuResult => {
-      // Extract menu_sources data
-      // NOTE: Supabase foreign key can return object or array depending on relationship
       let menuSource = menuResult.menu_sources as any
-      
-      // Handle both array and object returns
       if (Array.isArray(menuSource)) {
         menuSource = menuSource.length > 0 ? menuSource[0] : null
       }
-      
       const menuSourceLabel = menuSource?.label || null
       const menuSourceType = menuSource?.menu_type || null
-      
-      // Debug logging
-      console.log(`[${requestId}] 🔍 Checking menu: period='${menuResult.service_period_name}', label='${menuSourceLabel}', url='${menuResult.source_url}'`)
       
       const isDrinksMenu = isDrinksOnlyMenu(
         menuResult.service_period_name || '',
@@ -570,27 +589,15 @@ serve(async (req) => {
         menuSourceType
       )
       
-      if (isDrinksMenu) {
-        console.log(`[${requestId}] 🍸 Excluded drinks menu: '${menuResult.service_period_name}' (label='${menuSourceLabel}', url=${menuResult.source_url})`)
-        return false
-      }
-      
-      console.log(`[${requestId}] ✅ Kept food menu: '${menuResult.service_period_name}' (label='${menuSourceLabel}')`)
-      return true
+      return !isDrinksMenu
     }) || []
 
-    console.log(`[${requestId}] ✅ Menu extractions: ${menuResults?.length || 0} completed (after drinks filter)`)
-
-
-    // Extract AI summaries for persona generation
+    // Extract AI summaries and parse menu items
     const menuSummaries: Array<{ summary: string; service_period: string }> = []
-    
-    // Parse menu items from structured_data for Brand Profile layers (Layer 2-5 still need this)
     const normalizedMenuItems: any[] = []
     
     if (menuResults && menuResults.length > 0) {
       menuResults.forEach(menuResult => {
-        // Collect AI summaries for persona
         if (menuResult.ai_summary) {
           menuSummaries.push({
             summary: menuResult.ai_summary,
@@ -598,7 +605,6 @@ serve(async (req) => {
           })
         }
         
-        // Parse structured data for brand profile layers
         const structuredData = typeof menuResult.structured_data === 'string'
           ? JSON.parse(menuResult.structured_data)
           : menuResult.structured_data
@@ -610,7 +616,7 @@ serve(async (req) => {
                 normalizedMenuItems.push({
                   name: item.name,
                   description: item.description,
-                  price: item.price ? parseFloat(item.price) : null,  // FIX: Store as number, not string
+                  price: item.price ? parseFloat(item.price) : null,
                   currency: item.currency || 'DKK',
                   category: category.name,
                   service_periods: menuResult.service_periods || [],
@@ -623,84 +629,8 @@ serve(async (req) => {
       })
     }
 
-    console.log(`[${requestId}] ✅ Menu summaries: ${menuSummaries.length} AI-generated summaries for persona`)
-    console.log(`[${requestId}] ✅ Menu items: ${normalizedMenuItems.length} items parsed for brand profile layers`)
-
-    // ===== READ PRE-GENERATED CROSS-MENU SUMMARY =====
-    console.log(`[${requestId}] 📊 Loading cross-menu summary...`)
-    
-    // Priority 1: Use provided menu summary (passed from frontend to avoid race condition)
-    // Priority 2: Read from database (legacy/fallback)
+    // Load cross-menu summary
     const crossMenuSummary: CrossMenuSummary | null = menuOverviewSummary || existingProfile?.menu_overview_summary || null
-    
-    if (crossMenuSummary) {
-      const source = menuOverviewSummary ? 'provided parameter' : 'database'
-      console.log(`[${requestId}] ✅ Cross-menu summary found (source: ${source}):`)
-      console.log(`[${requestId}]    • Total items: ${crossMenuSummary.total_items}`)
-      console.log(`[${requestId}]    • Total menus: ${crossMenuSummary.total_menus}`)
-      console.log(`[${requestId}]    • Overall avg price: ${crossMenuSummary.overall_avg_price || 'N/A'} DKK`)
-      console.log(`[${requestId}]    • Signature themes: ${crossMenuSummary.signature_themes?.join(', ') || 'none'}`)
-      console.log(`[${requestId}]    • Summary preview: ${crossMenuSummary.cross_menu_summary?.substring(0, 100)}...`)
-    } else {
-      console.log(`[${requestId}] ⚠️ No cross-menu summary found - call menu-overview-summary Edge Function first`)
-    }
-
-    // Fetch location intelligence (Phase 2: includes demographic_proximity, physical_context, raw_competitive_venues)
-    const { data: location, error: locationError } = await supabaseClient
-      .from('business_location_intelligence')
-      .select(`
-        neighborhood,
-        neighborhood_character,
-        area_type,
-        category_scores,
-        demographic_proximity,
-        physical_context,
-        raw_competitive_venues,
-        landmarks_nearby,
-        nearby_hospitality,
-        category_modifiers,
-        location_marketing_hooks,
-        local_location_reference,
-        concept_fit_by_category,
-        latitude,
-        longitude
-      `)
-      .eq('business_id', businessId)
-      .maybeSingle()
-
-    if (locationError) {
-      console.error(`[${requestId}] ❌ Location intelligence query failed:`, locationError);
-      console.warn(`[${requestId}] ⚠️ Proceeding without location intelligence - demographic guard will not activate`);
-    }
-
-    console.log(`[${requestId}] 📍 Location query result: ${location ? 'FOUND' : 'NULL'}`)
-    console.log(`[${requestId}] ✅ Location WHERE: ${JSON.stringify(location?.category_scores || {})}`)
-    console.log(`[${requestId}] ✅ Location WHO nearby: ${JSON.stringify(location?.demographic_proximity || {})}`)
-    console.log(`[${requestId}] ✅ Pedestrian flow: ${location?.physical_context?.pedestrian_flow || 'unknown'}`)
-    
-    // Validate location context is present (critical for prompt quality)
-    if (location && !location.neighborhood && !location.local_location_reference) {
-      console.warn(`[${requestId}] ⚠️ LOCATION QUALITY WARNING: Neither neighborhood nor local_location_reference is set.`);
-      console.warn(`[${requestId}] → Prompts will fall back to city: ${business?.city || 'unknown'}`);
-      console.warn(`[${requestId}] → Consider refreshing location intelligence with force_refresh=true`);
-    }
-
-    // Fetch business operations (features, kitchen hours)
-    const { data: operations } = await supabaseClient
-      .from('business_operations')
-      .select('*')
-      .eq('business_id', businessId)
-      .single()
-
-    console.log(`[${requestId}] ✅ Operations: kitchen_close=${operations?.kitchen_close_time || 'N/A'}`)
-
-    // Fetch opening hours
-    const { data: openingHours } = await supabaseClient
-      .from('opening_hours')
-      .select('*')
-      .eq('business_id', businessId)
-
-    console.log(`[${requestId}] ✅ Opening hours: ${openingHours?.length || 0} entries`)
 
     // ===== STEP 2: LAYER 1 - PROGRAMME DETECTION (DETERMINISTIC) =====
     console.log(`[${requestId}] 🔍 Step 2: Layer 1 - Programme Detection...`)
@@ -754,6 +684,70 @@ serve(async (req) => {
     
     validateLayer1Output(layer1Output, requestId)
     console.log(`[${requestId}] ✅ Layer 1 validation passed - ${programmes.length} programmes detected`)
+
+    // Deduplicate programmes by type (V2 may detect multiple programmes of same type)
+    // e.g., Danish + English versions of dinner menu → merge into one "dinner" programme
+    const dedupedProgrammes = Object.values(
+      programmes.reduce((acc, programme) => {
+        const type = programme.type
+        
+        if (!acc[type]) {
+          // First programme of this type - wrap in object for consistent structure
+          acc[type] = { programme }
+        } else {
+          // Duplicate type - merge with existing
+          const existing = acc[type].programme
+          
+          // Combine menu evidence (unique values only)
+          existing.menuEvidence = [
+            ...new Set([
+              ...existing.menuEvidence,
+              ...programme.menuEvidence
+            ])
+          ]
+          
+          // Merge language variants (unique values) - signals multi-language menu for tourists
+          if (existing.metadata && programme.metadata) {
+            const existingLangs = existing.metadata.languageVariants || []
+            const progLangs = programme.metadata.languageVariants || []
+            const mergedLangs = [...new Set([...existingLangs, ...progLangs])]
+            if (mergedLangs.length > 0) {
+              existing.metadata.languageVariants = mergedLangs
+            }
+          }
+          
+          // Use widest time window (earliest start, latest end)
+          const timeToMinutes = (time: string) => {
+            const [h, m] = time.split(':').map(Number)
+            return h * 60 + m
+          }
+          
+          const existingStart = timeToMinutes(existing.timeWindow.start)
+          const progStart = timeToMinutes(programme.timeWindow.start)
+          const existingEnd = timeToMinutes(existing.timeWindow.end)
+          const progEnd = timeToMinutes(programme.timeWindow.end)
+          
+          if (progStart < existingStart) {
+            existing.timeWindow.start = programme.timeWindow.start
+          }
+          if (progEnd > existingEnd) {
+            existing.timeWindow.end = programme.timeWindow.end
+          }
+          
+          // Use highest confidence
+          const confMap = { high: 3, medium: 2, low: 1 }
+          const existingConf = existing.confidence
+          const progConf = programme.confidence
+          if (confMap[progConf] > confMap[existingConf]) {
+            existing.confidence = progConf
+          }
+        }
+        
+        return acc
+      }, {} as Record<string, { programme: typeof programmes[0] }>)
+    )
+
+    console.log(`[${requestId}] 📦 Deduplicated ${programmes.length} programmes → ${dedupedProgrammes.length} unique types`)
 
     // ===== STEP 2.5: LAYER 0 - BUSINESS INTELLIGENCE (NEW V5.2 - HYBRID) =====
     console.log(`[${requestId}] 🧠 Step 2.5: Layer 0 - Business Intelligence (HYBRID)...`)
@@ -1023,7 +1017,7 @@ serve(async (req) => {
       : null
 
     // OPTIMIZATION: Run all programme commercial orientations in parallel
-    const commercialPromises = programmes.map(async (programme) => {
+    const commercialPromises = dedupedProgrammes.map(async ({ programme }) => {
       const commercialOrientation = await generateCommercialOrientation(
         {
           name: programme.label,
@@ -1168,11 +1162,11 @@ serve(async (req) => {
       // NEW V5.3: Add customer situations to each segment
       audienceProfile.audience_segments = audienceProfile.audience_segments.map(segment => {
         const situations = deriveCustomerSituations({
-          timingPreference: segment.timing_preference || segment.timing_windows?.[0] || '',
+          timingPreference: segment.timing_preference || '',  // timing_windows removed June 28, 2026
           motivation: segment.motivation as any,
           programmeType: programme.type as any,
           decisionTiming: segment.decision_timing as any,
-          segmentLabel: segment.label,
+          segmentLabel: segment.people_type,
           language  // Multi-language support: da, sv, no, de, en
         })
         
@@ -1193,6 +1187,9 @@ serve(async (req) => {
 
     const programmesWithLayer4 = await Promise.all(audiencePromises)
 
+    // Reassign to dedupedProgrammes for downstream code (already deduped at Layer 1, now enriched)
+    const dedupedProgrammesEnriched = programmesWithLayer4
+
     // ===== VALIDATION: LAYER 4 =====
     console.log(`[${requestId}] 🔍 Validating Layer 4 output...`)
     
@@ -1201,7 +1198,7 @@ serve(async (req) => {
         programme,
         commercialOrientation,
         audienceSegments: audienceProfile.audience_segments.map(seg => ({
-          segment_name: seg.label,
+          segment_name: seg.people_type,
           motivation: seg.motivation,
           timing_preference: seg.decision_timing,
           content_angle: seg.content_angles[0] || '',
@@ -1290,22 +1287,7 @@ serve(async (req) => {
     // Replaces complex 120+ line fusion detection and selection logic
     let sampleMenuItems: Array<{name: string; description?: string; price?: number; currency?: string}> = []
     
-    console.log(`[${requestId}] 🍽️  Fetching pre-selected representative dishes (language: ${language})...`)
-    console.log(`[${requestId}]    Query params: business_id=${businessId}, language_code=${language}, status=done`)
-    
-    const { data: menuResultsWithDishes, error: menuQueryError } = await supabaseClient
-      .from('menu_results_v2')
-      .select('representative_dishes, language_code, service_period_name')
-      .eq('business_id', businessId)
-      .eq('language_code', language) // ONLY use local language - tourist menus are separate
-      .eq('status', 'done')
-      .not('representative_dishes', 'is', null)
-      .order('completed_at', { ascending: false })
-    
-    console.log(`[${requestId}]    Query returned: ${menuResultsWithDishes?.length || 0} menu(s)`)
-    if (menuQueryError) {
-      console.log(`[${requestId}]    ❌ Query error: ${menuQueryError.message}`)
-    }
+    console.log(`[${requestId}] 🍽️  Using pre-selected representative dishes (from fetchBusinessData)...`)
     
     if (menuResultsWithDishes && menuResultsWithDishes.length > 0) {
       // Flatten all representative dishes from all menu periods
@@ -1330,9 +1312,9 @@ serve(async (req) => {
       console.log(`[${requestId}]    This means Danish menus haven't been analyzed yet or representative_dishes is NULL`)
     }
 
-    // ===== LAYER 0B: TONE DNA — Strategic Foundation for Voice =====
-    // MUST run before Voice Profile so voice has Tone DNA as input
-    console.log(`[${requestId}] 🧬 Layer 0b: Strategic Tone DNA...`)
+    // ===== LAYER 0D: TONE DNA — Strategic Foundation for Voice =====
+    // Runs after Layer 4 so audience segment data is available for demographic signals.
+    console.log(`[${requestId}] 🧬 Layer 0d: Strategic Tone DNA...`)
 
     try {
       const { generateToneDNA } = await import('../_shared/brand-profile/tone-dna-generator.ts');
@@ -1343,11 +1325,10 @@ serve(async (req) => {
       const pricePositioning = determinePricePositioning(crossMenuSummary?.overall_avg_price);
       console.log(`[${requestId}] 💰 Price positioning: ${pricePositioning} (avg: ${crossMenuSummary?.overall_avg_price || 'unknown'})`);
 
-      // NOTE: Tone DNA runs before Layer 4, so we cannot check PRIMARY segments yet
-      // Pass empty array — tone DNA doesn't need segment analysis at this stage
+      // Layer 0d runs after Layer 4, so audience profiles are populated
       const toneRelevantDemographics = extractToneRelevantDemographics(
         demographicScores,
-        [],  // Empty — programmes not available yet at Layer 0b (runs before Layer 4)
+        programmesWithLayer4,  // Layer 4 complete, audienceProfile populated
         pricePositioning
       );
 
@@ -1470,10 +1451,6 @@ serve(async (req) => {
       (voiceProfile as any).humor_level = (existingProfile as any).humor_level
       console.log(`[${requestId}] 📝 Migrated legacy humor_level: ${(existingProfile as any).humor_level}`)
     }
-    if ((existingProfile as any)?.humor_level) {
-      (voiceProfile as any).humor_level = (existingProfile as any).humor_level
-      console.log(`[${requestId}] 📝 Migrated legacy humor_level: ${(existingProfile as any).humor_level}`)
-    }
 
     // ===== STEP 5C: LAYER 5 - GUARDRAILS (MOVED BEFORE WRITING EXAMPLES) =====
     console.log(`[${requestId}] 🛡️  Step 5c: Layer 5 - Guardrails...`)
@@ -1547,85 +1524,13 @@ serve(async (req) => {
         .eq('business_id', businessId)
     }
 
-    // Deduplicate programmes by type (V2 may detect multiple programmes of same type)
-    // e.g., Danish + English versions of dinner menu → merge into one "dinner" programme
-    const dedupedProgrammes = Object.values(
-      programmesWithLayer4.reduce((acc, item) => {
-        const type = item.programme.type
-        
-        if (!acc[type]) {
-          // First programme of this type - keep it
-          acc[type] = item
-        } else {
-          // Duplicate type - merge with existing
-          const existing = acc[type]
-          
-          // Combine menu evidence (unique values only)
-          existing.programme.menuEvidence = [
-            ...new Set([
-              ...existing.programme.menuEvidence,
-              ...item.programme.menuEvidence
-            ])
-          ]
-          
-          // Merge language variants (unique values) - signals multi-language menu for tourists
-          if (existing.programme.metadata && item.programme.metadata) {
-            const existingLangs = existing.programme.metadata.languageVariants || []
-            const itemLangs = item.programme.metadata.languageVariants || []
-            const mergedLangs = [...new Set([...existingLangs, ...itemLangs])]
-            if (mergedLangs.length > 0) {
-              existing.programme.metadata.languageVariants = mergedLangs
-            }
-          }
-          
-          // Use widest time window (earliest start, latest end)
-          const timeToMinutes = (time: string) => {
-            const [h, m] = time.split(':').map(Number)
-            return h * 60 + m
-          }
-          
-          const existingStart = timeToMinutes(existing.programme.timeWindow.start)
-          const itemStart = timeToMinutes(item.programme.timeWindow.start)
-          const existingEnd = timeToMinutes(existing.programme.timeWindow.end)
-          const itemEnd = timeToMinutes(item.programme.timeWindow.end)
-          
-          if (itemStart < existingStart) {
-            existing.programme.timeWindow.start = item.programme.timeWindow.start
-          }
-          if (itemEnd > existingEnd) {
-            existing.programme.timeWindow.end = item.programme.timeWindow.end
-          }
-          
-          // Merge audience segments (keep all unique segments)
-          const existingLabels = new Set(existing.audienceProfile.audience_segments.map(s => s.label))
-          const newSegments = item.audienceProfile.audience_segments.filter(
-            s => !existingLabels.has(s.label)
-          )
-          existing.audienceProfile.audience_segments = [
-            ...existing.audienceProfile.audience_segments,
-            ...newSegments
-          ]
-          
-          // Use highest confidence
-          const confMap = { high: 3, medium: 2, low: 1 }
-          const existingConf = existing.programme.confidence
-          const itemConf = item.programme.confidence
-          if (confMap[itemConf] > confMap[existingConf]) {
-            existing.programme.confidence = itemConf
-          }
-        }
-        
-        return acc
-      }, {} as Record<string, typeof programmesWithLayer4[0]>)
-    )
-
-    console.log(`[${requestId}] 📦 Deduplicated ${programmesWithLayer4.length} programmes → ${dedupedProgrammes.length} unique types`)
+    console.log(`[${requestId}] 📦 Deduplicated ${programmesWithLayer4.length} programmes → ${dedupedProgrammesEnriched.length} unique types`)
 
     // ===== STEP 5D: LAYER 6 - MARKETING MANAGER BRIEF (NEW V5.3) =====
     console.log(`[${requestId}] 📋 Step 5d: Layer 6 - Marketing Manager Brief Generation...`)
     
     // Derive simple commercial mode from programmes
-    const aggregatedGoalSplit = dedupedProgrammes.reduce((acc, { commercialOrientation }) => {
+    const aggregatedGoalSplit = dedupedProgrammesEnriched.reduce((acc, { commercialOrientation }) => {
       Object.entries(commercialOrientation.baseline_goal_split).forEach(([key, value]) => {
         acc[key] = (acc[key] || 0) + value
       })
@@ -1640,7 +1545,7 @@ serve(async (req) => {
     
     const commercialMode = extractCommercialMode(normalizedGoalSplit)
     
-    console.log(`[${requestId}]    Commercial mode: ${commercialMode} (from ${dedupedProgrammes.length} programmes)`)
+    console.log(`[${requestId}]    Commercial mode: ${commercialMode} (from ${dedupedProgrammesEnriched.length} programmes)`)
     console.log(`[${requestId}]    Goal split: ${JSON.stringify(normalizedGoalSplit)}`)
     
     const marketingManagerBrief = await generateMarketingManagerBrief(
@@ -1668,7 +1573,7 @@ serve(async (req) => {
             .filter(d => d.is_reachable)
             .map(d => d.demographic)
         } : undefined,
-        programmes: dedupedProgrammes.map(p => {
+        programmes: dedupedProgrammesEnriched.map(p => {
           console.log(`[${requestId}] 💰 Programme ${p.programme.label} pricing:`, p.commercialOrientation.price_positioning)
           return {
             programme_name: p.programme.label,
@@ -1713,10 +1618,10 @@ serve(async (req) => {
       try {
         const { generateEnhancedExamples } = await import('../_shared/brand-profile/tone-dna-generator.ts');
         
-        const programmeInfo = dedupedProgrammes.map(({ programme, audienceProfile }) => ({
+        const programmeInfo = dedupedProgrammesEnriched.map(({ programme, audienceProfile }) => ({
           type: programme.type,
           name: programme.label,
-          audienceSegments: audienceProfile.audience_segments.map(seg => ({ segment_name: seg.label }))
+          audienceSegments: audienceProfile.audience_segments.map(seg => ({ segment_name: seg.people_type }))
         }));
         
         // CRITICAL FIX v5.2.0: Pass voice constraints and guardrails to prevent contradictions
@@ -1738,6 +1643,8 @@ serve(async (req) => {
         );
         
         console.log(`[${requestId}] ✅ Enhanced examples: ${enhancedExamples.social_examples.length} social, ${enhancedExamples.avoid_examples.length} avoid`);
+        
+        enhancedExamplesSucceeded = true
         
         // Add enhanced examples to voice profile
         voiceProfile.enhanced_social_examples = enhancedExamples.social_examples;
@@ -1825,12 +1732,11 @@ serve(async (req) => {
       } catch (examplesError) {
         console.error(`[${requestId}] ⚠️  Enhanced examples generation failed (non-fatal):`, examplesError);
         console.log(`[${requestId}]    Tone DNA available but examples generation failed`);
-        generationStatus = 'partial';  // Mark as partial success
       }
     }
 
     // Save programme profiles (Layers 1, 2, 4)
-    const programmeProfilesToSave = dedupedProgrammes.map(({ programme, commercialOrientation, audienceProfile }) => ({
+    const programmeProfilesToSave = dedupedProgrammesEnriched.map(({ programme, commercialOrientation, audienceProfile }) => ({
       business_id: businessId,
       programme_type: programme.type,
       programme_name: programme.label,
@@ -1938,16 +1844,7 @@ serve(async (req) => {
           physical_opportunities: locationStrategy.physical_opportunities,
           competitive_gap: locationStrategy.competitive_gap,
         } : null,
-        professional_persona: {
-          // LEGACY: Keep old consultant persona for backward compatibility
-          // NOTE: This is being replaced by business_identity (HYBRID approach)
-          expertise_areas: professionalPersona.expertise_areas,
-          content_focus: professionalPersona.content_focus,
-          formality: professionalPersona.tone_defaults.formality,
-          sentence_style: professionalPersona.tone_defaults.sentence_style,
-          emoji_usage: professionalPersona.tone_defaults.emoji_usage,
-          system_prompt_preview: professionalPersona.system_persona.substring(0, 500) + '...'  // First 500 chars of actual prompt
-        },
+        professional_persona: null,  // DEPRECATED — replaced by business_identity
         voice_archetype: {
           archetype_id: voiceArchetype.archetype_name,
           base_rules: voiceArchetype.base_rules,  // All Danish rules
@@ -1958,7 +1855,7 @@ serve(async (req) => {
           content_priorities: voiceArchetype.content_priorities
         }
       },
-      layer_1_programmes: dedupedProgrammes.map(({ programme, commercialOrientation, audienceProfile }) => ({
+      layer_1_programmes: dedupedProgrammesEnriched.map(({ programme, commercialOrientation, audienceProfile }) => ({
         type: programme.type,
         name: programme.label,
         timeWindow: programme.timeWindow,
@@ -1972,7 +1869,7 @@ serve(async (req) => {
           reasoning: commercialOrientation.reasoning
         },
         audienceSegments: audienceProfile.audience_segments.map(seg => ({
-          segment_name: seg.label,
+          segment_name: seg.people_type,
           motivation: seg.motivation,
           timing_preference: seg.decision_timing,
           content_angle: seg.content_angles[0] || '',
@@ -2014,7 +1911,7 @@ serve(async (req) => {
     }
     
     const completeLayer1: Layer1Output = {
-      programmes: dedupedProgrammes.map(p => p.programme)
+      programmes: dedupedProgrammesEnriched.map(p => p.programme)
     }
     
     const completeLayer5: Layer5Output = {
@@ -2187,7 +2084,7 @@ serve(async (req) => {
         strategic_coverage: strategicCoverage,
         // Phase 2: Location strategy columns (June 25, 2026)
         location_strategy: locationStrategy,
-        generation_status: generationStatus,
+        generation_status: enhancedExamplesSucceeded ? 'complete' : 'partial',
         data_sources_used: {
           menu_data: !!crossMenuSummary,
           location_intelligence: !!location,

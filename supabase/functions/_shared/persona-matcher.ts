@@ -42,8 +42,8 @@ export interface PersonaMatchResult {
   /** V5: Derived tone guidance for Stage 1 framing */
   tone_note?: string
   
-  /** V5: Derived CTA type based on segment + business ops */
-  cta_type?: 'walk_in' | 'book_table' | 'impulse_visit'
+  /** V5: Derived CTA type based on segment + business ops ('mixed' = use both walk-in AND booking) */
+  cta_type?: 'walk_in' | 'book_table' | 'impulse_visit' | 'mixed'
   
   /** V5: Matched segment for richer context */
   matched_segment?: V5AudienceSegment
@@ -356,7 +356,7 @@ export function deriveToneNote(
 export function deriveCTAType(
   segment: V5AudienceSegment,
   businessOps: BusinessOperations
-): 'walk_in' | 'book_table' | 'impulse_visit' {
+): 'walk_in' | 'book_table' | 'impulse_visit' | 'mixed' {
   // ═══════════════════════════════════════════════════════
   // LAYER 1: Business Capability Constraints (HARD LIMITS)
   // ═══════════════════════════════════════════════════════
@@ -386,11 +386,10 @@ export function deriveCTAType(
       return 'book_table'
     }
     
-    // Mixed → use goal_contribution to break tie
+    // Mixed → supports BOTH booking and walk-in strategies
+    // Content generation should alternate between both CTA types
     if (segment.decision_timing === 'mixed') {
-      return segment.goal_contribution === 'drive_footfall' 
-        ? 'walk_in'       // Optimize for volume (lower friction)
-        : 'book_table'    // Optimize for commitment (higher quality)
+      return 'mixed'  // Signals dual-strategy: use both walk-in AND booking CTAs
     }
   }
   

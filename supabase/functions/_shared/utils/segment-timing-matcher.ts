@@ -172,29 +172,9 @@ export function matchTimingToSegment(
   time: string,
   segments: AudienceSegment[]
 ): SegmentTimingMatch {
-  // Try to match against each segment's timing windows
-  for (const segment of segments) {
-    for (const window of segment.timing_windows) {
-      const parsedWindows = parseTimingWindow(window)
-      
-      for (const parsed of parsedWindows) {
-        if (parsed.day === day && isTimeInRange(time, parsed.startHour, parsed.endHour)) {
-          // MATCH! This time falls within a strategic segment
-          return {
-            mode: 'strategic_segment',
-            matchedSegment: {
-              people_type: segment.people_type,
-              timing: window,
-              situation: segment.situation,
-              content_angles: segment.content_angles
-            }
-          }
-        }
-      }
-    }
-  }
-  
-  // NO MATCH: This is gap-time capacity
+  // NOTE: As of June 28, 2026 - timing_windows removed from AudienceSegment interface
+  // Segments are now occasion-based rather than time-slot based
+  // Always return gap_capacity as strategic time-slot matching is obsolete
   return {
     mode: 'gap_capacity',
     gapRationale: determineGapRationale(day, time)
@@ -241,26 +221,12 @@ function determineGapRationale(day: string, time: string): string {
  * and provides the default gap strategy for uncovered times.
  */
 export function buildStrategicCoverage(segments: AudienceSegment[]): StrategicCoverage {
-  const covered_slots: StrategicCoverage['covered_slots'] = []
-  
-  for (const segment of segments) {
-    for (const window of segment.timing_windows) {
-      const parsedWindows = parseTimingWindow(window)
-      
-      for (const parsed of parsedWindows) {
-        covered_slots.push({
-          day: parsed.day,
-          time_range: `${String(parsed.startHour).padStart(2, '0')}:00-${String(parsed.endHour).padStart(2, '0')}:00`,
-          segment_name: segment.situation || segment.people_type,
-          people_type: segment.people_type
-        })
-      }
-    }
-  }
-  
+  // NOTE: As of June 28, 2026 - timing_windows removed from AudienceSegment interface
+  // Segments are now occasion-based rather than time-slot based
+  // Returning empty coverage as this concept is obsolete in the new architecture
   return {
-    covered_slots,
-    gap_strategy: 'Format appeal (AYCE, location, variety) without segment forcing'
+    covered_slots: [],
+    gap_strategy: 'Occasion-based segmentation (no time-slot coverage required)'
   }
 }
 

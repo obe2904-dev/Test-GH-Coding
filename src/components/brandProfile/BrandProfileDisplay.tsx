@@ -325,7 +325,7 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
                 {normalisedAudienceSegments.segments.map((seg: any, i: number) => (
                   <div key={i} className="rounded-lg border border-border p-3 space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-text">{seg.label ?? seg.name}</span>
+                      <span className="text-sm font-semibold text-text">{seg.people_type ?? seg.label ?? seg.name}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
                         seg.priority === 'primary' ? 'bg-cta-surface text-cta' :
                         seg.priority === 'secondary' ? 'bg-accent-surface text-info' :

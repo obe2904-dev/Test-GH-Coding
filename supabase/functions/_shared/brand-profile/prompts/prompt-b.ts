@@ -462,17 +462,22 @@ export function buildPromptB(
   const { business, location, profile, menu, images, websiteAnalysis, operations, locationIntelligenceRow, menuSummaries, aiSummaryItems,
           existingBusinessCharacter, menuSignalProgrammes, openingHoursRows, locationsCount } = dataSources
 
-  // --- Derive multi-audience location context from category_scores ---
-  // category_scores is a map of CONCURRENT visitor types — not a ranked list,
-  // all confirmed types can be simultaneously true for the same venue.
+  // --- Derive multi-audience location context from demographic_proximity + category_scores ---
+  // SCHEMA V2: demographic_proximity = WHO passes by (student, tourist, local_resident)
+  //            category_scores = WHERE the business is (city_centre, waterfront, residential)
   const locIntelRow = locationIntelligenceRow
   const neighborhood = locIntelRow?.neighborhood || null
   const allMarketingHooks: string[] = (locIntelRow?.location_marketing_hooks || [])
     .map((h: any) => (typeof h === 'string' ? h : h?.text || '')).filter(Boolean)
+  
+  // Geographic location types (WHERE) - schema v2
   const categoryScores: Record<string, number> = locIntelRow?.category_scores || {}
   const sortedCategories = (Object.entries(categoryScores) as [string, number][])
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5)
+
+  // Demographic proximity (WHO passes by) - schema v2
+  const demographicProximity: Record<string, number> = locIntelRow?.demographic_proximity || {}
 
   // Multi-location detection: when ≥3 categories score ≥70 the brand serves multiple equal contexts
   const highScoreCategories = sortedCategories.filter(([, score]) => score >= 70)
@@ -481,7 +486,8 @@ export function buildPromptB(
   // Score-gated persona permissions — shared logic via audience-filter.ts
   // maxMenuPrice passed as null here: the model receives price_register separately and
   // the AUDIENCE PERMISSIONS block in the prompt already instructs it to validate against price.
-  const { touristStrength, studentStrength, officeStrength } = filterAudienceLabels(categoryScores, null)
+  // SCHEMA V2: Pass demographic_proximity (WHO passes by), not category_scores (WHERE business is)
+  const { touristStrength, studentStrength, officeStrength } = filterAudienceLabels(demographicProximity, null, categoryScores)
 
   // --- Smart banned words ---
   const businessName = business?.name || 'Unknown'
@@ -1008,7 +1014,7 @@ ${location?.enrichment ? `LOCATION ENRICHMENT (deterministic — COPY VERBATIM):
 - confidence: ${location.enrichment.micro.confidence}
 - neighborhood: ${locIntelRow?.local_location_reference || neighborhood || cityName || '—'}
 
-CONCURRENT VISITOR AUDIENCE (category_scores — all true simultaneously, not a ranked list):
+GEOGRAPHIC LOCATION TYPES (category_scores - WHERE the business is, NOT who visits):
 ${sortedCategories.length > 0
   ? sortedCategories.map(([k, v]) => {
       const fit = (locIntelRow?.concept_fit_by_category || {})[k]
@@ -1017,21 +1023,47 @@ ${sortedCategories.length > 0
       return `- ${k}: ${v}${seasonal}${driver}`
     }).join('\n')
   : '- (no category scores — use lightweight area_type only)'}
-CATEGORY KEY TRANSLATIONS (brug disse når du skriver publikumslabels):
-- waterfront → ${location?.enrichment?.micro?.waterfront_term || 'ved åen (default) / ved fjorden / ved søen / ved havnen / ved stranden / ved bugten'}
-  ${location?.enrichment?.micro?.waterfront_term ? `USE "${location.enrichment.micro.waterfront_term}" (already detected from location)` : 'NEVER use "ved vandet" unless explicitly a sea/ocean location'}
-- city_centre → bymidten / bycentrum
+
+DEMOGRAPHIC PROXIMITY (WHO passes by this area - from demographic_proximity):
+${Object.entries(demographicProximity).length > 0
+  ? Object.entries(demographicProximity)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .map(([k, v]) => `- ${k}: ${v}`)
+      .join('\n')
+  : '- (no demographic data available)'}
+
+DEMOGRAPHIC KEY TRANSLATIONS (brug disse når du skriver publikumslabels):
 - tourist → turister / besøgende
 - student → studerende
-- office → erhvervsgæster / kolleger
-- transport_hub → pendlere / rejsende
-- shopping_district → shoppere / butiksbesøgende
-- residential → naboer / lokale beboere
-AUDIENCE PERMISSIONS (score-gated — check before using ANY audience label):
+- local_resident → lokale / naboer
+- business_professional → erhvervsgæster / kolleger
+- family → familier (ONLY when describing occasions like "børn kan spise med", NEVER as demographic segment)
+
+GEOGRAPHIC KEY TRANSLATIONS (use these for LOCATION context, NOT audience):
+- waterfront → ${location?.enrichment?.micro?.waterfront_term || 'ved åen (default) / ved fjorden / ved søen / ved havnen / ved stranden / ved bugten'}
+  ${location?.enrichment?.micro?.waterfront_term ? `USE "${location.enrichment.micro.waterfront_term}" (already detected from location)` : 'NEVER use "ved vandet" unless explicitly a sea/ocean location'}
+- city_centre → bymidten / i centrum (LOCATION, not an audience type)
+- transport_hub → ved stationen (LOCATION, not an audience type)
+- shopping_district → i shoppingområdet (LOCATION, not an audience type)
+- residential → i boligkvarteret (LOCATION, not an audience type)
+
+AUDIENCE PERMISSIONS (score-gated — check demographic_proximity scores before using ANY audience label):
 - tourist_strength: ${touristStrength}  →  primary/secondary: "besøgende" allowed in ONE clause; absent: forbidden
 - student_strength: ${studentStrength}  →  primary only: "studerende" allowed; otherwise forbidden
 - office_strength: ${officeStrength}  →  primary/secondary: "erhvervsgæster" allowed; otherwise forbidden
-- NOTE: category scores reflect area geography — validate against price_register and menu_signal before using any audience label in output.
+
+🚨 VALIDATION RULES (MANDATORY — read before writing ANY content):
+1. These strength values are GATES — not suggestions. "absent" = DO NOT MENTION that demographic anywhere.
+2. Scores come from demographic_proximity (WHO PASSES BY the area) — NOT who the business serves.
+3. Low scores (< 40) mean that demographic is NOT PRESENT in the area → mentioning them is a HALLUCINATION.
+4. NEVER treat geographic types as audiences:
+   ❌ WRONG: "tone that appeals to byens centrum" (city_centre is WHERE, not WHO)
+   ❌ WRONG: "skriv til både studerende og waterfront-gæster" (waterfront is a location type)
+   ✅ RIGHT: "tone that appeals to studerende" (IF student_strength = primary)
+   ✅ RIGHT: "lokationsfrasing bruger vandfront-specificiteten" (describes location context)
+
+- NOTE: demographic_proximity scores reflect WHO PASSES BY — validate against price_register and menu_signal before using any audience label in output.
+- CRITICAL: Do NOT write "tone that appeals to byens centrum" - city_centre is a LOCATION TYPE, not an audience. Use "tone that appeals to studerende" (IF student_strength permits) or describe the OCCASION instead.
 SERVICE FACTS (fact-gated — OVERRIDE any demographic inference from location or menu signals):
 ${hasKidsMenu ? '- has_kids_menu: true → "børnemenu" MUST appear as an experience anchor in core_offerings.value; add "Når børn kan spise med" occasion in target_audience' : '- has_kids_menu: false → FORBIDDEN: do NOT mention børnemenu, børn spiser med, familietilbud, or any family-meal framing anywhere in the profile'}
 ${allMarketingHooks.length > 0 ? `LOCATION MARKETING HOOKS (place verbatim in voice_examples.do_say AND cta_style — do not paraphrase, do NOT put in tone_model.good_examples):\n${allMarketingHooks.map(h => `- "${h}"`).join('\n')}` : ''}

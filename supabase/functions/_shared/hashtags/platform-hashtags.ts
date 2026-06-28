@@ -9,6 +9,9 @@ export interface PlatformHashtagContext {
   detectedDishName?: string | null
   detectedDishDescription?: string | null
   locationVocabulary?: string[] | null  // FIX 03-B: Location-specific hashtag vocabulary
+  // FIX 04: Stable business-profile signals for venue classification
+  aiPlaceSynopsis?: string | null      // e.g. "Korean BBQ and sushi restaurant in central Silkeborg"
+  menuDescription?: string | null      // e.g. "Korean-inspired fusion with AYCE options"
 }
 
 export interface PlatformHashtagSets {
@@ -62,19 +65,31 @@ function pushUnique(target: string[], value: string | undefined | null): void {
 }
 
 function inferVenueCategory(context: PlatformHashtagContext): string {
-  const haystack = [context.vertical, context.businessCharacter, context.businessName, context.text, context.contentType]
+  // FIX 04: This classifies the VENUE, not the post content.
+  // Post text and contentType are intentionally excluded — scanning post text causes
+  // food keyword bleed (e.g. "pandekager" in post → Bakery classification on K-BBQ restaurant).
+  // aiPlaceSynopsis and menuDescription are stable business-level signals.
+  const haystack = [
+    context.vertical,
+    context.businessCharacter,
+    context.businessName,
+    context.aiPlaceSynopsis,
+    context.menuDescription,
+  ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
 
-  if (/(bakery|bageri|bager|wienerbrød|brød|kage)/i.test(haystack)) return 'Bakery'
-  if (/(bar|cocktail|wine|vin|drinks?|spirit|øl|beer)/i.test(haystack)) return 'Bar'
-  if (/(coffee|cafe|café|espresso|latte|barista|filterkaffe)/i.test(haystack)) return 'Cafe'
+  // Order matters: more specific signals first
+  if (/(bakery|bageri|bager|wienerbrød|konditori)/i.test(haystack)) return 'Bakery'
+  if (/(bar|cocktail|wine bar|vinbar|drinks?|spirit|øl|beer)/i.test(haystack)) return 'Bar'
+  if (/(coffee|cafe|café|espresso|latte|barista|filterkaffe|kaffebar)/i.test(haystack)) return 'Cafe'
   if (/(food truck|street food|foodtruck)/i.test(haystack)) return 'FoodTruck'
   if (/(takeaway|to go|udbring|afhent)/i.test(haystack)) return 'Takeaway'
-  if (/(restaurant|spisested|køkken|menu|diner)/i.test(haystack)) return 'Restaurant'
+  // All restaurant types — aiPlaceSynopsis naturally contains cuisine type
+  if (/(restaurant|spisested|køkken|menu|diner|bbq|sushi|thai|vietnamese|pho|indian|curry|chinese|wok|korean|koreansk|asian|asiatisk|fusion|tapas|bistro)/i.test(haystack)) return 'Restaurant'
 
-  return context.contentType === 'behind_scenes' ? 'Cafe' : 'Restaurant'
+  return 'Restaurant'  // Safe default — never Cafe for unknown venues
 }
 
 function inferProductTag(context: PlatformHashtagContext): string {
@@ -169,12 +184,19 @@ function buildLayers(context: PlatformHashtagContext): Record<HashtagLayerName, 
         .filter(Boolean)
     : [];
   
-  const localPrimary = locationVocabTags.length > 0 
+  // FIX 04: localPrimary should be plain city or first vocab word — never city+category compound
+  const localPrimary = locationVocabTags.length > 0
     ? locationVocabTags[0]
-    : (context.city ? compactTag(context.city, categoryTag) : '')
+    : cityTag  // plain city only (#Silkeborg, not #SilkeborgRestaurant)
+  
+  // localSecondary: second vocab word, or plain city if vocab has only one word
+  // This ensures businesses WITH locationVocabulary still get city as second local tag
   const localSecondary = locationVocabTags.length > 1
     ? locationVocabTags[1]
-    : (cityTag && cityTag !== localPrimary ? cityTag : '')
+    : locationVocabTags.length === 1 && cityTag !== locationVocabTags[0]
+      ? cityTag
+      : ''
+  
   const localTertiary = locationVocabTags.length > 2 ? locationVocabTags[2] : ''
   
   const productTag = inferProductTag(context)
@@ -205,9 +227,11 @@ function selectForPlatform(
   const limits = PLATFORM_LIMITS[platform]
 
   if (platform === 'facebook') {
-    // Facebook: prioritise local + the most specific content signal
-    // Order: local primary → product (dish/keyword) → occasion → lifestyle → category
-    const fbOrder: HashtagLayerName[] = ['local', 'product', 'occasion', 'lifestyle', 'category']
+    // FIX 04: Facebook 2026 — local discovery only.
+    // 1 tag (city/location) is correct for atmosphere posts.
+    // 2 tags only when a specific occasion or dish is present.
+    // Never lifestyle tags (#DrinkLovers, #FoodLovers) — these are IG signals, not FB signals.
+    const fbOrder: HashtagLayerName[] = ['local', 'occasion', 'product']
     const pool: string[] = []
     for (const layer of fbOrder) {
       for (const tag of layers[layer]) pushUnique(pool, tag)

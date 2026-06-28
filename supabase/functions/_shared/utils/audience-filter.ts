@@ -1,7 +1,11 @@
 /**
  * Audience Label Filter — single source of truth for location audience permissions.
  *
- * Takes raw category_scores from business_location_intelligence and a max menu price,
+ * SCHEMA V2 (current):
+ * - demographic_proximity: WHO passes by (tourist, student, local_resident, business_professional, family)
+ * - category_scores: WHERE the business is (city_centre, waterfront, residential, transport_hub, etc.)
+ *
+ * Takes raw demographic_proximity + category_scores from business_location_intelligence and a max menu price,
  * and returns permission-gated audience labels that match exactly what is shown to the
  * user in the Location setup UI.
  *
@@ -15,6 +19,8 @@
  * Used by:
  *   - brand-profile-generator/index.ts  (SecondarySignals.audienceProfile)
  *   - _shared/brand-profile/prompts/prompt-b.ts  (strength vars for AUDIENCE PERMISSIONS)
+ *   - get-weekly-strategy/index.ts (locationCategories calculation)
+ *   - _shared/post-helpers/weekly-plan-generator.ts (location context building)
  */
 
 export type AudienceStrength = 'primary' | 'secondary' | 'absent'
@@ -50,22 +56,30 @@ export const AUDIENCE_LABEL_MAP: Record<string, string> = {
 }
 
 /**
- * @param categoryScores  Raw map from business_location_intelligence.category_scores
- * @param maxMenuPrice    Highest menu item price in DKK — used to gate student audience.
- *                        Pass null if unknown (student gate falls back to score-only).
+ * @param demographicProximity  WHO passes by: {tourist, student, local_resident, business_professional, family}
+ * @param maxMenuPrice          Highest menu item price in DKK — used to gate student audience.
+ *                              Pass null if unknown (student gate falls back to score-only).
+ * @param categoryScores        WHERE business is: {city_centre, waterfront, residential, transport_hub, etc.}
  */
 export function filterAudienceLabels(
-  categoryScores: Record<string, number>,
-  maxMenuPrice: number | null
+  demographicProximity: Record<string, number> | null | undefined,
+  maxMenuPrice: number | null,
+  categoryScores?: Record<string, number> | null
 ): AudienceFilterResult {
-  // Tourist strength: max of the three tourist-family keys
-  const touristScore = Math.max(
-    categoryScores['tourist']     ?? 0,
-    categoryScores['destination'] ?? 0,
-    categoryScores['waterfront']  ?? 0
-  )
-  const studentScore = categoryScores['student'] ?? 0
-  const officeScore  = categoryScores['office']  ?? 0
+  // Handle missing data gracefully (backwards compatibility for businesses without schema v2 data)
+  const safeDemographic = demographicProximity ?? {}
+  const safeCategory = categoryScores ?? {}
+  
+  // SCHEMA V2: Tourist score from demographic_proximity, waterfront/destination from category_scores
+  const touristDemographic = safeDemographic['tourist'] ?? 0
+  const waterfrontGeographic = safeCategory['waterfront'] ?? 0
+  const destinationGeographic = safeCategory['destination'] ?? 0
+  
+  // Tourist strength = max of demographic tourist + geographic waterfront/destination
+  const touristScore = Math.max(touristDemographic, waterfrontGeographic, destinationGeographic)
+  
+  const studentScore = safeDemographic['student'] ?? 0
+  const officeScore  = safeDemographic['business_professional'] ?? 0
 
   const touristStrength: AudienceStrength =
     touristScore >= 70 ? 'primary' : touristScore >= 40 ? 'secondary' : 'absent'
@@ -88,8 +102,12 @@ export function filterAudienceLabels(
 
   // Tourist/waterfront/destination cluster — secondary threshold ≥40
   if (touristScore >= 40) {
-    const topKey = (['waterfront', 'destination', 'tourist'] as const)
-      .find(k => (categoryScores[k] ?? 0) === touristScore) ?? 'tourist'
+    // Prefer geographic location types (waterfront/destination) over demographic "tourist"
+    const topKey = waterfrontGeographic >= destinationGeographic && waterfrontGeographic >= touristDemographic
+      ? 'waterfront'
+      : destinationGeographic >= touristDemographic
+        ? 'destination'
+        : 'tourist'
     permittedKeys.push(topKey)
   }
 
@@ -101,14 +119,21 @@ export function filterAudienceLabels(
   // Office — secondary threshold ≥40
   if (officeScore >= 40) permittedKeys.push('office')
 
-  // Everything else ≥40, up to 2 additional (excludes already-handled keys)
-  const handled = new Set(['student', 'tourist', 'destination', 'waterfront', 'office'])
-  const extras = Object.entries(categoryScores)
+  // Everything else ≥40, up to 2 additional (check both demographic_proximity AND category_scores)
+  const handled = new Set(['student', 'tourist', 'destination', 'waterfront', 'office', 'business_professional'])
+  
+  const demographicExtras = Object.entries(safeDemographic)
     .filter(([k, v]) => (v as number) >= 40 && !handled.has(k) && !permittedKeys.includes(k))
+  
+  const categoryExtras = Object.entries(safeCategory)
+    .filter(([k, v]) => (v as number) >= 40 && !handled.has(k) && !permittedKeys.includes(k))
+  
+  const allExtras = [...demographicExtras, ...categoryExtras]
     .sort(([, a], [, b]) => (b as number) - (a as number))
     .slice(0, 2)
     .map(([k]) => k)
-  permittedKeys.push(...extras)
+  
+  permittedKeys.push(...allExtras)
 
   // Cap at 3 for prompt readability
   const finalKeys = permittedKeys.slice(0, 3)

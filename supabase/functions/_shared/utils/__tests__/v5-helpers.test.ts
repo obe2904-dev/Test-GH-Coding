@@ -135,7 +135,7 @@ Deno.test('getActiveSegment - finds matching segment', () => {
       programme_name: 'Weekend Brunch',
       audience_segments: [
         {
-          label: 'Weekend-brunch-gæster',
+          people_type: 'Familier',
           timing_windows: ['Lør-Søn 10:00-14:00'],
           content_angles: ['Social brunch-oplevelse'],
           segment_size: 'primary',
@@ -152,7 +152,7 @@ Deno.test('getActiveSegment - finds matching segment', () => {
   const match = getActiveSegment(programmes, 6, 11)
   
   assertExists(match)
-  assertEquals(match!.segment.label, 'Weekend-brunch-gæster')
+  assertEquals(match!.segment.people_type, 'Familier')
   assertEquals(match!.programme.programme_type, 'brunch')
 })
 

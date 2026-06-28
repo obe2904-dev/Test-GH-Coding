@@ -319,20 +319,31 @@ export async function generateStrategicBrief(
   // Driven by content_strategy from brand profile when available.
   brief.angles = assignSlotMetadata(brief.angles, targetPostCount, context);
 
-  // ── Append deterministic content mix summary to week_summary ──────────────────
-  // This ensures users see the brand/loyalty/footfall composition
-  const footfallCount = brief.angles.filter(a => a.goal_mode === 'drive_footfall').length;
-  const brandCount = brief.angles.filter(a => a.goal_mode === 'build_brand').length;
-  const loyaltyCount = brief.angles.filter(a => a.goal_mode === 'retain_loyalty').length;
+  // ── FIX BREAK 1: Replace (not append) deterministic content mix summary ──────
+  // Count actual angles by cta_mode (booking/walk_in) and goal_mode (brand/loyalty)
+  const bookingSlots = brief.angles.filter(a => a.cta_mode === 'booking').length;
+  const walkInSlots = brief.angles.filter(a => a.cta_mode === 'walk_in').length;
+  const brandSlots = brief.angles.filter(a => a.goal_mode === 'build_brand').length;
+  const loyaltySlots = brief.angles.filter(a => a.goal_mode === 'retain_loyalty').length;
   
   const mixParts: string[] = [];
-  if (footfallCount > 0) mixParts.push(`${footfallCount} opslag driver bookinger`);
-  if (brandCount > 0) mixParts.push(`${brandCount} opslag styrker brand`);
-  if (loyaltyCount > 0) mixParts.push(`${loyaltyCount} opslag plejer stamgæster`);
+  if (bookingSlots > 0) mixParts.push(`${bookingSlots} opslag driver bookinger`);
+  if (walkInSlots > 0) mixParts.push(`${walkInSlots} opslag driver besøg`);
+  if (brandSlots > 0) mixParts.push(`${brandSlots} opslag styrker brand`);
+  if (loyaltySlots > 0) mixParts.push(`${loyaltySlots} opslag plejer stamgæster`);
   
   if (mixParts.length > 0) {
-    const mixSummary = `\n\nDenne uge: ${mixParts.join(', ')}.`;
-    brief.week_summary = (brief.week_summary || '') + mixSummary;
+    const summaryLine = `Denne uge: ${mixParts.join(', ')}.`;
+    
+    // REPLACE any existing "Denne uge: ..." sentence (AI-fabricated count) with real count
+    if (brief.week_summary && /Denne uge:[^.]+\./i.test(brief.week_summary)) {
+      brief.week_summary = brief.week_summary.replace(/Denne uge:[^.]+\./i, summaryLine).trim();
+      console.log('[Phase 1] Replaced AI-fabricated "Denne uge:" count with actual slot counts');
+    } else {
+      // No existing "Denne uge:" found — append it
+      brief.week_summary = (brief.week_summary || '').trim() + '\n\n' + summaryLine;
+      console.log('[Phase 1] Appended slot count summary to week_summary');
+    }
   }
 
   console.log('[Phase 1] Slot assignments:', brief.angles.map(a => ({
@@ -375,6 +386,70 @@ function buildIdentityBlock(context: WeekContext): string {
 
   if (lines.length === 0) return '';
   return `## FORRETNINGSIDENTITET\n${lines.join('\n')}`;
+}
+
+// ============================================================
+// BOOKING CONTEXT BLOCK BUILDER
+// Surfaces all booking-relevant context for AI reasoning about lead days
+// ============================================================
+
+function buildBookingContextBlock(ctx: WeekContext): string {
+  const lines: string[] = []
+
+  // Booking capability
+  const ctaRules = (ctx as any).cta_rules
+  if (ctaRules) {
+    lines.push(`Booking model: ${ctaRules.mode}`)
+  }
+  if ((ctx as any).booking_link) {
+    lines.push(`Booking link: ${(ctx as any).booking_link}`)
+  }
+
+  // How guests decide — from programme profiles
+  const programmes = (ctx as any).business_programmes ?? []
+  const decisionLines = programmes
+    .filter((p: any) => p.decision_timing || p.accepts_reservations !== undefined)
+    .map((p: any) => {
+      const parts = [p.programme_name ?? p.programme_type]
+      if (p.decision_timing) parts.push(`books ${p.decision_timing}`)
+      if (p.accepts_reservations === false) parts.push('walk-in only')
+      if (p.accepts_reservations === true) parts.push('takes reservations')
+      return parts.join(': ')
+    })
+  if (decisionLines.length > 0) {
+    lines.push(`Guest decision timing:\n${decisionLines.map(l => `  - ${l}`).join('\n')}`)
+  }
+
+  // When the business is busy — from busy_pattern
+  if ((ctx as any).busy_pattern) {
+    lines.push(`Busy pattern: ${JSON.stringify((ctx as any).busy_pattern)}`)
+  }
+
+  // Peak revenue moment — from revenue_drivers
+  const peak = (ctx as any).revenue_drivers?.primary_revenue_moment
+  if (peak) {
+    const peakParts = [peak.service_type]
+    if (peak.peak_days?.length) peakParts.push(`peak days: ${peak.peak_days.join(', ')}`)
+    if (peak.peak_hours) peakParts.push(`hours: ${peak.peak_hours}`)
+    lines.push(`Peak revenue moment: ${peakParts.join(', ')}`)
+  }
+
+  // Upcoming events — full picture including lookahead
+  const events = ctx.events ?? []
+  if (events.length > 0) {
+    const eventLines = events.map((e: any) => {
+      const parts = [`${e.name} (${e.date}, ${e.days_away} days away)`]
+      if (e.commercial_weight) parts.push(`commercial weight: ${e.commercial_weight}`)
+      if (e.marketing_hook) parts.push(`hook: ${e.marketing_hook}`)
+      if (!e.in_week) parts.push('LOOKAHEAD — falls after this week')
+      return `  - ${parts.join(', ')}`
+    })
+    lines.push(`Events and lookahead:\n${eventLines.join('\n')}`)
+  } else {
+    lines.push('Events: none this week or in lookahead window')
+  }
+
+  return lines.join('\n')
 }
 
 // ============================================================
@@ -631,6 +706,10 @@ Forretningen HAR IKKE udeservering.
 
 `;
 })()}
+
+## BOOKING CONTEXT
+
+${buildBookingContextBlock(context)}
 
 ## BOOKING & CTA RULES (afgørende for CTA-valg på footfall-opslag)
 
@@ -906,6 +985,7 @@ Givet contextual_analysis viste "4-day window":
       "strategic_intent": "Drive planned lunch visits for Thursday-Friday (holiday + bridge day)",
       "goal_mode": "drive_footfall",
       "cta_mode": "booking",
+      "booking_lead_days": 2,
       "content_focus": "menu_item",
       "content_category": "product_menu",
       "target_service_period": "lunch",
@@ -920,6 +1000,7 @@ Givet contextual_analysis viste "4-day window":
       "strategic_intent": "Drive evening visits for Thursday-Friday (celebration mode + bridge day leisure)",
       "goal_mode": "drive_footfall",
       "cta_mode": "booking",
+      "booking_lead_days": 2,
       "content_focus": "atmosphere",
       "content_category": "craving_visual",
       "target_service_period": "dinner",
@@ -961,6 +1042,30 @@ Hver slot beskriver HVAD og HVORFOR — ikke HVORNÅR (timing bestemmes senere).
 - ["Monday", "Tuesday"]: Early week brand posts
 - ["any"]: Flexible timing
 
+**booking_lead_days field (PÅKRÆVET for cta_mode: "booking", null ellers):**
+
+Dette felt angiver hvor mange dage FØR target visit day opslaget skal publiceres,
+baseret på hvor langt frem denne specifikke forretnings gæster faktisk booker
+for denne specifikke lejlighed.
+
+Ræsonner ud fra den fulde kontekst i BOOKING CONTEXT sektionen ovenfor:
+- Hvordan beskriver guest decision timing denne forretning?
+- Hvor travlt er det på target day (busy_pattern)?
+- Er der en commercial event der ændrer planlægningsadfærd?
+  (Valentinsdag, Påske, Nytår — gæster booker tidligere end normalt)
+- Er det en multi-dages helligdag hvor efterspørgsel er spredt over flere dage?
+- Er target en peak revenue moment?
+
+Der er ingen faste regler. Brug din dømmekraft. Eksempler på hvordan kontekst
+skal ændre tallet:
+- Casual BBQ restaurant, almindelig fredag aften, same_week decision timing → sandsynligvis 2
+- Fine dining, lørdag aften, week_ahead decision timing → sandsynligvis 4-5
+- Enhver restaurant, Valentinsdag (commercial_weight 0.9), torsdag →
+  gæster booker meget tidligere end normalt → sandsynligvis 5-6
+- Brunch spot, Påske lørdag, week_ahead → sandsynligvis 4
+- Casual café, tirsdag frokost, walk-in crowd → cta_mode skal være walk_in,
+  ikke booking, så booking_lead_days er null
+
 SVAR KUN MED JSON:
 
 {
@@ -972,6 +1077,7 @@ SVAR KUN MED JSON:
       "strategic_intent": "Drive weekend dinner bookings for Friday/Saturday",
       "goal_mode": "drive_footfall",
       "cta_mode": "booking",
+      "booking_lead_days": 2,
       "content_focus": "menu_item",
       "content_category": "product_menu",
       "target_service_period": "dinner",
@@ -986,6 +1092,7 @@ SVAR KUN MED JSON:
       "strategic_intent": "Weekend walk-in footfall for lunch",
       "goal_mode": "drive_footfall",
       "cta_mode": "walk_in",
+      "booking_lead_days": null,
       "content_focus": "atmosphere",
       "content_category": "craving_visual",
       "target_service_period": "lunch",
@@ -1000,6 +1107,7 @@ SVAR KUN MED JSON:
       "strategic_intent": "Brand atmosphere and location advantage",
       "goal_mode": "build_brand",
       "cta_mode": "walk_in",
+      "booking_lead_days": null,
       "content_focus": "atmosphere",
       "content_category": "craving_visual",
       "target_service_period": "any",
@@ -1014,6 +1122,7 @@ SVAR KUN MED JSON:
       "strategic_intent": "Mid-week retention post for regulars",
       "goal_mode": "retain_loyalty",
       "cta_mode": "engagement",
+      "booking_lead_days": null,
       "content_focus": "behind_scenes",
       "content_category": "behind_scenes",
       "target_service_period": "any",

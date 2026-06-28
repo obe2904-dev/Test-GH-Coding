@@ -610,8 +610,10 @@ async function mapIdeaToEnrichedSlot(
   const rawAreaType = (locationIntel?.area_type as string | undefined) || 'city_center'
   const normalisedAreaType = rawAreaType === 'city_centre' ? 'city_center' : rawAreaType
   // Derive permitted audience types via shared filter (price-gated, same logic as Brand Profile)
+  // SCHEMA V2: demographic_proximity = WHO, category_scores = WHERE
   const _categoryScores = (locationIntel?.category_scores as Record<string, number>) ?? {}
-  const { permittedKeys: _permittedKeys } = filterAudienceLabels(_categoryScores, maxMenuPrice)
+  const _demographicProximity = (locationIntel?.demographic_proximity as Record<string, number>) ?? {}
+  const { permittedKeys: _permittedKeys } = filterAudienceLabels(_demographicProximity, maxMenuPrice, _categoryScores)
   const _secondaryTypes = _permittedKeys.map(k => k === 'city_centre' ? 'city_center' : k)
   const locationContextData = {
     type: normalisedAreaType as 'waterfront' | 'city_center' | 'historic' | 'residential' | 'suburban',
@@ -1437,17 +1439,29 @@ export async function saveWeeklyPlan(
             return null
           }
 
+          // Extract menu_item_id before content_type normalization
+          const menuItemId = idea.contentSubject?.menuItemId || idea.menuItemId || null
+          
+          // CRITICAL: Database constraint "daily_sugg_product_needs_menu" requires
+          // menu_item_id to be NON-NULL when content_type='product'.
+          // If content_type is 'product' but we have no menu_item_id, downgrade to 'atmosphere'.
+          let normalizedContentType = idea.content_type || 'atmosphere'
+          if (normalizedContentType === 'product' && !menuItemId) {
+            console.warn(`[saveWeeklyPlan] Post "${idea.title}" has content_type='product' but no menu_item_id — downgrading to 'atmosphere'`)
+            normalizedContentType = 'atmosphere'
+          }
+
           return {
             business_id: plan.businessId,
             title: idea.title || 'Untitled Post',
             rationale: idea.rationale || '',
-            content_type: idea.content_type || 'atmosphere',
+            content_type: normalizedContentType,
             suggested_time: idea.suggested_time || null,
             date,
             position: nextPos,
             source: 'weekly_plan',
             status: 'available',
-            menu_item_id: idea.contentSubject?.menuItemId || idea.menuItemId || null,
+            menu_item_id: menuItemId,
             menu_item_name: idea.contentSubject?.menuItemName || idea.menuItemName || null,
             menu_item_description: idea.contentSubject?.menuItemDescription || idea.menuItemDescription || null,
             validation_result: idea.validation_result || null,

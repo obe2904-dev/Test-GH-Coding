@@ -65,7 +65,7 @@ export interface SecondarySignals {
   secondaryTextFragments: string[]
   websiteRegisterHint: string
   dayArcProgrammes: string[]    // e.g. ["Brunch", "Frokost", "Aften", "Cocktails"]
-  audienceProfile: string       // e.g. "tourist, waterfront, city-centre" derived from category_scores
+  audienceProfile: string       // e.g. "tourist, waterfront, city-centre" derived from demographic_proximity + category_scores
   openingHoursHint: string      // e.g. "Man-søn 09:00-22:00" or "Tor-lør 17:00-23:00"
   acceptsReservations: boolean | null  // null = could not determine
   hybridTypeHint: string        // e.g. "café + cocktailbar (dag + sen aftendrift)" or "" if single-type

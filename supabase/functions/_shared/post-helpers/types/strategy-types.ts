@@ -892,6 +892,12 @@ export interface StrategicAngle {
   //   hybrid    → "kom forbi eller book via link" — both options
   //   engagement → community engagement, no hard CTA
   cta_mode?: 'walk_in' | 'booking' | 'hybrid' | 'engagement';
+  
+  // Booking lead days — AI-determined days before target visit to post the booking nudge
+  // Required when cta_mode === "booking", null otherwise
+  // Examples: 2 (casual regular Friday), 4-5 (fine dining Saturday), 5-6 (Valentine's Day)
+  booking_lead_days?: number | null;
+  
   suggested_content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people'; // AI hint from Phase 1 prompt for semantic slot matching
 }
 

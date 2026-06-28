@@ -5,6 +5,7 @@ import { useSubscriptionTier } from '@/hooks/useSubscriptionTier'
 import { useTierStore } from '../../stores/tierStore'
 import { usePostCreationStore } from '../../stores/postCreationStore'
 import { useSetupCompletion } from '@/hooks/useSetupCompletion'
+import type { CompletionState } from '@/hooks/useSetupCompletion'
 import { useBusinessData } from '../../hooks/useBusinessData'
 import { MediaGalleryModal } from '../media/media-gallery'
 import { useDashboardNavigationStore } from '../../stores/dashboardNavigationStore'
@@ -129,6 +130,14 @@ const CheckCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 )
 
+const PartialCircleIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 20 20" stroke="currentColor" strokeWidth="2">
+    <circle cx="10" cy="10" r="8" />
+    <path d="M10 2a8 8 0 0 1 0 16" strokeLinecap="round" />
+    <path d="M10 4a6 6 0 0 1 0 12" strokeLinecap="round" opacity="0.45" />
+  </svg>
+)
+
 const PhotoIcon = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
     <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -157,10 +166,12 @@ export function Sidebar({ className = '' }: SidebarProps) {
   const isWeeklyPlanLocked = isFree
 
   // Helper to render nav item
-  const renderNavItem = (item: { id: string; label: string; icon: any; path: string; locked?: boolean; badge?: string; completed?: boolean }) => {
+  const renderNavItem = (item: { id: string; label: string; icon: any; path: string; locked?: boolean; isSequentialLock?: boolean; badge?: string; completed?: boolean; completionState?: CompletionState }) => {
     const Icon = item.icon
     const isLocked = item.locked
+    const isSequentialLock = item.isSequentialLock
     const isCompleted = item.completed
+    const isPartial = item.completionState === 'partial'
     const isHovered = hoveredSidebarItem === item.id
     
     if (isLocked) {
@@ -172,7 +183,7 @@ export function Sidebar({ className = '' }: SidebarProps) {
         >
           <Icon className="w-5 h-5 flex-shrink-0" />
           <span className={`truncate ${isHovered ? 'font-semibold text-text' : ''}`}>{item.label}</span>
-          <span className="ml-auto text-xs">🔒</span>
+          <span className="ml-auto text-xs">{isSequentialLock ? '⏻' : '🔒'}</span>
         </button>
       )
     }
@@ -193,6 +204,9 @@ export function Sidebar({ className = '' }: SidebarProps) {
           <>
             <Icon className={`w-5 h-5 flex-shrink-0 ${isActive || isHovered ? 'text-[#0A7D5F]' : ''}`} />
             <span className={`truncate flex-1 ${isActive || isHovered ? 'font-semibold text-text' : ''}`}>{item.label}</span>
+            {!completion.loading && isPartial && (
+              <PartialCircleIcon className="w-4 h-4 text-[#F59E0B] flex-shrink-0" />
+            )}
             {isCompleted && !completion.loading && (
               <CheckCircleIcon className="w-4 h-4 text-[#0A7D5F] flex-shrink-0" />
             )}
@@ -205,10 +219,21 @@ export function Sidebar({ className = '' }: SidebarProps) {
   return (
     <div className={`w-72 bg-surface border-r border-border flex flex-col h-screen ${className}`}>
       {/* Logo */}
-      <div className="px-4 py-4">
+      <div className="px-4 py-4 flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-brand">
           Post2Grow
         </h1>
+        {isWeeklyPlanLocked && (
+          <button
+            onClick={() => navigate('/dashboard/plans')}
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+            </svg>
+            Opgrader
+          </button>
+        )}
       </div>
 
       {/* Main Navigation */}
@@ -227,10 +252,10 @@ export function Sidebar({ className = '' }: SidebarProps) {
             <div className="relative pl-3 space-y-0">
               <div className="absolute left-0 top-3 bottom-3 w-px bg-border"></div>
               
-              {renderNavItem({ id: 'profile', label: t('navigation.setup.profile'), icon: GlobeIcon, path: '/dashboard/profile', completed: completion.profile })}
-              {renderNavItem({ id: 'menu', label: t('navigation.setup.menu'), icon: MenuIcon, path: '/dashboard/menu', locked: isFree, completed: completion.menu })}
-              {renderNavItem({ id: 'location', label: t('navigation.setup.location'), icon: MapPinIcon, path: '/dashboard/location', locked: isFree, completed: completion.location })}
-              {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand', locked: isFree, completed: completion.brandProfile })}
+              {renderNavItem({ id: 'profile', label: t('navigation.setup.profile'), icon: GlobeIcon, path: '/dashboard/profile', completed: completion.profileState === 'complete', completionState: completion.profileState })}
+              {renderNavItem({ id: 'menu', label: t('navigation.setup.menu'), icon: MenuIcon, path: '/dashboard/menu', locked: isFree || (!isFree && completion.profileState !== 'complete'), isSequentialLock: !isFree && completion.profileState !== 'complete', completed: completion.menu, completionState: completion.menuState })}
+              {renderNavItem({ id: 'location', label: t('navigation.setup.location'), icon: MapPinIcon, path: '/dashboard/location', locked: isFree || (!isFree && completion.menuState === 'none'), isSequentialLock: !isFree && completion.menuState === 'none', completed: completion.location, completionState: completion.locationState })}
+              {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand', locked: isFree || (!isFree && completion.locationState === 'none'), isSequentialLock: !isFree && completion.locationState === 'none', completed: completion.brandProfile, completionState: completion.brandState })}
             </div>
           )}
         </div>
@@ -300,18 +325,6 @@ export function Sidebar({ className = '' }: SidebarProps) {
                 <span className="truncate">{t('navigation.weeklyPlan')}</span>
                 {isWeeklyPlanLocked && <span className="ml-auto text-xs">🔒</span>}
               </button>
-              {/* Pro Upsell Chip - only show if weekly plan is locked (free tier) */}
-              {isWeeklyPlanLocked && (
-                <button
-                  onClick={() => navigate('/dashboard/plans')}
-                  className="ml-8 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all inline-flex items-center gap-1"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
-                  </svg>
-                  Opgrader
-                </button>
-              )}
             </div>
           </div>
           
@@ -417,33 +430,6 @@ export function Sidebar({ className = '' }: SidebarProps) {
           )}
         </div>
       </nav>
-
-      {/* Bottom - Tier Badge */}
-      <div className="px-3 py-3 border-t border-border">
-        <button
-          onClick={() => navigate('/dashboard/plans')}
-          className="w-full px-3 py-2.5 rounded-lg bg-[#E6F4F1] hover:bg-[#D9EDE9] transition-all"
-        >
-          <div className="flex items-center justify-between">
-            <div className="text-left">
-              <div className="text-xs font-medium text-[#076B4E]">
-                {currentTier === 'free' && t('navigation.tier.free')}
-                {currentTier === 'standardplus' && t('navigation.tier.standard')}
-                {currentTier === 'premium' && t('navigation.tier.premium')}
-              </div>
-              <div className="text-xs text-[#076B4E]">
-                {currentTier !== 'premium' && t('navigation.tier.upgrade')}
-                {currentTier === 'premium' && t('navigation.tier.unlocked')}
-              </div>
-            </div>
-            <SparklesIcon className="w-4 h-4 text-[#0A7D5F]" />
-          </div>
-        </button>
-        
-        <div className="text-xs text-text-muted text-center mt-3">
-          Post2Grow © {new Date().getFullYear()}
-        </div>
-      </div>
 
       {/* Media Gallery Modal */}
       {business?.id && (

@@ -3,6 +3,41 @@
  * Uses GPT-4o + Brave Search to analyze location intelligence
  */
 
+// Danish university cities for student score validation
+const DANISH_UNIVERSITY_CITIES = [
+  'København', 'Aarhus', 'Odense', 'Aalborg', 'Roskilde', 'Kolding', 'Esbjerg'
+];
+
+// Major Danish tourist destinations for tourist score validation
+const MAJOR_TOURIST_DESTINATIONS = [
+  'København', 'Aarhus', 'Odense', 'Aalborg', 'Skagen', 'Ribe', 
+  'Ebeltoft', 'Billund', 'Ærøskøbing', 'Dragør', 'Møn', 'Bornholm'
+];
+
+// Danish city sizes for neighborhood_character language validation
+const DANISH_CITY_SIZES: Record<string, 'large' | 'medium' | 'small'> = {
+  'København': 'large',  // 600k+
+  'Aarhus': 'large',     // 280k
+  'Odense': 'medium',    // 180k
+  'Aalborg': 'medium',   // 120k
+  'Esbjerg': 'medium',   // 72k
+  'Silkeborg': 'medium', // 50k
+  'Horsens': 'medium',   // 60k
+  'Viborg': 'small',     // 40k
+  'Randers': 'medium',   // 62k
+  'Kolding': 'medium',   // 60k
+  'Vejle': 'medium',     // 60k
+  'Herning': 'medium',   // 50k
+  'Fredericia': 'small', // 40k
+  'Næstved': 'small',    // 43k
+};
+
+// Prohibited phrases by city size (prevents "pulsating city life" in small towns)
+const PROHIBITED_PHRASES_BY_SIZE: Record<string, string[]> = {
+  'medium': ['pulserende', 'urban energi', 'kosmopolit', 'byens puls', 'storby'],
+  'small':  ['pulserende', 'urban energi', 'kosmopolit', 'byens puls', 'storby', 'byliv', 'metropol']
+};
+
 // NEW: Location Context Input - streamlined for scoring
 export interface LocationContextInput {
   formatted_address: string;
@@ -206,6 +241,73 @@ export class AIAnalyzer {
         const cleanContent = content.trim().replace(/^```json\s*\n?/i, '').replace(/\n?```$/, '');
         
         const result = JSON.parse(cleanContent);
+        
+        // ===== POST-PROCESSING VALIDATION =====
+        // Extract city from address for validation
+        const city = input.formatted_address.split(',')[1]?.trim() || '';
+        
+        // FIX 2a: Student score validation - cap at 25 if not a university city
+        if (result.demographic_proximity?.student > 25) {
+          const isUniversityCity = DANISH_UNIVERSITY_CITIES.some(uc => 
+            city.toLowerCase().includes(uc.toLowerCase())
+          );
+          
+          if (!isUniversityCity) {
+            console.warn(
+              `⚠️ Student score capped: ${result.demographic_proximity.student} → 25 ` +
+              `(${city} is not a university city)`
+            );
+            result.demographic_proximity.student = Math.min(25, result.demographic_proximity.student);
+          }
+        }
+        
+        // FIX 2b: Tourist score validation - cap at 30 if not a major tourist destination
+        if (result.demographic_proximity?.tourist > 30) {
+          const isTouristDestination = MAJOR_TOURIST_DESTINATIONS.some(td => 
+            city.toLowerCase().includes(td.toLowerCase())
+          );
+          
+          if (!isTouristDestination) {
+            console.warn(
+              `⚠️ Tourist score capped: ${result.demographic_proximity.tourist} → 30 ` +
+              `(${city} is not a major tourist destination)`
+            );
+            result.demographic_proximity.tourist = Math.min(30, result.demographic_proximity.tourist);
+          }
+        }
+        
+        // FIX 4: Neighborhood character city-size validation
+        if (result.neighborhood_character) {
+          const citySize = DANISH_CITY_SIZES[city] || 'small';
+          const prohibited = PROHIBITED_PHRASES_BY_SIZE[citySize] || PROHIBITED_PHRASES_BY_SIZE['small'];
+          
+          const hasProhibited = prohibited.some(phrase => 
+            result.neighborhood_character.toLowerCase().includes(phrase)
+          );
+          
+          if (hasProhibited) {
+            console.warn(
+              `⚠️ Neighborhood character uses inappropriate language for ${citySize} city (${city}). ` +
+              `Regenerating with factual fallback...`
+            );
+            
+            // Fallback to simple factual synthesis
+            const areaTypeLabels: Record<string, string> = {
+              city_centre:        'centrum',
+              waterfront:         'ved havnen',
+              residential:        'i et boligkvarter',
+              office:             'i erhvervsområdet',
+              shopping_district:  'i shoppingområdet',
+              transport_hub:      'ved stationen',
+              destination:        'som destinationssted',
+              nature_park:        'ved naturområdet',
+            };
+            const areaLabel = areaTypeLabels[result.area_type] || 'i byen';
+            result.neighborhood_character = `${city} ${areaLabel}.`;
+            console.log(`🔧 Synthesized factual neighborhood_character: "${result.neighborhood_character}"`);
+          }
+        }
+        
         return {
           category_scores: result.category_scores || {},
           demographic_proximity: result.demographic_proximity || {},
@@ -284,15 +386,72 @@ Nearby landmarks: ${input.landmarks?.slice(0, 6).map(l => l.name).join(', ') || 
 TASK:
 Search for context about this location and area if needed, then return:
 
-1. category_scores (geographic character, each 0-100):
-   - city_centre: how central/urban is this? (100 = heart of city)
-   - waterfront: proximity to water (sea, river, lake, canal)?
-   - residential: neighbourhood feel, people live nearby?
-   - office: business district, offices dominant?
-   - transport_hub: near major train/metro/bus terminal?
-   - shopping_district: retail concentration?
-   - tourist_destination: tourist attractions dominant?
-   - nature_park: parks, forests, nature nearby?
+1. Location Category Scores (0–100)
+
+These scores answer ONE question per category:
+"To what degree is THIS category the primary reason customers are in this area?"
+
+Score based on CUSTOMER DRAW, not geographic proximity.
+
+RULE: A category scores high only if a customer would specifically
+seek out this location TYPE to visit this business.
+Nearby presence of that environment does NOT justify a high score.
+
+Category definitions:
+
+city_centre (0–100)
+  High: The venue sits in the active flow of urban life — pedestrian zone,
+  main square, dense mix of retail and restaurants. Customers are here
+  because it is a busy city hub.
+  Low: The venue is in a city but not in its commercial core.
+
+waterfront (0–100)
+  High: Water is a direct feature of the location experience — harbour
+  promenade, lakeside terrace, canal-side seating, sea views from the venue.
+  Low: Water exists nearby but is not part of why customers choose this spot.
+
+nature_park (0–100)
+  High: The venue is physically embedded in or at the entrance of a natural
+  area — forest, lake, beach, or trail. Customers come here because of nature.
+  Low: A natural area exists in the same city, within view, or within walking
+  distance but the venue itself is not in that natural setting.
+
+residential (0–100)
+  High: The venue primarily serves a local catchment — people arrive on foot
+  from surrounding homes. Low visitor or transit footfall from outsiders.
+  Low: The area attracts people from beyond the immediate neighbourhood.
+
+office (0–100)
+  High: Nearby workplaces generate the dominant customer flow —
+  lunchtime crowds, after-work visits, business meetings.
+  Low: Offices exist nearby but are not the primary driver of footfall.
+
+shopping_district (0–100)
+  High: The venue is inside or directly adjacent to a primary retail zone
+  and captures shoppers as its main audience.
+  Low: Some shops exist nearby but retail is not the area's defining character.
+
+transport_hub (0–100)
+  High: The venue is in or immediately next to a major transit node —
+  train station concourse, ferry terminal, bus interchange. Customers
+  pass through rather than come specifically to this area.
+  Low: A bus stop or station exists within walking distance.
+
+tourist_destination (0–100)
+  High: The location itself draws visitors — historic quarter, major
+  attraction, well-known landmark. Tourists form a significant share
+  of passers-by.
+  Low: The city has tourist attractions but this specific area does not
+  function as a tourist zone.
+
+Calibration:
+- Scores are independent. They do NOT need to sum to 100.
+- Most venues will have 1–2 high scores (60+) and the rest low (0–25).
+- A score above 60 means that category genuinely shapes why customers
+  are here. Do not inflate secondary categories because they are
+  "somewhat relevant."
+- When in doubt, score lower. Over-scoring creates false signals
+  downstream in content generation.
 
 2. demographic_proximity (who PASSES BY this area, 0-100):
    - local_resident: do locals use this area daily?
@@ -313,6 +472,24 @@ Search for context about this location and area if needed, then return:
 4. neighborhood_character: 2-3 sentences in Danish describing the area.
    What kind of place is this? What surrounds it? What is the atmosphere?
    Do NOT mention the specific business. Do NOT give marketing advice.
+   
+   FIX 1b: Generate neighborhood_character as a factual, city-accurate description.
+   Scale the language to the actual city size:
+   - Large city (500k+): urban energy, vibrant, cosmopolitan references are appropriate
+   - Medium city (50k–200k): focus on local landmarks, the specific street or square,
+     community feel, proximity to nature or water if relevant
+   - Small town (<50k): local character, slower pace, specific known landmarks
+   
+   For cities like Silkeborg, Horsens, Viborg (medium-sized Danish cities):
+   Reference specific local features (e.g., Silkeborg Søerne, gågaden, Torvet) or
+   the natural surroundings — NOT "pulserende byliv" or "byens puls".
+   These phrases do not match a city of 50k-100k people.
+   
+   neighborhood_character must be a factual sentence, not marketing language.
+   Example good output for Silkeborg: "Centralt i Silkeborg med gågaden og Torvet
+   inden for gangafstand, tæt på Silkeborg Søerne og naturstier."
+   Example bad output: "I hjertet af Silkeborgs pulserende byliv med konstant
+   aktivitet og urban energi."
 
 Return ONLY valid JSON:
 {

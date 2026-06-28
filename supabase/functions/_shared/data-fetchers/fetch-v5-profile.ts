@@ -240,7 +240,7 @@ export function buildV5AudienceSection(
     }
     
     for (const segment of prog.audience_segments) {
-      sections.push(`\n  Segment: ${segment.label}`)
+      sections.push(`\n  Segment: ${segment.people_type}`)
       sections.push(`  Size: ${segment.segment_size}`)
       sections.push(`  Timing: ${segment.timing_windows.join(', ')}`)
       sections.push(`  Motivation: ${segment.motivation}`)

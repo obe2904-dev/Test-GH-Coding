@@ -14,6 +14,42 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// ── classifyUserInput ────────────────────────────────────────────────────
+// Infer post intent from unconstrained user text.
+// Returns one of the standard contentType values used by platform-hashtags.ts
+// Priority: explicit signals in text → dish detection result → fallback
+function classifyUserInput(
+  text: string,
+  detectedDishName: string | null
+): string {
+  if (detectedDishName) return 'menu_item'
+
+  const t = text.toLowerCase()
+
+  // Operational / info posts
+  if (/(lukket|åbent|åbningstid|ferie|helligdag|holder\s+fri|åbner\s+kl|lukker\s+kl)/i.test(t))
+    return 'operational'
+
+  // Event posts
+  if (/(event|begivenhed|arrangement|koncert|quiz|live\s+musik|optræden|fest|fejrer|fejr)/i.test(t))
+    return 'event'
+
+  // Offer / promotion posts
+  if (/(tilbud|rabat|gratis|fri\s+øl|inkluderet|kampagne|happy\s+hour|all\s+you\s+can|ayce|deal)/i.test(t))
+    return 'offer'
+
+  // Outdoor / seasonal posts
+  if (/(udendørs|udeservering|terrasse|sommer|solskin|vejret|forår|vinter|sæson)/i.test(t))
+    return 'atmosphere'
+
+  // Team / people posts
+  if (/(vores\s+team|vores\s+kok|personale|bag\s+kulisserne|meet|mød\s+vores)/i.test(t))
+    return 'team_people'
+
+  // Default — genuinely unknown input, treat as atmosphere
+  return 'atmosphere'
+}
+
 // ── sanitizeMenuDesc ────────────────────────────────────────────────────
 // Strip upsell/add-on references and marketing summary sentences from menu descriptions.
 function sanitizeMenuDesc(raw: string): string {
@@ -167,10 +203,22 @@ function extractBrandTone(brandVoice: Record<string, any>): { brandTone: string;
   const v5EmojiLevel = v5Voice?.emoji_level
   const legacyEmojiLevel = brandVoice.tone_model?.emoji_level || (brandVoice.tone_of_voice as any)?.emoji_frequency
   const emojiLevel = v5EmojiLevel || legacyEmojiLevel || 'moderate'
-  emojiInstruction = emojiLevel === 'none' ? 'Brug INGEN emojis'
-    : emojiLevel === 'minimal' || emojiLevel === 'low' ? '0-1 emoji maksimum'
-    : emojiLevel === 'frequent' || emojiLevel === 'high' ? '2-3 emojis naturligt placeret'
-    : '1-2 emojis naturligt placeret'
+  
+  // FIX 06: Principle-based emoji instruction with count + placement + relevance rules
+  const emojiCount = emojiLevel === 'none' ? 'INGEN emojis — ingen undtagelser'
+    : emojiLevel === 'minimal' || emojiLevel === 'low' ? 'maksimalt ÉT emoji'
+    : emojiLevel === 'frequent' || emojiLevel === 'high' ? 'højst 2 emojis'
+    : 'højst 2 emojis'
+
+  emojiInstruction = emojiLevel === 'none'
+    ? 'Brug INGEN emojis.'
+    : [
+        `EMOJI: ${emojiCount}.`,
+        'Placer emoji(s) til sidst i teksten — aldrig midt i en sætning.',
+        'Vælg emoji der afspejler det SPECIFIKKE indhold i DENNE tekst.',
+        'Brug ALDRIG ☕ medmindre teksten handler om kaffe.',
+        'Brug ALDRIG 🍷🍸🥂 medmindre teksten handler om vin eller cocktails.',
+      ].join(' ')
 
   // V5 FALLBACK 4: Good examples
   // V5-first: use v5WritingExamples.good_examples, fallback to tone_model.good_examples
@@ -338,16 +386,28 @@ function buildEnhancePrompt(opts: {
   includeEmojis: boolean
   platforms: string[]
   clarificationContext: string | null
+  // FIX 06: content type for emoji overrides
+  classifiedContentType: string
 }): string {
   const { originalText, headline, businessName, locationText, language, isPaid,
     brandTone, writingRules, goodExamples, preferVocab, avoidVocab, sigPhrases,
     thingsToAvoid, voiceConstraints, venueIdentity, businessCharacter, emojiInstruction, typicalClosings,
     detectedDishName, detectedDishDescription, neighborhood, neighborhoodCharacter, locationHooks,
-    includeHashtags, platforms, clarificationContext } = opts
+    includeHashtags, platforms, clarificationContext, classifiedContentType } = opts
 
   const hasBrandVoice = !!(brandTone || writingRules.length > 0)
   const hasDish = !!detectedDishName
   const hasLocation = !!neighborhood || locationHooks.length > 0
+
+  // FIX 06: Content-type emoji overrides for non-food posts
+  const contentTypeEmojiOverrides: Record<string, string> = {
+    atmosphere:   'EMOJI: ét emoji der afspejler stemningen — f.eks. ✨🌅🌞🌆. Ingen mad-emojis. Placer til sidst.',
+    team_people:  'EMOJI: ét emoji der afspejler menneskene eller arbejdet — f.eks. 👨‍🍳🙌🤝. Ingen mad-emojis. Placer til sidst.',
+    event:        'EMOJI: ét emoji der afspejler begivenheden — f.eks. 🎉🗓️🎶. Ingen mad-emojis. Placer til sidst.',
+    operational:  'EMOJI: ingen emoji eller ét neutralt — f.eks. 🗓️📅. Ingen mad-emojis. Placer til sidst.',
+    offer:        'EMOJI: ét emoji der afspejler tilbuddet — f.eks. 🙌🎉 eller det specifikke produkt. Placer til sidst.',
+  }
+  const finalEmojiInstruction = contentTypeEmojiOverrides[classifiedContentType] ?? emojiInstruction
 
   // ── BRAND BLOCK ─────────────────────────────────────────────────────
   let brandBlock = ''
@@ -421,7 +481,7 @@ INSTRUKTIONER
 4. Fjern generiske sætninger og AI-klichéer ("lækker oplevelse", "kom og nyd", "tag med os", "lækker", "hyggelig")
 5. Slut med en naturlig call-to-action der passer til indholdet
 6. Længde: 280-420 tegn inkl. emojis
-7. ${emojiInstruction}
+7. ${finalEmojiInstruction}
 ${qualityNote}
 OUTPUT — returner KUN dette JSON på én linje (ingen markdown, ingen forklaring):
 {"text":"<forbedret tekst>","headline":"<overskrift eller tom streng>"}
@@ -528,6 +588,16 @@ serve(async (req) => {
       localLocationReference = bizResult.data?.local_location_reference || null
     }
 
+    // FIX 06: Free tier emoji instruction with principles
+    let freeEmojiInstruction = includeEmojis
+      ? [
+          'EMOJI: højst 2 emojis.',
+          'Placer til sidst — aldrig midt i en sætning.',
+          'Vælg emoji der afspejler det SPECIFIKKE indhold i DENNE tekst.',
+          'Brug ALDRIG ☕ medmindre teksten handler om kaffe.',
+        ].join(' ')
+      : 'Brug INGEN emojis.'
+
     // Compute location text: use authentic local reference if available, fallback to city
     const locationText = localLocationReference || (city ? `i ${city}` : '')
 
@@ -542,19 +612,32 @@ serve(async (req) => {
     let voiceConstraints = ''
     let venueIdentity = ''
     let businessCharacter = ''
-    let emojiInstruction = includeEmojis ? '1-2 emojis naturligt placeret' : 'Brug INGEN emojis'
+    let emojiInstruction = freeEmojiInstruction
     let typicalClosings: string[] = []
     let detectedDishName = ''
     let detectedDishDescription = ''
     let neighborhood = ''
     let neighborhoodCharacter = ''
     let locationHooks: string[] = []
+    let aiPlaceSynopsis: string | null = null
+    let menuDescription: string | null = null
+    let locationVocabulary: string[] | null = null
 
     if (isPaid && businessId) {
-      const [brandVoiceData, locationData] = await Promise.all([
+      const [brandVoiceData, locationData, profileData] = await Promise.all([
         fetchBrandVoice(supabase, businessId),
         fetchLocationIntelligence(supabase, businessId),
+        supabase
+          .from('business_profile')
+          .select('ai_place_synopsis, menu_description')
+          .eq('business_id', businessId)
+          .maybeSingle()
+          .then(r => r.data || null),
       ])
+
+      // FIX 06: Extract venue classification fields
+      aiPlaceSynopsis = profileData?.ai_place_synopsis || null
+      menuDescription = profileData?.menu_description || null
 
       // Brand voice
       const extracted = extractBrandTone(brandVoiceData)
@@ -591,13 +674,22 @@ serve(async (req) => {
             .forEach((h: { text: string }) => hooks.push(h.text))
         }
         locationHooks = hooks
+        
+        // FIX 06: Extract location vocabulary if available
+        if (locationData.tone_dna?.location_driver?.natural_vocabulary) {
+          locationVocabulary = locationData.tone_dna.location_driver.natural_vocabulary
+        }
       }
     }
+
+    // FIX 06: Classify user input for emoji and hashtag intelligence
+    const classifiedContentType = classifyUserInput(text, detectedDishName || null)
 
     console.log('🎯 ai-enhance called:', {
       tier: userTier, model, businessId: !!businessId,
       hasBrandVoice: !!(brandTone || writingRules.length),
       detectedDish: detectedDishName || 'none',
+      classifiedContentType,
       hasLocationIntel: !!neighborhood,
       localLocationReference: localLocationReference || 'none',
       locationText: locationText || 'none',
@@ -650,6 +742,7 @@ serve(async (req) => {
       includeEmojis,
       platforms,
       clarificationContext,
+      classifiedContentType,
     })
 
     // ── GENERATE ───────────────────────────────────────────────────────
@@ -659,10 +752,15 @@ serve(async (req) => {
       throw new Error('No text returned from OpenAI')
     }
 
-    // ── SPELLING CORRECTION (paid only) ───────────────────────────────
+    // ── POST-PROCESSING ────────────────────────────────────────────────
     let finalText = enhancedText
+    
+    // FIX 06: Strip emoji violations (universal, free + paid)
+    const { needsSpellingCheck, stripEmojiViolations } = await import('../generate-text-from-idea/post-process.ts')
+    finalText = stripEmojiViolations(finalText)
+    
+    // Spelling correction (paid only)
     if (isPaid) {
-      const { needsSpellingCheck } = await import('../generate-text-from-idea/post-process.ts')
       if (needsSpellingCheck(finalText, language)) {
         const corrected = await silentCorrect(finalText, language, brandTone || '', OPENAI_API_KEY)
         if (corrected !== finalText) {
@@ -678,10 +776,13 @@ serve(async (req) => {
           businessName,
           businessCharacter,
           vertical: businessVertical,
-          contentType: detectedDishName ? 'menu_item' : 'atmosphere',
+          contentType: classifiedContentType,
           text: finalText,
-          detectedDishName,
-          detectedDishDescription,
+          detectedDishName: detectedDishName || null,
+          detectedDishDescription: detectedDishDescription || null,
+          aiPlaceSynopsis: aiPlaceSynopsis || null,
+          menuDescription: menuDescription || null,
+          locationVocabulary: locationVocabulary || null,
         })
       : { facebook: [], instagram: [] }
 
@@ -727,6 +828,7 @@ serve(async (req) => {
 
     console.log('✅ ai-enhance complete:', {
       model, tier: userTier,
+      classifiedContentType,
       textLength: finalText.length,
       hashtagCount: combinedHashtags.length,
       facebookHashtagCount: hashtagSets.facebook.length,

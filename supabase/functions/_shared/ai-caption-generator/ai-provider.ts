@@ -11,7 +11,6 @@ declare const Deno: {
 }
 
 import { callGeminiJSON } from '../gemini-client.ts'
-import type { GeminiCaptionResponse } from './types.ts'
 
 // ============================================================================
 // CONFIGURATION

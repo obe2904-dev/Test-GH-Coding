@@ -5,7 +5,7 @@ import { GenerationProgress } from './GenerationProgress';
 
 interface BrandProfileV5GeneratorProps {
   businessId: string;
-  onSuccess: () => void;
+  onSuccess: () => void | Promise<void>;
   mode?: 'generate' | 'regenerate';
 }
 

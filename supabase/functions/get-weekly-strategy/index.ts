@@ -323,7 +323,7 @@ serve(async (req)=>{
     
     // Fetch all other business data in parallel (STEP 1)
     const [{ data: locationIntel }, { data: operations, error: operationsError }, { data: openingHours }, { data: brandProfile, error: brandProfileError }, { data: businessProfileSignal }, { data: menuItemsNormalized }, { data: menuItems }, { data: businessProgrammes }, { data: profileData }, { data: businessTier, error: businessTierError }] = await Promise.all([
-      dataClient.from('business_location_intelligence').select('neighborhood, area_type, category_scores, location_marketing_hooks, latitude, longitude, local_location_reference').eq('business_id', body.business_id).single(),
+      dataClient.from('business_location_intelligence').select('neighborhood, area_type, category_scores, demographic_proximity, location_marketing_hooks, latitude, longitude, local_location_reference').eq('business_id', body.business_id).single(),
       dataClient.from('business_operations').select('has_outdoor_seating, establishment_type, reservation_required, accepts_walk_ins, enabled_menu_languages, kitchen_close_time, has_takeaway, has_table_service').eq('business_id', body.business_id).maybeSingle(),
       dataClient.from('opening_hours').select('weekday, open_time, close_time').eq('business_id', body.business_id).eq('kind', 'normal'),
       dataClient.from('business_brand_profile').select(`
@@ -890,19 +890,21 @@ serve(async (req)=>{
     let locationCategories = null;
     // Max menu price for student audience price-gate (same logic as Brand Profile)
     const _maxMenuPrice = allMenuItems.length > 0 ? allMenuItems.map((m)=>parseFloat(m.price || '')).filter((p)=>!isNaN(p) && p > 0).sort((a, b)=>b - a)[0] ?? null : null;
-    if (locationIntel?.category_scores) {
-      const scores = locationIntel.category_scores;
-      const sorted = Object.entries(scores).sort(([, a], [, b])=>b - a);
+    if (locationIntel?.category_scores || locationIntel?.demographic_proximity) {
+      // SCHEMA V2: demographic_proximity = WHO, category_scores = WHERE
+      const categoryScores = locationIntel.category_scores ?? {};
+      const demographicProximity = locationIntel.demographic_proximity ?? {};
+      const sorted = Object.entries(categoryScores).sort(([, a], [, b])=>b - a);
       // Primary type: top category if score > 50 (backward compat)
       if (sorted[0] && sorted[0][1] > 50) {
         locationType = sorted[0][0];
       }
       // Permitted audience types via shared filter (price-gated, same logic as Brand Profile)
-      const { permittedKeys: _permittedKeys } = filterAudienceLabels(scores, _maxMenuPrice);
+      const { permittedKeys: _permittedKeys } = filterAudienceLabels(demographicProximity, _maxMenuPrice, categoryScores);
       if (_permittedKeys.length > 0) {
         locationCategories = _permittedKeys.slice(0, 4).map((type)=>({
             type,
-            score: scores[type] ?? 0
+            score: (categoryScores[type] ?? demographicProximity[type]) ?? 0
           }));
       }
     }
@@ -1261,7 +1263,7 @@ serve(async (req)=>{
               'Every post MUST include a booking CTA using brand-specific phrases from the CTA library. ' +
               'Walk-in language ("kom forbi", "kig ind") is NOT permitted as a primary CTA.',
             booking_nudge_capable: true,
-            booking_nudge_lead_days: 2, // post this many days before target visit day
+            // No booking_nudge_lead_days — AI determines this per slot based on context
           };
         }
 
@@ -1274,7 +1276,7 @@ serve(async (req)=>{
               'especially Thursday/Friday/Saturday evening slots. ' +
               'Never combine both CTAs in a single post.',
             booking_nudge_capable: true,
-            booking_nudge_lead_days: 2,
+            // No booking_nudge_lead_days — AI determines this per slot based on context
           };
         }
 
@@ -1285,7 +1287,6 @@ serve(async (req)=>{
               'Use walk-in language only ("kom forbi", "kig ind", "tag forbi"). ' +
               'Do NOT reference online booking — no booking link exists.',
             booking_nudge_capable: false,
-            booking_nudge_lead_days: 0,
           };
         }
 
@@ -1296,7 +1297,6 @@ serve(async (req)=>{
             'Reservation is required but no booking link is available. ' +
             'Do not promise online booking. Avoid CTA entirely or use "ring og reservér".',
           booking_nudge_capable: false,
-          booking_nudge_lead_days: 0,
         };
       })(),
       is_current_week: body.include_current_week || false,
@@ -1351,7 +1351,7 @@ serve(async (req)=>{
         has_takeaway: operations?.has_takeaway || false,
         has_table_service: operations?.has_table_service || false,
         is_july_tourist_boost: economicTiming.is_july && locationType === 'tourist_area',
-        // Enriched from category_scores: visit motivations, marketing angle, tourist flag
+        // Enriched from location intelligence: visit motivations, marketing angle, tourist flag
         matched_motivations: derivedLocationIntel?.matched_motivations ?? null,
         marketing_focus: derivedLocationIntel?.marketing_focus ?? null,
         tourist_context: derivedLocationIntel?.tourist_context ?? false,

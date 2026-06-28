@@ -492,25 +492,31 @@ export function ProgrammeProfilesPage() {
                   <div key={idx} className="bg-white rounded-lg p-4 border border-orange-300">
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <h4 className="font-bold text-gray-900 text-lg">{segment.label}</h4>
+                        <h4 className="font-bold text-gray-900 text-lg">{segment.people_type || (segment as any).label || 'Unknown'}</h4>
                         <p className="text-sm text-gray-600 capitalize">
-                          {segment.segment_size} • {segment.motivation.replace('_', ' ')} • {segment.decision_timing}
+                          {segment.segment_size} • {segment.motivation.replace('_', ' ')} • {
+                            segment.decision_timing === 'mixed' ? 'planned og footfall' : segment.decision_timing
+                          }
                         </p>
                       </div>
-                      <span className="text-xs px-2 py-1 bg-orange-100 text-orange-800 rounded">
-                        {segment.goal_contribution.replace('_', ' ')}
-                      </span>
+                      {(segment as any).goal_contribution && (
+                        <span className="text-xs px-2 py-1 bg-orange-100 text-orange-800 rounded">
+                          {(segment as any).goal_contribution.replace('_', ' ')}
+                        </span>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-xs font-semibold text-gray-600 uppercase mb-2">Timing Windows</p>
-                        <div className="space-y-1">
-                          {segment.timing_windows.map((window, wIdx) => (
-                            <p key={wIdx} className="text-sm text-gray-900">📅 {window}</p>
-                          ))}
+                      {segment.timing_windows && segment.timing_windows.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-600 uppercase mb-2">Timing Windows</p>
+                          <div className="space-y-1">
+                            {segment.timing_windows.map((window, wIdx) => (
+                              <p key={wIdx} className="text-sm text-gray-900">📅 {window}</p>
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
                       <div>
                         <p className="text-xs font-semibold text-gray-600 uppercase mb-2">Content Angles</p>

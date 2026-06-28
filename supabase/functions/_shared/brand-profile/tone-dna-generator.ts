@@ -38,6 +38,71 @@ import type {
 import { getV5Prompt } from './v5-prompts.ts';
 
 // ============================================================================
+// FIX 2: CITY SIZE HELPERS — Prevent big-city vocabulary for medium/small cities
+// ============================================================================
+
+/**
+ * Classify city size for vocabulary scaling.
+ * Prevents small/medium cities from receiving large-city vocabulary.
+ * FIX 2a from location vocabulary hallucination fix.
+ */
+function classifyCitySize(
+  population: number | null | undefined,
+  cityName: string
+): 'large' | 'medium' | 'small' {
+  // Known Danish cities — hardcoded to avoid relying on AI population estimates
+  const LARGE_CITIES = ['København', 'Aarhus'];         // 200k+
+  const MEDIUM_CITIES = [                                // 50k–200k
+    'Odense', 'Aalborg', 'Esbjerg', 'Randers', 'Kolding',
+    'Horsens', 'Vejle', 'Roskilde', 'Herning', 'Silkeborg',
+    'Næstved', 'Fredericia', 'Viborg', 'Køge', 'Holstebro',
+  ];
+
+  if (LARGE_CITIES.some(c => cityName.toLowerCase().includes(c.toLowerCase()))) return 'large';
+  if (MEDIUM_CITIES.some(c => cityName.toLowerCase().includes(c.toLowerCase()))) return 'medium';
+  if (population && population >= 200000) return 'large';
+  if (population && population >= 40000)  return 'medium';
+  return 'small';
+}
+
+/**
+ * Filter location vocabulary to remove city-size-inappropriate phrases.
+ * FIX 2c from location vocabulary hallucination fix.
+ */
+function filterLocationVocabulary(
+  vocabulary: string[],
+  citySize: 'large' | 'medium' | 'small'
+): string[] {
+  if (citySize === 'large') return vocabulary; // No restrictions for large cities
+
+  const FORBIDDEN_BY_SIZE: Record<'medium' | 'small', string[]> = {
+    medium: [
+      'pulserende byliv', 'byens puls', 'urban energi', 'storbyatmosfære',
+      'konstant aktivitet', 'travl storby', 'urban stemning', 'storbylivet',
+      'metropolit', 'kosmopolitisk',
+    ],
+    small: [
+      // All medium forbidden phrases plus:
+      'midt i bylivet', 'byens hjerte', 'et af byens travleste',
+      'handelsgade med høj trafik', 'pulserende byliv', 'byens puls',
+      'urban energi', 'storbyatmosfære', 'konstant aktivitet',
+    ],
+  };
+
+  const forbidden = FORBIDDEN_BY_SIZE[citySize] || [];
+
+  return vocabulary.filter(phrase => {
+    const isForbidden = forbidden.some(f =>
+      phrase.toLowerCase().includes(f.toLowerCase())
+    );
+    if (isForbidden) {
+      console.warn(`🚫 Filtered city-size-inappropriate vocabulary: "${phrase}" (city size: ${citySize})`);
+    }
+    return !isForbidden;
+  });
+}
+
+// ============================================================================
 // INPUT INTERFACES
 // ============================================================================
 
@@ -107,6 +172,25 @@ export async function generateToneDNA(
   // 2. Call AI as strategic marketing expert
   const toneDNA = await callToneDNAAI(prompt, input.business.name, openaiClient, language);
   
+  // FIX 2c: Post-generation filter to remove city-size-inappropriate vocabulary
+  const citySize = classifyCitySize(
+    undefined,  // No population data in current input structure
+    input.business.city || ''
+  );
+  
+  if (toneDNA?.location_driver?.natural_vocabulary) {
+    const beforeCount = toneDNA.location_driver.natural_vocabulary.length;
+    toneDNA.location_driver.natural_vocabulary = filterLocationVocabulary(
+      toneDNA.location_driver.natural_vocabulary,
+      citySize
+    );
+    const afterCount = toneDNA.location_driver.natural_vocabulary.length;
+    
+    if (beforeCount !== afterCount) {
+      console.log(`[ToneDNA] 🚫 Filtered location vocabulary from ${beforeCount} to ${afterCount} items (city size: ${citySize})`);
+    }
+  }
+  
   // 3. Validate and return
   validateToneDNA(toneDNA);
   
@@ -115,6 +199,7 @@ export async function generateToneDNA(
   console.log(`[ToneDNA]    Location driver: ${toneDNA.location_driver.primary_dimension} (${toneDNA.location_driver.strategic_importance})`);
   console.log(`[ToneDNA]    Price positioning: ${toneDNA.culinary_character.price_positioning}`);
   console.log(`[ToneDNA]    Owner register: ${toneDNA.owner_voice.register_level}`);
+  console.log(`[ToneDNA]    City size: ${citySize}`);
   
   return toneDNA;
 }
@@ -176,6 +261,39 @@ function buildToneDNAPrompt(input: ToneDNAInput, language: string): string {
     prompt += `\n  2. Aldrig erstattes af generiske alternativer ("ved vandet", "havnefronten", "waterfront", "åen" alene osv.)`;
     prompt += `\n  3. Ikke parres med havbeskrivelser (bølger, hav, maritim) — det er en å, ikke et hav/fjord/strand.\n\n`;
   }
+  
+  // FIX 2b: Add city-size vocabulary rules
+  const citySize = classifyCitySize(
+    input.location_intelligence?.category_scores ? undefined : undefined,  // No population in current schema
+    input.business.city || ''
+  );
+  
+  const locationVocabInstruction: Record<string, string> = {
+    large: `
+    City centre vocabulary for a large Danish city (200k+ people):
+    Appropriate: 'i hjertet af byen', 'byens puls', 'midt i storbylivet',
+    'urban stemning', 'et af byens travleste kvarterer'
+    These phrases match the actual energy of a large city.
+  `,
+    medium: `
+    City centre vocabulary for a medium Danish city (40k–200k people):
+    Appropriate: 'i centrum', 'på gågaden', 'ved torvet', 'centralt beliggende',
+    'i byens hjerte', 'tæt på byens handelsliv'
+    AVOID: 'pulserende byliv', 'urban energi', 'storbyatmosfære',
+    'konstant aktivitet' — these do not match a city of this size.
+    Reference specific local landmarks when known (lakes, river, main square).
+  `,
+    small: `
+    City centre vocabulary for a small Danish town (<40k people):
+    Appropriate: 'i byens centrum', 'på hovedgaden', 'tæt på torvet',
+    'i det lokale handelsmiljø', 'i ${input.business.city} midtby'
+    AVOID all big-city energy language. Reference hyggelig, local, community feel.
+  `,
+  };
+  
+  prompt += `\n📍 CITY SIZE GUIDANCE (${input.business.city} = ${citySize}):\n`;
+  prompt += locationVocabInstruction[citySize];
+  prompt += `\n\nWhen generating location_driver.natural_vocabulary, follow the ${citySize} city guidance above.\n\n`;
   
   // Menu overview
   if (input.menu_overview_summary) {
@@ -546,10 +664,11 @@ export async function generateEnhancedExamples(
         const lowerText = ex.text.toLowerCase();
         
         for (const bannedWord of bannedWords) {
-          // Check for whole word match (not substring)
+          // Check for word stem match to catch inflected forms (autentisk → autentiske, autentisk, etc.)
           // Escape special regex characters in banned word
           const escaped = bannedWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const wordPattern = new RegExp(`\\b${escaped}\\b`, 'i');
+          // Use \b at start only - allows matching word stems with inflections
+          const wordPattern = new RegExp(`\\b${escaped}`, 'i');
           
           if (wordPattern.test(lowerText)) {
             console.warn(`[ToneDNA] 🚫 Filtered banned word "${bannedWord}" in example: "${ex.text.substring(0, 60)}..."`);

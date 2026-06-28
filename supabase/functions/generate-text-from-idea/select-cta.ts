@@ -244,12 +244,17 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
     )
     
     if (brandCTAs) {
-      const ctaStyle: 'strict' | 'soft' = (ctaIntent === 'visit' && !!bookingLink) ? 'strict' : 'soft'
-      console.log('🎯 CTA selected from brand library:', brandCTAs.cta, '(intent:', ctaIntent, ', style:', ctaStyle, ', source: brand_cta_library)')
+      // FIX GAP A: Normalize ctaIntent vocabulary — "visit" is legacy, always emit "booking" for booking intent
+      const resolvedCtaIntent = 
+        ctaIntent === 'booking' || ctaIntent === 'visit'
+          ? 'booking'
+          : ctaIntent
+      const ctaStyle: 'strict' | 'soft' = ((ctaIntent === 'visit' || ctaIntent === 'booking') && !!bookingLink) ? 'strict' : 'soft'
+      console.log('🎯 CTA selected from brand library:', brandCTAs.cta, '(intent:', resolvedCtaIntent, ', style:', ctaStyle, ', source: brand_cta_library)')
       return {
         selectedCta: brandCTAs.cta,
         ctaStyle,
-        ctaIntent
+        ctaIntent: resolvedCtaIntent
       }
     }
   }
@@ -319,10 +324,16 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
   ) % ctaPool.length
   const selectedCta = ctaPool[ctaIndex]
 
+  // FIX GAP A: Normalize ctaIntent vocabulary — "visit" is legacy, always emit "booking" for booking intent
+  const resolvedCtaIntent = 
+    ctaIntent === 'booking' || ctaIntent === 'visit'
+      ? 'booking'
+      : ctaIntent
+
   // strict = booking CTA with URL must appear verbatim; soft = model may integrate naturally
-  const ctaStyle: 'strict' | 'soft' = (ctaIntent === 'visit' && !!bookingLink) ? 'strict' : 'soft'
+  const ctaStyle: 'strict' | 'soft' = ((ctaIntent === 'visit' || ctaIntent === 'booking') && !!bookingLink) ? 'strict' : 'soft'
 
-  console.log('🎯 CTA selected:', selectedCta, '(intent:', ctaIntent, ', style:', ctaStyle, ', from brand closings:', typicalClosings.length > 0, ')')
+  console.log('🎯 CTA selected:', selectedCta, '(intent:', resolvedCtaIntent, ', style:', ctaStyle, ', from brand closings:', typicalClosings.length > 0, ')')
 
-  return { selectedCta, ctaStyle, ctaIntent }
+  return { selectedCta, ctaStyle, ctaIntent: resolvedCtaIntent }
 }

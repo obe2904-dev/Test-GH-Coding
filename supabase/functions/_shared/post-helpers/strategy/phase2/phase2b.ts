@@ -493,6 +493,26 @@ export async function generatePostDetail(
   const voiceConstraint = (context.brand_voice as any)?.voice_constraints
     || (((context.brand_voice as any)?.never_say || []).slice(0, 3).join(', ') || '');
 
+  // ── CRITICAL OUTDOOR SEATING CONSTRAINT (prevent AI hallucination when facility doesn't exist) ──
+  // This constraint is used by BOTH menu and experience post paths
+  const outdoorSeatingConstraint = (() => {
+    const hasOutdoorSeating = (context.location as any)?.has_outdoor_seating ?? false;
+    if (hasOutdoorSeating) {
+      // Business HAS outdoor seating — but only allow it when weather permits
+      if (!outdoorSeatingOk) {
+        return `\n⚠️ UDESERVERING: Forretningen HAR udeservering, men vejret er IKKE egnet denne dag (${weatherLine}). Nævn IKKE "terrassen åbner", "udeservering er klar", eller "udendørs" som en mulighed for denne dag.\n`;
+      }
+      return ''; // Has outdoor seating AND weather is good — no constraint
+    }
+    // Business DOES NOT have outdoor seating — strict block
+    return `\n⛔ UDESERVERING (KRITISK — gælder ALLE felter):
+Forretningen HAR IKKE udeservering.
+• Nævn ALDRIG udeservering, udendørs servering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter i titel, rationale, media direction eller captions.
+• Generer INGEN angles eller faktorer der relaterer til udendørs oplevelser.
+• Fokusér udelukkende på indendørs oplevelser, placering, stemning, menu og service.
+\n`;
+  })();
+
   // Tone-of-voice style signals — used by titleStyleHint in both menu and experience post branches
   const _toneKeywordsLower = toneKeywords.toLowerCase();
   const _humorLevel = ((context.brand_voice as any)?.tone_model?.humor_level || (context.brand_voice as any)?.humor_level || '').toLowerCase();
@@ -972,6 +992,37 @@ export async function generatePostDetail(
       ? `5. Media direction: Skriv som en trin-for-trin guide til en ikke-professionel med mobiltelefon — 3 afsluttede imperativ-sætninger med punktum. Sætning 1: konkret placering og vinkel (overhead/45°/øjenhøjde + afstand i cm). Sætning 2: ét konkret lys-tip (gå hen til vinduet, lys fra siden/forfra). Sætning 3: hvad der præcist fylder rammen — rettens specifikke farver, tekstur eller damp; lad bordet skabe dybde. Vær specifik for DETTE opslag. Ingen menu-board eller kasseapparat.`
       : `5. Media direction: Skriv som en trin-for-trin guide til en ikke-professionel med mobiltelefon — 3 afsluttede imperativ-sætninger med punktum. Sætning 1: konkret placering og vinkel (overhead/45°/øjenhøjde + afstand i cm). Sætning 2: ét konkret lys-tip (gå hen til vinduet, lys forfra/fra siden). Sætning 3: hvad der præcist fylder rammen — rettens specifikke farver, tekstur og detaljer. Vær specifik for DETTE opslag.`;
 
+    // FIX BREAK 2c: Inject CTA rules into prompt
+    const ctaRulesBlock = (() => {
+      const angle = strategicBrief.angles.find(a => a.focus === postSlot.angle_focus);
+      const slotCtaMode = (angle as any)?.cta_mode || ctaMode;
+      
+      if (!slotCtaMode || goalMode !== 'drive_footfall') return '';
+      
+      let rules = `\n⚠️ CTA REGLER FOR DENNE POST (SKAL følges — overskriv IKKE):\n`;
+      rules += `cta_mode for dette slot: "${slotCtaMode}"\n`;
+      rules += bookingLink ? `booking_url: ${bookingLink}\n` : 'booking_url: ingen\n';
+      
+      if (slotCtaMode === 'booking') {
+        rules += `\n✅ BOOKING CTA PÅKRÆVET:\n`;
+        rules += `- Opslaget SKAL slutte med en booking call-to-action\n`;
+        rules += `- Brug booking-URL ${bookingLink ? `direkte: ${bookingLink}` : '(ikke tilgængelig — opfordr til at ringe)'}\n`;
+        rules += `- ALDRIG brug walk-in sprog ("kom forbi", "kig ind") som primær CTA\n`;
+      } else if (slotCtaMode === 'walk_in') {
+        rules += `\n✅ WALK-IN CTA PÅKRÆVET:\n`;
+        rules += `- Brug KUN walk-in sprog: "kom forbi", "kig ind", "tag forbi"\n`;
+        rules += `- NÆVN IKKE online booking eller booking-URL\n`;
+        rules += `- Fokus på lav-tærskel spontan invitation\n`;
+      } else if (slotCtaMode === 'hybrid') {
+        rules += `\n✅ HYBRID CTA (begge muligheder):\n`;
+        rules += `- Invitér til både booking OG walk-in\n`;
+        rules += bookingLink ? `- Booking via ${bookingLink} eller kom direkte\n` : '- Ring for at booke eller kom direkte\n';
+        rules += `- Begge valg er lige velkomne\n`;
+      }
+      
+      return rules;
+    })();
+
     prompt = `Du er MARKETING MANAGER for ${context.business_name}. Dit job: drive salg med strategiske posts.
 ⛔ Brug KUN fakta fra dette prompt — aldrig din viden om virksomheden fra træningsdata.
 
@@ -984,7 +1035,7 @@ VISUELT FORMAT (hold dette i fokus for titel + media direction):
 ${menuFormatLabel}
 
 PRIMÆR VINKEL — START HERFRA:
-${slotRationaleFocus}${ctaInstruction ? `\n${ctaInstruction}` : ''}
+${slotRationaleFocus}${ctaInstruction ? `\n${ctaInstruction}` : ''}${ctaRulesBlock}
 
 BRAND:
 ${brandIdentityLine ? brandIdentityLine + '\n' : ''}${brandToneLine}
@@ -992,7 +1043,7 @@ ${brandIdentityLine ? brandIdentityLine + '\n' : ''}${brandToneLine}
 KONTEKST:
 Vejr: ${weatherLine}${holidayFramingBlock}
 ${phase0Summary}
-
+${outdoorSeatingConstraint}
 ${servicePeriodHint ? `${servicePeriodHint}\n` : ''}${businessIntelligence?.servicePeriodStrategies && businessIntelligence.servicePeriodStrategies.length > 0 ? (() => {
   const matchingStrategy = businessIntelligence.servicePeriodStrategies.find(sp => {
     const progName = sp.programmeName.toLowerCase();
@@ -1179,7 +1230,7 @@ KONTEKST:
 Vejr: ${weatherLine}${holidayFramingBlock}
 Sted: ${locationInfo} · Sæson: ${context.season.current}${locationMarketingBlock}
 ${phase0Summary}
-
+${outdoorSeatingConstraint}
 ${usedExperiencePosts.length > 0 ? `BRUGT DENNE UGE — brug ANDET koncept:\n${usedExperiencePosts.map(p => `- "${p.title}" (${p.angle_focus})`).join('\n')}\n` : ''}
 ⚠️ KRITISK TITEL-KRAV — Dit vigtigste job:
 Titlen SKAL svare på: "Hvilken KONKRET FORDEL får jeg?"
@@ -1378,6 +1429,8 @@ Svar KUN med JSON:
       goal_mode: postSlot.goal_mode,
       content_category: postSlot.content_category,
       slot_id: postSlot.slot_id,
+      // FIX BREAK 2a: Include cta_intent in post_idea output
+      cta_intent: resolvedCtaIntent,
       ...result.parsed,
       menu_category: menuCategory, // Track category for deduplication
       menu_item_id: menuItemId,    // Track UUID for deduplication (most reliable)

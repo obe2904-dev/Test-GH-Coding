@@ -21,8 +21,7 @@ const MAJOR_DANISH_CITIES = [
   'Herning', 'Silkeborg', 'Næstved', 'Fredericia', 'Viborg'
 ];
 
-// Schema v1: student/tourist in category_scores (deprecated June 2026)
-// Schema v2: category_scores (geographic only) + demographic_proximity split
+// Schema v2: category_scores (geographic location types) + demographic_proximity (who passes by)
 const LOCATION_SCHEMA_VERSION = 2;
 
 /**
@@ -390,7 +389,10 @@ serve(async (req) => {
     }
 
     // Synthesize neighborhood from city + area_type if Google didn't provide one
-    if (!analyzedLocation.neighborhood && city && analyzedLocation.area_type) {
+    // OR if neighborhood is too generic (same as city name)
+    if ((!analyzedLocation.neighborhood || analyzedLocation.neighborhood === city) && 
+        city && 
+        analyzedLocation.area_type) {
       analyzedLocation.neighborhood = synthesizeNeighborhoodFromAreaType(city, analyzedLocation.area_type);
       console.log(`🔧 Synthesized neighborhood: "${analyzedLocation.neighborhood}" from city="${city}" + area_type="${analyzedLocation.area_type}"`);
     } else if (!analyzedLocation.neighborhood && city) {
@@ -486,6 +488,15 @@ serve(async (req) => {
         
         const aiResult = await aiAnalyzer.analyzeLocationContext(claudeInput);
         
+        // FIX 1a: Add logging to confirm what AI returns
+        console.log('🔍 AI location result:', {
+          area_type: aiResult.area_type,
+          neighborhood_character_length: aiResult.rich_neighborhood_character?.length || 0,
+          neighborhood_character_preview: aiResult.rich_neighborhood_character?.substring(0, 80) || 'NULL',
+          category_scores_keys: Object.keys(aiResult.category_scores || {}),
+          demographic_keys: Object.keys(aiResult.demographic_proximity || {}),
+        });
+        
         // Validate AI returned usable scores
         const hasScores = Object.keys(aiResult.category_scores || {}).length > 0;
         const hasDemographics = Object.keys(aiResult.demographic_proximity || {}).length > 0;
@@ -496,6 +507,25 @@ serve(async (req) => {
           analyzedLocation.demographic_proximity = aiResult.demographic_proximity;
           analyzedLocation.area_type = aiResult.area_type;
           analyzedLocation.neighborhood_character = aiResult.rich_neighborhood_character;
+          
+          // FIX 1d: Add fallback synthesis when AI returns null neighborhood_character
+          if (!analyzedLocation.neighborhood_character && city) {
+            // Minimal factual fallback — city name + area type in plain Danish
+            // This is intentionally conservative: factual but not marketing language
+            const areaTypeLabels: Record<string, string> = {
+              city_centre:        'centrum',
+              waterfront:         'ved havnen',
+              residential:        'i et boligkvarter',
+              office:             'i erhvervsområdet',
+              shopping_district:  'i shoppingområdet',
+              transport_hub:      'ved stationen',
+              destination:        'som destinationssted',
+              nature_park:        'ved naturområdet',
+            };
+            const areaLabel = areaTypeLabels[analyzedLocation.area_type] || 'i byen';
+            analyzedLocation.neighborhood_character = `${city} ${areaLabel}.`;
+            console.log(`🔧 Synthesized neighborhood_character fallback: "${analyzedLocation.neighborhood_character}"`);
+          }
           
           console.log(`✅ AI scores: ${JSON.stringify(aiResult.category_scores)}`);
           console.log(`✅ Demographics: ${JSON.stringify(aiResult.demographic_proximity)}`);
@@ -522,6 +552,13 @@ serve(async (req) => {
     console.log(`✅ Pedestrian flow: ${analyzedLocation.physical_context.pedestrian_flow} (${hospitalityPlaces.length} hospitality venues, area_type: ${analyzedLocation.area_type})`);
 
     console.log(`[5/5] Saving to database...`);
+    
+    // FIX 1c: Verify the save path - log what we're about to save
+    console.log('💾 Saving neighborhood_character:', {
+      value: analyzedLocation.neighborhood_character?.substring(0, 80) || 'NULL — will save null',
+      is_null: analyzedLocation.neighborhood_character === null,
+    });
+    
     const saver = new DatabaseSaver(supabase);
     await saver.saveLocationIntelligence(business_id, analyzedLocation, LOCATION_SCHEMA_VERSION);
 

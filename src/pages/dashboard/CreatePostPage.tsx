@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, lazy, Suspense, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useConnectionsStore } from '../../stores/connectionsStore'
@@ -185,19 +185,41 @@ export function CreatePostPage() {
   // Initialize the active path from the query string and sync to store.
   // Note: We use urlDerivedPath for rendering to prevent flash of wrong content,
   // but still sync to store for components that read activePath from Zustand.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (urlDerivedPath !== storeActivePath) {
       setActivePath(urlDerivedPath)
     }
     
-    // Reset to Generate stage when URL changes mode
+    // Reset to Generate stage when URL changes mode.
+    // AI mode should always start in Forslag; generated content is restored
+    // later when the user selects an idea and continues.
     if (urlDerivedPath === 'write') setWriteSelfStep('generate')
-    if (urlDerivedPath === 'ai-ideas') setAiIdeerStep('generate')
+    if (urlDerivedPath === 'ai-ideas') {
+      setAiIdeerStep('generate')
+      setSelectedIdea(null)
+      setSelectedSuggestionData(null)
+      setAiIdeerContent(null)
+      setAiIdeerPhotoIdea('')
+      setPhotoContent(null)
+      setPostCta(null)
+    }
     // Note: Don't reset weeklyPlanStep here - let WeeklyPlanEffect handle it based on draft existence
     setHasEnteredUdgiv(false)
     setIsReadOnlyMode(false)
     setPublishedInfo(null)
-  }, [urlDerivedPath, storeActivePath, setActivePath, setAiIdeerStep, setWriteSelfStep])
+  }, [
+    urlDerivedPath,
+    storeActivePath,
+    setActivePath,
+    setAiIdeerStep,
+    setWriteSelfStep,
+    setSelectedIdea,
+    setSelectedSuggestionData,
+    setAiIdeerContent,
+    setAiIdeerPhotoIdea,
+    setPhotoContent,
+    setPostCta,
+  ])
 
   // ── Auto-save: context-keyed localStorage draft (no modal, no interval) ──
   // Weekly Plan posts are persisted by the store's setDraftMapEntry; only
@@ -408,44 +430,12 @@ export function CreatePostPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weeklyPlanPost, businessData.business?.id, currentStep])
 
-  // Silent restore for Skriv Selv: if the user has a manual draft from a previous session,
-  // hydrate it automatically and skip the Generate step.
-  // NOTE: Write mode now uses DB-only persistence (write_drafts table).
-  // Draft loading happens in GenerateStep via useWriteDraft hook.
-  // This localStorage restore is disabled for write mode to avoid conflicts.
+  // AI Ideas should not auto-restore into Design on mount.
+  // The cached draft is picked up later after the user selects a suggestion
+  // and runs generation again.
   useEffect(() => {
-    // Skip write mode - it uses DB-only persistence via useWriteDraft
-    if (activePath === 'write') {
-      return
-    }
-    
-    // ai-ideas and weekly-plan still use localStorage restore
-    if (activePath === 'ai-ideas' && !aiIdeerContent) {
-      const saved = restoreNow() as any
-      if (saved) {
-        setAiIdeerContent(saved.content ?? saved)
-        // Restore photo URLs — recreate MediaItem stubs (no File object needed for display)
-        if (saved.photoMedia?.length) {
-          setPhotoContent({
-            uploadedMedia: saved.photoMedia.map((m: any) => ({
-              id: m.id,
-              file: null as any, // No File object when restoring from draft - will use URL instead
-              url: m.originalUrl || m.url,
-              originalUrl: m.originalUrl,
-              adjustedUrl: m.adjustedUrl,
-              type: m.type || 'image',
-              selectedVersionForPost: m.selectedVersionForPost || 'original',
-              analysisCache: m.analysisCache,
-            })),
-            selectedMedia: null,
-            isOriginal: true,
-            photoAdjustments: null,
-            carouselMode: false,
-          })
-        }
-        setAiIdeerStep('create')
-      }
-    }
+    if (activePath === 'write') return
+    if (activePath === 'ai-ideas') return
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // mount-only: intentionally ignore refs
 

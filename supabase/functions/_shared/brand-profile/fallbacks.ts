@@ -407,7 +407,8 @@ export function buildContentStrategyFallback(ctx: FallbackContext): FallbackResu
   // ===== LOCATION TYPE =====
   const areaType = location?.enrichment?.micro?.area_type || locationIntel?.area_type
   const isWaterfront = areaType === 'waterfront' || /waterfront|water/i.test(String(locationIntel?.neighborhood || ''))
-  const isDestination = isWaterfront || areaType === 'tourist' || (locationIntel?.category_scores?.tourist || 0) >= 70
+  // FIX: Read from demographic_proximity (schema v2), not category_scores (deprecated)
+  const isDestination = isWaterfront || areaType === 'tourist' || (locationIntel?.demographic_proximity?.tourist || 0) >= 70
   
   // ===== ARCHETYPE =====
   const businessType = operations?.establishment_type || business?.business_type || profile?.business_category || 'cafe'

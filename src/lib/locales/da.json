@@ -6,6 +6,8 @@
     "password": "Adgangskode",
     "passwordMin": "Adgangskode (min. 6 tegn)",
     "passwordTooShort": "Adgangskoden skal være mindst 6 tegn",
+    "confirmPassword": "Bekræft adgangskode",
+    "passwordsDoNotMatch": "Adgangskoderne matcher ikke",
     "signInButton": "Log ind",
     "signUpButton": "Opret konto",
     "signingIn": "Logger ind...",
@@ -254,10 +256,10 @@
     "upgrade": "Opgrader",
     "mainMenu": "Hovedmenu",
     "yourBusiness": "Din Forretning",
-    "whatWeOffer": "Det vi tilbyder",
+    "whatWeOffer": "Det I tilbyder",
     "setup": {
       "profile": "1. Virksomhedsprofil",
-      "menu": "2. Det vi tilbyder",
+      "menu": "2. Det I tilbyder",
       "location": "3. Lokation",
       "brand": "4. Brand Profil (AI)"
     },
@@ -269,12 +271,12 @@
     "sectionPublishing": "Overblik",
     "businessProfile": "Virksomhedsprofil",
     "businessProfileDescription": "Se og opdater den profil, der repræsenterer virksomheden.",
-    "offerings": "Det vi tilbyder",
-    "offeringsDescription": "Hold styr på de ydelser og produkter, du vil fremhæve.",
+    "offerings": "Det I tilbyder",
+    "offeringsDescription": "Tilføj dine produkter og ydelser, så vi kan skabe de bedste resultater for dig.",
     "location": "Lokation",
-    "locationDescription": "Vælg og vis den rigtige placering for forretningen.",
+    "locationDescription": "Vi skræddersyr indhold, så det passer til jeres forretning og lokation.",
     "brandProfile": "Brand Profil",
-    "brandProfileDescription": "Sørg for at tone og profil matcher jeres brand.",
+    "brandProfileDescription": "Vi sikrer en rød tråd i jeres kommunikation, så indhold matcher jeres brand og tone.",
     "writeSelfDescription": "Skriv opslaget selv med et roligt og enkelt flow.",
     "dailySuggestionDescription": "Lav opslag nu med hjælp fra AI og hurtige forslag.",
     "weeklyPlanDescription": "Planlæg ugens indhold samlet ét sted.",
@@ -527,7 +529,7 @@
     "extractFailed": "Menuudtræk mislykkedes. Prøv igen.",
     "savePricingFailed": "Kunne ikke gemme priser. Prøv igen.",
     "header": {
-      "title": "Det vi tilbyder",
+      "title": "Det I tilbyder",
       "subtitle": "Tilføj din menu, så vi kan lave relevant indhold",
       "subtitle2": "Din menu og dine tilbud"
     },
@@ -1547,7 +1549,7 @@
     "kitchenCloseHint": "Udfyld hvis køkkenet lukker tidligere end stedet. AI bruger dette til at foreslå bar/drink-opslag i vinduet mellem køkken- og lukketid (kun relevant hvis forskellen er ≥ 90 min).",
     "weeklyProgrammeLabel": "Ugentligt program",
     "weeklyProgrammeHint": "Tilbagevendende events og tidsrum som AI ikke kan finde på din hjemmeside — happy hour, quiz-aften, DJ, live musik, fredagsbrunch, søndagsmiddag osv. Skriv gerne med dag og tidspunkt. AI bruger disse som prioriterede Slot B-ankre i de daglige forslag.",
-    "nextMenu": "Næste: Det vi tilbyder →"
+    "nextMenu": "Næste: Det I tilbyder →"
   },
   "calendarEvent": {
     "Outdoor Season Begin": "Udendørssæson begynder",
@@ -1608,8 +1610,10 @@
     "timing": "Timing:",
     "motivation": "Motivation:",
     "decision": "Beslutning:",
+    "plannedAndFootfall": "planned og footfall",
     "goal": "Mål:",
     "contentAngles": "Content vinkler:",
+    "locationOccasions": "Stedsanledninger:",
     "evidence": "Dokumentation (faktatjek)",
     "voiceGuidelines": "Stemme & retningslinjer",
     "voiceGuidelinesDesc": "Retningslinjer for indholdsoprettelse",
@@ -1668,6 +1672,7 @@
     "businessTypeLabel": "Branche",
     "cafeRestaurant": "Café / Restaurant",
     "helperText": "Det er nok til at jeg kan lave gode forslag til tekst og hashtags. Du kan altid tilføje mere senere.",
+    "optional": "Valgfrit",
     "facebookHashtags": "Standard: 0-3 hashtags",
     "instagramHashtags": "Standard: 3-5 hashtags",
     "platformsHelperText": "Du vælger kun platforme her.",
@@ -1860,7 +1865,7 @@
     "analyzeButton": "Analysér lokation",
     "analyzing": "Analyserer...",
     "autoSaving": "Gemmer automatisk...",
-    "backToProfile": "<-Tilbage: Det vi tilbyder",
+    "backToProfile": "<-Tilbage: Det I tilbyder",
     "continue": "Fortsæt",
     "errorAnalyzeFailed": "Analyse mislykkedes. Prøv igen.",
     "errorNoAddress": "Tilføj venligst en adresse i din virksomhedsprofil først",
@@ -1888,7 +1893,7 @@
     "forceRefreshLong": "Gennemtving ny analyse (ignorer 90-dages cache)",
     "breadcrumb": {
       "profile": "Virksomhedsprofil",
-      "menu": "Det vi tilbyder",
+      "menu": "Det I tilbyder",
       "location": "Lokation",
       "brand": "Brand Profil"
     }

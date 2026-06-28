@@ -23,6 +23,33 @@ function extractFirstSentence(text: string): string {
   return match ? match[0].trim() : text.slice(0, 120).trim()
 }
 
+// ── buildEmojiInstruction ───────────────────────────────────────────────
+// Build emoji instruction from universal principles, not cuisine keywords.
+// The AI knows what it wrote — it should choose the emoji that fits that content.
+function buildEmojiInstruction(language: string): string {
+  if (language === 'da') {
+    return [
+      'EMOJI-REGLER:',
+      '1. Brug præcist ÉT emoji i hele teksten.',
+      '2. Placer det til allersidst — efter punktum eller udråbstegn.',
+      '3. Vælg et emoji der afspejler det SPECIFIKKE indhold i DENNE tekst: den konkrete ret, drik, stemning eller handling du netop har beskrevet.',
+      '4. Brug ALDRIG ☕ medmindre teksten handler om kaffe.',
+      '5. Brug ALDRIG 🍷🍸🥂🍺 medmindre teksten handler om vin, cocktails eller øl.',
+      '6. Brug ALDRIG generiske mad-emojis (🍽️🥄🍴) når du har beskrevet en specifik ret.',
+    ].join('\n')
+  }
+  // English fallback (for other markets)
+  return [
+    'EMOJI RULES:',
+    '1. Use exactly ONE emoji in the entire text.',
+    '2. Place it at the very end — after the final period or exclamation mark.',
+    '3. Choose an emoji that reflects the SPECIFIC content of THIS text: the exact dish, drink, mood or action you just described.',
+    '4. NEVER use ☕ unless the text is about coffee.',
+    '5. NEVER use 🍷🍸🥂🍺 unless the text is about wine, cocktails or beer.',
+    '6. NEVER use generic food emojis (🍽️🥄🍴) when you have described a specific dish.',
+  ].join('\n')
+}
+
 // ── sanitizeMenuDesc ────────────────────────────────────────────────────
 // Strip add-on / upsell references so the AI cannot "see" other dishes.
 // Patterns: "Tilkøb: X", "kan tilkøbes X", "+ X", parenthetical add-ons.
@@ -126,6 +153,7 @@ export interface BusinessContext {
   keyOfferings: string
   menuDescription: string
   userAboutText: string
+  aiPlaceSynopsis: string  // FIX 04: AI-generated place synopsis for venue classification
   // brand identity & register anchor
   voiceRationale: string
   venueIdentity: string
@@ -141,6 +169,10 @@ export interface BusinessContext {
   tone_dna?: any                         // v5.5: voice.tone_dna (full strategic tone structure)
   localLocationReference: string | null  // NEW (June 14, 2026): operator-set location phrase from business_location_intelligence
   locationIntelligenceNarrative?: string | null  // NEW (Fix 4): layer_0_intelligence.geographic_context.narrative for atmosphere posts
+  // FIX 4 (June 27, 2026): Location intelligence fields for buildLocationContext
+  neighborhoodCharacter?: string | null  // AI-generated factual description
+  neighborhood?: string | null           // Google Maps neighborhood or synthesized
+  areaType?: string | null               // Geographic classification (city_centre, waterfront, etc.)
 }
 
 // ── ContentContext ──────────────────────────────────────────────────────
@@ -170,7 +202,7 @@ export async function fetchBusinessContext(
   const [businessResult, locationResult, locationIntelResult] = await Promise.all([
     supabase.from('businesses').select('name, business_type_hybrid').eq('id', businessId).single(),
     supabase.from('business_locations').select('city, country').eq('business_id', businessId).eq('is_primary', true).single(),
-    supabase.from('business_location_intelligence').select('local_location_reference').eq('business_id', businessId).maybeSingle()
+    supabase.from('business_location_intelligence').select('local_location_reference, neighborhood_character, area_type, neighborhood, location_marketing_hooks').eq('business_id', businessId).maybeSingle()
   ])
 
   const businessName = businessResult.data?.name || 'din virksomhed'
@@ -195,7 +227,7 @@ export async function fetchBusinessContext(
   let contentAnchors: string[] = []
   let thingsToAvoid = ''
   let voiceConstraints = ''
-  let emojiInstruction = '1-2 emojis naturligt placeret'
+  let emojiInstruction = buildEmojiInstruction(language)  // FIX 05: Principle-based default
   let typicalClosings: string[] = []
   let bookingLink: string | null = null
   let todayOpenTime = ''
@@ -211,11 +243,13 @@ export async function fetchBusinessContext(
   let keyOfferings = ''
   let menuDescription = ''
   let userAboutText = ''
+  let aiPlaceSynopsis = ''  // FIX 04
   let voiceRationale = ''
   let venueIdentity = ''
   let businessCharacter = ''
   let venueCharacter = ''
   let venueScene = ''
+  let signatureThemes: string[] = []
   let businessIdentityPersona = ''        // Full persona with strategic segments (paid only) - DEPRECATED
   let marketingManagerBrief = ''          // V5.3: Synthesized marketing guidance (PREFERRED)
   let identityKeywords: string[] = []
@@ -238,19 +272,43 @@ export async function fetchBusinessContext(
     console.log('📍 local_location_reference loaded:', localLocationReference)
   }
 
+  // FIX 4: Extract neighborhood_character from location intelligence
+  const neighborhoodCharacter: string | null = locationIntelResult?.data?.neighborhood_character ?? null
+  const areaType: string | null = locationIntelResult?.data?.area_type ?? null
+  const neighborhood: string | null = locationIntelResult?.data?.neighborhood ?? null
+  const locationMarketingHooks: string[] | null = locationIntelResult?.data?.location_marketing_hooks ?? null
+  
+  if (neighborhoodCharacter) {
+    console.log('📍 neighborhood_character loaded:', neighborhoodCharacter.substring(0, 80))
+  } else {
+    console.warn('⚠️ neighborhood_character is null — run populate-location-intelligence with force_refresh=true to generate')
+  }
+  
+  if (locationMarketingHooks && locationMarketingHooks.length > 0) {
+    console.log('📍 location_marketing_hooks loaded:', locationMarketingHooks.length, 'hooks')
+  }
+
   if (isPaid) {
     // 2. Brand voice
     const { data: brandProfile } = await supabase
       .from('business_brand_profile')
-      .select('brand_essence, tone_of_voice, tone_model, content_strategy, things_to_avoid, voice_constraints, voice_examples, booking_link, voice_rationale, recognizable_interior_identity, business_identity_persona, marketing_manager_brief, identity_keywords, voice_guardrails, brand_profile_v5')
+      .select('brand_essence, tone_of_voice, tone_model, content_strategy, things_to_avoid, voice_constraints, voice_examples, voice_rationale, recognizable_interior_identity, business_identity_persona, marketing_manager_brief, identity_keywords, voice_guardrails, brand_profile_v5')
       .eq('business_id', businessId)
       .single()
 
     // Extract V5 profile for use across function scope
     brandProfileV5 = (brandProfile as any)?.brand_profile_v5 as any | undefined
 
-    if (brandProfile) {
-      bookingLink = (brandProfile as any).booking_link ?? null
+    // FIX BREAK 3b: Read booking_url from business_profile (single source of truth)
+    // DO NOT read booking_link from business_brand_profile
+    const { data: businessProfile } = await supabase
+      .from('business_profile')
+      .select('booking_url')
+      .eq('business_id', businessId)
+      .maybeSingle()
+    
+    if (businessProfile) {
+      bookingLink = (businessProfile as any).booking_url ?? null
     }
 
     if (brandProfile?.tone_of_voice) {
@@ -297,20 +355,20 @@ export async function fetchBusinessContext(
             contentAnchors = csObj.anchors.filter((s: any) => typeof s === 'string').slice(0, 3)
           }
         }
-        // Emoji frequency from tone_model (v5) beats legacy tov.emoji_frequency
-        const emojiLevel = tm.emoji_level || (brandProfile.tone_of_voice as any)?.emoji_frequency || 'moderate'
-        emojiInstruction = emojiLevel === 'none' ? 'Brug INGEN emojis'
-          : emojiLevel === 'minimal' || emojiLevel === 'low' ? '0-1 emoji maksimum'
-          : emojiLevel === 'frequent' || emojiLevel === 'high' ? '2-3 emojis naturligt placeret'
-          : '1-2 emojis naturligt placeret' // moderate (default)
+        // FIX 05: Check for explicit brand profile emoji_usage override first (premium feature)
+        // If brand has custom emoji rules, use those. Otherwise use new principle-based instruction.
+        const brandEmojiUsage = brandProfileV5?.voice?.emoji_usage
+        if (typeof brandEmojiUsage === 'string' && brandEmojiUsage.trim().length > 10) {
+          emojiInstruction = brandEmojiUsage.trim()
+          console.log('✅ Using brand-specific emoji_usage from V5 profile')
+        } else {
+          // FIX 05: Use new principle-based instruction (world-class emoji system)
+          emojiInstruction = buildEmojiInstruction(language)
+        }
       }
     } else {
-      // v2 fallback emoji from tone_of_voice.emoji_frequency
-      const emojiFreq = (brandProfile?.tone_of_voice as any)?.emoji_frequency || 'moderate'
-      emojiInstruction = emojiFreq === 'none' ? 'Brug INGEN emojis'
-        : emojiFreq === 'low' ? '0-1 emoji maksimum'
-        : emojiFreq === 'high' ? '2-3 emojis naturligt placeret'
-        : '1-2 emojis naturligt placeret'
+      // v2 fallback: Use principle-based instruction (FIX 05)
+      emojiInstruction = buildEmojiInstruction(language)
     }
 
     if (brandProfile?.things_to_avoid) {
@@ -607,13 +665,22 @@ export async function fetchBusinessContext(
           console.log('✅ V5.6 humor_character extracted:', humorCharacter)
         }
         
+        // Extract signature_themes from culinary_character for concept anchoring
+        if (tone_dna.culinary_character?.signature_themes && Array.isArray(tone_dna.culinary_character.signature_themes)) {
+          signatureThemes = tone_dna.culinary_character.signature_themes
+            .filter((s: any) => typeof s === 'string' && s.trim().length > 0)
+            .slice(0, 6)
+          console.log('✅ signature_themes extracted:', signatureThemes.length, 'themes')
+        }
+        
         console.log('✅ V5.5 tone_dna loaded:', {
           has_strategic_summary: !!tone_dna.strategic_summary,
           tone_do_list: toneDNARules.length,
           tone_dont_list: tone_dna.tone_dont_list?.length || 0,
           has_location_driver: !!tone_dna.location_driver,
           has_culinary_character: !!tone_dna.culinary_character,
-          has_humor_character: !!humorCharacter
+          has_humor_character: !!humorCharacter,
+          signature_themes_count: signatureThemes.length
         })
       } else {
         console.log('⚠️ V5.5 tone_dna not found - using legacy tone_model')
@@ -698,7 +765,7 @@ export async function fetchBusinessContext(
     const [profileResult, operationsResult, hoursResult, brandResult] = await Promise.all([
       supabase
         .from('business_profile')
-        .select('key_offerings, menu_description, user_about_text')
+        .select('key_offerings, menu_description, user_about_text, ai_place_synopsis, booking_url')  // FIX 04: Added ai_place_synopsis
         .eq('business_id', businessId)
         .single(),
       supabase
@@ -713,9 +780,10 @@ export async function fetchBusinessContext(
         .eq('kind', 'normal')
         .eq('weekday', todayName)
         .limit(1),
+      // FIX BREAK 3b: Only fetch menu_signal, NOT booking_link (use business_profile.booking_url instead)
       supabase
         .from('business_brand_profile')
-        .select('booking_link, menu_signal')
+        .select('menu_signal')
         .eq('business_id', businessId)
         .single(),
     ])
@@ -725,7 +793,8 @@ export async function fetchBusinessContext(
     const todayHours = hoursResult.data?.[0]
     const brandRow = brandResult.data as any
 
-    bookingLink = brandRow?.booking_link ?? null
+    // FIX BREAK 3b: Read booking_url from business_profile (single source of truth)
+    bookingLink = profileRow?.booking_url ?? null
 
     if (typeof profileRow?.key_offerings === 'string' && profileRow.key_offerings.trim()) {
       keyOfferings = profileRow.key_offerings.trim()
@@ -745,6 +814,11 @@ export async function fetchBusinessContext(
 
     if (typeof profileRow?.user_about_text === 'string' && profileRow.user_about_text.trim()) {
       userAboutText = profileRow.user_about_text.trim()
+    }
+
+    // FIX 04: Extract ai_place_synopsis if available
+    if (typeof profileRow?.ai_place_synopsis === 'string' && profileRow.ai_place_synopsis.trim()) {
+      aiPlaceSynopsis = profileRow.ai_place_synopsis.trim()
     }
 
     businessCharacter = menuDescription || userAboutText || ''
@@ -835,12 +909,18 @@ export async function fetchBusinessContext(
     ctaPreferences,
     bookingLink, todayOpenTime, todayCloseTime, kitchenCloseTime,
     reservationRequired, acceptsWalkIns, hasTableService, hasTakeaway, hasDelivery, hasOutdoorSeating, hasParking,
-    keyOfferings, menuDescription, userAboutText,
+    keyOfferings, menuDescription, userAboutText, aiPlaceSynopsis,
     voiceRationale, venueIdentity, businessIdentityPersona, marketingManagerBrief, identityKeywords,
     businessCharacter, venueCharacter, venueScene,
     humorLevel, formalityLevel, tone_dna,
     localLocationReference,
     locationIntelligenceNarrative: geoNarrative || null,
+    // FIX 4: Pass through location intelligence fields
+    neighborhoodCharacter,
+    neighborhood,
+    areaType,
+    locationMarketingHooks,
+    signatureThemes,
   }
 }
 

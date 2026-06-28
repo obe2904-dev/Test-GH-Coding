@@ -115,10 +115,11 @@ export function buildLocationIntelligence(location: any): LocationIntelligence |
   const matchedMotivations = deriveMotivations(primaryType, secondaryTypes)
 
   // Tourist context: triggered by area type OR high tourist / destination score
+  // Schema v2: read tourist from demographic_proximity (who passes by), not category_scores (where business is)
   const touristContext =
     TOURIST_TYPES.has(primaryType) ||
     TOURIST_TYPES.has(lightweightAreaType ?? '') ||
-    (categoryScores['tourist'] ?? 0) >= 50 ||
+    (location.demographic_proximity?.tourist ?? 0) >= 50 ||
     (categoryScores['destination'] ?? 0) >= 50
 
   const marketingFocus = marketingHooks[0]?.text ?? null

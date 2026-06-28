@@ -84,6 +84,12 @@ const PhotoIcon = ({ className }: { className?: string }) => (
   </svg>
 )
 
+const ArrowRightIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+    <path d="M13 7l5 5m0 0l-5 5m5-5H6" />
+  </svg>
+)
+
 type DashboardCard = {
   sidebarId: string
   title: string
@@ -91,6 +97,8 @@ type DashboardCard = {
   icon: ({ className }: { className?: string }) => JSX.Element
   action: { kind: 'route'; to: string } | { kind: 'modal' }
   locked?: boolean
+  lockedReason?: string
+  isSequentialLock?: boolean
   completed?: boolean
   statusTone?: 'ok' | 'warn' | 'empty'
 }
@@ -119,17 +127,6 @@ export function DashboardOverviewPage() {
     if (hasData) return 'warn'
     return 'empty'
   }
-
-  const profileHasData = Boolean(
-    business?.name?.trim() ||
-    business?.website_url?.trim() ||
-    profile?.short_description?.trim() ||
-    profile?.long_description?.trim() ||
-    profile?.menu_description?.trim() ||
-    profile?.ai_brand_context?.trim() ||
-    profile?.menu_structure ||
-    profile?.detected_menu_urls
-  )
 
   const menuHasData = Boolean(
     profile?.menu_structure ||
@@ -163,8 +160,8 @@ export function DashboardOverviewPage() {
           description: t('navigation.businessProfileDescription'),
           icon: GlobeIcon,
           action: { kind: 'route' as const, to: '/dashboard/profile' },
-          completed: setupCompletion.profile,
-          statusTone: getFrameTone(setupCompletion.profile, profileHasData),
+          completed: setupCompletion.profileState === 'complete',
+          statusTone: setupCompletion.profileState === 'complete' ? 'ok' : 'warn',
         },
         {
           sidebarId: 'menu',
@@ -174,7 +171,13 @@ export function DashboardOverviewPage() {
           action: currentTier === 'free'
             ? { kind: 'route' as const, to: '/dashboard/plans' }
             : { kind: 'route' as const, to: '/dashboard/menu' },
-          locked: currentTier === 'free',
+          locked: currentTier === 'free' || (currentTier !== 'free' && setupCompletion.profileState !== 'complete'),
+          isSequentialLock: currentTier !== 'free' && setupCompletion.profileState !== 'complete',
+          lockedReason: currentTier === 'free' 
+            ? undefined 
+            : setupCompletion.profileState !== 'complete'
+              ? 'Udfyld først virksomhedsprofil for at låse menuen op'
+              : undefined,
           completed: setupCompletion.menu,
           statusTone: getFrameTone(setupCompletion.menu, menuHasData),
         },
@@ -186,7 +189,13 @@ export function DashboardOverviewPage() {
           action: currentTier === 'free'
             ? { kind: 'route' as const, to: '/dashboard/plans' }
             : { kind: 'route' as const, to: '/dashboard/location' },
-          locked: currentTier === 'free',
+          locked: currentTier === 'free' || (currentTier !== 'free' && setupCompletion.menuState === 'none'),
+          isSequentialLock: currentTier !== 'free' && setupCompletion.menuState === 'none',
+          lockedReason: currentTier === 'free' 
+            ? undefined 
+            : setupCompletion.menuState === 'none'
+              ? 'Tilføj først menu data for at låse lokation op'
+              : undefined,
           completed: setupCompletion.location,
           statusTone: getFrameTone(setupCompletion.location, locationHasData),
         },
@@ -198,7 +207,13 @@ export function DashboardOverviewPage() {
           action: currentTier === 'free'
             ? { kind: 'route' as const, to: '/dashboard/plans' }
             : { kind: 'route' as const, to: '/dashboard/brand' },
-          locked: currentTier === 'free',
+          locked: currentTier === 'free' || (currentTier !== 'free' && setupCompletion.locationState === 'none'),
+          isSequentialLock: currentTier !== 'free' && setupCompletion.locationState === 'none',
+          lockedReason: currentTier === 'free' 
+            ? undefined 
+            : setupCompletion.locationState === 'none'
+              ? 'Tilføj først lokation data for at låse brand profil op'
+              : undefined,
           completed: setupCompletion.brandProfile,
           statusTone: getFrameTone(setupCompletion.brandProfile, brandHasData),
         },
@@ -261,7 +276,13 @@ export function DashboardOverviewPage() {
     },
   ]
 
-  const handleCardClick = (action: { kind: 'route'; to: string } | { kind: 'modal' }) => {
+  const handleCardClick = (action: { kind: 'route'; to: string } | { kind: 'modal' }, locked?: boolean, lockedReason?: string) => {
+    if (locked && lockedReason) {
+      // Show toast or alert with nudging message
+      alert(lockedReason)
+      return
+    }
+
     if (action.kind === 'route') {
       navigate(action.to)
       return
@@ -289,13 +310,17 @@ export function DashboardOverviewPage() {
                 {section.title}
               </h3>
               <div
-                className={`grid grid-cols-1 gap-4 ${
-                  section.cards.length === 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-4'
+                className={`${
+                  section.cards.length === 2 ? 'grid grid-cols-1 gap-4 lg:grid-cols-2' : 
+                  section.title === t('navigation.yourBusiness') 
+                    ? 'flex flex-col lg:flex-row lg:items-center gap-3'
+                    : 'grid grid-cols-1 gap-4 lg:grid-cols-4'
                 }`}
               >
-                {section.cards.map((card) => {
+                {section.cards.map((card, index) => {
                   const Icon = card.icon
                   const isBusinessSection = section.title === t('navigation.yourBusiness')
+                  const isProfileCard = card.sidebarId === 'profile'
                   const emphasizeFrame = isFreeTier && ['profile', 'write', 'ai-ideas'].includes(card.sidebarId)
                   const statusTone = card.statusTone ?? 'empty'
                   const businessFrameClass = statusTone === 'ok'
@@ -305,45 +330,60 @@ export function DashboardOverviewPage() {
                       : 'border-[#E8D8D8] bg-[#FCF8F8]'
 
                   return (
-                    <div
-                      key={card.title}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        if (card.sidebarId === 'write') {
-                          setActivePath('write')
-                          setWriteSelfStep('generate')
-                        }
-                        handleCardClick(card.action)
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault()
+                    <>
+                      <div
+                        key={card.title}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
                           if (card.sidebarId === 'write') {
                             setActivePath('write')
                             setWriteSelfStep('generate')
                           }
-                          handleCardClick(card.action)
-                        }
-                      }}
-                      onMouseEnter={() => setHoveredSidebarItem(card.sidebarId)}
-                      onMouseLeave={clearHoveredSidebarItem}
-                      onFocus={() => setHoveredSidebarItem(card.sidebarId)}
-                      onBlur={clearHoveredSidebarItem}
-                      data-card-id={card.sidebarId}
-                      className={`cursor-pointer rounded-3xl p-5 shadow-sm transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#0A7D5F]/20 ${card.locked ? 'bg-white border border-slate-200 opacity-70' : isBusinessSection ? `${businessFrameClass} border` : 'bg-white border border-slate-200'} ${emphasizeFrame ? 'border-2 border-slate-300' : ''}`}
-                    >
-                      <div className="mb-3 flex items-center gap-3">
-                        <Icon className="h-5 w-5 shrink-0 text-slate-500" />
-                        <h4 className="text-base font-semibold text-slate-900">
-                          {card.title}
-                        </h4>
-                        {card.locked && <span className="ml-auto text-xs text-slate-400">🔒</span>}
+                          handleCardClick(card.action, card.locked, card.lockedReason)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            if (card.sidebarId === 'write') {
+                              setActivePath('write')
+                              setWriteSelfStep('generate')
+                            }
+                            handleCardClick(card.action, card.locked, card.lockedReason)
+                          }
+                        }}
+                        onMouseEnter={() => setHoveredSidebarItem(card.sidebarId)}
+                        onMouseLeave={clearHoveredSidebarItem}
+                        onFocus={() => setHoveredSidebarItem(card.sidebarId)}
+                        onBlur={clearHoveredSidebarItem}
+                        data-card-id={card.sidebarId}
+                        className={`cursor-pointer rounded-3xl p-5 shadow-sm transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#0A7D5F]/20 ${
+                          isBusinessSection ? 'flex-1' : ''
+                        } ${card.locked ? 'bg-white border border-slate-200 opacity-70' : isBusinessSection ? `${businessFrameClass} border ${isProfileCard ? 'border-2' : ''}` : 'bg-white border border-slate-200'} ${emphasizeFrame ? 'border-2 border-slate-300' : ''}`}
+                      >
+                        <div className="mb-3 flex items-center gap-3">
+                          <Icon className="h-5 w-5 shrink-0 text-slate-500" />
+                          <h4 className="text-base font-semibold text-slate-900">
+                            {card.title}
+                          </h4>
+                          {card.locked && (
+                            <span className="ml-auto text-xs text-slate-400">
+                              {card.isSequentialLock ? '⏻' : '🔒'}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm leading-6 text-slate-600">
+                          {isProfileCard && !setupCompletion.profile
+                            ? t('dashboard.profileNeedsContent', 'For indhold, udfyld venligst.')
+                            : card.description}
+                        </p>
                       </div>
-                      <p className="text-sm leading-6 text-slate-600">
-                        {card.description}
-                      </p>
-                    </div>
+                      {isBusinessSection && index < section.cards.length - 1 && (
+                        <div className="hidden lg:flex items-center justify-center px-2">
+                          <ArrowRightIcon className="h-6 w-6 text-slate-400" />
+                        </div>
+                      )}
+                    </>
                   )
                 })}
               </div>

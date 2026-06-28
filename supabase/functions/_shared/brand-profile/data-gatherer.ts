@@ -222,8 +222,8 @@ export async function gatherDataSources(
       : Promise.resolve({ data: null, error: null }),
     // Operations: establishment type + physical features that affect audience occasions
     supabase.from('business_operations').select('establishment_type, has_outdoor_seating, has_takeaway, has_table_service, has_english_menu, has_kids_menu').eq('business_id', businessId).maybeSingle(),
-    // Rich location intelligence: category_scores, neighborhood, location_marketing_hooks, concept_fit_by_category
-    supabase.from('business_location_intelligence').select('neighborhood, area_type, category_scores, location_marketing_hooks, concept_fit_by_category, local_location_reference').eq('business_id', businessId).maybeSingle(),
+    // Rich location intelligence: category_scores (WHERE), demographic_proximity (WHO), neighborhood, location_marketing_hooks, concept_fit_by_category
+    supabase.from('business_location_intelligence').select('neighborhood, area_type, category_scores, demographic_proximity, location_marketing_hooks, concept_fit_by_category, local_location_reference').eq('business_id', businessId).maybeSingle(),
     // menu_results_v2: AI helicopter summaries + structured data (always fetched in parallel)
     // JOIN with menu_sources to get label (e.g., "Cocktails") for reliable drinks detection
     // Filter by language to exclude English tourist menus

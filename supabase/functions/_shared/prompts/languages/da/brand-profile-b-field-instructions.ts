@@ -109,6 +109,17 @@ export function buildToneOfVoiceInstructions(params: FieldInstructionParams): st
    - Derive from confirmed signals in SIGNAL PROFILE: meal_arc, venue_type, price_register, location, dietary_flags, exclusion_list.
    - FALSIFICERINGSTEST (OBLIGATORISK): For each rule ask: "Kan en naborestaurant med et andet signal bruge denne regel?" Ja → kassér og omskriv med et smallere signal.
    - FORBIDDEN: generic rules that apply to all casual cafés. Rules must reference THIS venue's specific configuration.
+   
+   🚨 DEMOGRAPHIC VALIDATION (CRITICAL):
+   Before writing ANY rule that mentions an audience type (studerende, turister, erhvervsgæster, familier, etc.):
+   1. CHECK AUDIENCE PERMISSIONS block in the data section above
+   2. IF the demographic shows "absent" or is not listed → DO NOT MENTION IT
+   3. IF score < 40 → DO NOT MENTION IT
+   4. NEVER write "appellerer til [geographic location]" — locations are WHERE, not WHO
+      ❌ WRONG: "Skriv med en tone der appellerer til byens centrum" (city_centre is a LOCATION, not an audience)
+      ✅ RIGHT: "Skriv med en tilgængelig tone der passer til centrumområdet" (describes location context, not audience appeal)
+   5. ONLY use demographic labels if explicitly permitted by AUDIENCE PERMISSIONS with "primary" or "secondary" strength
+   
    GOOD examples (these would FAIL at a different venue):
      'Stedet har et konkret fysisk anker — skriv det som aktør i situationen, ikke som stemningsbaggrund' (signal: location)
      'Første service og sen aften er ikke det samme gæsteforhold — ton ned med klokkeslættet' (signal: meal_arc)
@@ -116,6 +127,7 @@ export function buildToneOfVoiceInstructions(params: FieldInstructionParams): st
    BAD examples (portable to any café — would PASS at a competitor — FORBIDDEN):
      'Skriv som en person, ikke et reklamebureau' (no specific signal — fails test)
      'Vær uformel og varm' (no signal — fails test)
+     'Skriv med en tone der appellerer til både studerende og byens centrum' (treats location as audience + uses unpermitted demographic — FORBIDDEN)
 
    FORMAT strictly:
    STEMME-MEKANIK:

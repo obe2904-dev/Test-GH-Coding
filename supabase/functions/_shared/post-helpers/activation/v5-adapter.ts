@@ -30,7 +30,7 @@ export function transformV5ToActivationSegments(v5Profile: V5BrandProfile): Bran
     for (const segment of programme.audience_segments) {
       // Map V5 segment to BrandSegment interface
       const brandSegment: BrandSegment = {
-        segment_name: segment.label,
+        segment_name: segment.people_type,
         programme_type: programmeType,
         programme_name: programmeName,
         

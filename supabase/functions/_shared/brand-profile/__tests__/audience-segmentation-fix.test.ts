@@ -135,10 +135,10 @@ const CAFE_FAUST_LOCATION_INPUT: LocationStrategyInput = {
 // ===== HELPER FUNCTIONS =====
 
 function assertSegmentHasConceptFitReason(segment: AudienceSegment, testName: string) {
-  assertExists(segment.concept_fit_reason, `${testName}: segment "${segment.label}" missing concept_fit_reason`);
+  assertExists(segment.concept_fit_reason, `${testName}: segment "${segment.people_type}" missing concept_fit_reason`);
   assert(
     segment.concept_fit_reason.length >= 20,
-    `${testName}: segment "${segment.label}" concept_fit_reason too short: "${segment.concept_fit_reason}"`
+    `${testName}: segment "${segment.people_type}" concept_fit_reason too short: "${segment.concept_fit_reason}"`
   );
 }
 
@@ -146,10 +146,10 @@ function assertNoTouristsAsPrimarySegment(profile: ProgrammeAudienceProfile, tes
   const primarySegment = profile.audience_segments.find(s => s.segment_size === 'primary');
   assertExists(primarySegment, `${testName}: No primary segment found`);
   
-  const labelLower = primarySegment.label.toLowerCase();
+  const labelLower = primarySegment.people_type.toLowerCase();
   assert(
     !labelLower.includes('turist') && !labelLower.includes('tourist'),
-    `${testName}: Primary segment should NOT be tourists, got: "${primarySegment.label}"`
+    `${testName}: Primary segment should NOT be tourists, got: "${primarySegment.people_type}"`
   );
 }
 
@@ -159,7 +159,7 @@ function assertSegmentMatchesFormat(
   testName: string
 ) {
   const reasonLower = segment.concept_fit_reason.toLowerCase();
-  const labelLower = segment.label.toLowerCase();
+  const labelLower = segment.people_type.toLowerCase();
   
   const hasFormatMatch = expectedFormats.some(format => 
     reasonLower.includes(format.toLowerCase()) || labelLower.includes(format.toLowerCase())
@@ -167,7 +167,7 @@ function assertSegmentMatchesFormat(
   
   assert(
     hasFormatMatch,
-    `${testName}: Segment "${segment.label}" should reference format (${expectedFormats.join(' or ')}). concept_fit_reason: "${segment.concept_fit_reason}"`
+    `${testName}: Segment "${segment.people_type}" should reference format (${expectedFormats.join(' or ')}). concept_fit_reason: "${segment.concept_fit_reason}"`
   );
 }
 

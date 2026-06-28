@@ -20,6 +20,66 @@ import { assembleBusinessIntelligence, formatBusinessIntelligenceForPrompt } fro
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { generateTimingRecommendation } from '../timing-intelligence.ts';
 
+// ── Nudge Rationale Helpers ──
+const DANISH_DAY_NAMES: Record<number, string> = {
+  0: 'søndag', 1: 'mandag', 2: 'tirsdag', 3: 'onsdag',
+  4: 'torsdag', 5: 'fredag', 6: 'lørdag',
+};
+
+const DANISH_DAY_NAMES_CAPITAL: Record<number, string> = {
+  0: 'Søndag', 1: 'Mandag', 2: 'Tirsdag', 3: 'Onsdag',
+  4: 'Torsdag', 5: 'Fredag', 6: 'Lørdag',
+};
+
+/**
+ * Builds a human-readable booking nudge rationale for UI display.
+ * Only called for ideas where cta_mode === "booking".
+ *
+ * Examples:
+ *   "Opslaget onsdag skal drive bookinger til fredag aften — 2 dages fremtid."
+ *   "Opslaget torsdag skal drive bookinger til lørdag aften — 2 dages fremtid."
+ *   "Opslaget mandag skal drive bookinger til onsdag frokost — 2 dages fremtid."
+ */
+function buildNudgeRationale(opts: {
+  postDate: string          // ISO date of the post, e.g. "2026-07-01" (Wednesday)
+  targetDays: string[]      // angle.target_days, e.g. ["Friday", "Saturday"]
+  targetServicePeriod: string // angle.target_service_period, e.g. "dinner"
+  leadDays: number          // angle.booking_lead_days (from AI reasoning)
+}): string {
+  const { postDate, targetDays, targetServicePeriod, leadDays } = opts;
+
+  const postDow = new Date(postDate + 'T00:00:00').getDay();
+  const postDayName = DANISH_DAY_NAMES_CAPITAL[postDow] ?? 'Denne dag';
+
+  // Map English target day names to Danish
+  const EN_TO_DA: Record<string, string> = {
+    Monday: 'mandag', Tuesday: 'tirsdag', Wednesday: 'onsdag',
+    Thursday: 'torsdag', Friday: 'fredag', Saturday: 'lørdag', Sunday: 'søndag',
+  };
+  const targetDaysDanish = targetDays
+    .map(d => EN_TO_DA[d] ?? d.toLowerCase())
+    .join(' eller ');
+
+  // Map service period to Danish
+  const PERIOD_DA: Record<string, string> = {
+    dinner:  'aften',
+    lunch:   'frokost',
+    brunch:  'brunch',
+    all_day: 'hele dagen',
+    any:     '',
+  };
+  const periodLabel = PERIOD_DA[targetServicePeriod] ?? '';
+  const targetLabel = periodLabel
+    ? `${targetDaysDanish} ${periodLabel}`
+    : targetDaysDanish;
+
+  const leadLabel = leadDays === 1
+    ? '1 dags fremtid'
+    : `${leadDays} dages fremtid`;
+
+  return `Opslaget ${postDayName.toLowerCase()} skal drive bookinger til ${targetLabel} — ${leadLabel}.`;
+}
+
 export async function generateContentPlanSplit(
   context: WeekContext,
   strategicBrief: StrategicBrief,
@@ -145,19 +205,65 @@ export async function generateContentPlanSplit(
     const isLastPost = i === contentPlan.length - 1;
     const ctaResolution = resolveCtaIntent(slot.type, context, isLastPost);
 
-    // Override cta_intent based on goal_mode (slot system takes precedence over legacy type resolver)
+    // FIX BREAK 2a: Deterministic cta_mode → cta_intent mapping
+    // Phase 1 sets cta_mode (booking/walk_in/engagement) on each angle based on business model.
+    // Phase 2 executes that decision by mapping to the canonical cta_intent enum.
     let finalCtaIntent: CTAIntent = ctaResolution.intent;
-    if (slot.goal_mode === 'drive_footfall') {
-      // 'traffic' = visit us now; includes spontaneous walk-ins, opening times, AND booking
+    
+    const ctaMode = slot.cta_mode as string | undefined;
+    const goalMode = slot.goal_mode as string | undefined;
+    
+    if (ctaMode === 'booking') {
+      finalCtaIntent = 'booking';
+    } else if (ctaMode === 'walk_in') {
       finalCtaIntent = 'traffic';
-    } else if (slot.goal_mode === 'build_brand') {
+    } else if (ctaMode === 'engagement') {
       finalCtaIntent = 'engagement';
-    } else if (slot.goal_mode === 'retain_loyalty') {
+    } else if (goalMode === 'drive_footfall') {
+      // No explicit cta_mode → fall back to goal_mode logic (legacy path)
+      finalCtaIntent = 'traffic';
+    } else if (goalMode === 'build_brand') {
+      finalCtaIntent = 'engagement';
+    } else if (goalMode === 'retain_loyalty') {
       finalCtaIntent = 'awareness';
     }
-    console.log(`[Phase 2b] Processing post ${i + 1}/${contentPlan.length} (ID: ${slot.id}, type: ${slot.type}, goal: ${slot.goal_mode || 'none'}, cta: ${finalCtaIntent})`);
+    
+    console.log(`[Phase 2b] Processing post ${i + 1}/${contentPlan.length} (ID: ${slot.id}, type: ${slot.type}, cta_mode: ${ctaMode || 'none'}, goal: ${goalMode || 'none'}, cta_intent: ${finalCtaIntent})`);
 
     const detail = await generatePostDetail(slot, context, strategicBrief, contextualAnalysis, contentPlan, usedMenuItems, usedExperiencePosts, finalCtaIntent, usedRationaleThemes, ctaFlavorIndex, businessIntelligencePrompt, businessIntel, usedMenuCategories, i, usedMenuItemIds);
+
+    // Populate nudge_rationale deterministically for booking posts
+    if (ctaMode === 'booking' && detail.suggested_day) {
+      // Find the corresponding angle to get booking_lead_days and target_days
+      const angle = strategicBrief.angles.find(a => a.slot_id === slot.slot_id);
+      if (angle && angle.booking_lead_days !== null && angle.booking_lead_days !== undefined) {
+        detail.nudge_rationale = buildNudgeRationale({
+          postDate: detail.suggested_day,
+          targetDays: angle.target_days ?? [],
+          targetServicePeriod: angle.target_service_period ?? 'any',
+          leadDays: angle.booking_lead_days,
+        });
+        console.log(`[Phase 2b] Populated nudge_rationale for booking post: "${detail.nudge_rationale}"`);
+
+        // Also update timing_intelligence.timing_rationale to match
+        if (detail.timing_intelligence) {
+          detail.timing_intelligence.timing_rationale = detail.nudge_rationale;
+        }
+      } else {
+        console.warn(`[Phase 2b] booking_lead_days not found for slot ${slot.slot_id}, using fallback`);
+        // Fallback to 2 days if booking_lead_days is missing
+        detail.nudge_rationale = buildNudgeRationale({
+          postDate: detail.suggested_day,
+          targetDays: angle?.target_days ?? [],
+          targetServicePeriod: angle?.target_service_period ?? 'any',
+          leadDays: 2,
+        });
+        if (detail.timing_intelligence) {
+          detail.timing_intelligence.timing_rationale = detail.nudge_rationale;
+        }
+      }
+    }
+
     postDetails.push(detail);
 
     // Track the rationale theme this post used (first clause of rationale = theme)

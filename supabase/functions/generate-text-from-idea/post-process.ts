@@ -197,6 +197,40 @@ export function stripAIDashes(text: string): string {
     .trim()
 }
 
+// ── stripEmojiViolations ───────────────────────────────────────────────────
+// FIX 05: Universal emoji safety net. Enforces count and position rules only.
+// Does NOT make cuisine-specific decisions — the prompt handles that.
+// 
+// Rules enforced here:
+//   - Max 2 emojis total (world-class = 1, absolute max = 2)
+//   - Emojis must be at end of text, not mid-sentence
+//
+// Rules NOT enforced here (prompt responsibility):
+//   - Which specific emoji to use
+//   - Cuisine-category matching
+export function stripEmojiViolations(text: string): string {
+  let cleaned = text
+
+  // Rule 1: Remove mid-sentence emojis
+  // Pattern explanation: \p{Emoji_Presentation} matches emoji characters
+  // Removes emoji if followed by word characters (keeps end-position emojis)
+  cleaned = cleaned.replace(/(\p{Emoji_Presentation})\s*(?=[A-Za-zÆØÅæøå\u00C0-\u024F])/gu, '')
+
+  // Rule 2: Max 2 emojis — if more than 2, keep only the last one
+  // This catches edge cases where the AI ignored the "one emoji" instruction
+  const emojiMatches = [...cleaned.matchAll(/\p{Emoji_Presentation}/gu)]
+  if (emojiMatches.length > 2) {
+    const lastEmoji = emojiMatches[emojiMatches.length - 1][0]
+    // Strip all emojis
+    cleaned = cleaned.replace(/\p{Emoji_Presentation}\s*/gu, '').trim()
+    // Re-append only the last emoji at the end
+    cleaned = cleaned.replace(/([.!?])\s*$/, `$1 ${lastEmoji}`)
+  }
+
+  // Clean up any double spaces created by emoji removal
+  return cleaned.replace(/\s{2,}/g, ' ').trim()
+}
+
 // ── extractTopicKeyword ────────────────────────────────────────────────────
 // Derive topic keyword from structured inputs — no word-list scanning, language-agnostic.
 // Priority: menuItemName → contentBlock RET: prefix → AI-returned keyword
@@ -244,6 +278,7 @@ function getContentDomain(keyword: string): 'coffee' | 'drinks' | 'food' | 'bake
 
 // ── generateHashtags ───────────────────────────────────────────────────────
 // FIX 03-B: Extended to accept locationVocabulary for location-specific hashtags
+// FIX 04: Extended to accept aiPlaceSynopsis and menuDescription for venue classification
 export function generateHashtags(
   city: string,
   contentType: string,
@@ -263,5 +298,7 @@ export function generateHashtags(
     text: context.text,
     detectedDishName: context.detectedDishName,
     detectedDishDescription: context.detectedDishDescription,
+    aiPlaceSynopsis: context.aiPlaceSynopsis,    // FIX 04: Stable business-level signal
+    menuDescription: context.menuDescription,    // FIX 04: Stable business-level signal
   })
 }

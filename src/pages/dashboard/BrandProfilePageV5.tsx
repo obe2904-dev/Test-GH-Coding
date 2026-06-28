@@ -264,16 +264,7 @@ export function BrandProfilePageV5() {
   const { programmes, loading: programmesLoading, refetch: refetchProgrammes } = useProgrammeProfiles(businessId);
   const { generating: generatingV5, generate: generateV5 } = useBrandProfileV5Generation();
 
-  // DEBUG: Log programmes state
-  React.useEffect(() => {
-    console.log('[BrandProfilePageV5] 🎨 Programmes state:', {
-      businessId,
-      programmes,
-      count: programmes?.length,
-      loading: programmesLoading,
-      showGenerator: showV5Generator
-    });
-  }, [programmes, programmesLoading, businessId, showV5Generator]);
+
 
   // Handle V5 regeneration
   const handleRegenerateV5 = async () => {
@@ -433,9 +424,9 @@ export function BrandProfilePageV5() {
           {showV5Generator && businessId && (
             <BrandProfileV5Generator
               businessId={businessId}
-              onSuccess={() => {
-                refetch();
-                refetchProgrammes();
+              onSuccess={async () => {
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                await Promise.all([refetch(), refetchProgrammes(true)]);
                 setShowV5Generator(false);
               }}
               mode="regenerate"
@@ -856,8 +847,12 @@ export function BrandProfilePageV5() {
       ) : businessId ? (
         <BrandProfileV5Generator 
           businessId={businessId} 
-          onSuccess={refetch}
-          mode="initial"
+          onSuccess={async () => {
+            // Wait for DB writes to fully commit before reading back
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            await Promise.all([refetch(), refetchProgrammes(true)]);
+          }}
+          mode="generate"
         />
       ) : (
         <div className="text-center py-12">

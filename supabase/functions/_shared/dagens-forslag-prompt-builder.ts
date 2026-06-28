@@ -96,7 +96,7 @@ export interface DagensPromptContext {
   
   // V5 Behavioral Guidance (June 2026)
   v5ToneNote?: string  // Danish tone guidance from motivation × decision_timing
-  v5CTAType?: 'walk_in' | 'book_table' | 'impulse_visit'  // CTA type from segment + business ops
+  v5CTAType?: 'walk_in' | 'book_table' | 'impulse_visit' | 'mixed'  // CTA type from segment + business ops ('mixed' = use BOTH strategies)
   v5ContentAngles?: string[]  // Content angles from active segment
   
   // Menu
@@ -788,7 +788,12 @@ export async function runSlotPlanner(
     ? `Aktivt segment: ${ctx.targetAudienceText}${ctx.activeSegmentAngle ? ` — anbefalet vinkel: ${ctx.activeSegmentAngle}` : ''}${
         ctx.v5ToneNote ? `\n  TONE (V5): ${ctx.v5ToneNote}` : ''
       }${
-        ctx.v5CTAType ? `\n  CTA (V5): ${ctx.v5CTAType === 'walk_in' ? 'Inviter til walk-in' : ctx.v5CTAType === 'book_table' ? 'Opfordre til bordbestilling' : 'Understøt impulsbeslutninger'}` : ''
+        ctx.v5CTAType ? `\n  CTA (V5): ${
+          ctx.v5CTAType === 'walk_in' ? 'Inviter til walk-in' : 
+          ctx.v5CTAType === 'book_table' ? 'Opfordre til bordbestilling' : 
+          ctx.v5CTAType === 'mixed' ? 'MIXED STRATEGI — brug BEGGE tilgange: Nogle forslag inviterer til walk-in, andre opfordrer til bordbestilling (veksle mellem begge CTAer)' :
+          'Understøt impulsbeslutninger'
+        }` : ''
       }${
         ctx.v5ContentAngles && ctx.v5ContentAngles.length > 0 ? `\n  CONTENT ANGLES (V5): ${ctx.v5ContentAngles.join(', ')}` : ''
       }`

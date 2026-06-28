@@ -4,6 +4,130 @@
 
 import type { Suggestion, PromptOptions, SharedToneCore, BrandBlockOptions } from './types.ts'
 
+// ══════════════════════════════════════════════════════════════════════════
+// FIX 3: LOCATION CONTEXT HELPERS — Prevent city-size hallucination
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Classify city size for vocabulary scaling.
+ * Prevents small/medium cities from receiving large-city vocabulary.
+ * FIX 2a from location vocabulary hallucination fix.
+ */
+function classifyCitySize(
+  population: number | null | undefined,
+  cityName: string
+): 'large' | 'medium' | 'small' {
+  // Known Danish cities — hardcoded to avoid relying on AI population estimates
+  const LARGE_CITIES = ['København', 'Aarhus'];         // 200k+
+  const MEDIUM_CITIES = [                                // 50k–200k
+    'Odense', 'Aalborg', 'Esbjerg', 'Randers', 'Kolding',
+    'Horsens', 'Vejle', 'Roskilde', 'Herning', 'Silkeborg',
+    'Næstved', 'Fredericia', 'Viborg', 'Køge', 'Holstebro',
+  ];
+
+  if (LARGE_CITIES.some(c => cityName.toLowerCase().includes(c.toLowerCase()))) return 'large';
+  if (MEDIUM_CITIES.some(c => cityName.toLowerCase().includes(c.toLowerCase()))) return 'medium';
+  if (population && population >= 200000) return 'large';
+  if (population && population >= 40000)  return 'medium';
+  return 'small';
+}
+
+/**
+ * Build the location context string for the generation prompt.
+ *
+ * Priority:
+ * 1. neighborhood_character — factual AI-generated description (best)
+ * 2. local_location_reference — manually set specific reference (e.g. "ved Åen")
+ * 3. neighborhood — district name (e.g. "Silkeborg centrum")
+ * 4. city name only — safe, factual, never embellished
+ *
+ * NEVER: use area_type as a source for copy language.
+ * area_type is a classification signal ('city_centre', 'waterfront') — it is
+ * not copy-ready language and must not be interpolated into marketing text.
+ * 
+ * FIX 3a from location vocabulary hallucination fix.
+ */
+function buildLocationContext(params: {
+  neighborhood_character: string | null | undefined;
+  local_location_reference: string | null | undefined;
+  neighborhood: string | null | undefined;
+  city: string | null | undefined;
+  area_type: string | null | undefined;  // Classification only — never used as copy language
+}): string {
+  if (params.neighborhood_character) {
+    return params.neighborhood_character;
+  }
+  if (params.local_location_reference) {
+    return params.local_location_reference;
+  }
+  if (params.neighborhood) {
+    return params.neighborhood;
+  }
+  if (params.city) {
+    return params.city;
+  }
+  return ''; // No location context — better than hallucinated context
+}
+
+/**
+ * Determine which fallback level was used for location context.
+ * Used for logging to help detect when populate-location-intelligence needs to run.
+ * FIX 3c from location vocabulary hallucination fix.
+ */
+function getLocationFallbackLevel(params: {
+  neighborhood_character: string | null | undefined;
+  local_location_reference: string | null | undefined;
+  neighborhood: string | null | undefined;
+  city: string | null | undefined;
+}): 'neighborhood_character' | 'local_location_reference' | 'neighborhood' | 'city_only' | 'none' {
+  if (params.neighborhood_character) return 'neighborhood_character';
+  if (params.local_location_reference) return 'local_location_reference';
+  if (params.neighborhood) return 'neighborhood';
+  if (params.city) return 'city_only';
+  return 'none';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// FIX 05: CONTENT-TYPE EMOJI OVERRIDE
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Apply content-type specific emoji overrides.
+ * For atmosphere, team, and event posts, restrict emoji domain to prevent
+ * food/drink emojis on non-food content types.
+ * FIX 05: World-class emoji system (principle-based, not cuisine-hardcoded)
+ */
+function applyContentTypeEmojiOverride(
+  baseInstruction: string,
+  contentType: string | null,
+  language: string
+): string {
+  // These content types should never produce food/drink emojis
+  const overrides: Record<string, Record<string, string>> = {
+    atmosphere: {
+      da: 'EMOJI-REGLER: Brug ét emoji der afspejler stemningen i teksten — f.eks. ✨🌅🌆🌃🌊. Ingen mad- eller drikke-emojis på stemningsposts. Placer det til sidst.',
+      en: 'EMOJI RULES: Use one emoji reflecting the mood — e.g. ✨🌅🌆🌃🌊. No food or drink emojis on atmosphere posts. Place at the end.',
+    },
+    team_people: {
+      da: 'EMOJI-REGLER: Brug ét emoji der afspejler menneskene eller arbejdet i teksten — f.eks. 🧑‍🍳🙌🤝. Ingen mad-emojis på team-posts. Placer det til sidst.',
+      en: 'EMOJI RULES: Use one emoji reflecting the people or work described — e.g. 🧑‍🍳🙌🤝. No food emojis on team posts. Place at the end.',
+    },
+    behind_scenes: {
+      da: 'EMOJI-REGLER: Brug ét emoji der afspejler menneskene eller arbejdet i teksten — f.eks. 🧑‍🍳🙌🤝. Ingen mad-emojis på team-posts. Placer det til sidst.',
+      en: 'EMOJI RULES: Use one emoji reflecting the people or work described — e.g. 🧑‍🍳🙌🤝. No food emojis on team posts. Place at the end.',
+    },
+    event: {
+      da: 'EMOJI-REGLER: Brug ét emoji der afspejler begivenheden i teksten — f.eks. 🎉🗓️🎶. Ingen mad-emojis medmindre begivenheden handler om en ret. Placer det til sidst.',
+      en: 'EMOJI RULES: Use one emoji reflecting the event described — e.g. 🎉🗓️🎶. No food emojis unless the event is about a dish. Place at the end.',
+    },
+  }
+
+  const lang = language === 'da' ? 'da' : 'en'
+  return overrides[contentType ?? '']?.[lang] ?? baseInstruction
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+
 // ── sanitizeGuestMoment ────────────────────────────────────────────────────
 // Strip Danish strategy-reasoning clauses from guest moment strings.
 // Source data sometimes appends why-this-dish rationale after the actual
@@ -349,7 +473,55 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     voiceConstraints, emojiInstruction,
     todayOpenTime, selectedCta, businessName, city, language, ctaStyle, goalMode,
     voiceRationale, venueIdentity, businessCharacter, identityKeywords,
+    isPaid, neighborhoodCharacter, locationMarketingHooks, signatureThemes,
   } = opts
+
+  // FIX 05: Apply content-type emoji override before using emojiInstruction in prompts
+  const finalEmojiInstruction = applyContentTypeEmojiOverride(
+    emojiInstruction,
+    contentType,
+    language
+  )
+
+  // FIX 3: Build location context with strict fallback priority
+  const locationContext = buildLocationContext({
+    neighborhood_character: opts.neighborhoodCharacter,
+    local_location_reference: opts.localLocationReference,
+    neighborhood: opts.neighborhood,
+    city: opts.city,
+    area_type: opts.areaType,
+  });
+
+  const fallbackLevel = getLocationFallbackLevel({
+    neighborhood_character: opts.neighborhoodCharacter,
+    local_location_reference: opts.localLocationReference,
+    neighborhood: opts.neighborhood,
+    city: opts.city,
+  });
+
+  console.log(`📍 [AI Ideas] Location context source: ${fallbackLevel}`, {
+    value: locationContext?.substring(0, 80) || 'empty',
+  });
+
+  if (fallbackLevel === 'city_only' || fallbackLevel === 'none') {
+    console.warn(
+      `⚠️ [AI Ideas] Location context is weak (${fallbackLevel}). ` +
+      `Run populate-location-intelligence with force_refresh=true ` +
+      `to generate neighborhood_character.`
+    );
+  }
+
+  // FIX 3b: Add city-size guard for medium/small cities
+  const citySize = classifyCitySize(undefined, city || '');
+  const citySizeGuard = citySize !== 'large' && city
+    ? `\nVIGTIGT: Undgå storby-sprog. ${city} er ikke en storby. ` +
+      `Skriv IKKE: "pulserende byliv", "byens puls", "urban energi", "storbyatmosfære". ` +
+      `Brug i stedet konkrete, faktuelle referencer til ${city}.`
+    : '';
+
+  console.log(`📍 [AI Ideas] City size classification: ${citySize} (${city})`, {
+    city_size_guard_active: citySize !== 'large',
+  });
 
   const core = buildSharedToneCore(opts)
   const {
@@ -419,6 +591,46 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
   const atmosphereHint = isAtmosphereNoMenu
     ? `${atmosphereHintMap[language] || atmosphereHintMap.da}\n`
     : ''
+
+  // ── FAKTUEL FORANKRING — Consolidated factual anchoring (paid tier, Danish only) ──
+  let factualAnchoringBlock = ''
+  if (isPaid && language === 'da') {
+    const anchoringLines: string[] = []
+
+    // Part A: Location vocabulary gate
+    const hasLocationHooks = Array.isArray(locationMarketingHooks) && locationMarketingHooks.length > 0
+    if (neighborhoodCharacter && neighborhoodCharacter.trim().length > 10) {
+      const locationHooksBlock = hasLocationHooks
+        ? `\nGodkendte stedsformuleringer (ejer-valideret — må bruges direkte):\n${locationMarketingHooks.slice(0, 3).map((h: string) => `• "${h}"`).join('\n')}`
+        : ''
+
+      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.`)
+    }
+
+    // Part B: Concept anchor requirement for non-menu posts
+    const isNonMenuPost = ['behind_scenes', 'atmosphere', 'guest_moment', 'team_people']
+      .includes(contentType || '')
+
+    if (isNonMenuPost) {
+      const conceptAnchors: string[] = []
+
+      if (Array.isArray(signatureThemes) && signatureThemes.length > 0) {
+        conceptAnchors.push(...signatureThemes.slice(0, 4))
+      }
+
+      if (conceptAnchors.length > 0) {
+        anchoringLines.push(`KONCEPTANKER FOR DETTE OPSLAG:\nMindst ét af følgende specifikke elementer SKAL fremgå i teksten:\n${conceptAnchors.map(a => `• ${a}`).join('\n')}\n\nTest: Kan sætningen stå uændret i en tekst for en vilkårlig restaurant\ni samme kategori? Hvis ja — erstat med et specifikt konceptelement ovenfor.\n\nEKSEMPEL PÅ GENERISK (fejler testen):\n  "Vi tilbereder alt med friske råvarer og kærlighed til detaljen"\n  → Dette kunne stå hos enhver restaurant. ERSTAT MED konceptanker.\n\nEKSEMPEL PÅ SPECIFIKT (består testen):\n  "Vores bordgrill giver dig fuld kontrol over hver bid"\n  → Dette refererer til et specifikt konceptelement (bordgrill). OK.\n\nDette gælder ikke for tone eller stil — kun for faktuelle påstande om\nhvad stedet tilbyder eller er.`)
+      } else {
+        // No concept anchors available — log warning
+        console.warn(`⚠️ [buildPrompt] No concept anchors found for non-menu post (${businessName}). Output may be generic.`)
+      }
+    }
+
+    // Inject if we have anything
+    if (anchoringLines.length > 0) {
+      factualAnchoringBlock = `\n── FAKTUEL FORANKRING ──\n${anchoringLines.join('\n\n')}\n`
+    }
+  }
 
   // startRules — open with a concrete offer/dish/time, never the title verbatim.
   const startRuleDA = '2) Start: Din første sætning skal ENTEN beskrive noget konkret (sansekvalitet, udseende, smag, en situation læseren genkender) ELLER invitere til en handling ELLER stille læseren et spørgsmål. En sætning med kun subjekt + intransitivt udsagnsord er IKKE en åbning — det er scenefylde (fx forbudt overalt i teksten, ikke kun som åbning: „X venter.“, „X flyder.“, „X kalder.“, „X vågner.“, „X spejler.“). Rettens navn alene er ikke en åbning — beskriv den.'
@@ -508,6 +720,16 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     ? `${ctaHeader[language] || ctaHeader.da}\n"${selectedCta}"\n`
     : ''
   
+  // FIX GAP B: Booking CTA instruction — tell AI NOT to include URL in caption
+  const bookingCtaInstruction: Record<string, string> = {
+    da: `\n⚠️ BOOKING-CTA REGEL: Afslut med booking-opfordringen ovenfor. Skriv IKKE booking-URL'en i teksten — den tilføjes automatisk efter din tekst på Facebook. På Instagram vises kun teksten uden URL, hvilket er korrekt.\n`,
+    sv: `\n⚠️ BOOKING-CTA REGEL: Avsluta med booking-uppmaningen ovan. Skriv INTE booking-URL:en i texten — den läggs till automatiskt efter din text på Facebook. På Instagram visas bara texten utan URL, vilket är korrekt.\n`,
+    de: `\n⚠️ BOOKING-CTA REGEL: Beende mit der Booking-Aufforderung oben. Schreibe NICHT die Booking-URL in den Text — sie wird automatisch nach deinem Text auf Facebook hinzugefügt. Auf Instagram erscheint nur der Text ohne URL, was korrekt ist.\n`,
+  }
+  const bookingCtaBlock = (opts.bookingLink && ctaStyle === 'strict')
+    ? (bookingCtaInstruction[language] || bookingCtaInstruction.da)
+    : ''
+  
   // Nu-faktor (KRAV #5): model must anchor the post in a concrete "why now" signal.
   const anledningRule: Record<string, string> = {
     da: '5) Nu-faktor: teksten SKAL give ét konkret signal om HVORFOR dette er relevant NU — brug LEJLIGHED eller KONTEKST fra INDHOLD som vinkel hvis til stede ("perfekt til frokostpausen", "nu er sæsonen for det her"). Ingen tekst uden en grund til at handle i dag.',
@@ -520,8 +742,8 @@ Skriv ÉN social media-tekst til ${businessName} i ${city}.
 ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${contentTypeHint}${atmosphereHint}
 INDHOLD (skriv om KUN dette):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.da}${sceneMoodOpeningHint}${forbiddenOpener.da}${dishProtagonistHint}
-${ctaSection}KRAV TIL TEKSTEN
+${brandBlock}${hoursBlock}${faktaforbud.da}${citySizeGuard}${factualAnchoringBlock}${sceneMoodOpeningHint}${forbiddenOpener.da}${dishProtagonistHint}
+${ctaSection}${bookingCtaBlock}KRAV TIL TEKSTEN
 1) Længde: 300-450 tegn INKL. emojis og CTA
 ${startRules.da}
 ${sensoryRules.da}
@@ -529,7 +751,7 @@ ${dishRules.da}
 ${anledningRule.da}
 6) Naturligt dansk — skriv som en dansker skriver. Undgå: "lækker", "hyggelig", "autentisk", "unik", "svip" (dateret), "nyd" som imperativ åbning
 7) Aldrig " - " eller " – " som bindeled mellem sætningsled ("god mad – hyggelig stemning – book nu").
-8) ${emojiInstruction}
+8) ${finalEmojiInstruction}
    ☕ MÅ KUN bruges, hvis kaffe, espresso, latte eller cappuccino er eksplicit nævnt som en drik i selve teksten — "Café" i virksomhedsnavnet tæller IKKE.
 9) ${selectedCta ? ctaRule8.da : 'Ingen CTA påkrævet for dette opslag — lad teksten tale for sig selv'}${qualityNote}
 
@@ -542,8 +764,8 @@ Skriv EN social media-text till ${businessName} i ${city}.
 ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${contentTypeHint}${atmosphereHint}
 INNEHÅLL (skriv om BARA detta):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.sv}${sceneMoodOpeningHint}${forbiddenOpener.sv}${dishProtagonistHint}
-${ctaSection}KRAV
+${brandBlock}${hoursBlock}${faktaforbud.sv}${factualAnchoringBlock}${sceneMoodOpeningHint}${forbiddenOpener.sv}${dishProtagonistHint}
+${ctaSection}${bookingCtaBlock}KRAV
 1) Längd: 300-450 tecken INKL. emojis och CTA
 ${startRules.sv}
 ${sensoryRules.sv}
@@ -551,7 +773,7 @@ ${dishRules.sv}
 ${anledningRule.sv}
 6) Naturlig svenska — undvik: "läcker", "mysig", "autentisk", "unik"
 7) Aldrig " - " eller " – " som bindeled mellan meningsled.
-8) ${emojiInstruction}
+8) ${finalEmojiInstruction}
    ☕ FÅR BARA användas om kaffe, espresso, latte eller cappuccino uttryckligen nämns som en dryck i texten — "Café" i företagsnamnet räknas INTE.
 9) ${selectedCta ? ctaRule8.sv : 'Ingen CTA krävs för detta inlägg — låt texten tala för sig själv'}
 
@@ -564,8 +786,8 @@ Schreibe EINEN Social-Media-Text für ${businessName} in ${city}.
 ${goalDirectiveLine}${readerOutcomeLine}${writingPostureLine}${activationLine}${contentTypeHint}${atmosphereHint}
 INHALT (schreibe NUR über dieses):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.de}${sceneMoodOpeningHint}${forbiddenOpener.de}${dishProtagonistHint}
-${ctaSection}ANFORDERUNGEN
+${brandBlock}${hoursBlock}${faktaforbud.de}${factualAnchoringBlock}${sceneMoodOpeningHint}${forbiddenOpener.de}${dishProtagonistHint}
+${ctaSection}${bookingCtaBlock}ANFORDERUNGEN
 1) Länge: 300-450 Zeichen INKL. Emojis und CTA
 ${startRules.de}
 ${sensoryRules.de}
@@ -601,7 +823,55 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     tone_dna_summary, tone_do_list, tone_dont_list,
     location_natural_vocab, location_avoid_vocab, humor_style,
     locationIntelligenceNarrative, contentType,
+    isPaid, neighborhoodCharacter, locationMarketingHooks, signatureThemes,
   } = opts
+
+  // FIX 05: Apply content-type emoji override before using emojiInstruction in prompts
+  const finalEmojiInstruction = applyContentTypeEmojiOverride(
+    emojiInstruction,
+    contentType,
+    language
+  )
+
+  // FIX 3: Build location context with strict fallback priority
+  const locationContext = buildLocationContext({
+    neighborhood_character: opts.neighborhoodCharacter,
+    local_location_reference: opts.localLocationReference,
+    neighborhood: opts.neighborhood,
+    city: opts.city,
+    area_type: opts.areaType,
+  });
+
+  const fallbackLevel = getLocationFallbackLevel({
+    neighborhood_character: opts.neighborhoodCharacter,
+    local_location_reference: opts.localLocationReference,
+    neighborhood: opts.neighborhood,
+    city: opts.city,
+  });
+
+  console.log(`📍 Location context source: ${fallbackLevel}`, {
+    value: locationContext?.substring(0, 80) || 'empty',
+  });
+
+  if (fallbackLevel === 'city_only' || fallbackLevel === 'none') {
+    console.warn(
+      `⚠️ Location context is weak (${fallbackLevel}). ` +
+      `Run populate-location-intelligence with force_refresh=true ` +
+      `to generate neighborhood_character.`
+    );
+  }
+
+  // FIX 3b: Add city-size guard for medium/small cities
+  const citySize = classifyCitySize(undefined, city || '');
+  const citySizeGuard = citySize !== 'large' && city
+    ? `\nVIGTIGT: Undgå storby-sprog. ${city} er ikke en storby. ` +
+      `Skriv IKKE: "pulserende byliv", "byens puls", "urban energi", "storbyatmosfære". ` +
+      `Brug i stedet konkrete, faktuelle referencer til ${city}.`
+    : '';
+
+  console.log(`📍 City size classification: ${citySize} (${city})`, {
+    city_size_guard_active: citySize !== 'large',
+  });
 
   const core = buildSharedToneCore(opts)
   const {
@@ -777,6 +1047,45 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     ? `\n\nLOKATIONSKONTEKST (gælder især for stemnings- og stedsposter):\n${locationIntelligenceNarrative}`
     : ''
 
+  // ── FAKTUEL FORANKRING — Consolidated factual anchoring (paid tier, Danish only) ──
+  let wpFactualAnchoringBlock = ''
+  if (isPaid && language === 'da') {
+    const anchoringLines: string[] = []
+
+    // Part A: Location vocabulary gate
+    const hasLocationHooks = Array.isArray(locationMarketingHooks) && locationMarketingHooks.length > 0
+    if (neighborhoodCharacter && neighborhoodCharacter.trim().length > 10) {
+      const locationHooksBlock = hasLocationHooks
+        ? `\nGodkendte stedsformuleringer (ejer-valideret — må bruges direkte):\n${locationMarketingHooks.slice(0, 3).map((h: string) => `• "${h}"`).join('\n')}`
+        : ''
+
+      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.`)
+    }
+
+    // Part B: Concept anchor requirement for non-menu posts
+    const isNonMenuPost = ['behind_scenes', 'atmosphere', 'guest_moment', 'team_people']
+      .includes(contentType || '')
+
+    if (isNonMenuPost) {
+      const conceptAnchors: string[] = []
+
+      if (Array.isArray(signatureThemes) && signatureThemes.length > 0) {
+        conceptAnchors.push(...signatureThemes.slice(0, 4))
+      }
+
+      if (conceptAnchors.length > 0) {
+        anchoringLines.push(`KONCEPTANKER FOR DETTE OPSLAG:\nMindst ét af følgende specifikke elementer SKAL fremgå i teksten:\n${conceptAnchors.map(a => `• ${a}`).join('\n')}\n\nTest: Kan sætningen stå uændret i en tekst for en vilkårlig restaurant\ni samme kategori? Hvis ja — erstat med et specifikt konceptelement ovenfor.\n\nEKSEMPEL PÅ GENERISK (fejler testen):\n  "Vi tilbereder alt med friske råvarer og kærlighed til detaljen"\n  → Dette kunne stå hos enhver restaurant. ERSTAT MED konceptanker.\n\nEKSEMPEL PÅ SPECIFIKT (består testen):\n  "Vores bordgrill giver dig fuld kontrol over hver bid"\n  → Dette refererer til et specifikt konceptelement (bordgrill). OK.\n\nDette gælder ikke for tone eller stil — kun for faktuelle påstande om\nhvad stedet tilbyder eller er.`)
+      } else {
+        console.warn(`⚠️ [buildWeeklyPlanPrompt] No concept anchors found for non-menu post (${businessName}). Output may be generic.`)
+      }
+    }
+
+    // Inject if we have anything
+    if (anchoringLines.length > 0) {
+      wpFactualAnchoringBlock = `\n── FAKTUEL FORANKRING ──\n${anchoringLines.join('\n\n')}\n`
+    }
+  }
+
   const ctaHeader = {
     da: ctaStyle === 'strict' ? 'FAST CTA (skal stå til sidst, ordret):' : 'AFSLUTNING — integrer naturligt i teksten:',
     sv: ctaStyle === 'strict' ? 'FAST CTA (ska stå sist, ordagrant):' : 'AVSLUTNING — integrera naturligt i texten:',
@@ -791,6 +1100,16 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
   // Conditionally include CTA section only when selectedCta is not null (Weekly Plan path)
   const wpCtaSection = selectedCta
     ? `${ctaHeader[language] || ctaHeader.da}\n"${selectedCta}"\n`
+    : ''
+
+  // FIX GAP B: Booking CTA instruction — tell AI NOT to include URL in caption
+  const bookingCtaInstruction: Record<string, string> = {
+    da: `\n⚠️ BOOKING-CTA REGEL: Afslut med booking-opfordringen ovenfor. Skriv IKKE booking-URL'en i teksten — den tilføjes automatisk efter din tekst på Facebook. På Instagram vises kun teksten uden URL, hvilket er korrekt.\n`,
+    sv: `\n⚠️ BOOKING-CTA REGEL: Avsluta med booking-uppmaningen ovan. Skriv INTE booking-URL:en i texten — den läggs till automatiskt efter din text på Facebook. På Instagram visas bara texten utan URL, vilket är korrekt.\n`,
+    de: `\n⚠️ BOOKING-CTA REGEL: Beende mit der Booking-Aufforderung oben. Schreibe NICHT die Booking-URL in den Text — sie wird automatisch nach deinem Text auf Facebook hinzugefügt. Auf Instagram erscheint nur der Text ohne URL, was korrekt ist.\n`,
+  }
+  const wpBookingCtaBlock = (opts.bookingLink && ctaStyle === 'strict')
+    ? (bookingCtaInstruction[language] || bookingCtaInstruction.da)
     : ''
 
   // WP: same principle-based opening rule as AI Ideas path — mirrors sceneMoodOpeningHint.
@@ -812,8 +1131,8 @@ Skriv ÉN social media-tekst til ${businessName} i ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INDHOLD (skriv om KUN dette):
 ${contentBlock}
-${brandBlock}${toneDNASection}${geoNarrativeBlock}${forbiddenWordsBlock}${hoursBlock}${faktaforbud.da}${wpSceneMoodOpeningHint}
-${wpCtaSection}KRAV TIL TEKSTEN
+${brandBlock}${toneDNASection}${geoNarrativeBlock}${forbiddenWordsBlock}${hoursBlock}${faktaforbud.da}${citySizeGuard}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}
+${wpCtaSection}${wpBookingCtaBlock}KRAV TIL TEKSTEN
 1) Længde: 300-450 tegn INKL. emojis og CTA
 ${startRules.da}
 ${sensoryRules.da}
@@ -825,7 +1144,7 @@ ${dishRules.da}
    d) NATURLIGT DANSK — skriv som en dansker skriver. Undgå: "lækker", "hyggelig", "autentisk", "unik", "svip" (dateret), "nyd" som imperativ åbning
    e) VÆRDI-DEMONSTRATION (kun for all-inclusive menuer/set menus): Vis bredden af tilbudet — hvor mange retter/elementer er inkluderet? Hvad får gæsten for prisen?
 6) Aldrig " - " eller " – " som bindeled mellem sætningsled ("god mad – hyggelig stemning – book nu").
-7) ${emojiInstruction}
+7) ${finalEmojiInstruction}
    ☕ MÅ KUN bruges, hvis kaffe, espresso, latte eller cappuccino er eksplicit nævnt som en drik i selve teksten — "Café" i virksomhedsnavnet tæller IKKE.
 8) ${selectedCta ? ctaRule8.da : 'Ingen CTA påkrævet for dette opslag — lad teksten tale for sig selv'}${qualityNote}
 9) Sætninger med kun subjekt + intransitivt verbum er forbudt overalt — "X venter", "X kalder", "X lokker" er scenefylde.
@@ -839,15 +1158,15 @@ Skriv EN social media-text till ${businessName} i ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INNEHÅLL (skriv om BARA detta):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.sv}${wpSceneMoodOpeningHint}
-${wpCtaSection}KRAV
+${brandBlock}${hoursBlock}${faktaforbud.sv}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}
+${wpCtaSection}${wpBookingCtaBlock}KRAV
 1) Längd: 300-450 tecken INKL. emojis och CTA
 ${startRules.sv}
 ${sensoryRules.sv}
 ${dishRules.sv}
 5) Naturlig svenska — undvik: "läcker", "mysig", "autentisk", "unik"
 6) Aldrig " - " eller " – " som bindeled mellan meningsled.
-7) ${emojiInstruction}
+7) ${finalEmojiInstruction}
    ☕ FÅR BARA användas om kaffe, espresso, latte eller cappuccino uttryckligen nämns som en dryck i texten — "Café" i företagsnamnet räknas INTE.
 8) ${selectedCta ? ctaRule8.sv : 'Ingen CTA krävs för detta inlägg — låt texten tala för sig själv'}
 9) Meningar med bara subjekt + intransitivt verb är förbjudna genomgående — "X väntar", "X kallar", "X lockar" är scenfyllnad.
@@ -861,15 +1180,15 @@ Schreibe EINEN Social-Media-Text für ${businessName} in ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INHALT (schreibe NUR über dieses):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.de}${wpSceneMoodOpeningHint}
-${wpCtaSection}ANFORDERUNGEN
+${brandBlock}${hoursBlock}${faktaforbud.de}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}
+${wpCtaSection}${wpBookingCtaBlock}ANFORDERUNGEN
 1) Länge: 300-450 Zeichen INKL. Emojis und CTA
 ${startRules.de}
 ${sensoryRules.de}
 ${dishRules.de}
 5) Natürliches Deutsch — vermeide: "lecker", "gemütlich", "authentisch", "einzigartig"
 6) Niemals " - " oder " – " als Bindeglied zwischen Satzteilen.
-7) ${emojiInstruction}
+7) ${finalEmojiInstruction}
    ☕ DARF NUR genutzt werden, wenn Kaffee, Espresso, Latte oder Cappuccino ausdrücklich als Getränk im Text erwähnt wird — "Café" im Firmennamen zählt NICHT.
 8) ${selectedCta ? ctaRule8.de : 'Keine CTA erforderlich für diesen Beitrag — lass den Text für sich sprechen'}
 9) Sätze nur mit Subjekt + intransitivem Verb sind durchgehend verboten — "X wartet", "X ruft", "X lockt" sind Szenenerfüllung.

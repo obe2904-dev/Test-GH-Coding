@@ -362,8 +362,8 @@ function LocationIntelligencePage() {
   };
 
   const handleAnalyze = async () => {
-    if (!address.trim()) {
-      setError(t('location.errorNoAddress'));
+    if (!businessId) {
+      setError('No business ID found');
       return;
     }
 
@@ -371,93 +371,123 @@ function LocationIntelligencePage() {
       setIsAnalyzing(true);
       setError(null);
       
-      // Try using Supabase function with real Google Maps data
+      // Call the REAL backend Edge Function that generates schema v2 with separated demographic_proximity
       const session = await supabase.auth.getSession();
-      const useSupabase = businessId && session.data.session?.access_token;
+      const accessToken = session.data.session?.access_token;
       
-      const analysis = await analyzeLocation(address, {
-        useSupabaseFunction: !!useSupabase,
-        businessId: businessId || undefined,
-        supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
-        accessToken: session.data.session?.access_token,
-        forceRefresh: forceRefresh  // Task 4.5: Pass force refresh flag
-      });
+      if (!accessToken) {
+        throw new Error('No access token - please log in');
+      }
       
-      console.log('✅ Analysis complete:', analysis);
-      setAnalysis(analysis);
-      
-      // Get business data first for country code
-      const businessDataForCountry = await loadBusinessData();
-      
-      // STEP 1: Pure location type matching (independent of business)
-      const { analyzeLocationTypes } = await import('../../lib/location/locationTypeMatcher');
-      
-      // Get country code from business data or default to DK
-      const countryCode = (businessDataForCountry as any)?.country || 'DK';
-      
-      const locationContext = {
-        address: address,
-        neighborhood: (analysis as any).neighborhood,
-        city: analysis.city,
-        countryCode: countryCode, // Pass country code for pattern selection
-        nearbyPOIs: {
-          restaurants: analysis.matches[0]?.signals?.filter(s => s.type === 'restaurant').length || 0,
-          cafes: analysis.matches[0]?.signals?.filter(s => s.type === 'cafe').length || 0,
-          hotels: analysis.matches[0]?.signals?.filter(s => s.type === 'hotel').length || 0,
-          tourist_attractions: analysis.matches[0]?.signals?.filter(s => s.type === 'tourist_attraction').length || 0
+      console.log('📡 Calling populate-location-intelligence Edge Function (schema v2)...');
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/populate-location-intelligence`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
         },
-        landmarks: analysis.matches[0]?.signals?.map(s => ({ name: s.name, type: s.type }))
-      };
-      const locationTypeMatches = analyzeLocationTypes(locationContext, countryCode);
-      console.log('📍 STEP 1 - Location Type Matches (Country: ' + countryCode + '):', locationTypeMatches);
-      console.log('🔍 DEBUG - locationTypeMatches scores:', Object.entries(locationTypeMatches).map(([k, v]: [string, any]) => `${k}=${v.match_score}`).join(', '));
+        body: JSON.stringify({ 
+          business_id: businessId,
+          address_override: address.trim() || undefined,
+          force_refresh: forceRefresh
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Edge Function failed: ${response.status} ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Edge Function Response:', data);
       
-      // STEP 2: Concept fit analysis (how business fits each location type)
+      if (!data.success) {
+        throw new Error(data.error || 'Location intelligence generation failed');
+      }
+
+      // Reload location intelligence from database to get the saved schema v2 data
+      console.log('📥 Loading saved location intelligence from database...');
+      const { data: locationData, error: loadError } = await supabase
+        .from('business_location_intelligence')
+        .select('*')
+        .eq('business_id', businessId)
+        .single();
+
+      if (loadError) {
+        throw new Error(`Failed to load location data: ${loadError.message}`);
+      }
+
+      if (!locationData) {
+        throw new Error('No location data found after generation');
+      }
+
+      console.log('✅ Location intelligence loaded (schema v2):');
+      console.log('   category_scores:', locationData.category_scores);
+      console.log('   demographic_proximity:', locationData.demographic_proximity);
+      console.log('   area_type:', locationData.area_type);
+      console.log('   neighborhood:', locationData.neighborhood);
+
+      // Convert to the format expected by the UI
+      const categoryScores = locationData.category_scores || {};
+      const demographicProximity = locationData.demographic_proximity || {};
+      
+      // Create matches array from category_scores (geographic types only)
+      const matches = Object.entries(categoryScores)
+        .sort(([, a], [, b]) => (b as number) - (a as number))
+        .map(([categoryId, score]) => ({
+          categoryId,
+          score: score as number,
+          signals: locationData.landmarks_nearby || []
+        }));
+
+      const analysis: LocationAnalysis = {
+        city: locationData.city || '',
+        locale: 'da-DK',
+        culturalContext: {
+          description: locationData.neighborhood_character || '',
+          knownFor: locationData.location_marketing_hooks || []
+        },
+        matches: matches,
+        coordinates: {
+          lat: locationData.latitude || 0,
+          lng: locationData.longitude || 0
+        }
+      };
+
+      setAnalysis(analysis);
+
+      // Display demographic_proximity separately
+      console.log('📊 Schema V2 Demographics (separate field):');
+      Object.entries(demographicProximity).forEach(([key, value]) => {
+        console.log(`   ${key}: ${value}`);
+      });
+
+      // Concept fit analysis on geographic categories only (not demographics)
       const businessData = await loadBusinessData();
-      if (businessData && analysis.matches.length > 0) {
-        // Get locale config to get actual category display names
-        const localeConfig = getLocaleConfig(analysis.locale);
+      if (businessData && matches.length > 0) {
+        const localeConfig = getLocaleConfig('da-DK');
         
-        // Persist fresh scores into state for rendering
-        const freshScores: Record<string, number> = {};
-        analysis.matches.forEach(m => { freshScores[m.categoryId] = m.score; });
-        setLocationTypeScores(freshScores);
-
-        // Categories where client-side detection is reliable (keyword + transit POI based).
-        // If the lightweight matcher confidently gives these 0, they're infrastructure mismatches
-        // that only survive from stale DB scores — suppress them.
-        const RELIABLE_CLIENT_VETO = new Set(['transport_hub', 'office', 'shopping_district']);
-
-        // Use DB/analysis.matches scores (Google Maps-based, authoritative) for gating.
-        console.log('🔍 DEBUG - analysis.matches:', analysis.matches.map(m => `${m.categoryId}=${m.score}`).join(', '));
-        
-        const categories = analysis.matches.map(m => ({
+        const categories = matches.map(m => ({
           categoryId: m.categoryId,
-          score: (RELIABLE_CLIENT_VETO.has(m.categoryId) && locationTypeMatches[m.categoryId]?.match_score === 0)
-            ? 0
-            : m.score,
+          score: m.score,
           displayName: localeConfig.categories[m.categoryId]?.name || m.categoryId
         }));
         
-        console.log('🔍 DEBUG - categories after veto logic:', categories.map(c => `${c.categoryId}=${c.score}`).join(', '));
-
-        // Filter categories >= 60% AND geographic types only (exclude demographics)
+        // Filter categories >= 60% AND geographic types only
         const eligibleCategories = categories.filter(cat => 
           cat.score >= 60 && GEOGRAPHIC_LOCATION_TYPES.has(cat.categoryId)
         );
-        console.log(`🚀 Calling Edge Function for ${eligibleCategories.length} geographic categories (≥60%):`, eligibleCategories.map(c => c.categoryId).join(', '));
+        
+        console.log(`🚀 Calling concept fit for ${eligibleCategories.length} geographic categories (≥60%):`, eligibleCategories.map(c => c.categoryId).join(', '));
         
         let fitResults: Record<string, ConceptFitOutput> = {};
-        let edgeFunctionSuccessCount = 0;
         
-        // Call Edge Function for ALL eligible categories
+        // Call Edge Function for concept fit
         for (let i = 0; i < eligibleCategories.length; i++) {
           const category = eligibleCategories[i];
-          const isStrategyDriver = i === 0; // First category is strategy driver
+          const isStrategyDriver = i === 0;
           
           try {
-            console.log(`🔄 [${i + 1}/${eligibleCategories.length}] Analyzing ${category.categoryId}...`);
-            
             const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('analyze-concept-fit', {
               body: {
                 businessId: businessId,
@@ -466,16 +496,9 @@ function LocationIntelligencePage() {
               }
             });
             
-            if (edgeFunctionError) {
-              console.error(`⚠️ Edge Function error for ${category.categoryId}:`, edgeFunctionError);
-              throw edgeFunctionError;
-            }
+            if (edgeFunctionError) throw edgeFunctionError;
             
             if (edgeFunctionData?.success && edgeFunctionData.conceptFit) {
-              edgeFunctionSuccessCount++;
-              console.log(`✅ [${i + 1}/${eligibleCategories.length}] ${category.categoryId} analyzed successfully`);
-              
-              // Convert Edge Function output to match expected format
               const edgeConceptFit = edgeFunctionData.conceptFit;
               fitResults[category.categoryId] = {
                 area_type: category.categoryId,
@@ -500,41 +523,13 @@ function LocationIntelligencePage() {
                 recommended_adjustments: [],
                 watchouts: edgeConceptFit.mismatch_reasons || []
               };
-              
-              console.log(`📊 ${category.categoryId} fit_reasons (${edgeConceptFit.fit_reasons?.length || 0}):`, edgeConceptFit.fit_reasons);
-            } else {
-              throw new Error('Edge Function returned no data');
             }
           } catch (edgeError) {
-            console.warn(`⚠️ Edge Function failed for ${category.categoryId}, will use client-side fallback:`, edgeError);
+            console.warn(`⚠️ Concept fit failed for ${category.categoryId}:`, edgeError);
           }
         }
         
-        // Use client-side analysis ONLY for categories that failed Edge Function call
-        if (edgeFunctionSuccessCount < eligibleCategories.length) {
-          console.log(`🔄 Using client-side fallback for ${eligibleCategories.length - edgeFunctionSuccessCount} categories`);
-          const failedCategories = eligibleCategories.filter(cat => !fitResults[cat.categoryId]);
-          if (failedCategories.length > 0) {
-            const clientResults = analyzeConceptFit(failedCategories, businessData);
-            fitResults = { ...fitResults, ...clientResults };
-          }
-        }
-        
-        // Fallback: if all Edge Functions failed, use client-side for all
-        if (Object.keys(fitResults).length === 0) {
-          console.warn('⚠️ All Edge Functions failed, using full client-side analysis');
-          fitResults = analyzeConceptFit(categories, businessData);
-        }
-        
-        console.log(`🎯 STEP 2 - Concept Fit Analysis Complete: ${Object.keys(fitResults).length} categories analyzed (${edgeFunctionSuccessCount} via Edge Function)`);
-        console.log('📊 Results:', fitResults);
         setConceptFit(fitResults);
-        
-        // Auto-save with location type matches AND concept fit
-        await saveLocationProfile(analysis, fitResults, locationTypeMatches);
-      } else {
-        // Auto-save with just location type matches
-        await saveLocationProfile(analysis, undefined, locationTypeMatches);
       }
       
     } catch (error) {

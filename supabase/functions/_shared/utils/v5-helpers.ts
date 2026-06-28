@@ -202,6 +202,11 @@ export function getActiveSegment(
     }
     
     for (const segment of programme.audience_segments) {
+      // Skip segments without timing_windows (occasion-based segments added June 28, 2026)
+      if (!segment.timing_windows || segment.timing_windows.length === 0) {
+        continue;
+      }
+      
       for (const windowStr of segment.timing_windows) {
         const window = parseTimingWindow(windowStr)
         if (!window) continue
@@ -251,7 +256,7 @@ export function getActiveSegment(
     matchesFound: matches.length,
     bestMatch: {
       programme: matches[0].programme.programme_name,
-      segment: matches[0].segment.label,
+      segment: matches[0].segment.people_type,
       confidence: matches[0].matchConfidence
     }
   })

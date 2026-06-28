@@ -264,10 +264,6 @@ export function OnboardingPage() {
               <p className="text-sm text-gray-500 mt-2">{t('onboarding.optional')}</p>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <p className="text-sm text-blue-900">💡 {t('onboarding.platformsHelperText')}</p>
-            </div>
-
             <button
               type="submit"
               disabled={isSaving}

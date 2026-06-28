@@ -38,6 +38,25 @@ export class DatabaseSaver {
       dataToSave.area_type = 'mixed_use';
     }
     
+    // SCHEMA V2 CLEANUP: Remove demographic keys from category_scores
+    // Migration 20260522000002 moved student/tourist to demographic_proximity
+    // But old data may still have these keys in category_scores — explicitly remove them
+    if (schemaVersion >= 2 && dataToSave.category_scores) {
+      const demographicKeys = ['student', 'tourist', 'local_resident', 'business_professional', 'family'];
+      let cleaned = false;
+      
+      for (const key of demographicKeys) {
+        if (key in dataToSave.category_scores) {
+          delete dataToSave.category_scores[key];
+          cleaned = true;
+        }
+      }
+      
+      if (cleaned) {
+        console.log('🧹 Cleaned demographic keys from category_scores (schema v2 migration)');
+      }
+    }
+    
     const { error } = await this.supabase
       .from('business_location_intelligence')
       .upsert({

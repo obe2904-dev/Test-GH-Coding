@@ -21,7 +21,7 @@ import { fetchBusinessContext, resolveContentContext } from './resolve-context.t
 import { selectCTA } from './select-cta.ts'
 import { buildWeeklyPlanContext, buildPrompt } from './prompt-builders.ts'
 import { callOpenAI } from './generate-text.ts'
-import { needsSpellingCheck, stripBannedClosers, stripAIDashes, stripIncompleteFragments, stripMetaInstructions, extractTopicKeyword, generateHashtags, validateSceneFormat } from './post-process.ts'
+import { needsSpellingCheck, stripBannedClosers, stripAIDashes, stripEmojiViolations, stripIncompleteFragments, stripMetaInstructions, extractTopicKeyword, generateHashtags, validateSceneFormat } from './post-process.ts'
 import { validateAgainstVoice } from '../_shared/validation/validate-voice.ts'
 import { applyTargetedVoiceFixes } from './post-process-voice-fixes.ts'
 
@@ -280,6 +280,13 @@ serve(async (req) => {
       business_identity_persona: biz.marketingManagerBrief || biz.businessIdentityPersona,  // V5.3: Prioritize marketing_manager_brief (synthesized) over business_identity_persona
       enhanced_social_examples: enhancedSocialExamples,
       enhanced_avoid_examples: enhancedAvoidExamples,
+      // Factual anchoring: location and concept fields
+      neighborhoodCharacter: biz.neighborhoodCharacter ?? null,
+      neighborhood: biz.neighborhood ?? null,
+      areaType: biz.areaType ?? null,
+      localLocationReference: biz.localLocationReference ?? null,
+      locationMarketingHooks: biz.locationMarketingHooks ?? null,
+      signatureThemes: biz.signatureThemes ?? null,
     })
 
     console.log('📝 Prompt built, calling', model, '...')
@@ -425,6 +432,8 @@ serve(async (req) => {
 
     // 6c. Strip AI-tell dashes (em-dash/en-dash used as stylistic connectors)
     cleanText = stripAIDashes(cleanText)
+    // Step 6c-b: FIX 05 — Enforce universal emoji rules (count + position)
+    cleanText = stripEmojiViolations(cleanText)
 
     // 6d. Strip incomplete sentence fragments (e.g. "Vi har åbent. Og 🥑." → "Vi har åbent.")
     cleanText = stripIncompleteFragments(cleanText)
@@ -466,10 +475,13 @@ serve(async (req) => {
       text: cleanText,
       detectedDishName: content.menuItemName || undefined,
       detectedDishDescription: content.menuItemDescription || undefined,
+      aiPlaceSynopsis: biz.aiPlaceSynopsis || undefined,      // FIX 04: Stable venue classification signal
+      menuDescription: biz.menuDescription || undefined,      // FIX 04: Stable venue classification signal
     }, locationNaturalVocab)  // FIX 03-B: Pass location vocabulary for location-specific hashtags
 
     // 9. Response
-    const isBookingIntent = ctaIntent === 'visit' && !!biz.bookingLink
+    // FIX GAP A: Check for 'booking' not 'visit' (vocabulary normalized in select-cta.ts)
+    const isBookingIntent = ctaIntent === 'booking' && !!biz.bookingLink
     const hasCTA = selectedCta !== null
     
     const response = {

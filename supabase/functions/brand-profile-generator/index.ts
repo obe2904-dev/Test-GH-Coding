@@ -1849,11 +1849,15 @@ serve(async (req: Request) => {
 
     // Audience profile — score-gated + price-validated via shared audience-filter utility.
     // Single source of truth: same logic as prompt-b.ts and the Location UI.
+    // SCHEMA V2: demographic_proximity = WHO, category_scores = WHERE
+    const demographicProximityRaw: Record<string, number> =
+      (dataSources.locationIntelligenceRow as any)?.demographic_proximity ?? {}
     const categoryScoresRaw: Record<string, number> =
       (dataSources.locationIntelligenceRow as any)?.category_scores ?? {}
     const { audienceProfileString: audienceProfile } = filterAudienceLabels(
-      categoryScoresRaw,
-      prices.length ? Math.max(...prices) : null
+      demographicProximityRaw,
+      prices.length ? Math.max(...prices) : null,
+      categoryScoresRaw
     )
 
     const secondarySignals: SecondarySignals = {

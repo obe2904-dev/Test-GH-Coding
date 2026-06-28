@@ -17,6 +17,7 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [marketingOptIn, setMarketingOptIn] = useState(false)
   const [termsAccepted, setTermsAccepted] = useState(false)
   const [error, setError] = useState('')
@@ -37,6 +38,12 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
 
     if (password.length < 6) {
       setError(t('auth.passwordTooShort', 'Password must be at least 6 characters'))
+      setLoading(false)
+      return
+    }
+
+    if (password !== confirmPassword) {
+      setError(t('auth.passwordsDoNotMatch', 'Passwords do not match'))
       setLoading(false)
       return
     }
@@ -244,6 +251,23 @@ export function SignUpForm({ redirectOnSuccess = true, onClose }: SignUpFormProp
                   placeholder={t('auth.passwordMin', 'Password (min. 6 characters)')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="confirm-password" className="block text-sm font-medium text-slate-700">
+                  {t('auth.confirmPassword', 'Confirm password')}
+                </label>
+                <input
+                  id="confirm-password"
+                  name="confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  className="mt-1 block w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-cta focus:outline-none focus:ring-1 focus:ring-cta"
+                  placeholder={t('auth.confirmPassword', 'Confirm password')}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
                 />
               </div>
 

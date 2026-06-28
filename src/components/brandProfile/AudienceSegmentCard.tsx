@@ -27,7 +27,7 @@ export function AudienceSegmentCard({ segment }: AudienceSegmentCardProps) {
     <div className="border border-gray-200 rounded-lg p-4 space-y-3">
       {/* Segment header */}
       <div className="flex items-center gap-2 flex-wrap">
-        <h4 className="font-medium text-[15px] text-[#111714]">{segment.label}</h4>
+        <h4 className="font-medium text-[15px] text-[#111714]">{segment.people_type}</h4>
         <span className={`px-[10px] py-[3px] text-[11px] font-medium rounded-full ${getBadgeColor(segment.segment_size)}`}>
           {t(`brandProfileV5.${segment.segment_size}`)}
         </span>
@@ -47,19 +47,30 @@ export function AudienceSegmentCard({ segment }: AudienceSegmentCardProps) {
         )}
       </div>
 
-      {/* Decision & goal */}
+      {/* Decision timing */}
       <div className="text-sm text-gray-700 space-y-1">
         {segment.decision_timing && (
           <p>
-            <span className="font-medium">{t('brandProfileV5.decision')}</span> {segment.decision_timing}
-          </p>
-        )}
-        {segment.goal_contribution && (
-          <p>
-            <span className="font-medium">{t('brandProfileV5.goal')}</span> {segment.goal_contribution}
+            <span className="font-medium">{t('brandProfileV5.decision')}</span>{' '}
+            {segment.decision_timing === 'mixed' 
+              ? t('brandProfileV5.plannedAndFootfall', 'planned og footfall')
+              : segment.decision_timing
+            }
           </p>
         )}
       </div>
+
+      {/* Location occasions (NEW: occasion-based approach) */}
+      {segment.location_occasions && segment.location_occasions.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-semibold uppercase text-gray-500 mb-1">{t('brandProfileV5.locationOccasions')}</p>
+          <ul className="space-y-1">
+            {segment.location_occasions.map((occasion, i) => (
+              <li key={i} className="pl-4 -indent-4 text-[13px] text-[#5C5650] leading-[1.7]">• {occasion}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Content angles */}
       {segment.content_angles && segment.content_angles.length > 0 && (

@@ -29,14 +29,17 @@ export interface ProgrammeProfile {
 }
 
 export interface AudienceSegment {
-  label: string;
-  timing_windows: string[];
+  people_type: string;              // Updated from 'label' (June 28, 2026)
+  people_type_id?: number;          // Derived ID for canonical people type
+  timing_windows?: string[];        // Now optional (removed for occasion-based segments)
   content_angles: string[];
   segment_size: 'primary' | 'secondary' | 'niche';
   motivation: string;
   decision_timing: string;
-  goal_contribution: string;
+  location_occasions?: string[];    // NEW: occasion-based (replaces time-slot thinking)
+  concept_fit_reason?: string;      // Why this segment fits the business
   evidence: string[];
+  // Removed fields (June 28, 2026): label, goal_contribution, situation, validation_failed
 }
 
 export function useProgrammeProfiles(businessId: string | undefined) {
@@ -69,21 +72,14 @@ export function useProgrammeProfiles(businessId: string | undefined) {
         .eq('business_id', businessId)
         .order('programme_type');
 
-      console.log('[useProgrammeProfiles] 📥 Raw response:', { 
-        data, 
-        error: fetchError, 
-        count: data?.length,
-        businessId,
-        errorDetails: fetchError ? {
-          message: fetchError.message,
-          details: fetchError.details,
-          hint: fetchError.hint,
-          code: fetchError.code
-        } : null
-      });
-
       if (fetchError) {
+        console.error('[useProgrammeProfiles] Error fetching programmes:', fetchError);
         throw fetchError;
+      }
+      
+      if (!data || data.length === 0) {
+        setProgrammes([]);
+        return;
       }
 
       // Parse JSONB fields
