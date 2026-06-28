@@ -171,6 +171,77 @@ function checkStrategyFreshness(
   return { isStale: false };
 }
 
+/**
+ * Map cta_mode from strategic brief to cta_intent for post_ideas
+ */
+function ctaModeToIntent(
+  ctaMode: string,
+  goalMode: string
+): 'booking' | 'traffic' | 'engagement' | 'awareness' {
+  if (ctaMode === 'booking') return 'booking';
+  if (ctaMode === 'walk_in') return 'traffic';
+  if (ctaMode === 'engagement') return 'engagement';
+  if (goalMode === 'retain_loyalty') return 'awareness';
+  return 'traffic'; // safe default
+}
+
+/**
+ * Rebuild week summary sentence from actual slot counts
+ */
+function rebuildWeekSummarySentence(angles: any[]): string {
+  const counts = { booking: 0, walk_in: 0, build_brand: 0, retain_loyalty: 0 };
+  for (const a of angles) {
+    if (a.cta_mode === 'booking') counts.booking++;
+    else if (a.goal_mode === 'drive_footfall') counts.walk_in++;
+    else if (a.goal_mode === 'build_brand') counts.build_brand++;
+    else if (a.goal_mode === 'retain_loyalty') counts.retain_loyalty++;
+  }
+  const parts: string[] = [];
+  if (counts.booking > 0)
+    parts.push(`${counts.booking} opslag driver bookinger`);
+  if (counts.walk_in > 0)
+    parts.push(`${counts.walk_in} opslag driver besøg`);
+  if (counts.build_brand > 0)
+    parts.push(`${counts.build_brand} opslag styrker brand`);
+  if (counts.retain_loyalty > 0)
+    parts.push(`${counts.retain_loyalty} opslag plejer stamgæster`);
+  return parts.length > 0 ? `Denne uge: ${parts.join(', ')}.` : '';
+}
+
+const DAY_NAME_TO_DOW: Record<string, number> = {
+  Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4,
+  Friday: 5, Saturday: 6, Sunday: 0,
+};
+
+/**
+ * Returns the first available_day that matches the target DOW(s).
+ * For booking CTAs, shifts back by bookingNudgeLeadDays so the post
+ * appears before the intended visit day.
+ * Falls back to the first available day if no match found.
+ */
+function resolvePostDate(
+  targetDays: string[],         // e.g. ["Friday", "Saturday"]
+  availableDays: string[],      // ISO dates for the week (open-hours filtered)
+  ctaMode: string,
+  bookingNudgeLeadDays: number, // weekContext.cta_rules?.booking_nudge_lead_days ?? 2
+): string {
+  const targetDows = targetDays
+    .map(d => DAY_NAME_TO_DOW[d])
+    .filter(d => d !== undefined);
+
+  const effectiveDows =
+    ctaMode === 'booking' && bookingNudgeLeadDays > 0
+      ? targetDows.map(dow => ((dow - bookingNudgeLeadDays) + 7) % 7)
+      : targetDows;
+
+  const match = availableDays.find(dateStr => {
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    return effectiveDows.includes(dow);
+  });
+
+  return match ?? availableDays[0];
+}
+
 serve(async (req)=>{
   if (req.method === 'OPTIONS') {
     return new Response('ok', {
@@ -1263,7 +1334,7 @@ serve(async (req)=>{
               'Every post MUST include a booking CTA using brand-specific phrases from the CTA library. ' +
               'Walk-in language ("kom forbi", "kig ind") is NOT permitted as a primary CTA.',
             booking_nudge_capable: true,
-            // No booking_nudge_lead_days — AI determines this per slot based on context
+            booking_nudge_lead_days: 2,
           };
         }
 
@@ -1276,7 +1347,7 @@ serve(async (req)=>{
               'especially Thursday/Friday/Saturday evening slots. ' +
               'Never combine both CTAs in a single post.',
             booking_nudge_capable: true,
-            // No booking_nudge_lead_days — AI determines this per slot based on context
+            booking_nudge_lead_days: 2,
           };
         }
 
@@ -1946,6 +2017,49 @@ serve(async (req)=>{
         // Continue without type allocation - posts will not have content_type field
         }
         // ===== END PHASE C =====
+        
+        // ===== POST-PROCESS: Fix booking signal flow =====
+        console.log('[get-weekly-strategy] POST-PROCESS: Mapping cta_mode → cta_intent and resolving post dates...');
+        const angles = strategy.strategic_brief?.angles ?? [];
+        
+        for (const idea of strategy.post_ideas) {
+          const angle = angles.find((a: any) => String(a.slot_id) === String(idea.slot_id));
+          if (!angle) continue;
+          
+          // FIX 2a: deterministic cta_intent (NEVER trust AI value)
+          idea.cta_intent = ctaModeToIntent(angle.cta_mode, idea.goal_mode);
+          
+          // FIX 2b: deterministic post date from target_days + lead_days offset
+          const leadDays = weekContext.cta_rules?.booking_nudge_lead_days ?? 2;
+          const resolvedDate = resolvePostDate(
+            angle.target_days ?? [],
+            weekContext.available_days,
+            angle.cta_mode,
+            leadDays,
+          );
+          idea.suggested_day = resolvedDate;
+          if (idea.timing_intelligence) {
+            idea.timing_intelligence.suggested_post_date = resolvedDate;
+          }
+        }
+        
+        // FIX 1: rebuild week summary sentence from actual slot counts
+        const correctSummaryLine = rebuildWeekSummarySentence(angles);
+        if (strategy.strategic_brief?.week_summary && correctSummaryLine) {
+          strategy.strategic_brief.week_summary = strategy.strategic_brief.week_summary
+            .replace(/Denne uge:[^.]+\./u, correctSummaryLine)
+            .trim();
+        }
+        
+        console.log('[get-weekly-strategy] POST-PROCESS complete:', {
+          post_ideas_mapped: strategy.post_ideas.map((p: any) => ({
+            slot: p.slot_id,
+            cta_intent: p.cta_intent,
+            suggested_day: p.suggested_day,
+          })),
+          week_summary: strategy.strategic_brief?.week_summary?.substring(0, 80),
+        });
+        // ===== END POST-PROCESS =====
         
         // DEBUG: Verify weekContext has booking data before saving
         console.log('[get-weekly-strategy] About to save weekContext:', {
