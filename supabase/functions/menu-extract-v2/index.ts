@@ -482,6 +482,111 @@ async function triggerMenuWorkerOnce(): Promise<void> {
   }
 }
 
+/**
+ * Resolve when a menu is served using a strict priority chain.
+ *
+ * Priority:
+ * 1. Times parsed directly from menu text (structured.startTime / endTime)
+ * 1.5. Parse menuSubtitle for timing phrases (e.g. "Serveres til kl. 14.00")
+ * 2. Times parsed from structured.availabilityTime string
+ * 3. Business opening hours — used when menu has no timing signal at all
+ * 4. null / null — only if opening hours are also missing
+ *
+ * Sentinel detection: If extracted times are wildly outside business hours (>1hr), treat as false.
+ */
+function resolveMenuTiming(
+  structured: any,
+  businessHours: { open: string; close: string } | undefined,
+): { timeStart: string | null; timeEnd: string | null; timeSource: string } {
+  // Import helper from menuPeriodParser - timeToMinutes is already available from import
+  const timeToMinutes = (time: string): number => {
+    const [hours, minutes] = time.split(':').map(Number)
+    return hours * 60 + minutes
+  }
+
+  // Parse time range helper (basic version - menuPeriodParser has more robust one)
+  const parseTimeRange = (text: string): { start: string; end: string } | null => {
+    // Match patterns like "11:00-15:00", "kl. 12-16", "til kl. 14.00"
+    const untilMatch = text.match(/til\s+kl\.?\s*(\d{1,2})[.:,]?(\d{2})?/i)
+    if (untilMatch) {
+      const hour = untilMatch[1].padStart(2, '0')
+      const min = untilMatch[2] || '00'
+      return { start: '09:00', end: `${hour}:${min}` }
+    }
+
+    const rangeMatch = text.match(/(\d{1,2})[.:,](\d{2})?\s*[-–]\s*(\d{1,2})[.:,](\d{2})?/)
+    if (rangeMatch) {
+      const startHour = rangeMatch[1].padStart(2, '0')
+      const startMin = rangeMatch[2] || '00'
+      const endHour = rangeMatch[3].padStart(2, '0')
+      const endMin = rangeMatch[4] || '00'
+      return { start: `${startHour}:${startMin}`, end: `${endHour}:${endMin}` }
+    }
+
+    return null
+  }
+
+  // --- Priority 1: Direct extracted times from menu text ---
+  let start: string | null = structured.startTime ?? null
+  let end: string | null   = structured.endTime   ?? null
+
+  // Reject sentinel PAIR + validate against business hours
+  if (start === '00:00' && end === '23:59') {
+    start = null
+    end   = null
+  } else if (businessHours && start && end) {
+    // Sentinel detection: if extracted times are wildly outside opening hours, treat as false
+    const outsideHours = (
+      timeToMinutes(start) < timeToMinutes(businessHours.open) - 60 ||  // More than 1hr before
+      timeToMinutes(end)   > timeToMinutes(businessHours.close) + 60    // More than 1hr after
+    )
+    if (outsideHours) {
+      console.log(`⚠️ Extracted ${start}-${end} outside business hours ${businessHours.open}-${businessHours.close} → treating as sentinel`)
+      start = null
+      end   = null
+    }
+  }
+
+  // --- Priority 1.5: Parse menuSubtitle (handles "Serveres til kl. 14.00") ---
+  if ((!start || !end) && structured.menuSubtitle) {
+    const parsed = parseTimeRange(structured.menuSubtitle)
+    if (parsed) {
+      start = start ?? parsed.start ?? null
+      end   = end   ?? parsed.end   ?? null
+    }
+  }
+
+  // --- Priority 2: Parse availabilityTime string ---
+  if ((!start || !end) && structured.availabilityTime) {
+    const parsed = parseTimeRange(structured.availabilityTime)
+    if (parsed) {
+      start = start ?? parsed.start ?? null
+      end   = end   ?? parsed.end   ?? null
+    }
+  }
+
+  // We have extracted timing from menu text
+  if (start || end) {
+    // Fill missing bound from opening hours
+    if (!start && businessHours) start = businessHours.open
+    if (!end   && businessHours) end   = businessHours.close
+    
+    return { timeStart: start, timeEnd: end, timeSource: 'menu_text' }
+  }
+
+  // --- Priority 3: No timing in menu → opening hours ARE the answer (coffee, wine, bakery) ---
+  if (businessHours) {
+    return {
+      timeStart: businessHours.open,
+      timeEnd:   businessHours.close,
+      timeSource: 'opening_hours_fallback',
+    }
+  }
+
+  // --- Priority 4: Nothing available ---
+  return { timeStart: null, timeEnd: null, timeSource: 'menu_text' }
+}
+
 async function parseMenuWithOpenAI(extractedText: string, languageCode: string): Promise<any> {
   const apiKey = Deno.env.get('OPENAI_API_KEY')
   if (!apiKey) throw new Error('OPENAI_API_KEY environment variable not set')
@@ -621,9 +726,27 @@ You MUST detect and return the primary language of the menu content:
   * "Served with french fries and aioli" → "en" (English words)
   * "Dampede blåmuslinger" vs "Steamed mussels" → check descriptions!
 
+MENU TYPE CLASSIFICATION (REQUIRED):
+Classify what this menu primarily serves based on category names and content — NOT the business name.
+
+Return one value in "menu_type":
+- "coffee"     → Categories include: ESPRESSO, FILTER, LATTE, AMERICANO, COLD BREW, KAGE, TOAST, KAFFE
+- "wine"       → Categories include: RØDVIN, HVIDVIN, ROSÉ, NATURVIN, VINLISTE, WINE LIST, GLAS, FLASKE
+- "cocktail"   → Categories include: COCKTAILS, SIGNATURE DRINKS, CLASSICS, MOCKTAILS, SPIRITS, DRINKS
+- "beer"       → Categories include: ØL, FADØL, FLASKEØL, CRAFT BEER, TAPROOM, BEER
+- "bakery"     → Categories include: BRØD, WIENERBRØD, CROISSANT, KAGE, BAGERI (minimal hot food)
+- "bar_snacks" → Primarily snacks/tapas that accompany drinks (no full meal structure)
+- "drinks"     → Generic beverage menu not fitting the above (mixed drinks)
+- "brunch"     → Categories include: BRUNCH, MORGENMAD, BREAKFAST, or availability window is morning
+- "lunch"      → Categories include: FROKOST, SMØRREBRØD, LUNCH, or time signal is 11:00–17:00
+- "dinner"     → Categories include: AFTENSMAD, AFTENMENU, DINNER, or time signal is from 17:00+
+- "all_day"    → Single menu covering full opening hours, no meal-period distinction
+- "other"      → Cannot determine from content
+
 Return ONLY valid JSON in this schema:
 {
   "detected_language": "da" | "en" | "de" | "fr" | "es",  ← REQUIRED FIELD
+  "menu_type": "lunch" | "brunch" | "dinner" | "all_day" | "coffee" | "wine" | "cocktail" | "beer" | "bakery" | "bar_snacks" | "drinks" | "other",  ← REQUIRED FIELD
   "menuTitle": "string|null",
   "menuSubtitle": "string|null",
   "availabilityTime": "string|null",
@@ -744,8 +867,13 @@ CRITICAL RULES:
 19) TAPAS section with component list + single price - A TAPAS section may list many individual ingredients followed by a single price for the entire board. Create ONE item with a description listing all components and that single price.
 20) Variant items (UDEN/MED) - Lines like "UDEN KYLLING" or "MED KYLLING" following a dish description are separate price variants. Create separate items for each variant with the price from the line immediately following.
 
+MENU TYPE CLASSIFICATION (REQUIRED):
+Classify what this menu primarily serves based on category names and content — NOT the business name.
+Return one value in "menu_type": coffee | wine | cocktail | beer | bakery | bar_snacks | drinks | brunch | lunch | dinner | all_day | other
+
 Return ONLY valid JSON in this schema:
 {
+  "menu_type": "lunch" | "brunch" | "dinner" | "all_day" | "coffee" | "wine" | "cocktail" | "beer" | "bakery" | "bar_snacks" | "drinks" | "other",
   "menuTitle": "string|null",
   "menuSubtitle": "string|null",
   "availabilityTime": "string|null",
@@ -1559,6 +1687,18 @@ serve(async (req: Request) => {
             }
             console.log(`🌐 Language detected: ${detectedLanguage} (AI: ${structured.detected_language || 'not detected, used fallback'})`)
 
+            // Resolve menu type and timing
+            const menuType = (structured.menu_type as string | undefined)
+              ?? servicePeriodName
+              ?? 'other'
+
+            const { timeStart, timeEnd, timeSource } = resolveMenuTiming(
+              enrichedStructured,
+              businessHours,
+            )
+
+            console.log(`⏱️ Menu timing: ${menuType} ${timeStart ?? '?'}–${timeEnd ?? '?'} (source: ${timeSource})`)
+
             const { error: updateError } = await supabaseService
               .from('menu_results_v2')
               .update({
@@ -1572,6 +1712,11 @@ serve(async (req: Request) => {
                 service_period_name: servicePeriodName,
                 is_signature: isSignature,
                 language_code: detectedLanguage, // ✨ NEW: AI-detected language
+                menu_type: menuType, // ✨ NEW: Menu type classification
+                time_start: timeStart, // ✨ NEW: Menu start time
+                time_end: timeEnd, // ✨ NEW: Menu end time
+                time_source: timeSource, // ✨ NEW: Timing source
+                time_confirmed: false, // ✨ NEW: User must verify
               })
               .eq('id', resultId)
             
@@ -1960,6 +2105,18 @@ serve(async (req: Request) => {
               // Classify establishment type based on menu structure
               const establishmentType = classifyEstablishmentType(structured)
               
+              // Resolve menu type and timing
+              const menuType = (structured.menu_type as string | undefined)
+                ?? servicePeriodName
+                ?? 'other'
+
+              const { timeStart, timeEnd, timeSource } = resolveMenuTiming(
+                enrichedStructured,
+                businessHours,
+              )
+
+              console.log(`⏱️ Menu timing: ${menuType} ${timeStart ?? '?'}–${timeEnd ?? '?'} (source: ${timeSource})`)
+              
               const { error: updateError } = await supabaseService
                 .from('menu_results_v2')
                 .update({
@@ -1973,6 +2130,11 @@ serve(async (req: Request) => {
                   service_period_name: servicePeriodName, // ✨ NEW
                   is_signature: isSignature, // ✨ NEW
                   language_code: detectedLanguage, // ✨ NEW: AI-detected language
+                  menu_type: menuType, // ✨ NEW: Menu type classification
+                  time_start: timeStart, // ✨ NEW: Menu start time
+                  time_end: timeEnd, // ✨ NEW: Menu end time
+                  time_source: timeSource, // ✨ NEW: Timing source
+                  time_confirmed: false, // ✨ NEW: User must verify
                 })
                 .eq('id', resultId)
               

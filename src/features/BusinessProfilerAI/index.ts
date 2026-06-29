@@ -82,6 +82,7 @@ export interface BusinessProfileAnalysis {
     name: string
   }>
   detectedMenuUrls?: string[]  // NEW: Menu URLs detected by AI for user confirmation (Menukort tab)
+  localLocationReference?: string  // NEW: Local place name extracted from website (e.g., "ved åen", "Nyhavn")
 
   // NYT – matcher dine nye felter i Business Profile
   businessSector?: BusinessSector
@@ -229,6 +230,8 @@ class SupabaseBusinessProfilerAI {
       const data = (await res.json()) as BusinessProfileAnalysis
       if (this.debug) {
         console.log('✅ Raw analysis result received')
+        console.log('📍 localLocationReference in response:', (data as any).localLocationReference)
+        console.log('🔍 Response keys:', Object.keys(data))
       }
 
       const persistenceDebugEnabled =

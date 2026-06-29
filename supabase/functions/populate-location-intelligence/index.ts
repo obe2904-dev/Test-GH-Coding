@@ -34,7 +34,7 @@ function synthesizeNeighborhoodFromAreaType(city: string, areaType: string): str
     'residential': `${city} boligområde`,
     'office': `${city} erhvervsområde`,
     'transport_hub': `${city} transportknudepunkt`,
-    'waterfront': `${city} havn`,
+    'waterfront': `${city} ved vandet`,
     'shopping_district': `${city} shoppingområde`,
     'mixed_use': city, // Just city name for mixed-use
     'destination': `${city} attraktion`,
@@ -129,6 +129,9 @@ function applyPOIFallbackScores(
   console.log(`   Reliability: ${analyzedLocation._fallback_warning.reliability} (${total} POIs)`);
   console.log('   category_scores:', analyzedLocation.category_scores);
   console.log('   demographic_proximity:', analyzedLocation.demographic_proximity);
+  
+  // Cache poisoning guard: prevents bad fallback scores being written to DB for 90 days
+  analyzedLocation._is_fallback = true;
 }
 
 /**
@@ -476,12 +479,26 @@ serve(async (req) => {
           .eq('business_id', business_id)
           .maybeSingle();
         
+        // Fetch local_location_reference — owner's own words for location
+        // (set by analyze-website, editable by user in UI)
+        const { data: businessData } = await supabase
+          .from('businesses')
+          .select('local_location_reference')
+          .eq('id', business_id)
+          .maybeSingle();
+
+        const localLocationReference = businessData?.local_location_reference || null;
+        if (localLocationReference) {
+          console.log('📍 local_location_reference:', localLocationReference);
+        }
+        
         const claudeInput = {
           formatted_address: fullAddress,
           neighborhood: analyzedLocation.neighborhood,
           landmarks: analyzedLocation.landmarks_nearby,
           business_category: businessCategory,
           website_about: profileData?.long_description || undefined,
+          local_location_reference: localLocationReference || undefined,
           area_type: null,  // AI determines this
           hospitality_count: hospitalityPlaces.length,
         };
@@ -552,17 +569,22 @@ serve(async (req) => {
     console.log(`✅ Pedestrian flow: ${analyzedLocation.physical_context.pedestrian_flow} (${hospitalityPlaces.length} hospitality venues, area_type: ${analyzedLocation.area_type})`);
 
     console.log(`[5/5] Saving to database...`);
-    
-    // FIX 1c: Verify the save path - log what we're about to save
     console.log('💾 Saving neighborhood_character:', {
       value: analyzedLocation.neighborhood_character?.substring(0, 80) || 'NULL — will save null',
       is_null: analyzedLocation.neighborhood_character === null,
     });
-    
-    const saver = new DatabaseSaver(supabase);
-    await saver.saveLocationIntelligence(business_id, analyzedLocation, LOCATION_SCHEMA_VERSION);
 
-    console.log('✅ Location intelligence populated successfully!');
+    if (analyzedLocation._is_fallback) {
+      console.warn(
+        '⚠️ AI-analyse fejlede — POI-fallback scores gemmes IKKE i databasen. ' +
+        'Returnerer fallback til klienten, men cache forgiftes ikke. ' +
+        'Næste request vil prøve AI-analysen igen.'
+      );
+    } else {
+      const saver = new DatabaseSaver(supabase);
+      await saver.saveLocationIntelligence(business_id, analyzedLocation, LOCATION_SCHEMA_VERSION);
+      console.log('✅ Location intelligence populated successfully!');
+    }
     console.log('ℹ️ Architecture: V2 - AI+web search scoring, graceful fallback, schema versioning');
 
     return new Response(

@@ -136,7 +136,10 @@ export async function generateBusinessIdentityPersona(
   
   // 4. Calculate metadata
   const locationDimensions = businessData.location_intelligence?.category_scores 
-    ? Object.values(businessData.location_intelligence.category_scores).filter(score => score && score >= 80).length 
+    ? Object.entries(businessData.location_intelligence.category_scores)
+        .filter(([_, score]) => score && score >= 50)
+        .sort(([_, a], [__, b]) => (b || 0) - (a || 0))
+        .slice(0, 3).length
     : 0;
   
   const signatureThemesCount = businessData.menu_overview_summary?.signature_themes?.length || 0;
@@ -278,7 +281,7 @@ function buildEnhancedFactsPrompt(
   parts.push(``);
   parts.push(`LOKATION:`);
   parts.push(`- [Adresse + lokal reference]`);
-  parts.push(`- [Flerdimensionel positionering med scores (kun hvis ≥80) - BRUG DANSKE NAVNE]`);
+  parts.push(`- [Top 3 flerdimensionel positionering med scores (kun hvis ≥50) - BRUG DANSKE NAVNE]`);
   parts.push(`- [Unik lokationskarakter og -kendetegn]`);
   parts.push(``);
   parts.push(`TILBUD:`);
@@ -294,7 +297,7 @@ function buildEnhancedFactsPrompt(
   parts.push(`   - Use specific dish names if provided (pariserbøf, bøf & bearnaise, etc.)`);
   parts.push(`   - Use exact hours if provided (09:00-17:30)`);
   parts.push(`   - NO marketing language ("perfekte", "fantastisk", "lækker", "hyggelig")`);
-  parts.push(`2. LOKATION: Vis flerdimensionel positionering (kun scores ≥80) - OVERSATTE kategorier`);
+  parts.push(`2. LOKATION: Vis top 3 flerdimensionel positionering (kun scores ≥50) - OVERSATTE kategorier`);
   parts.push(`3. KULINARISK: Træk KONKRETE detaljer fra signatur-temaer og tværgående analyse`);
   parts.push(`   - List specific dishes and ingredients from menu intelligence`);
   parts.push(`   - Include fusion patterns ("Europæisk og amerikansk fusion med fransk fokus")`);

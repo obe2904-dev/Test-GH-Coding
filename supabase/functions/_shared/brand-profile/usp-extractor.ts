@@ -47,8 +47,8 @@ export interface ExtractedUSPs {
  * Extract and prioritize USPs from brand intelligence data
  * 
  * PRIORITIZATION LOGIC:
- * 1. Location scores ≥90 = Primary USP (strongest differentiator)
- * 2. Location scores 80-89 = Secondary USP
+ * 1. Top location score from top 3 (>= 50) = Primary USP (strongest differentiator)
+ * 2. Secondary/tertiary location scores from top 3 (>= 50) = Secondary USP
  * 3. Signature themes (unique menu offerings) = Secondary USP
  * 4. Gastronomic profile insights = Tertiary (supporting context)
  */
@@ -69,17 +69,17 @@ export function extractUSPs(input: USPExtractionInput): ExtractedUSPs {
   // === 1. LOCATION-BASED USPs (strongest differentiators) ===
   
   if (input.locationScores) {
-    // Find highest location score
+    // Find top 3 location scores >= 50
     const sortedScores = Object.entries(input.locationScores)
+      .filter(([_, score]) => score >= 50)
       .sort(([, a], [, b]) => b - a)
+      .slice(0, 3);
     
     if (sortedScores.length > 0) {
-      const [topCategory, topScore] = sortedScores[0]
+      const [topCategory, topScore] = sortedScores[0];
       
-      // Primary USP if score ≥ 90
-      if (topScore >= 90) {
-        // Map category to Danish marketing language
-        const categoryLabels: Record<string, string> = {
+      // Primary USP from top scoring location category
+      const categoryLabels: Record<string, string> = {
           waterfront: 'Beliggenhed ved vandet',
           city_centre: 'Central beliggenhed',
           tourist: 'Destination i turistområde',
@@ -88,39 +88,36 @@ export function extractUSPs(input: USPExtractionInput): ExtractedUSPs {
           transport_hub: 'Let tilgængelig',
           shopping_district: 'Centralt i shoppingområde',
           office: 'Tæt på kontorområde'
-        }
-        
-        const labelText = categoryLabels[topCategory] || topCategory
-        usps.primary_usp = {
-          text: labelText,
-          source: 'location',
-          score: Math.round(topScore) / 100,
-          evidence: `Location score: ${Math.round(topScore)}${input.locationMarketingHooks?.[0] ? ` - ${input.locationMarketingHooks[0]}` : ''}`
-        }
-        
-        reasons.push(`Primary USP: ${topCategory} (${Math.round(topScore)} score) - strongest location differentiator`)
       }
       
-      // Secondary location USPs (scores 80-89)
+      const labelText = categoryLabels[topCategory] || topCategory
+      usps.primary_usp = {
+        text: labelText,
+        source: 'location',
+        score: Math.round(topScore) / 100,
+        evidence: `Location score: ${Math.round(topScore)}${input.locationMarketingHooks?.[0] ? ` - ${input.locationMarketingHooks[0]}` : ''}`
+      }
+      
+      reasons.push(`Primary USP: ${topCategory} (${Math.round(topScore)} score) - top location differentiator from top 3 categories`)
+      
+      // Secondary location USPs from remaining top 3 (2nd and 3rd if >= 50)
       sortedScores.slice(1, 3).forEach(([category, score]) => {
-        if (score >= 80) {
-          const categoryLabels: Record<string, string> = {
-            waterfront: 'Ved vandet',
-            city_centre: 'I byens centrum',
-            tourist: 'Turistdestination',
-            student: 'Studenterfavorit',
-            residential: 'Lokalt samlingssted'
-          }
-          
-          const labelText = categoryLabels[category] || category
-          usps.secondary_usps.push({
-            text: labelText,
-            source: 'location',
-            evidence: `Location score: ${Math.round(score)}`
-          })
-          
-          reasons.push(`Secondary USP: ${category} (${Math.round(score)} score)`)
+        const categoryLabels: Record<string, string> = {
+          waterfront: 'Ved vandet',
+          city_centre: 'I byens centrum',
+          tourist: 'Turistdestination',
+          student: 'Studenterfavorit',
+          residential: 'Lokalt samlingssted'
         }
+        
+        const labelText = categoryLabels[category] || category
+        usps.secondary_usps.push({
+          text: labelText,
+          source: 'location',
+          evidence: `Location score: ${Math.round(score)}`
+        })
+        
+        reasons.push(`Secondary USP: ${category} (${Math.round(score)} score)`)
       })
     }
   }

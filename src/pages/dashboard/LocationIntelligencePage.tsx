@@ -156,34 +156,56 @@ function LocationIntelligencePage() {
         if (savedData) {
           console.log('✅ Found saved location data:', savedData);
           
+          // Parse landmarks_nearby if it's a JSON string
+          let landmarksArray: any[] = [];
+          if (savedData.landmarks_nearby) {
+            if (typeof savedData.landmarks_nearby === 'string') {
+              try {
+                landmarksArray = JSON.parse(savedData.landmarks_nearby);
+              } catch (e) {
+                console.error('Failed to parse landmarks_nearby:', e);
+              }
+            } else if (Array.isArray(savedData.landmarks_nearby)) {
+              landmarksArray = savedData.landmarks_nearby;
+            }
+          }
+          
           // Reconstruct ALL matches from category_scores
           const matches: any[] = [];
           
-          if (savedData.category_scores && typeof savedData.category_scores === 'object') {
-            // Load all categories from category_scores
-            const scores = savedData.category_scores as Record<string, number>;
-            const hasScores = Object.keys(scores).length > 0;
-            
-            if (hasScores) {
-              Object.entries(scores)
-                .sort(([, a], [, b]) => b - a) // Sort by score descending
-                .forEach(([categoryId, score]) => {
-                  matches.push({
-                    categoryId: categoryId as any,
-                    score: score,
-                    confidence: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',
-                    reasoning: savedData.neighborhood_character ? [savedData.neighborhood_character] : [],
-                    signals: categoryId === savedData.area_type 
-                      ? (savedData.landmarks_nearby as any[])?.map((landmark: any) => ({
-                          name: landmark.name || '',
-                          type: landmark.type || 'landmark',
-                          distance: landmark.distance || 0,
-                          relevance: 1
-                        })) || []
-                      : []
-                  });
-                });
+          // Parse category_scores if it's a JSON string
+          let categoryScoresData: Record<string, number> = {};
+          if (savedData.category_scores) {
+            if (typeof savedData.category_scores === 'string') {
+              try {
+                categoryScoresData = JSON.parse(savedData.category_scores);
+              } catch (e) {
+                console.error('Failed to parse category_scores:', e);
+              }
+            } else if (typeof savedData.category_scores === 'object') {
+              categoryScoresData = savedData.category_scores as Record<string, number>;
             }
+          }
+          
+          if (Object.keys(categoryScoresData).length > 0) {
+            Object.entries(categoryScoresData)
+              .sort(([, a], [, b]) => b - a) // Sort by score descending
+              .forEach(([categoryId, score]) => {
+                matches.push({
+                  categoryId: categoryId as any,
+                  score: score,
+                  confidence: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',
+                  reasoning: savedData.neighborhood_character ? [savedData.neighborhood_character] : [],
+                  signals: categoryId === savedData.area_type 
+                    ? landmarksArray.map((landmark: any) => ({
+                        name: landmark.name || '',
+                        type: landmark.type || 'landmark',
+                        distance: landmark.distance || 0,
+                        relevance: 1
+                      }))
+                    : []
+                });
+              });
           }
           
           // Fallback: if no scores, use area_type as single category
@@ -193,12 +215,12 @@ function LocationIntelligencePage() {
               score: 100,
               confidence: 'high' as const,
               reasoning: savedData.neighborhood_character ? [savedData.neighborhood_character] : [],
-              signals: (savedData.landmarks_nearby as any[])?.map((landmark: any) => ({
+              signals: landmarksArray.map((landmark: any) => ({
                 name: landmark.name || '',
                 type: landmark.type || 'landmark',
                 distance: landmark.distance || 0,
                 relevance: 1
-              })) || []
+              }))
             });
           }
           
@@ -214,11 +236,30 @@ function LocationIntelligencePage() {
               ? { lat: savedData.latitude as number, lng: savedData.longitude as number }
               : { lat: 0, lng: 0 }),
             matches: matches,
-            culturalContext: (savedData.neighborhood_character || savedData.location_marketing_hooks?.length > 0 ? {
-              significance: 'medium' as const,
-              description: savedData.neighborhood_character || '',
-              knownFor: savedData.location_marketing_hooks || [],
-            } : undefined),
+            culturalContext: (() => {
+              // Parse location_marketing_hooks if needed
+              let hooks: string[] = [];
+              if (savedData.location_marketing_hooks) {
+                if (typeof savedData.location_marketing_hooks === 'string') {
+                  try {
+                    hooks = JSON.parse(savedData.location_marketing_hooks);
+                  } catch (e) {
+                    console.error('Failed to parse location_marketing_hooks:', e);
+                  }
+                } else if (Array.isArray(savedData.location_marketing_hooks)) {
+                  hooks = savedData.location_marketing_hooks;
+                }
+              }
+              
+              if (savedData.neighborhood_character || hooks.length > 0) {
+                return {
+                  significance: 'medium' as const,
+                  description: savedData.neighborhood_character || '',
+                  knownFor: hooks,
+                };
+              }
+              return undefined;
+            })(),
           };
 
           setAnalysis(reconstructedAnalysis);
@@ -229,11 +270,29 @@ function LocationIntelligencePage() {
             setLastAnalyzedAt((savedData as any).last_updated_by_ai);
           }
           
-          // Also restore concept fit data if available
+          // Also restore concept fit data if available - handle both parsed and string formats
           const savedDataAny = savedData as any;
-          if (savedDataAny.concept_fit_by_category && typeof savedDataAny.concept_fit_by_category === 'object') {
-            setConceptFit(savedDataAny.concept_fit_by_category);
-            console.log('✅ Restored concept fit from database');
+          if (savedDataAny.concept_fit_by_category) {
+            let conceptFitData = savedDataAny.concept_fit_by_category;
+            
+            // Parse if it's a JSON string
+            if (typeof conceptFitData === 'string') {
+              try {
+                conceptFitData = JSON.parse(conceptFitData);
+              } catch (e) {
+                console.error('Failed to parse concept_fit_by_category:', e);
+                conceptFitData = {};
+              }
+            }
+            
+            if (typeof conceptFitData === 'object' && Object.keys(conceptFitData).length > 0) {
+              setConceptFit(conceptFitData);
+              console.log('✅ Restored concept fit from database');
+            } else {
+              console.log('ℹ️ concept_fit_by_category is empty - user needs to run analysis');
+            }
+          } else {
+            console.log('ℹ️ No concept_fit_by_category in database - user needs to run analysis');
           }
         } else {
           console.log('ℹ️ No saved location data found');
@@ -473,12 +532,13 @@ function LocationIntelligencePage() {
           displayName: localeConfig.categories[m.categoryId]?.name || m.categoryId
         }));
         
-        // Filter categories >= 60% AND geographic types only
-        const eligibleCategories = categories.filter(cat => 
-          cat.score >= 60 && GEOGRAPHIC_LOCATION_TYPES.has(cat.categoryId)
-        );
+        // Filter top 3 categories >= 50% AND geographic types only
+        const eligibleCategories = categories
+          .filter(cat => cat.score >= 50 && GEOGRAPHIC_LOCATION_TYPES.has(cat.categoryId))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3);
         
-        console.log(`🚀 Calling concept fit for ${eligibleCategories.length} geographic categories (≥60%):`, eligibleCategories.map(c => c.categoryId).join(', '));
+        console.log(`🚀 Calling concept fit for top ${eligibleCategories.length} geographic categories (≥50%, max 3):`, eligibleCategories.map(c => c.categoryId).join(', '));
         
         let fitResults: Record<string, ConceptFitOutput> = {};
         
@@ -530,6 +590,12 @@ function LocationIntelligencePage() {
         }
         
         setConceptFit(fitResults);
+        
+        // Save concept fit to database for future page loads
+        if (Object.keys(fitResults).length > 0 && analysis) {
+          console.log('💾 Saving concept fit to database...');
+          await saveLocationProfile(analysis, fitResults);
+        }
       }
       
     } catch (error) {
@@ -761,6 +827,51 @@ function LocationIntelligencePage() {
         </div>
       )}
 
+      {/* Location Overview - Always show when analysis exists */}
+      {analysis && (
+        <div className="bg-surface rounded-lg border border-border p-6 mb-6">
+          <div className="flex items-start gap-4 mb-4">
+            <MapPinIcon className="w-10 h-10 text-[#0A7D5F]" />
+            <div className="flex-1">
+              <h3 className="text-xl font-medium text-brand mb-2">{t('location.basicDataTitle', 'Lokationsdata')}</h3>
+              
+              {analysis.city && (
+                <div className="mb-3">
+                  <p className="text-xs font-medium text-text-muted mb-1">{t('location.neighborhood', 'Neighborhood')}</p>
+                  <p className="text-sm text-brand font-medium">{analysis.city}</p>
+                </div>
+              )}
+              
+              {analysis.culturalContext?.description && (
+                <div className="mb-3">
+                  <p className="text-xs font-medium text-text-muted mb-1">{t('location.character', 'Area Character')}</p>
+                  <p className="text-sm text-text">{analysis.culturalContext.description}</p>
+                </div>
+              )}
+              
+              {analysis.matches && analysis.matches.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-text-muted mb-2">{t('location.locationTypes', 'Location Types')}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {analysis.matches
+                      .filter(m => m.score >= 50)
+                      .sort((a, b) => b.score - a.score)
+                      .slice(0, 3)
+                      .map(match => (
+                        <div key={match.categoryId} className="inline-flex items-center gap-2 bg-surface-alt border border-border rounded-lg px-3 py-1.5">
+                          <LocationCategoryIcon categoryId={match.categoryId} className="w-4 h-4 text-text-secondary" />
+                          <span className="text-xs text-text">{match.categoryId.replace(/_/g, ' ')}</span>
+                          <span className="text-xs font-medium text-text-muted">{Math.round(match.score)}%</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Concept Fit Results - Din Lokation hidden, only show final fit analysis */}
       {analysis && conceptFit && Object.keys(conceptFit).length > 0 && (
         <>
@@ -786,7 +897,7 @@ function LocationIntelligencePage() {
                   // Use fresh scores (locationTypeScores) if available, else fall back to stored analysis
                   const score = locationTypeScores[categoryId] 
                     ?? (analysis.matches.find(m => m.categoryId === categoryId)?.score || 0);
-                  return score >= 60;
+                  return score >= 50;
                 })
                 .sort(([, a], [, b]) => {
                   if (a.is_strategy_driver) return -1;
@@ -796,7 +907,8 @@ function LocationIntelligencePage() {
                   const scoreB = locationTypeScores[b.area_type] 
                     ?? (analysis.matches.find(m => m.categoryId === b.area_type)?.score || 0);
                   return scoreB - scoreA;
-                });
+                })
+                .slice(0, 3); // Limit to top 3 highest scoring categories
 
               return eligibleCategories
                 .filter(([, fit]) => fit.fit_level !== 'challenging')
@@ -864,6 +976,22 @@ function LocationIntelligencePage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Fallback: Show message when analysis exists but no concept fit */}
+      {analysis && (!conceptFit || Object.keys(conceptFit).length === 0) && (
+        <div className="bg-surface rounded-lg border border-border p-6 mb-6">
+          <div className="flex items-start gap-4 mb-4">
+            <div className="flex-1">
+              <p className="text-sm text-text-secondary">
+                {t('location.basicDataSubtitle', 'Din lokation er analyseret. Detaljeret konceptanalyse genereres når kategori-scores er højere (≥40%).')}
+              </p>
+              <p className="text-xs text-text-muted mt-3">
+                💡 {t('location.lowScoreHint', 'Tip: Scores under 40% udløser ikke detaljeret konceptanalyse. Dette er normalt for unikke lokationer.')}
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Navigation buttons */}

@@ -906,6 +906,65 @@ serve(async (req: any) => {
 
       const venueHooks = normalizeVenueHooks(venueHooksRaw)
 
+      // Extract local_location_reference from venue hooks (location category)
+      // This is the owner's own language for where they are — "ved åen", "på havnen" etc.
+      // Stored on businesses table, used downstream in location intelligence + brand profile.
+      const locationHooks = venueHooks.uniqueHooks
+        .filter((h: any) => h.category === 'location' && h.confidence >= 0.6)
+        .sort((a: any, b: any) => b.confidence - a.confidence)
+
+      // Also scan metadata title/description for waterfront/location signals
+      // e.g. "Lækker mad og oplevelser ved åen i Aarhus" → "ved åen"
+      const DANISH_LOCATION_PATTERNS = [
+        /\bved\s+åen\b/i,
+        /\bved\s+havnen\b/i,
+        /\bpå\s+havnen\b/i,
+        /\bved\s+søen\b/i,
+        /\bi\s+gågaden\b/i,
+        /\bpå\s+strøget\b/i,
+        /\bved\s+kanalen\b/i,
+        /\bved\s+stranden\b/i,
+        /\bved\s+fjorden\b/i,
+        /\bi\s+havnekvarteret\b/i,
+        /\bi\s+latinerkvarteret\b/i,
+        /\bi\s+centrum\b/i,
+        /\bpå\s+torvet\b/i,
+      ]
+
+      let localLocationReference: string | null = null
+
+      // Priority 1: venue hook with location category + high confidence
+      if (locationHooks.length > 0) {
+        const hookText = locationHooks[0].hook
+
+        // Try to extract a short location phrase from the hook text
+        // e.g. "lækker mad og oplevelser ved åen i Aarhus" → "ved åen"
+        let extracted: string | null = null
+        for (const pattern of DANISH_LOCATION_PATTERNS) {
+          const match = hookText.match(pattern)
+          if (match) {
+            extracted = match[0].trim().toLowerCase()
+            break
+          }
+        }
+
+        localLocationReference = extracted || hookText
+        console.log('📍 local_location_reference from venue hook:', localLocationReference, '(source:', hookText, ')')
+      }
+
+      // Priority 2: pattern match from metadata title/description
+      if (!localLocationReference) {
+        const metaText = [metadata?.title, metadata?.description].filter(Boolean).join(' ')
+        for (const pattern of DANISH_LOCATION_PATTERNS) {
+          const match = metaText.match(pattern)
+          if (match) {
+            localLocationReference = match[0].trim().toLowerCase()
+            console.log('📍 local_location_reference from metadata pattern:', localLocationReference)
+            break
+          }
+        }
+      }
+
       // Collect detected menu URLs (for Menukort tab to confirm/edit before extraction)
       const detectedMenuUrls: string[] = []
       
@@ -1040,7 +1099,7 @@ serve(async (req: any) => {
         kidsMenu: hasKidsMenu
       }
       console.log('🍽️ Service model detected (restaurant=', isRestaurant, '):', serviceModel)
-      
+
       analysisResult = {
         // Basic info
         businessName: basicInfo.businessName,
@@ -1105,7 +1164,10 @@ serve(async (req: any) => {
         menuSignal: menuSignal || null,
 
         // NEW: Tone of voice (brand voice analysis - all tiers)
-        toneOfVoice: toneOfVoice || null
+        toneOfVoice: toneOfVoice || null,
+
+        // Local location reference (owner's language for where they are)
+        localLocationReference: localLocationReference || null
       }
 
       // DEBUG MODE: Return comprehensive extraction data

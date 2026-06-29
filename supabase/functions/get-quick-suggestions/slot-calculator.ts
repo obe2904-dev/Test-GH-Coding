@@ -89,7 +89,15 @@ export function calculateSlots(
       toMins(p.start) < toMins(earliest.start) ? p : earliest
     )
     
-    const dayStartMins = toMins(firstProgram.start)  // e.g., 09:30 = 570 mins
+    let dayStartMins = toMins(firstProgram.start)  // e.g., 09:00 from menu
+    
+    // FIX: Clamp to actual opening time (e.g., 09:30 on weekdays)
+    const venueOpenMins = openTime ? toMins(openTime) : null
+    if (venueOpenMins !== null && dayStartMins < venueOpenMins) {
+      console.log(`⚠️ First program "${firstProgram.name}" starts at ${firstProgram.start} but venue opens at ${openTime}. Clamping to opening time.`)
+      dayStartMins = venueOpenMins
+    }
+    
     const lastEndMins = Math.max(...programs.map(p => {
       const endMins = toMins(p.end)
       const startMins = toMins(p.start)
@@ -186,8 +194,16 @@ export function calculateSlots(
   console.log(`🔍 Finding active/upcoming periods at ${fromMins(normalizedNow)}:`)
   
   for (const program of programs) {
-    const startMins = toMins(program.start)
+    let startMins = toMins(program.start)
     let endMins = toMins(program.end)
+    
+    // FIX: Clamp program start time to actual venue opening time.
+    // If menu says "BRUNCH 09:00-14:00" but venue opens at 09:30 on weekdays,
+    // the service window should start at 09:30, not 09:00.
+    if (openMins && startMins < openMins) {
+      console.log(`⚠️ Program "${program.name}" starts at ${program.start} but venue opens at ${openTime}. Clamping to opening time.`)
+      startMins = openMins
+    }
     
     // Handle midnight-crossing programs
     if (endMins < startMins && endMins < 600) {
@@ -364,13 +380,32 @@ function generateSlots(
   }
   
   // ── Slot 1: NOW (Immediate Posting) ──────────────────────────────────────
-  const slot1Mins = ceilToHalfHour(nowMins)  // Round up to next :00/:30
+  // FIX: First slot should be postable NOW (within 60 min of generation time)
+  // Constraint: Must be at least nowMins + 15 min (buffer for user to review/edit)
+  // Target: nowMins + 30-60 min (natural posting window)
+  const minSlot1Mins = nowMins + 15  // Absolute minimum (15 min buffer)
+  const targetSlot1Mins = nowMins + 30  // Target: 30 min from now
+  const maxSlot1Mins = nowMins + 60  // Maximum: within 1 hour
+  
+  // If there are active periods, use them; otherwise allow general content
   let slot1Periods = activePeriods.map(p => p.name.toLowerCase())
   let slot1Window = activePeriods.length > 0 ? activePeriods[0] : null
   
+  // Calculate slot1 time: prefer target (now+30), but respect half-hour rounding
+  let slot1Mins = ceilToHalfHour(targetSlot1Mins)
+  
+  // If rounding pushed it beyond max window, use the target without rounding
+  if (slot1Mins > maxSlot1Mins) {
+    slot1Mins = targetSlot1Mins
+  }
+  
+  // Ensure it's not before minimum
+  slot1Mins = Math.max(slot1Mins, minSlot1Mins)
+  
   console.log(`🎯 Slot 1 calculation:`)
   console.log(`   nowMins: ${nowMins} (${fromMins(nowMins)})`)
-  console.log(`   slot1Mins (ceiled): ${slot1Mins} (${fromMins(slot1Mins)})`)
+  console.log(`   targetSlot1Mins: ${targetSlot1Mins} (${fromMins(targetSlot1Mins)})`)
+  console.log(`   slot1Mins (final): ${slot1Mins} (${fromMins(slot1Mins)})`)
   console.log(`   activePeriods: ${activePeriods.map(p => `${p.name} (${p.start}-${p.end})`).join(', ')}`)
   console.log(`   slot1Periods: ${slot1Periods.join(', ')}`)
   

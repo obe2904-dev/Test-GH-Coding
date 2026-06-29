@@ -204,9 +204,6 @@ export function Sidebar({ className = '' }: SidebarProps) {
           <>
             <Icon className={`w-5 h-5 flex-shrink-0 ${isActive || isHovered ? 'text-[#0A7D5F]' : ''}`} />
             <span className={`truncate flex-1 ${isActive || isHovered ? 'font-semibold text-text' : ''}`}>{item.label}</span>
-            {!completion.loading && isPartial && (
-              <PartialCircleIcon className="w-4 h-4 text-[#F59E0B] flex-shrink-0" />
-            )}
             {isCompleted && !completion.loading && (
               <CheckCircleIcon className="w-4 h-4 text-[#0A7D5F] flex-shrink-0" />
             )}

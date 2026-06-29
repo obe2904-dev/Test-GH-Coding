@@ -370,13 +370,38 @@ export async function optimizeWeeklySchedule(
   
   const performanceData: PerformanceData | null = baselines || null
   
-  // Track used slots to prevent collisions
-  const usedSlots = new Set<string>()
+  // ============================================================================
+  // PRIORITY SORTING: Booking/footfall posts claim days first
+  // ============================================================================
+  const getPriority = (slot: any): number => {
+    if (slot.ctaIntent === 'booking') return 1        // Highest priority
+    if (slot.ctaIntent === 'traffic') return 2        // Second priority (footfall)
+    if (slot.ctaIntent === 'event_promo') return 3    // Third priority
+    return 4                                          // Lowest priority (engagement, awareness, etc.)
+  }
+  
+  // Sort slots by priority (lower number = higher priority) BEFORE optimization
+  // This ensures booking posts claim their preferred days before other posts
+  const sortedSlots = [...weeklyPlan.slots].sort((a, b) => {
+    const priorityDiff = getPriority(a) - getPriority(b)
+    if (priorityDiff !== 0) return priorityDiff
+    // If same priority, preserve original order
+    return 0
+  })
+  
+  // Track original index for each slot to maintain mapping after re-sorting
+  const slotToOriginalIndex = new Map<any, number>()
+  weeklyPlan.slots.forEach((slot, idx) => {
+    slotToOriginalIndex.set(slot, idx)
+  })
+  
+  // Track used DAYS to prevent collisions (one post per day maximum)
+  const usedDays = new Set<number>()
   
   // Optimize each slot with collision detection
   const optimizedSlots: OptimizedPostSlot[] = []
   
-  for (const slot of weeklyPlan.slots) {
+  for (const slot of sortedSlots) {
     // Phase 1: Refine day selection
     const originalDay = slot.dayOfWeek
     // If Layer 0 assigned a strategic date, preserve it (skip generic pattern override)
@@ -432,39 +457,29 @@ export async function optimizeWeeklySchedule(
       performanceData
     )
     
-    // Phase 3: COLLISION DETECTION AND RESOLUTION
+    // Phase 3: COLLISION DETECTION AND RESOLUTION (one post per day maximum)
     let collisionAttempts = 0
-    const maxAttempts = 7 * 24 // Max 7 days × 24 hours
-    let slotKey = `${optimalDay}-${optimalHour}`
+    const maxAttempts = 7 // Max 7 days in a week
     
-    while (usedSlots.has(slotKey) && collisionAttempts < maxAttempts) {
+    // Check if this day is already taken
+    while (usedDays.has(optimalDay) && collisionAttempts < maxAttempts) {
       collisionAttempts++
       
-      // Strategy 1: Try next hour (up to 3 hours later)
-      if (collisionAttempts <= 3) {
-        optimalHour = (optimalHour + 1) % 24
-      }
-      // Strategy 2: Try next day with same hour
-      else if (collisionAttempts <= 6) {
-        optimalDay = (optimalDay + 1) % 7
-        // CRITICAL: Preserve layer0Hour (strategy AI's explicit time) even when moving days
-        // Only fall back to selectOptimalHour if no layer0Hour was provided
-        if (slot.layer0Hour === undefined) {
-          optimalHour = selectOptimalHour(slot.contentType, slot.platform)
-        }
-        // Otherwise keep the layer0Hour value (e.g. lunch at 12:00 stays 12:00)
-      }
-      // Strategy 3: Try any available slot
-      else {
-        optimalHour = (optimalHour + 2) % 24
-        optimalDay = (optimalDay + 1) % 7
-      }
+      // Move to next day (preserve time)
+      optimalDay = (optimalDay + 1) % 7
       
-      slotKey = `${optimalDay}-${optimalHour}`
+      // CRITICAL: Preserve layer0Hour (strategy AI's explicit time) even when moving days
+      // Only recalculate hour if no layer0Hour was provided
+      if (slot.layer0Hour === undefined) {
+        optimalHour = selectOptimalHour(slot.contentType, slot.platform)
+        optimalHour = respectOpeningHours(optimalHour, slot.contentType, businessHours)
+        optimalHour = applyPerformanceOptimization(slot.contentType, optimalHour, performanceData)
+      }
+      // Otherwise keep the layer0Hour value (e.g. lunch at 12:00 stays 12:00 on new day)
     }
     
-    // Mark this slot as used
-    usedSlots.add(slotKey)
+    // Mark this day as used
+    usedDays.add(optimalDay)
     
     const wasAdjusted = (optimalDay !== originalDay) || (optimalHour !== originalHour)
     const hadCollision = collisionAttempts > 0
@@ -495,15 +510,22 @@ export async function optimizeWeeklySchedule(
     })
   }
   
-  // CRITICAL: Preserve original input order to maintain 1:1 mapping with enrichedSlots array
-  // Track original index BEFORE sorting by date
-  optimizedSlots.forEach((slot, idx) => {
-    (slot as any).originalIndex = idx
+  // CRITICAL: Restore original input order to maintain 1:1 mapping with enrichedSlots array
+  // We sorted by priority for optimization, now restore original order for mapping
+  optimizedSlots.forEach((slot) => {
+    const originalIndex = slotToOriginalIndex.get(
+      weeklyPlan.slots.find(s => 
+        s.contentType === slot.contentType && 
+        s.ctaIntent === slot.ctaIntent &&
+        s.platform === slot.platform
+      )
+    )
+    ;(slot as any).originalIndex = originalIndex ?? 0
   })
   
-  // Sort by scheduled date for chronological display
+  // Sort back to original order for 1:1 mapping
   optimizedSlots.sort((a, b) => 
-    a.scheduledDate.getTime() - b.scheduledDate.getTime()
+    ((a as any).originalIndex ?? 0) - ((b as any).originalIndex ?? 0)
   )
   
   return {

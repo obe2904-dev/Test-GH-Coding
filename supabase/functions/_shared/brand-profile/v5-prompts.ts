@@ -1236,13 +1236,13 @@ Som marketing-ekspert, analysér:
 
 **A. LOCATION DRIVER**
 Spørgsmål:
-- Hvilket location-aspekt scorer højest (>= 80)?
+- Hvilke top 3 location-aspekter scorer højest (>= 50)?
 - Er location en USP eller bare kontext?
 - Hvilken tone passer til denne placering?
 - Hvilke ord/fraser er naturlige vs. unaturlige her?
 
-⚠️ MULTI-DIMENSION LOCATIONS:
-Hvis FLERE dimensioner scorer højt (>= 80):
+⚠️ MULTI-DIMENSION LOCATIONS (max 3):
+Hvis FLERE dimensioner scorer højt (>= 50):
 - Waterfront 95 + City Centre 85 → BEGGE er relevante
 - Include phrases for BOTH dimensions i natural_vocabulary
 - Eksempel: ["ved åen", "i hjertet af byen", "på Åboulevarden", "ved vandet", "i centrum"]
@@ -1257,7 +1257,7 @@ Tjek location_intelligence.landmarks_nearby for konkrete stednavne:
 natural_vocabulary skal have 4-6 VARIEREDE fraser:
 1. Primær dimension (f.eks. "ved åen")
 2. Specifik landmark (f.eks. "på Åboulevarden") 
-3. Sekundær dimension hvis score >= 80 (f.eks. "i centrum")
+3. Sekundær/tertiær dimension fra top 3 hvis score >= 50 (f.eks. "i centrum")
 4-6. Variations (f.eks. "ved vandet", "i hjertet af Aarhus")
 
 FORMÅL: Undgå repetition - AI skal ROTERE mellem disse fraser i posts
@@ -1360,7 +1360,7 @@ Kom med KONKRET anbefaling baseret på analyse:
 2. **LOCATION DRIVER GUIDANCE**
    - Primary dimension + strategic importance
    - Tone implications (hvorfor det påvirker tone)
-   - Natural vocabulary: Array af 4-6 VARIEREDE location phrases (primær dimension, landmarks, sekundær dimension hvis >= 80 score, variations)
+   - Natural vocabulary: Array af 4-6 VARIEREDE location phrases (primær dimension, landmarks, top 3 dimensioner hvis >= 50 score, variations)
    - Avoid vocabulary (ord der clasher)
 
 3. **CULINARY CHARACTER GUIDANCE**

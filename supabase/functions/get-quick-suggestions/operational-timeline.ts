@@ -129,14 +129,25 @@ function buildWindows(
   kitchenCloseTime: string | null,
 ): ServiceWindow[] {
   const kitchenCloseMins = kitchenCloseTime ? toMins(kitchenCloseTime) : null
+  const venueOpenMins = openTime ? toMins(openTime) : null
 
   if (programs.length > 0) {
     return programs.map(p => {
-      const startMins = toMins(p.start)
+      let startMins = toMins(p.start)
+      
+      // FIX: Clamp program start time to venue opening time.
+      // If a menu program says "BRUNCH 05:30-14:00" but venue opens at 09:30,
+      // the service window should start at 09:30, not 05:30.
+      // This prevents suggesting post times before the business is actually open.
+      if (venueOpenMins !== null && startMins < venueOpenMins) {
+        console.log(`⚠️ Program "${p.name}" starts at ${p.start} but venue opens at ${openTime}. Clamping to opening time.`)
+        startMins = venueOpenMins
+      }
+      
       const endMins = safeEndMins(startMins, p.end)
       // A window is food-eligible unless its start is at or after kitchen close
       const isFoodService = kitchenCloseMins === null || startMins < kitchenCloseMins
-      return { name: p.name, start: p.start, end: p.end, isFoodService, startMins, endMins }
+      return { name: p.name, start: fromMins(startMins), end: p.end, isFoodService, startMins, endMins }
     }).sort((a, b) => a.startMins - b.startMins)
   }
 

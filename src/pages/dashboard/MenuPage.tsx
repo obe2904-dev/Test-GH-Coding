@@ -37,6 +37,26 @@ interface MenuCard {
   ai_summary?: string
   is_social_lead?: boolean
   created_at: string
+  // Flat timing columns from menu_results_v2
+  result_id?: string
+  menu_type_extracted?: string | null
+  time_start?: string | null
+  time_end?: string | null
+  time_source?: string | null
+  time_confirmed?: boolean
+}
+
+const TIME_HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'))
+const TIME_MINUTE_OPTIONS = ['00', '15', '30', '45']
+
+function splitTimeValue(value: string) {
+  const [hour = '', minute = ''] = value.split(':')
+  return { hour, minute }
+}
+
+function joinTimeValue(hour: string, minute: string) {
+  if (!hour && !minute) return ''
+  return `${hour || '00'}:${minute || '00'}`
 }
 
 function MenuPage() {
@@ -66,6 +86,12 @@ function MenuPage() {
   const [priceLevel, setPriceLevel] = useState<string>('')
   const [isEditingPricing, setIsEditingPricing] = useState(false)
   const [isSavingPricing, setIsSavingPricing] = useState(false)
+
+  // Timing edit state
+  const [editingTimingCardId, setEditingTimingCardId] = useState<string | null>(null)
+  const [editingTimeStart, setEditingTimeStart] = useState('')
+  const [editingTimeEnd, setEditingTimeEnd] = useState('')
+  const [isSavingTiming, setIsSavingTiming] = useState(false)
 
   // Normalized item flags (is_signature toggle)
   // keyed by item_name.toLowerCase() → { id, is_signature }
@@ -164,7 +190,7 @@ function MenuPage() {
       // Load results from menu_results_v2 (the queue system)
       const { data: results } = await supabase
         .from('menu_results_v2')
-        .select('*')
+        .select('id, source_id, source_url, status, error_message, structured_data, ai_summary, menu_type, time_start, time_end, time_source, time_confirmed')
         .eq('business_id', bizId)
         .order('created_at', { ascending: false })
 
@@ -262,7 +288,14 @@ function MenuPage() {
           item_count: itemCount,
           ai_summary: result?.ai_summary || undefined,
           is_social_lead: !!(source as any).is_social_lead,
-          created_at: source.created_at
+          created_at: source.created_at,
+          // Flat timing columns
+          result_id: result?.id,
+          menu_type_extracted: result?.menu_type || null,
+          time_start: result?.time_start || null,
+          time_end: result?.time_end || null,
+          time_source: result?.time_source || null,
+          time_confirmed: result?.time_confirmed || false,
         }
       })
 
@@ -998,6 +1031,78 @@ function MenuPage() {
     }
   }
 
+  // Start editing timing for a menu card
+  const handleStartEditTiming = (card: MenuCard) => {
+    setEditingTimingCardId(card.result_id || null)
+    setEditingTimeStart(card.time_start || '')
+    setEditingTimeEnd(card.time_end || '')
+  }
+
+  const updateTimePart = (value: string, part: 'hour' | 'minute', nextValue: string) => {
+    const current = splitTimeValue(value)
+    const nextHour = part === 'hour' ? nextValue : current.hour
+    const nextMinute = part === 'minute' ? nextValue : current.minute
+
+    if (part === 'hour' && nextValue && !nextMinute) {
+      return joinTimeValue(nextValue, '00')
+    }
+
+    if (part === 'minute' && nextValue && !nextHour) {
+      return joinTimeValue('00', nextValue)
+    }
+
+    return joinTimeValue(nextHour, nextMinute)
+  }
+
+  // Cancel timing edit
+  const handleCancelEditTiming = () => {
+    setEditingTimingCardId(null)
+    setEditingTimeStart('')
+    setEditingTimeEnd('')
+  }
+
+  // Save timing changes
+  const handleSaveTiming = async (resultId: string) => {
+    if (!resultId) return
+
+    // Validate HH:MM format
+    const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/
+    if (editingTimeStart && !timeRegex.test(editingTimeStart)) {
+      alert('Starttid skal være i formatet HH:MM (f.eks. 09:00)')
+      return
+    }
+    if (editingTimeEnd && !timeRegex.test(editingTimeEnd)) {
+      alert('Sluttid skal være i formatet HH:MM (f.eks. 17:30)')
+      return
+    }
+
+    setIsSavingTiming(true)
+    try {
+      const { error } = await supabase
+        .from('menu_results_v2')
+        .update({
+          time_start: editingTimeStart || null,
+          time_end: editingTimeEnd || null,
+          time_source: 'user_edited',
+          time_confirmed: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', resultId)
+
+      if (error) throw error
+
+      // Reload menu cards to reflect changes
+      if (businessId) await loadMenuCards(businessId)
+      
+      handleCancelEditTiming()
+    } catch (error) {
+      console.error('Error saving timing:', error)
+      alert('Kunne ikke gemme tidspunkt')
+    } finally {
+      setIsSavingTiming(false)
+    }
+  }
+
   const loadNormalizedItems = async (bizId: string) => {
     try {
       const { data } = await supabase
@@ -1227,7 +1332,7 @@ function MenuPage() {
                           className="mt-1 h-5 w-5 text-cta border-border rounded focus:ring-cta"
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
                             {!menuCard && <span className="text-gray-400">📋</span>}
                             {menuCard?.status === 'pending' && (
                               <>
@@ -1268,8 +1373,83 @@ function MenuPage() {
                                 {menuCard.extracted_data.menuSubtitle}
                               </span>
                             )}
+                            
                           </div>
                           <p className="text-xs text-text-muted break-all">{item.url}</p>
+                          
+                          {/* Timing Editor - Inline when editing */}
+                          {editingTimingCardId === menuCard?.result_id && (
+                            <div className="flex items-center gap-1 mt-2 p-2 bg-surface-alt rounded border border-border">
+                              <label className="text-xs text-text-secondary font-medium">Tid:</label>
+                              <select
+                                value={splitTimeValue(editingTimeStart).hour}
+                                onChange={(e) => setEditingTimeStart(updateTimePart(editingTimeStart, 'hour', e.target.value))}
+                                className="px-2 py-1 border border-border rounded text-xs w-16 bg-white"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <option value="">--</option>
+                                {TIME_HOUR_OPTIONS.map((hour) => (
+                                  <option key={hour} value={hour}>
+                                    {hour}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeStart).minute) ? splitTimeValue(editingTimeStart).minute : ''}
+                                onChange={(e) => setEditingTimeStart(updateTimePart(editingTimeStart, 'minute', e.target.value))}
+                                className="px-2 py-1 border border-border rounded text-xs w-16 bg-white"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <option value="">--</option>
+                                {TIME_MINUTE_OPTIONS.map((minute) => (
+                                  <option key={minute} value={minute}>
+                                    {minute}
+                                  </option>
+                                ))}
+                              </select>
+                              <span className="text-xs text-text-muted">–</span>
+                              <select
+                                value={splitTimeValue(editingTimeEnd).hour}
+                                onChange={(e) => setEditingTimeEnd(updateTimePart(editingTimeEnd, 'hour', e.target.value))}
+                                className="px-2 py-1 border border-border rounded text-xs w-16 bg-white"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <option value="">--</option>
+                                {TIME_HOUR_OPTIONS.map((hour) => (
+                                  <option key={hour} value={hour}>
+                                    {hour}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeEnd).minute) ? splitTimeValue(editingTimeEnd).minute : ''}
+                                onChange={(e) => setEditingTimeEnd(updateTimePart(editingTimeEnd, 'minute', e.target.value))}
+                                className="px-2 py-1 border border-border rounded text-xs w-16 bg-white"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <option value="">--</option>
+                                {TIME_MINUTE_OPTIONS.map((minute) => (
+                                  <option key={minute} value={minute}>
+                                    {minute}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleSaveTiming(menuCard.result_id!); }}
+                                disabled={isSavingTiming}
+                                className="px-3 py-1 bg-cta text-text-inverse rounded text-xs font-medium hover:bg-cta-hover disabled:opacity-50"
+                              >
+                                {isSavingTiming ? 'Gemmer...' : 'Gem'}
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleCancelEditTiming(); }}
+                                className="px-2 py-1 bg-surface text-text-secondary rounded text-xs hover:bg-border border border-border"
+                              >
+                                Annuller
+                              </button>
+                            </div>
+                          )}
+                          
                           {menuCard?.status === 'pending' && (
                             <p className="text-xs text-orange-600 mt-1">
                               {t('menu.sources.pendingHint')}
@@ -1289,18 +1469,64 @@ function MenuPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          {menuCard?.status === 'extracted' && (
-                            <button
-                              onClick={() => menuCard && toggleSocialLead(menuCard.id)}
-                              title={menuCard?.is_social_lead ? 'Fjern som social-fokus-menu' : 'Markér som den menu I vil fremhæve socialt'}
-                              className={`px-2 py-1.5 text-sm rounded border transition-colors ${
-                                menuCard?.is_social_lead
-                                  ? 'bg-warning text-white border-warning font-medium'
-                                  : 'text-text-muted border-border hover:border-warning hover:text-warning'
-                              }`}
-                            >
-                              {menuCard?.is_social_lead ? '📢 Fremhævet socialt' : '📢'}
-                            </button>
+                          {menuCard?.menu_type_extracted && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                              {menuCard.menu_type_extracted === 'breakfast' && '🌅 Morgenmad'}
+                              {menuCard.menu_type_extracted === 'brunch' && '🥞 Brunch'}
+                              {menuCard.menu_type_extracted === 'lunch' && '🍽️ Frokost'}
+                              {menuCard.menu_type_extracted === 'dinner' && '🌙 Aftensmad'}
+                              {menuCard.menu_type_extracted === 'cocktail' && '🍸 Cocktails'}
+                              {menuCard.menu_type_extracted === 'wine' && '🍷 Vin'}
+                              {menuCard.menu_type_extracted === 'beer' && '🍺 Øl'}
+                              {menuCard.menu_type_extracted === 'beverage' && '🥤 Drikkevarer'}
+                              {menuCard.menu_type_extracted === 'dessert' && '🍰 Dessert'}
+                              {menuCard.menu_type_extracted === 'kids' && '👶 Børnemenu'}
+                              {menuCard.menu_type_extracted === 'seasonal' && '🍂 Sæson'}
+                              {!['breakfast', 'brunch', 'lunch', 'dinner', 'cocktail', 'wine', 'beer', 'beverage', 'dessert', 'kids', 'seasonal'].includes(menuCard.menu_type_extracted) && menuCard.menu_type_extracted}
+                            </span>
+                          )}
+                          {menuCard?.result_id && menuCard.status === 'extracted' && (
+                            <div className="flex items-center gap-1">
+                              {menuCard.time_start && menuCard.time_end ? (
+                                <>
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                    menuCard.time_source === 'user_edited' || menuCard.time_confirmed
+                                      ? 'bg-success-surface text-success-text border border-success'
+                                      : menuCard.time_source === 'opening_hours_fallback' || (menuCard.time_start === '00:00' && menuCard.time_end === '23:59')
+                                      ? 'bg-warning-surface text-warning-text border border-warning'
+                                      : 'bg-info-surface text-info-text border border-info'
+                                  }`}>
+                                    🕐 {menuCard.time_start}–{menuCard.time_end}
+                                    {menuCard.time_source === 'opening_hours_fallback' && ' (åbningstider)'}
+                                    {menuCard.time_start === '00:00' && menuCard.time_end === '23:59' && ' (hele dagen)'}
+                                  </span>
+                                  {editingTimingCardId !== menuCard.result_id && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
+                                      className="px-1.5 py-0.5 text-xs text-cta hover:text-cta-text"
+                                      title="Rediger tidspunkt"
+                                    >
+                                      ✏️
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-error-surface text-error-text border border-error">
+                                    ⚠️ Ingen tid
+                                  </span>
+                                  {editingTimingCardId !== menuCard.result_id && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
+                                      className="px-2 py-0.5 text-xs bg-cta text-text-inverse rounded font-medium hover:bg-cta-hover"
+                                      title="Tilføj tidspunkt"
+                                    >
+                                      + Tilføj
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           )}
                           {menuCard?.status === 'extracted' && menuCard.extracted_data && (
                             <button
@@ -1341,26 +1567,19 @@ function MenuPage() {
                     {/* Expanded Menu Details */}
                     {isExpanded && menuCard?.extracted_data && (
                       <div className="px-4 py-3 border-t border-border bg-surface-alt">
-                        {/* Menu Metadata (subtitle and availability) */}
-                        {(menuCard.extracted_data.menuSubtitle || menuCard.extracted_data.availabilityTime || menuCard.extracted_data.availabilityDays) && (
+                        {/* Menu Metadata (subtitle and availability days only - timing now in header) */}
+                        {(menuCard.extracted_data.menuSubtitle || menuCard.extracted_data.availabilityDays) && (
                           <div className="mb-4 pb-3 border-b border-border">
                             {menuCard.extracted_data.menuSubtitle && (
                               <p className="text-sm text-text-secondary mb-2 italic">
                                 {menuCard.extracted_data.menuSubtitle}
                               </p>
                             )}
-                            <div className="flex flex-wrap gap-2 text-xs">
-                              {menuCard.extracted_data.availabilityTime && (
-                                <span className="inline-flex items-center px-2 py-1 rounded bg-info-surface text-info-text">
-                                  🕐 {menuCard.extracted_data.availabilityTime}
-                                </span>
-                              )}
-                              {menuCard.extracted_data.availabilityDays && (
-                                <span className="inline-flex items-center px-2 py-1 rounded bg-success-surface text-success-text">
-                                  📅 {menuCard.extracted_data.availabilityDays}
-                                </span>
-                              )}
-                            </div>
+                            {menuCard.extracted_data.availabilityDays && (
+                              <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-success-surface text-success-text">
+                                📅 {menuCard.extracted_data.availabilityDays}
+                              </span>
+                            )}
                           </div>
                         )}
 

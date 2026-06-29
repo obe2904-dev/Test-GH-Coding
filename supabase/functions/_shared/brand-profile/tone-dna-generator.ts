@@ -212,11 +212,12 @@ function buildToneDNAPrompt(input: ToneDNAInput, language: string): string {
   // Get base strategic prompt
   let prompt = getV5Prompt('tone_dna', language);
   
-  // Find primary location dimension
+  // Find top location dimensions (top 3 with score >= 50)
   const locationScores = input.location_intelligence?.category_scores || {};
   const sortedDimensions = Object.entries(locationScores)
-    .filter(([_, score]) => score && score >= 80)
-    .sort(([_, a], [__, b]) => (b || 0) - (a || 0));
+    .filter(([_, score]) => score && score >= 50)
+    .sort(([_, a], [__, b]) => (b || 0) - (a || 0))
+    .slice(0, 3);
   
   const primaryDimension = sortedDimensions.length > 0 
     ? sortedDimensions[0][0] 

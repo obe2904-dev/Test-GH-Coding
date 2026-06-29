@@ -456,6 +456,9 @@ function BusinessProfilePage() {
           setKeyOfferings(enrichKeyOfferings((profileData as any).key_offerings))
         }
 
+        console.log('🔍 DEBUG businessData.local_location_reference:', (businessData as any).local_location_reference)
+        console.log('🔍 DEBUG full businessData keys:', Object.keys(businessData))
+        
         const loadedState: ProfileFormState = {
           websiteUrl: (businessData as any).website_url ?? (websiteAnalysisData as any)?.source_url ?? '',
           businessName: (businessData as any).name ?? '',
@@ -474,6 +477,7 @@ function BusinessProfilePage() {
         }
         
         console.log('📋 Final loadedState:', loadedState)
+        console.log('📍 loadedState.localLocationReference:', loadedState.localLocationReference)
 
         if (!isActive) return
 
@@ -603,6 +607,13 @@ function BusinessProfilePage() {
       // Booking URL
       if (analysis.bookingUrl && !bookingLink.trim()) {
         setBookingLink(analysis.bookingUrl)
+        fieldsUpdated++
+      }
+
+      // Local location reference (extracted from website)
+      if (analysis.localLocationReference && !localLocationReference.trim()) {
+        console.log('📍 Setting localLocationReference from analysis:', analysis.localLocationReference)
+        setLocalLocationReference(analysis.localLocationReference)
         fieldsUpdated++
       }
 

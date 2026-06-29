@@ -18,7 +18,8 @@ export class DatabaseSaver {
     'shopping_district',
     'mixed_use',
     'destination',
-    'nature_park'
+    'nature_park',
+    'tourist_destination'
   ];
 
   constructor(supabase: ReturnType<typeof createClient>) {
@@ -26,8 +27,8 @@ export class DatabaseSaver {
   }
 
   async saveLocationIntelligence(businessId: string, locationData: any, schemaVersion: number = 2): Promise<void> {
-    // Remove poi_counts as it's not a database column (used for analysis only)
-    const { poi_counts, _fallback_warning, ...dataToSave } = locationData;
+    // Remove poi_counts and internal flags as they're not database columns
+    const { poi_counts, _fallback_warning, _is_fallback, ...dataToSave } = locationData;
     
     // Validate area_type against schema enum
     if (dataToSave.area_type && !this.VALID_AREA_TYPES.includes(dataToSave.area_type)) {

@@ -31,13 +31,25 @@ export interface MenuResult {
   business_id: string
   source_url: string
   status: string
+  // NEW: Flat timing columns (single source of truth)
+  menu_type?: string           // e.g., "brunch", "lunch", "dinner", "coffee", "wine"
+  time_start?: string          // e.g., "09:00" - HH:MM format
+  time_end?: string            // e.g., "14:00" - HH:MM format
+  time_source?: string         // e.g., "menu_text", "opening_hours_fallback", "user_override"
+  time_confirmed?: boolean     // User has verified timing
   structured_data: {
     menuTitle?: string
     menuSubtitle?: string
-    startTime?: string           // e.g., "09:00" - DIRECT extraction from menu
-    endTime?: string             // e.g., "14:00" - DIRECT extraction from menu
+    startTime?: string           // DEPRECATED: use flat time_start instead
+    endTime?: string             // DEPRECATED: use flat time_end instead
     availabilityTime?: string    // e.g., "17.30-21.30" or "til kl. 14.00" - descriptive text
     availabilityDays?: string    // e.g., "dagligt", "mandag-fredag"
+    menuPeriods?: Array<{        // Aggregated time periods from menu parser (Priority 2)
+      name: string
+      type: string
+      startTime: string
+      endTime: string
+    }>
     categories: Array<{
       name: string
       categoryDescription?: string
@@ -172,70 +184,150 @@ function menuResultToProgramme(
     classifyProgrammeFromURL(menuResult.source_url).programmeType ||
     'dinner' // default fallback
   
-  // Step 3: Parse time window from extracted data
-  // PRIORITY 1: Use direct startTime/endTime fields (most reliable)
-  // PRIORITY 1B: Hybrid - endTime from menu + startTime from opening hours
-  // PRIORITY 2: Parse availabilityTime text field
-  // PRIORITY 3: Infer from opening hours or use hardcoded defaults
+  // Step 3: Parse time window from extracted data - PREFERENCE CASCADE
+  // NEW: Prefer flat columns (single source of truth) over structured_data
+  // PRIORITY 0: Flat columns (time_start, time_end) from menu-extract-v2
+  // PRIORITY 1: Top-level startTime/endTime (direct extraction) - BACKWARDS COMPAT
+  // PRIORITY 2: Aggregate valid menuPeriods (filter sentinel, union times, pick best type)
+  // PRIORITY 3: Parse availabilityTime text field
+  // PRIORITY 4: Parse menuSubtitle text field
+  // PRIORITY 5: Hardcoded type defaults adjusted to opening hours
+  
   let timeWindow: { start: string, end: string } | null = null
-  let timeWindowSource = 'extracted'
+  let timeWindowSource = 'unknown'
+  let resolvedProgrammeType = programmeType  // May be overridden by Priority 2 or flat menu_type
   
-  // Filter out meaningless default values (00:00-23:59 = "all day" fallback from parser)
-  const hasValidStartTime = data.startTime && data.startTime !== '00:00'
-  const hasValidEndTime = data.endTime && data.endTime !== '23:59'
-  const isDefaultAllDay = data.startTime === '00:00' && data.endTime === '23:59'
+  // Helper: reject the "all-day sentinel" pair produced when no timing found
+  const isSentinel = (s: string, e: string) => s === '00:00' && e === '23:59'
   
-  if (hasValidStartTime && hasValidEndTime && !isDefaultAllDay) {
-    // PRIORITY 1A: Both valid fields from extraction (e.g., "09:00", "14:00")
-    timeWindow = {
-      start: normalizeTimeFormat(data.startTime),
-      end: normalizeTimeFormat(data.endTime)
-    }
-    console.log(`✅ Using extracted startTime/endTime for ${programmeName}: ${data.startTime}-${data.endTime}`)
-    timeWindowSource = 'extracted_direct'
-  } else if (hasValidEndTime && !hasValidStartTime) {
-    // PRIORITY 1B: Only endTime from menu (e.g., "til kl. 14.00")
-    // Infer startTime from opening hours (earliest opening time)
-    const earliestOpenTime = getEarliestOpeningTime(openingHours)
-    if (earliestOpenTime) {
-      timeWindow = {
-        start: earliestOpenTime,
-        end: normalizeTimeFormat(data.endTime)
+  // ── PRIORITY 0: Flat columns (NEW - single source of truth) ─────────────
+  // Use flat time_start/time_end if available (from menu-extract-v2 resolveMenuTiming)
+  if (menuResult.time_start && menuResult.time_end) {
+    const s = normalizeTimeFormat(menuResult.time_start)
+    const e = normalizeTimeFormat(menuResult.time_end)
+    if (!isSentinel(s, e)) {
+      timeWindow = { start: s, end: e }
+      timeWindowSource = menuResult.time_source || 'flat_columns'
+      console.log(`✅ P0 (flat columns) for "${programmeName}": ${s}-${e} [${timeWindowSource}]`)
+      
+      // Override programme type if flat menu_type is more specific
+      if (menuResult.menu_type) {
+        const flatType = mapMenuTypeToProgType(menuResult.menu_type)
+        if (flatType && flatType !== programmeType) {
+          console.log(`🔄 Type override for "${programmeName}": ${programmeType} → ${flatType} (from flat menu_type)`);
+          resolvedProgrammeType = flatType
+        }
       }
-      console.log(`✅ Using hybrid timing for ${programmeName}: opening ${earliestOpenTime} → menu end ${data.endTime}`)
-      timeWindowSource = 'hybrid_opening_and_menu'
-    } else {
-      // Fallback if no opening hours
-      timeWindow = {
-        start: '09:00', // Reasonable default for morning programmes
-        end: normalizeTimeFormat(data.endTime)
-      }
-      console.log(`⚠️ Using default start + menu end for ${programmeName}: 09:00-${data.endTime}`)
-      timeWindowSource = 'hybrid_default_and_menu'
-    }
-  } else if (data.availabilityTime && !isDefaultAllDay) {
-    // PRIORITY 2: Parse descriptive text (e.g., "17.30-21.30", "kl. 12-16")
-    // Skip if we already know it's the default "00:00-23:59"
-    timeWindow = parseTimeWindow(data.availabilityTime)
-    if (timeWindow) {
-      console.log(`✅ Using parsed availabilityTime for ${programmeName}: ${data.availabilityTime}`)
-      timeWindowSource = 'extracted_parsed'
     }
   }
   
+  // ── PRIORITY 1: top-level startTime + endTime (BACKWARDS COMPAT) ──────────────
+  // Both must be present, non-zero, and not the sentinel pair
   if (!timeWindow) {
-    // PRIORITY 3: Fallback to type-specific defaults, adjusted to opening hours
-    if (isDefaultAllDay) {
-      console.log(`⚠️ Ignoring default 00:00-23:59 for ${programmeName}, using type-based inference`)
-    } else {
-      console.log(`⚠️ No time data found for ${programmeName}, inferring from opening hours`)
-    }
-    const defaults = PROGRAMME_TIME_WINDOWS[programmeType]
+    const s = data.startTime ? normalizeTimeFormat(data.startTime) : null
+    const e = data.endTime   ? normalizeTimeFormat(data.endTime)   : null
+    const validStart = s && s !== '00:00'
+    const validEnd   = e && e !== '23:59'
     
-    // Special handling for bar/cocktail programmes - infer from closing time
-    if (programmeType === 'bar') {
+    if (validStart && validEnd && !isSentinel(s!, e!)) {
+      timeWindow = { start: s!, end: e! }
+      timeWindowSource = 'extracted_direct'
+      console.log(`✅ P1 (direct) for "${programmeName}": ${s}-${e}`)
+    } else if (!validStart && validEnd) {
+      // End-only case: "Serveres til kl. 14.00" at the top level
+      // Start comes from opening hours (or safe default 09:00)
+      const openStart = getEarliestOpeningTime(openingHours)
+      const finalStart = openStart ?? '09:00'
+      timeWindow = { start: finalStart, end: e! }
+      timeWindowSource = 'hybrid_opening_and_menu'
+      if (!openStart) {
+        console.log(`⚠️ P1b using default 09:00 start (no opening hours available) for "${programmeName}"`)
+      }
+      console.log(`✅ P1b (hybrid) for "${programmeName}": ${finalStart}-${e}`)
+    }
+  }
+  
+  // ── PRIORITY 2: aggregate valid menuPeriods ─────────────────
+  // Filter out sentinel 00:00-23:59 entries, pick most specific type, union time windows
+  if (!timeWindow && data.menuPeriods && Array.isArray(data.menuPeriods)) {
+    const validPeriods = (data.menuPeriods as Array<{
+      name: string; type: string; startTime: string; endTime: string
+    }>).filter(p =>
+      p.startTime && p.endTime && !isSentinel(p.startTime, p.endTime)
+    )
+    
+    if (validPeriods.length > 0) {
+      // Pick the most specific type — ranked preference list
+      // "other" is always last resort; concrete meal types win
+      const TYPE_RANK: Record<string, number> = {
+        brunch: 10, morgenmad: 9, breakfast: 9,
+        lunch: 8, frokost: 8,
+        dinner: 7, aftensmad: 7,
+        afternoon: 6, eftermiddag: 6,
+        late_night: 5, natbar: 5,
+        all_day: 2,
+        other: 1,
+      }
+      const bestPeriod = validPeriods.reduce((best, p) => {
+        const rank = TYPE_RANK[p.type] ?? 1
+        const bestRank = TYPE_RANK[best.type] ?? 1
+        return rank > bestRank ? p : best
+      })
+      
+      // Union: earliest start → latest end across all valid periods
+      const starts = validPeriods.map(p => timeToMinutes(normalizeTimeFormat(p.startTime)))
+      const ends   = validPeriods.map(p => timeToMinutes(normalizeTimeFormat(p.endTime)))
+      const unionStart = minutesToTime(Math.min(...starts))
+      const unionEnd   = minutesToTime(Math.max(...ends))
+      
+      timeWindow = { start: unionStart, end: unionEnd }
+      timeWindowSource = `menuPeriods_aggregated(${validPeriods.length}/${(data.menuPeriods as any[]).length})`
+      
+      // Override programme type if aggregated periods give more specific signal
+      const aggregatedType = mapPeriodTypeToProgType(bestPeriod.type)
+      if (aggregatedType && aggregatedType !== programmeType) {
+        console.log(`🔄 Type override for "${programmeName}": ${programmeType} → ${aggregatedType} (from menuPeriods)`)
+        resolvedProgrammeType = aggregatedType
+      }
+      
+      console.log(`✅ P2 (menuPeriods) for "${programmeName}": ${unionStart}-${unionEnd} | type hint: ${bestPeriod.type}`)
+    }
+  }
+  
+  // ── PRIORITY 3: availabilityTime text field ─────────────────
+  if (!timeWindow && data.availabilityTime) {
+    timeWindow = parseTimeWindow(data.availabilityTime) ?? null
+    if (timeWindow) {
+      timeWindowSource = `parsed_availabilityTime("${data.availabilityTime}")`
+      console.log(`✅ P3 (availabilityTime) for "${programmeName}": ${timeWindow.start}-${timeWindow.end}`)
+    }
+  }
+  
+  // ── PRIORITY 4: menuSubtitle text field ─────────────────────
+  // Handles "Serveres til kl. 14.00 hver dag." style strings
+  if (!timeWindow && data.menuSubtitle) {
+    const subtitleWindow = parseTimeWindow(data.menuSubtitle)
+    if (subtitleWindow) {
+      // parseTimeWindow may only return an end time for "til kl. X" patterns
+      // In that case, sharpen start with actual opening hours
+      if (subtitleWindow.start === '09:00' || !subtitleWindow.start) {
+        const openStart = getEarliestOpeningTime(openingHours)
+        if (openStart) subtitleWindow.start = openStart
+      }
+      timeWindow = subtitleWindow
+      timeWindowSource = `parsed_menuSubtitle("${data.menuSubtitle}")`
+      console.log(`✅ P4 (menuSubtitle) for "${programmeName}": ${timeWindow.start}-${timeWindow.end}`)
+    }
+  }
+  
+  // ── PRIORITY 5: hardcoded type defaults ─────────────────────
+  // Only reached when zero timing data found anywhere
+  if (!timeWindow) {
+    console.log(`⚠️ P5 (hardcoded fallback) for "${programmeName}" (type: ${resolvedProgrammeType})`)
+    const defaults = PROGRAMME_TIME_WINDOWS[resolvedProgrammeType]
+    if (resolvedProgrammeType === 'bar') {
       timeWindow = inferBarTimeFromOpeningHours(openingHours, defaults)
-      timeWindowSource = 'inferred_from_closing_hours'
+      timeWindowSource = 'inferred_bar'
     } else {
       timeWindow = adjustTimeWindowToOpeningHours(
         defaults.start,
@@ -290,7 +382,7 @@ function menuResultToProgramme(
   
   // Step 9: Build programme object
   return {
-    type: programmeType,
+    type: resolvedProgrammeType,  // Use resolved type (may be overridden by Priority 2)
     label: programmeName,  // Use extracted menu title, not hardcoded fallback
     timeWindow,
     daysOfWeek,
@@ -659,40 +751,93 @@ function adjustTimeWindowToOpeningHours(
   openingHours: OpeningHoursRow[]
 ): { start: string, end: string } {
   
-  // Find earliest open and latest close
-  let earliestOpen = '23:59'
-  let latestClose = '00:00'
+  // Collect valid open/close times (skip closed days and rows with null times)
+  const validRows = openingHours.filter(
+    row => !row.closed && row.open_time && row.close_time
+  )
   
-  openingHours.forEach(row => {
-    if (!row.closed && row.open_time && row.close_time) {
-      if (row.open_time < earliestOpen) earliestOpen = row.open_time
-      if (row.close_time > latestClose) latestClose = row.close_time
-    }
-  })
+  // If no valid opening hours exist, return defaults unchanged
+  // Clamping to "00:00" (sentinel initial value) would corrupt the window
+  if (validRows.length === 0) {
+    console.log(`⚠️ No valid opening hours — using defaults: ${defaultStart}-${defaultEnd}`)
+    return { start: defaultStart, end: defaultEnd }
+  }
   
-  // Keep the programme window as defined, unless it's outside opening hours
-  let start = defaultStart
-  let end = defaultEnd
+  // Normalize all times to HH:MM (opening hours DB rows use HH:MM:SS)
+  const openTimes  = validRows.map(r => normalizeTimeFormat(r.open_time!))
+  const closeTimes = validRows.map(r => normalizeTimeFormat(r.close_time!))
   
-  // If programme starts before business opens, adjust start time
-  if (timeToMinutes(defaultStart) < timeToMinutes(earliestOpen)) {
+  const earliestOpen = openTimes.reduce((a, b)  => a < b ? a : b)
+  const latestClose  = closeTimes.reduce((a, b) => a > b ? a : b)
+  
+  let start = normalizeTimeFormat(defaultStart)
+  let end   = normalizeTimeFormat(defaultEnd)
+  
+  // Clamp start: don't begin before business opens
+  if (timeToMinutes(start) < timeToMinutes(earliestOpen)) {
+    console.log(`⏰ Clamping start ${start} → ${earliestOpen}`)
     start = earliestOpen
   }
   
-  // If programme ends after business closes (and it's not a bar/late-night programme)
-  const endMinutes = timeToMinutes(defaultEnd)
-  const closeMinutes = timeToMinutes(latestClose)
-  
-  // Special case: bar programmes can extend past midnight
-  if (defaultEnd >= '22:00' && defaultEnd <= '02:00') {
-    // This is a late-night programme - keep the default end time
-    end = defaultEnd
-  } else if (endMinutes > closeMinutes) {
-    // Regular programme extends past closing - constrain it
+  // Clamp end: don't extend past closing
+  // Late-night programmes (end ≤ 04:00 in minutes) wrap midnight — exempt
+  const isLateNight = timeToMinutes(end) <= timeToMinutes('04:00')
+  if (!isLateNight && timeToMinutes(end) > timeToMinutes(latestClose)) {
+    console.log(`⏰ Clamping end ${end} → ${latestClose}`)
     end = latestClose
   }
   
+  // Validate: clamping must not produce invalid window (start >= end)
+  if (timeToMinutes(end) <= timeToMinutes(start)) {
+    console.log(`⚠️ Clamping produced invalid window (${start}-${end}) — reverting to defaults`)
+    return { start: defaultStart, end: defaultEnd }
+  }
+  
   return { start, end }
+}
+
+/**
+ * Map flat menu_type column values to ProgrammeType enum values
+ * Used by Priority 0 to override programme type based on menu-extract-v2 classification
+ */
+function mapMenuTypeToProgType(menuType: string): ProgrammeType | null {
+  const map: Record<string, ProgrammeType | null> = {
+    brunch:      'morning',
+    breakfast:   'morning',
+    lunch:       'lunch',
+    dinner:      'dinner',
+    all_day:     null,       // Keep existing type
+    coffee:      null,       // Untimed beverage menus - keep existing type
+    wine:        'bar',      // Wine menus typically evening
+    cocktail:    'bar',
+    beer:        'bar',
+    drinks:      'bar',
+    bar_snacks:  'bar',
+    bakery:      null,       // Keep existing type
+    other:       null,       // Keep existing type
+  }
+  return map[menuType] ?? null
+}
+
+/**
+ * Map menuPeriod type strings to ProgrammeType enum values
+ * Used by Priority 2 to override programme type based on aggregated menu data
+ */
+function mapPeriodTypeToProgType(periodType: string): ProgrammeType | null {
+  const map: Record<string, ProgrammeType> = {
+    breakfast:  'morning',
+    morgenmad:  'morning',
+    brunch:     'morning',   // "morning" is the ProgrammeType for brunch
+    lunch:      'lunch',
+    frokost:    'lunch',
+    dinner:     'dinner',
+    aftensmad:  'dinner',
+    afternoon:  'lunch',     // afternoon sits closer to lunch than dinner
+    late_night: 'bar',
+    natbar:     'bar',
+    bar:        'bar',
+  }
+  return map[periodType] ?? null  // "other" and "all_day" return null (no override)
 }
 
 /**

@@ -329,10 +329,12 @@ async function fetchBusinessData(
       .maybeSingle(),
     supabaseClient
       .from('menu_results_v2')
-      .select('id, business_id, ai_summary, structured_data, service_periods, service_period_name, completed_at, source_url, status, language_code, menu_sources!menu_results_v2_source_id_fkey(label, menu_type)')
+      .select('id, business_id, ai_summary, structured_data, service_periods, service_period_name, completed_at, source_url, status, language_code, menu_type, time_start, time_end, time_source, time_confirmed, menu_sources!menu_results_v2_source_id_fkey(label, menu_type)')
       .eq('business_id', businessId)
       .eq('status', 'done')
-      .eq('language_code', language)
+      // CRITICAL FIX: Fetch ALL language variants — menu_results_v2 is the truth
+      // If user uploaded a cocktails menu (even in English), it MUST be detected
+      // The language filter was incorrectly excluding menus with different language_code
       .order('completed_at', { ascending: false }),
     supabaseClient
       .from('business_location_intelligence')
@@ -352,7 +354,6 @@ async function fetchBusinessData(
       .from('menu_results_v2')
       .select('representative_dishes, language_code, service_period_name')
       .eq('business_id', businessId)
-      .eq('language_code', language)
       .eq('status', 'done')
       .not('representative_dishes', 'is', null)
       .order('completed_at', { ascending: false })
@@ -1745,6 +1746,7 @@ serve(async (req) => {
       menu_evidence: programme.menuEvidence,
       confidence: programme.confidence === 'high' ? 0.9 : programme.confidence === 'medium' ? 0.7 : 0.5,
       is_active: true,  // CRITICAL: Required for RLS policy to return records
+      menu_results_v2_id: programme.metadata?.menuResultId || null,  // CRITICAL: Track source menu for data lineage
       baseline_goal_split: commercialOrientation.baseline_goal_split,
       decision_timing: commercialOrientation.decision_timing,
       content_type_affinity: commercialOrientation.content_type_affinity,

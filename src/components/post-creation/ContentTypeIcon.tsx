@@ -42,6 +42,16 @@ export function ContentTypeIcon({ contentType, className = 'w-5 h-5' }: ContentT
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zm14 10l1 2.5 2.5 1-2.5 1L19 20l-1-2.5L15.5 16.5l2.5-1L19 13zm-4-10l.75 1.75L17.5 5.5l-1.75.75L15 8l-.75-1.75L12.5 5.5l1.75-.75L15 3z" />
         </svg>
       )
+    case 'indoor_focus':
+      // House — indoor focus / interior setting
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 11l9-7 9 7" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 10v10h14V10" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10 20v-6h4v6" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 14h6" />
+        </svg>
+      )
     case 'behind_scenes':
       // Clapperboard — behind the scenes
       return (

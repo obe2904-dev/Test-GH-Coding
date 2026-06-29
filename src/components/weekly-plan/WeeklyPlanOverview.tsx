@@ -90,6 +90,10 @@ function getContentIconType(post: PostSpecification): string {
     return 'outdoor_seating'
   }
 
+  if (/indend|indoor|inside|interior|innes|indeserv/.test(title)) {
+    return 'indoor_focus'
+  }
+
   if (/havne|åen|ved åen|udsigt|location/.test(title)) {
     return 'location_story'
   }
@@ -575,9 +579,12 @@ export function WeeklyPlanOverview({
 
         // Build a map of date → post using normalized YYYY-MM-DD keys
         const postByDate = new Map<string, PostSpecification>()
+        
         plan.posts.forEach(p => {
           const key = toYMD(p.timing.date ?? '')
-          if (key) postByDate.set(key, p)
+          if (key) {
+            postByDate.set(key, p)
+          }
         })
 
         // Build array of the 7 dates starting from Monday of the week that contains the plan's posts.

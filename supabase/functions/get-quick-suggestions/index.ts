@@ -101,6 +101,9 @@ function getContentAwareTime(
   const nowMins = nowOverrideMins ?? (new Date().getHours() * 60 + new Date().getMinutes())
   // Midnight-safe end time helper (bars / clubs closing at 01:00, 02:00 etc.)
   const safeEnd = (hhmm: string) => { const m = toMinutes(hhmm); return m < 600 ? m + 1440 : m }
+  
+  // Get opening time in minutes for clamping program start times
+  const openingMins = todayOpenTime ? toMinutes(todayOpenTime) : null
 
   // Try to match content to a specific program from menu.
   // Three-pass strategy so any business — regardless of how they name their programs — gets
@@ -118,7 +121,15 @@ function getContentAwareTime(
       if (/brunch|morgen|breakfast/.test(progName) &&
           (/brunch|morgen|morgenmad|breakfast|æg|croissant|granola|acai|boller|pandekage|vaffel/.test(t) ||
            /brunch|morgenmad|breakfast/.test(t))) {
-        const startMins = toMinutes(prog.start)
+        let startMins = toMinutes(prog.start)
+        
+        // FIX: Clamp program start time to actual opening time
+        // Menu might say "09:00" but venue opens at "09:30" on weekdays
+        if (openingMins !== null && startMins < openingMins) {
+          console.log(`⚠️ Program "${prog.name}" starts at ${prog.start} but venue opens at ${todayOpenTime}. Clamping to opening time.`)
+          startMins = openingMins
+        }
+        
         const endMins = toMinutes(prog.end)
         const midPoint = startMins + Math.min(90, Math.floor((endMins - startMins) * 0.4))
         const suggestedMins = Math.max(startMins + 60, midPoint)
@@ -130,7 +141,14 @@ function getContentAwareTime(
       // Lunch / frokost
       if (/frokost|lunch/.test(progName) &&
           /frokost|sandwich|smørbr|suppe|salat|wrap|baguette/.test(t)) {
-        const startMins = toMinutes(prog.start)
+        let startMins = toMinutes(prog.start)
+        
+        // FIX: Clamp to opening time
+        if (openingMins !== null && startMins < openingMins) {
+          console.log(`⚠️ Program "${prog.name}" starts at ${prog.start} but venue opens at ${todayOpenTime}. Clamping to opening time.`)
+          startMins = openingMins
+        }
+        
         const endMins = toMinutes(prog.end)
         const suggestedMins = Math.max(startMins + 30, endMins - 120)
         if (suggestedMins < nowMins) { console.log(`⚠️ Skipping LUNCH — ${fromMinutes(suggestedMins)} past`); continue }
@@ -141,7 +159,14 @@ function getContentAwareTime(
       // Dinner / evening
       if (/aften|dinner|evening/.test(progName) &&
           /aftensmad|middag|3-retters|tre retters|aftenmenu|bøf|vildt|pasta/.test(t)) {
-        const startMins = toMinutes(prog.start)
+        let startMins = toMinutes(prog.start)
+        
+        // FIX: Clamp to opening time (rare for dinner, but ensures consistency)
+        if (openingMins !== null && startMins < openingMins) {
+          console.log(`⚠️ Program "${prog.name}" starts at ${prog.start} but venue opens at ${todayOpenTime}. Clamping to opening time.`)
+          startMins = openingMins
+        }
+        
         const preDinnerMins = startMins - 30
         const suggestedMins = preDinnerMins < nowMins ? nowMins + 15 : preDinnerMins
         console.log(`✅ Pass-1 DINNER match "${prog.name}" → ${fromMinutes(suggestedMins)}`)
@@ -173,7 +198,14 @@ function getContentAwareTime(
       const hasOverlap = progWords.some(w => t.includes(w))
       if (!hasOverlap) continue
 
-      const startMins = toMinutes(prog.start)
+      let startMins = toMinutes(prog.start)
+      
+      // FIX: Clamp to opening time
+      if (openingMins !== null && startMins < openingMins) {
+        console.log(`⚠️ Program "${prog.name}" starts at ${prog.start} but venue opens at ${todayOpenTime}. Clamping to opening time.`)
+        startMins = openingMins
+      }
+      
       const endMins = safeEnd(prog.end)
       // Post 30% into the service window (captures active period)
       const suggestedMins = startMins + Math.round((endMins - startMins) * 0.3)
@@ -189,7 +221,14 @@ function getContentAwareTime(
     if (contentType === 'menu_item' && remaining.length > 0) {
       // Prefer the program that is currently active (started but not ended), else the next one
       const active = remaining.find(p => toMinutes(p.start) <= nowMins) ?? remaining[0]
-      const startMins = toMinutes(active.start)
+      let startMins = toMinutes(active.start)
+      
+      // FIX: Clamp to opening time
+      if (openingMins !== null && startMins < openingMins) {
+        console.log(`⚠️ Program "${active.name}" starts at ${active.start} but venue opens at ${todayOpenTime}. Clamping to opening time.`)
+        startMins = openingMins
+      }
+      
       const endMins = safeEnd(active.end)
       const optimalMins = Math.max(nowMins + 15, startMins + Math.round((endMins - startMins) * 0.3))
       console.log(`✅ Pass-3 active-program fallback "${active.name}" → ${fromMinutes(optimalMins)}`)

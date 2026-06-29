@@ -1,6 +1,16 @@
 /**
  * AI Analyzer Service
  * Uses GPT-4o + Brave Search to analyze location intelligence
+ * 
+ * CHANGES (2026-06-28):
+ * - buildLocationPrompt() rewritten in Danish with Danish geographic vocabulary
+ * - extractJSON() helper replaces raw JSON.parse() — handles preamble text + markdown fences
+ * - Waterfront detection: recognises 'å', 'sø', 'kanal', 'fjord' in addition to 'havn'
+ * - Danish waterfront terms mapping: ensures correct terminology (ved åen vs ved floden)
+ * - Student/tourist score validation: caps scores for non-university/non-tourist cities
+ * - Neighborhood character city-size validation: prevents "pulserende" for small cities
+ * - Waterfront score floor: enforces minimum score when address contains water signals
+ * - synthesizeNeighborhoodFromAreaType: waterfront now maps to correct Danish terms contextually
  */
 
 // Danish university cities for student score validation
@@ -38,12 +48,43 @@ const PROHIBITED_PHRASES_BY_SIZE: Record<string, string[]> = {
   'small':  ['pulserende', 'urban energi', 'kosmopolit', 'byens puls', 'storby', 'byliv', 'metropol']
 };
 
+// Danish waterfront vocabulary — street/area name fragments that signal water proximity.
+// Used to boost waterfront scoring and select correct Danish terminology.
+const DANISH_WATERFRONT_SIGNALS = [
+  'å',          // river/stream (Åboulevarden, Åen)
+  'boulevard',  // often waterside in DK cities
+  'havn',       // harbour (Aarhus Havn, Nordhavn)
+  'kanal',      // canal (Christianshavn, Nyhavn)
+  'fjord',      // fjord (Roskilde Fjord)
+  'sø',         // lake (Silkeborg Søerne, Bagsværd Sø)
+  'strand',     // beach/shore
+  'kyst',       // coast
+  'bred',       // riverbank
+  'mole',       // pier/jetty
+];
+
+// Danish waterfront terminology by water type — used in neighborhood_character
+const DANISH_WATERFRONT_TERMS: Record<string, string> = {
+  'å':        'ved åen',
+  'kanal':    'ved kanalen',
+  'havn':     'ved havnen',
+  'fjord':    'ved fjorden',
+  'sø':       'ved søen',
+  'strand':   'ved stranden',
+  'kyst':     'ved kysten',
+  'bred':     'langs bredden',
+  'mole':     'ved molen',
+  'default':  'ved vandet',
+};
+
 // NEW: Location Context Input - streamlined for scoring
 export interface LocationContextInput {
   formatted_address: string;
   neighborhood: string | null;
   landmarks: Array<{ name: string; type: string }>;
   business_category: string;
+  website_about?: string;
+  local_location_reference?: string | null;  // Owner's own location language
   area_type?: string | null;
   hospitality_count?: number;
 }
@@ -173,6 +214,50 @@ export interface WhoWhenWhyOutput {
   }>;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract JSON from AI response that may contain preamble text or markdown fences
+ */
+function extractJSON(text: string): any {
+  // 1. Try markdown code fences first (```json ... ``` or ``` ... ```)
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) {
+    return JSON.parse(fenceMatch[1].trim());
+  }
+
+  // 2. Find the first { and last } to slice out the JSON object,
+  //    skipping any preamble text before it.
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+  }
+
+  // 3. Nothing worked — throw so the caller can trigger the POI fallback
+  throw new Error(
+    `No JSON found in AI response. Preview: "${text.substring(0, 120)}"`
+  );
+}
+
+/**
+ * Detects Danish waterfront context from address string.
+ * Returns { isWaterfront: boolean, term: string } where term is the
+ * locally-correct Danish phrase ("ved åen", "ved havnen", etc.)
+ */
+function detectDanishWaterfront(address: string): { isWaterfront: boolean; term: string } {
+  const lower = address.toLowerCase();
+  for (const signal of DANISH_WATERFRONT_SIGNALS) {
+    if (lower.includes(signal)) {
+      const term = DANISH_WATERFRONT_TERMS[signal] || DANISH_WATERFRONT_TERMS['default'];
+      return { isWaterfront: true, term };
+    }
+  }
+  return { isWaterfront: false, term: DANISH_WATERFRONT_TERMS['default'] };
+}
+
 export class AIAnalyzer {
   private apiKey: string;
 
@@ -185,19 +270,22 @@ export class AIAnalyzer {
    * Returns ALL scores (geographic + demographic) + neighborhood character
    */
   async analyzeLocationContext(input: LocationContextInput): Promise<LocationAnalysis> {
+    // Pre-detect waterfront from address so the prompt can reference it explicitly
+    const waterfrontContext = detectDanishWaterfront(input.formatted_address);
+
     const messages: any[] = [
-      { role: 'user', content: this.buildLocationPrompt(input) }
+      { role: 'user', content: this.buildLocationPrompt(input, waterfrontContext) }
     ];
 
     const tools = [{
       type: 'function',
       function: {
         name: 'web_search',
-        description: 'Search for information about a location, city, or neighbourhood',
+        description: 'Søg efter information om en lokation, by eller kvarter i Danmark',
         parameters: {
           type: 'object',
           properties: {
-            query: { type: 'string', description: 'Search query' }
+            query: { type: 'string', description: 'Søgeforespørgsel' }
           },
           required: ['query']
         }
@@ -235,16 +323,39 @@ export class AIAnalyzer {
       // No tool calls → AI is done, parse the JSON response
       if (!message.tool_calls || message.tool_calls.length === 0) {
         const content = message.content;
-        if (!content) throw new Error('Empty response from AI');
-        
-        // Strip markdown code fences if present (AI sometimes wraps JSON in ```json ... ```)
-        const cleanContent = content.trim().replace(/^```json\s*\n?/i, '').replace(/\n?```$/, '');
-        
-        const result = JSON.parse(cleanContent);
+        if (!content) throw new Error('Tom respons fra AI');
+
+        // Use extractJSON() instead of raw JSON.parse() — handles preamble + fences
+        const result = extractJSON(content);
         
         // ===== POST-PROCESSING VALIDATION =====
-        // Extract city from address for validation
         const city = input.formatted_address.split(',')[1]?.trim() || '';
+
+        // Waterfront score floor: if address signals waterfront, enforce minimum score of 60
+        if (waterfrontContext.isWaterfront) {
+          const currentScore = result.category_scores?.waterfront || 0;
+          if (currentScore < 60) {
+            console.log(
+              `🌊 Waterfront floor applied: score ${currentScore} → 65 ` +
+              `(address "${input.formatted_address}" contains waterfront signal, ` +
+              `term: "${waterfrontContext.term}")`
+            );
+            result.category_scores = result.category_scores || {};
+            result.category_scores.waterfront = 65;
+
+            // Ensure area_type reflects waterfront if it was the dominant signal
+            // but only if no other category is clearly dominant (score > 80)
+            const otherMax = Math.max(
+              ...Object.entries(result.category_scores)
+                .filter(([k]) => k !== 'waterfront')
+                .map(([, v]) => v as number)
+            );
+            if (otherMax <= 80 && result.area_type === 'mixed_use') {
+              result.area_type = 'waterfront';
+              console.log('🌊 area_type updated to waterfront (no dominant category > 80)');
+            }
+          }
+        }
         
         // FIX 2a: Student score validation - cap at 25 if not a university city
         if (result.demographic_proximity?.student > 25) {
@@ -287,24 +398,16 @@ export class AIAnalyzer {
           
           if (hasProhibited) {
             console.warn(
-              `⚠️ Neighborhood character uses inappropriate language for ${citySize} city (${city}). ` +
-              `Regenerating with factual fallback...`
+              `⚠️ neighborhood_character bruger upassende sprog for ${citySize} by (${city}). ` +
+              `Falder tilbage til faktuel tekst...`
             );
             
             // Fallback to simple factual synthesis
-            const areaTypeLabels: Record<string, string> = {
-              city_centre:        'centrum',
-              waterfront:         'ved havnen',
-              residential:        'i et boligkvarter',
-              office:             'i erhvervsområdet',
-              shopping_district:  'i shoppingområdet',
-              transport_hub:      'ved stationen',
-              destination:        'som destinationssted',
-              nature_park:        'ved naturområdet',
-            };
-            const areaLabel = areaTypeLabels[result.area_type] || 'i byen';
+            const areaLabel = waterfrontContext.isWaterfront
+              ? waterfrontContext.term
+              : this.areaTypeToLabel(result.area_type);
             result.neighborhood_character = `${city} ${areaLabel}.`;
-            console.log(`🔧 Synthesized factual neighborhood_character: "${result.neighborhood_character}"`);
+            console.log(`🔧 Syntetiseret neighborhood_character: "${result.neighborhood_character}"`);
           }
         }
         
@@ -338,7 +441,25 @@ export class AIAnalyzer {
       }
     }
 
-    throw new Error('AI did not return location analysis after 3 iterations');
+    throw new Error('AI returnerede ikke lokationsanalyse efter 3 iterationer');
+  }
+
+  /**
+   * Map area_type to Danish location label — used in fallback neighborhood_character
+   */
+  private areaTypeToLabel(areaType: string): string {
+    const labels: Record<string, string> = {
+      city_centre:        'centrum',
+      waterfront:         'ved vandet',
+      residential:        'i et boligkvarter',
+      office:             'i erhvervsområdet',
+      shopping_district:  'i shoppingområdet',
+      transport_hub:      'ved stationen',
+      destination:        'som destinationssted',
+      nature_park:        'ved naturområdet',
+      mixed_use:          'i byen',
+    };
+    return labels[areaType] || 'i byen';
   }
 
   /**
@@ -369,134 +490,229 @@ export class AIAnalyzer {
   }
 
   /**
-   * Build the analysis prompt for GPT-4o
+   * Build the location analysis prompt — written in Danish with Danish geographic vocabulary.
+   *
+   * WHY DANISH:
+   * An English prompt causes translation loss for Danish-specific geography:
+   * - "å" → AI reads as "river" → writes "ved floden" (wrong — DK has ingen floder, only åer)
+   * - "havn" context gets merged with international harbour concepts
+   * - City-size calibration fails because the AI lacks Danish population context
+   * - Local terminology (gågade, torv, å, sø) is better understood in Danish
+   *
+   * The market parameter prepares for expansion: da / no / sv / nl / de
    */
-  private buildLocationPrompt(input: LocationContextInput): string {
-    return `You are a location analyst for a restaurant marketing platform.
+  private buildLocationPrompt(
+    input: LocationContextInput,
+    waterfrontContext: { isWaterfront: boolean; term: string }
+  ): string {
+    const waterfrontHint = waterfrontContext.isWaterfront
+      ? `\nVIGTIGT: Adressen indeholder et dansk vandrelateret signal ("${input.formatted_address}"). ` +
+        `Vandfront (waterfront) er sandsynligvis en primær kategori. ` +
+        `Brug den korrekte danske betegnelse: "${waterfrontContext.term}" — IKKE "ved floden" eller "ved riveren". ` +
+        `Danmark har åer og søer, ikke floder. Vand scorer HØJT (60+) når stedet faktisk ligger VED vandet.`
+      : '';
 
-Analyze the character and demographics of this location using web search if needed.
-Return a JSON object with scores and a description.
+    return `Du er lokationsanalytiker for en dansk restaurantmarketingplatform. Markedet er: Danmark (da).
 
-LOCATION:
-Address: ${input.formatted_address}
-Area: ${input.neighborhood || 'Unknown neighbourhood'}
-Hospitality venues within 300m: ${input.hospitality_count || 0}
-Nearby landmarks: ${input.landmarks?.slice(0, 6).map(l => l.name).join(', ') || 'none'}
+Analysér karakteren og demografien for denne lokation. Brug websøgning hvis du mangler kontekst om stedet.
+Returner et JSON-objekt med scores og en beskrivelse.
 
-TASK:
-Search for context about this location and area if needed, then return:
+LOKATION:
+Adresse: ${input.formatted_address}
+Kvarter/område: ${input.neighborhood || 'Ukendt'}
+Spisesteder inden for 300m: ${input.hospitality_count || 0}
+Nærliggende steder: ${input.landmarks?.slice(0, 6).map(l => l.name).join(', ') || 'ingen'}
+${input.local_location_reference
+  ? `\nEJERENS EGEN STEDSBESKRIVELSE: "${input.local_location_reference}"
+Dette er virksomhedens egne ord for sin beliggenhed — brug denne terminologi
+direkte i neighborhood_character og respekter den som primær kilde.
+Eksempel: "ved åen" skal bruges præcist som "ved åen", IKKE "ved floden" eller "ved vandet".`
+  : ''}
+${waterfrontHint}
 
-1. Location Category Scores (0–100)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DANSK GEOGRAFISK ORDBOG (obligatorisk viden)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-These scores answer ONE question per category:
-"To what degree is THIS category the primary reason customers are in this area?"
+Disse begreber er centrale i dansk bygeografi. Brug dem præcist:
 
-Score based on CUSTOMER DRAW, not geographic proximity.
+• å / åen — en mindre vandløb der løber gennem byen (fx Aarhus Å langs Åboulevarden).
+  ALDRIG kald det "floden" eller "riveren". Danmark har ingen store floder — kun åer og søer.
+  En café ved åen er et stærkt waterfront-signal.
 
-RULE: A category scores high only if a customer would specifically
-seek out this location TYPE to visit this business.
-Nearby presence of that environment does NOT justify a high score.
+• sø / søerne — sø i eller ved byen (fx Silkeborg Søerne, Bagsværd Sø).
+  Sø-nærhed er waterfront-kontekst, ikke nature_park.
 
-Category definitions:
+• havn / havnen — havn (fx Aarhus Havn, Nordhavn i København).
+  Moderne havnekvarterer (Aarhus Ø, Nordhavn) er city_centre + waterfront.
+
+• kanal / kanalen — kanal (fx Nyhavn, Christianshavn i København).
+
+• gågade / strøget — fodgængerzone i bycentrum. Stærkt shopping_district signal.
+
+• torv / torvet — byens centrale plads (Aarhus Rådhusplads, Silkeborg Torv).
+  Torv = city_centre.
+
+• boulevard — ofte en bred vej langs vand eller park i danske byer.
+  "Åboulevarden" = boulevard langs åen → waterfront + city_centre.
+
+• latin kvarter / latinerkvarteret — ældre bydelsnavne med kulturel identitet.
+
+Bystørrelser i Danmark (kalibrér sproget herefter):
+• Stor by (250k+): København, Aarhus — urban, dynamisk, mangfoldig
+• Mellemstor by (50–200k): Odense, Aalborg, Horsens, Silkeborg, Randers, Kolding
+• Lille by (<50k): Viborg, Fredericia, Næstved, Ribe og lignende
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPGAVE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Søg evt. efter kontekst om lokationen, og returner derefter:
+
+1. category_scores — geografiske lokationstyper (0–100)
+
+Scorerne besvarer ét spørgsmål pr. kategori:
+"I hvilken grad er DENNE kategori den primære grund til, at kunder befinder sig i dette område?"
+
+Score efter KUNDERNES TILTRÆKNINGSKRAFT, ikke geografisk nærhed.
+
+REGEL: En kategori scorer højt KUN hvis en kunde specifikt ville opsøge
+denne lokationstype for at besøge stedet.
+At noget befinder sig i nærheden retfærdiggør IKKE en høj score alene.
+
+Kategoridefinitioner:
 
 city_centre (0–100)
-  High: The venue sits in the active flow of urban life — pedestrian zone,
-  main square, dense mix of retail and restaurants. Customers are here
-  because it is a busy city hub.
-  Low: The venue is in a city but not in its commercial core.
+  Høj: Stedet ligger i den aktive bykerne — gågade, torv, tæt mix af butikker og
+  restauranter. Kunder er her fordi det er et travlt byknudepunkt.
+  Lav: Stedet er i en by, men ikke i dens kommercielle centrum.
 
 waterfront (0–100)
-  High: Water is a direct feature of the location experience — harbour
-  promenade, lakeside terrace, canal-side seating, sea views from the venue.
-  Low: Water exists nearby but is not part of why customers choose this spot.
+  Høj: Vand er en direkte del af lokationsoplevelsen — havnepromenade, søbred,
+  kanalside, terrasse langs å, udsigt til vand fra stedet.
+  En café på Åboulevarden ved Aarhus Å scorer HØJT (70+) — åen er synlig og
+  udgør en central del af stedets identitet.
+  Lav: Vand eksisterer i nærheden men er ikke en del af grunden til at kunder vælger stedet.
+
+  VIGTIGT: "Å" i en adresse er næsten altid et stærkt waterfront-signal i Danmark.
+  Åboulevarden, Åen, Ådalen, Ågade → alle signalerer vandnærhed.
 
 nature_park (0–100)
-  High: The venue is physically embedded in or at the entrance of a natural
-  area — forest, lake, beach, or trail. Customers come here because of nature.
-  Low: A natural area exists in the same city, within view, or within walking
-  distance but the venue itself is not in that natural setting.
+  Høj: Stedet er fysisk placeret i eller ved indgangen til et naturområde —
+  skov, sø, strand eller sti. Kunder kommer her på grund af naturen.
+  Lav: Et naturområde eksisterer i samme by, men stedet selv er ikke i det.
 
 residential (0–100)
-  High: The venue primarily serves a local catchment — people arrive on foot
-  from surrounding homes. Low visitor or transit footfall from outsiders.
-  Low: The area attracts people from beyond the immediate neighbourhood.
+  Høj: Stedet betjener primært et lokalt opland — folk ankommer til fods fra
+  nærliggende boliger. Lav besøgs- eller transitstrøm fra andre områder.
+  Lav: Området tiltrækker folk fra et bredere opland.
 
 office (0–100)
-  High: Nearby workplaces generate the dominant customer flow —
-  lunchtime crowds, after-work visits, business meetings.
-  Low: Offices exist nearby but are not the primary driver of footfall.
+  Høj: Nærliggende arbejdspladser genererer den dominerende kundestrøm —
+  frokosttrængsel, eftermiddagsbesøg, forretningsmøder.
+  Lav: Der er kontorer i nærheden, men de er ikke den primære driver af fodgængerflow.
 
 shopping_district (0–100)
-  High: The venue is inside or directly adjacent to a primary retail zone
-  and captures shoppers as its main audience.
-  Low: Some shops exist nearby but retail is not the area's defining character.
+  Høj: Stedet er inde i eller direkte op til en primær detailhandelszone
+  og fanger shoppere som sin primære målgruppe.
+  Lav: Der er butikker i nærheden, men detailhandel er ikke områdets dominerende karakter.
 
 transport_hub (0–100)
-  High: The venue is in or immediately next to a major transit node —
-  train station concourse, ferry terminal, bus interchange. Customers
-  pass through rather than come specifically to this area.
-  Low: A bus stop or station exists within walking distance.
+  Høj: Stedet er i eller umiddelbart ved et større transitknudepunkt —
+  togstationshal, færgeterminal, busstation. Kunder passerer igennem.
+  Lav: Et busstoppested eller station er inden for gåafstand.
 
 tourist_destination (0–100)
-  High: The location itself draws visitors — historic quarter, major
-  attraction, well-known landmark. Tourists form a significant share
-  of passers-by.
-  Low: The city has tourist attractions but this specific area does not
-  function as a tourist zone.
+  Høj: Lokationen i sig selv tiltrækker besøgende — historisk kvarter, større
+  attraktion, velkendt landemærke. Turister udgør en betydelig del af forbipasserende.
+  Lav: Byen har turistattraktioner, men dette specifikke område fungerer ikke som turistzone.
 
-Calibration:
-- Scores are independent. They do NOT need to sum to 100.
-- Most venues will have 1–2 high scores (60+) and the rest low (0–25).
-- A score above 60 means that category genuinely shapes why customers
-  are here. Do not inflate secondary categories because they are
-  "somewhat relevant."
-- When in doubt, score lower. Over-scoring creates false signals
-  downstream in content generation.
+Kalibrering:
+- Scores er uafhængige. De behøver IKKE summere til 100.
+- De fleste steder vil have 1–2 høje scores (60+) og resten lave (0–25).
+- En score over 60 betyder at kategorien reelt former, hvorfor kunder er her.
+  Undgå at oppuste sekundære kategorier fordi de er "lidt relevante".
+- Tænk i det faktiske gadebillede: hvad ser man fra indgangen?
 
-2. demographic_proximity (who PASSES BY this area, 0-100):
-   - local_resident: do locals use this area daily?
-   - tourist: do tourists visit this area?
-   - student: is this a student area (university-dominant)?
-   - business_professional: office workers in the area?
-   - family: family-oriented area (schools, parks)?
+2. demographic_proximity — hvem PASSERER FORBI dette område (0–100):
+   - local_resident: bruger lokale dette område dagligt?
+   - tourist: besøger turister dette område?
+   - student: er dette et studenterdomineret område?
+   - business_professional: er der kontorfolk i området?
+   - family: er det et familieorienteret område (skoler, parker)?
 
-   IMPORTANT: Base demographic scores on actual area character,
-   not just proximity to one institution. A single university campus
-   in a non-student city should score LOW (10-25), not high.
-   Aarhus is a student city. Silkeborg is not.
+   VIGTIGT: Basér demografiske scores på områdets faktiske karakter,
+   ikke blot nærhed til én institution.
+   Et enkelt universitetscampus i en ikke-studenterdomineret by scorer LAVT (10–25).
+   Aarhus er en studenterby. Silkeborg er ikke.
+   Turister scores HØJT i kystbyer, historiske bykerner og kendte attraktionssteder.
 
-3. area_type: the single best description from:
+3. area_type — den bedste enkeltbetegnelse fra:
    city_centre / waterfront / residential / office / transport_hub /
    shopping_district / tourist_destination / nature_park / mixed_use
 
-4. neighborhood_character: 2-3 sentences in Danish describing the area.
-   What kind of place is this? What surrounds it? What is the atmosphere?
-   Do NOT mention the specific business. Do NOT give marketing advice.
-   
-   FIX 1b: Generate neighborhood_character as a factual, city-accurate description.
-   Scale the language to the actual city size:
-   - Large city (500k+): urban energy, vibrant, cosmopolitan references are appropriate
-   - Medium city (50k–200k): focus on local landmarks, the specific street or square,
-     community feel, proximity to nature or water if relevant
-   - Small town (<50k): local character, slower pace, specific known landmarks
-   
-   For cities like Silkeborg, Horsens, Viborg (medium-sized Danish cities):
-   Reference specific local features (e.g., Silkeborg Søerne, gågaden, Torvet) or
-   the natural surroundings — NOT "pulserende byliv" or "byens puls".
-   These phrases do not match a city of 50k-100k people.
-   
-   neighborhood_character must be a factual sentence, not marketing language.
-   Example good output for Silkeborg: "Centralt i Silkeborg med gågaden og Torvet
-   inden for gangafstand, tæt på Silkeborg Søerne og naturstier."
-   Example bad output: "I hjertet af Silkeborgs pulserende byliv med konstant
-   aktivitet og urban energi."
+   Vælg den kategori der bedst forklarer HVAD der primært tiltrækker kunder til dette sted.
+   Et sted kan have to høje scores (fx city_centre: 85, waterfront: 70) —
+   vælg den der er mest definerende for stedets identitet.
 
-Return ONLY valid JSON:
+4. neighborhood_character — 2–3 sætninger PÅ DANSK der beskriver området.
+   Hvad slags sted er dette? Hvad omgiver det? Hvad er atmosfæren?
+   Nævn IKKE den specifikke virksomhed. Giv IKKE marketingråd.
+
+   Skalér sproget til byens faktiske størrelse:
+   - Stor by (250k+): urban energi, mangfoldigt, dynamisk — passende referencer
+   - Mellemstor by (50–200k): fokus på lokale landemærker, den specifikke gade eller plads,
+     lokal fællesskabsfølelse, nærhed til natur eller vand hvis relevant
+   - Lille by (<50k): lokal karakter, roligt tempo, kendte lokale steder
+
+   For mellemstore danske byer (Silkeborg, Horsens, Viborg):
+   Nævn specifikke lokale kendetegn (fx Silkeborg Søerne, gågaden, Torvet) —
+   IKKE "pulserende byliv" eller "byens puls".
+
+   Brug KORREKTE danske vandtermer:
+   ✅ "ved åen", "langs åen", "ved Aarhus Å" — for å-lokationer
+   ✅ "ved søen", "ved Silkeborg Søerne" — for søer
+   ✅ "ved havnen", "i havnekvarteret" — for havne
+   ❌ "ved floden", "ved riveren", "ved elven" — ALDRIG brug disse
+
+   Eksempel god output for Åboulevarden, Aarhus:
+   "Åboulevarden ligger centralt i Aarhus Centrum, direkte ved Aarhus Å der løber
+   gennem bykernen. Gaden er omgivet af restauranter og caféer med terrasser langs åen,
+   og ARoS Kunstmuseum er inden for få minutters gang."
+
+   Eksempel god output for Silkeborg:
+   "Centralt i Silkeborg med gågaden og Torvet inden for gangafstand,
+   tæt på Silkeborg Søerne og naturstier."
+
+   Eksempel DÅRLIG output (upassende for dansk mellemstor by):
+   "I hjertet af Silkeborgs pulserende byliv med konstant urban energi og kosmopolitisk stemning."
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Returner KUN valid JSON uden markdown, uden forklaring, uden preamble:
+
 {
-  "category_scores": { "city_centre": 0-100, "waterfront": 0-100, ... },
-  "demographic_proximity": { "local_resident": 0-100, "tourist": 0-100, ... },
+  "category_scores": {
+    "city_centre": 0-100,
+    "waterfront": 0-100,
+    "nature_park": 0-100,
+    "residential": 0-100,
+    "office": 0-100,
+    "shopping_district": 0-100,
+    "transport_hub": 0-100,
+    "tourist_destination": 0-100
+  },
+  "demographic_proximity": {
+    "local_resident": 0-100,
+    "tourist": 0-100,
+    "student": 0-100,
+    "business_professional": 0-100,
+    "family": 0-100
+  },
   "area_type": "city_centre",
-  "neighborhood_character": "dansk tekst..."
+  "neighborhood_character": "dansk tekst her..."
 }`;
   }
 
