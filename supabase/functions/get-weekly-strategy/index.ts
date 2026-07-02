@@ -10,6 +10,7 @@ import { fetchWeatherFromCoordinates, createSeasonalFallbackWeather } from './we
 import { getTypeAnalytics } from '../_shared/contentTypeTracking.ts';
 import { DEFAULT_TYPE_MIX, allocateContentTypes, getDominantGoalMode } from '../_shared/contentTypeSystem.ts';
 import { countryToLanguageCode } from '../_shared/helpers/country-to-language.ts';
+import { getBusinessTier } from '../_shared/tier-resolver.ts';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
@@ -181,20 +182,32 @@ function ctaModeToIntent(
   if (ctaMode === 'booking') return 'booking';
   if (ctaMode === 'walk_in') return 'traffic';
   if (ctaMode === 'engagement') return 'engagement';
-  if (goalMode === 'retain_loyalty') return 'awareness';
+  if (goalMode === 'build_brand') return 'awareness';
   return 'traffic'; // safe default
+}
+
+/**
+ * Get slot priority based on CTA intent
+ * Lower number = higher priority (booking > footfall > brand > other)
+ * Note: retain_loyalty removed - loyalty is an outcome, not a tactical goal
+ */
+function getSlotPriority(ctaMode: string, goalMode: string): number {
+  const intent = ctaModeToIntent(ctaMode, goalMode);
+  if (intent === 'booking') return 1;
+  if (intent === 'traffic') return 2;
+  if (intent === 'engagement' || goalMode === 'build_brand') return 4;
+  return 5; // other
 }
 
 /**
  * Rebuild week summary sentence from actual slot counts
  */
 function rebuildWeekSummarySentence(angles: any[]): string {
-  const counts = { booking: 0, walk_in: 0, build_brand: 0, retain_loyalty: 0 };
+  const counts = { booking: 0, walk_in: 0, build_brand: 0 };
   for (const a of angles) {
     if (a.cta_mode === 'booking') counts.booking++;
     else if (a.goal_mode === 'drive_footfall') counts.walk_in++;
     else if (a.goal_mode === 'build_brand') counts.build_brand++;
-    else if (a.goal_mode === 'retain_loyalty') counts.retain_loyalty++;
   }
   const parts: string[] = [];
   if (counts.booking > 0)
@@ -203,8 +216,6 @@ function rebuildWeekSummarySentence(angles: any[]): string {
     parts.push(`${counts.walk_in} opslag driver besøg`);
   if (counts.build_brand > 0)
     parts.push(`${counts.build_brand} opslag styrker brand`);
-  if (counts.retain_loyalty > 0)
-    parts.push(`${counts.retain_loyalty} opslag plejer stamgæster`);
   return parts.length > 0 ? `Denne uge: ${parts.join(', ')}.` : '';
 }
 
@@ -224,6 +235,7 @@ function resolvePostDate(
   availableDays: string[],      // ISO dates for the week (open-hours filtered)
   ctaMode: string,
   bookingNudgeLeadDays: number, // weekContext.cta_rules?.booking_nudge_lead_days ?? 2
+  assignedDays?: Set<string>,
 ): string {
   const targetDows = targetDays
     .map(d => DAY_NAME_TO_DOW[d])
@@ -234,12 +246,18 @@ function resolvePostDate(
       ? targetDows.map(dow => ((dow - bookingNudgeLeadDays) + 7) % 7)
       : targetDows;
 
-  const match = availableDays.find(dateStr => {
+  // Exclude days already claimed by higher-priority slots
+  const candidateDays = assignedDays && assignedDays.size > 0
+    ? availableDays.filter(d => !assignedDays.has(d))
+    : availableDays;
+
+  const match = candidateDays.find(dateStr => {
     const dow = new Date(dateStr + 'T00:00:00').getDay();
     return effectiveDows.includes(dow);
   });
 
-  return match ?? availableDays[0];
+  // Fallback: first unassigned day, then absolute first available day
+  return match ?? candidateDays[0] ?? availableDays[0];
 }
 
 serve(async (req)=>{
@@ -393,7 +411,7 @@ serve(async (req)=>{
     console.log('[get-weekly-strategy] Language filter:', { country: locationData?.country, expectedLanguage });
     
     // Fetch all other business data in parallel (STEP 1)
-    const [{ data: locationIntel }, { data: operations, error: operationsError }, { data: openingHours }, { data: brandProfile, error: brandProfileError }, { data: businessProfileSignal }, { data: menuItemsNormalized }, { data: menuItems }, { data: businessProgrammes }, { data: profileData }, { data: businessTier, error: businessTierError }] = await Promise.all([
+    const [{ data: locationIntel }, { data: operations, error: operationsError }, { data: openingHours }, { data: brandProfile, error: brandProfileError }, { data: businessProfileSignal }, { data: menuItemsNormalized }, { data: menuItems }, { data: businessProgrammes }, { data: profileData }] = await Promise.all([
       dataClient.from('business_location_intelligence').select('neighborhood, area_type, category_scores, demographic_proximity, location_marketing_hooks, latitude, longitude, local_location_reference').eq('business_id', body.business_id).single(),
       dataClient.from('business_operations').select('has_outdoor_seating, establishment_type, reservation_required, accepts_walk_ins, enabled_menu_languages, kitchen_close_time, has_takeaway, has_table_service').eq('business_id', body.business_id).maybeSingle(),
       dataClient.from('opening_hours').select('weekday, open_time, close_time').eq('business_id', body.business_id).eq('kind', 'normal'),
@@ -425,11 +443,7 @@ serve(async (req)=>{
       dataClient.from('menu_items_normalized').select('id, item_name, item_description, category_name, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', body.business_id).eq('menu_language', expectedLanguage),
       dataClient.from('menu_results_v2').select('id, language_code, structured_data, service_periods, is_signature, ai_summary, source_url, service_period_name').eq('business_id', body.business_id).eq('status', 'done').limit(20),
       dataClient.from('business_programme_profiles').select('programme_type, programme_name, time_windows, operating_days, is_active, decision_timing, accepts_reservations, baseline_goal_split, audience_segments').eq('business_id', body.business_id).eq('is_active', true),
-      dataClient.from('profiles').select('selected_platforms').eq('id', skipAuth ? business.owner_id : user.id).single(),
-      Promise.resolve({
-        data: null,
-        error: null
-      })
+      dataClient.from('profiles').select('selected_platforms').eq('id', skipAuth ? business.owner_id : user.id).single()
     ]);
     // Derive structured location intelligence from category_scores
     // Uses the same buildLocationIntelligence() as brand-profile-generator
@@ -482,8 +496,11 @@ serve(async (req)=>{
         'instagram'
       ];
     })();
-    // Derive subscription tier with fallback
-    const subscriptionTier = businessTier?.subscription_tier === 'pro' ? 'pro' : 'smart';
+
+    // Resolve subscription tier (single source of truth)
+    const { legacyTier: subscriptionTier, isPaidTier, isProTier } = await getBusinessTier(dataClient, body.business_id);
+    console.log('[get-weekly-strategy] Tier resolution:', { subscriptionTier, isPaidTier, isProTier });
+
     // Derive preferred post count with fallback
     const preferredPostsPerWeek = 5; // Default value - preferred_posts_per_week column doesn't exist
     // Resolve actual post count based on tier:
@@ -871,7 +888,12 @@ serve(async (req)=>{
           menuSummaries.push({
             title,
             source_url: item.source_url || '',
-            summary: item.ai_summary
+            summary: item.ai_summary,
+            // FIX: carry the raw English service_periods array (e.g. ["lunch"]) alongside
+            // the Danish display title. Downstream period-matching for menu_context_snippet
+            // must match on this, not on `title` — title is localized display text and
+            // will never match idea.service_period ("lunch" vs "FROKOST").
+            service_periods: Array.isArray(item.service_periods) ? item.service_periods : []
           });
           // Extract readable lines from summary as fallback dish names
           // (strip leading bullet/dash chars, keep non-empty lines)
@@ -1537,14 +1559,27 @@ serve(async (req)=>{
         // Content strategy — drives Phase 1 slot assignment (goal_mode + content_category per post)
         content_strategy: (()=>{
           const cs = brandProfile.content_strategy;
+          let parsed = null;
           if (typeof cs === 'string') {
             try {
-              return JSON.parse(cs);
+              parsed = JSON.parse(cs);
             } catch  {
               return null;
             }
+          } else {
+            parsed = cs || null;
           }
-          return cs || null;
+          
+          // Migrate legacy 3-goal structure to 2-goal framework
+          if (parsed && parsed.goal_blend && 'retain_loyalty' in parsed.goal_blend) {
+            const legacy = parsed.goal_blend;
+            parsed.goal_blend = {
+              drive_footfall: legacy.drive_footfall || 0,
+              build_brand: (legacy.build_brand || 0) + (legacy.retain_loyalty || 0)
+            };
+          }
+          
+          return parsed;
         })(),
         // v5: recognizable_interior_identity — verified factual venue description from photo analysis.
         // Factual anchor for atmosphere posts; prevents training-data interpolation about the space.
@@ -1613,20 +1648,20 @@ serve(async (req)=>{
       const splitsWithData = progs.filter((p: any) => p.baseline_goal_split);
       if (splitsWithData.length > 0) {
         const n = splitsWithData.length;
+        // TWO-DIMENSIONAL FRAMEWORK: Merge retain_regulars into build_brand
         const avgFootfall  = splitsWithData.reduce((s: number, p: any) => s + (p.baseline_goal_split.drive_footfall   || 0), 0) / n / 100;
         const avgBrand     = splitsWithData.reduce((s: number, p: any) => s + (p.baseline_goal_split.strengthen_brand || 0), 0) / n / 100;
         const avgLoyalty   = splitsWithData.reduce((s: number, p: any) => s + (p.baseline_goal_split.retain_regulars  || 0), 0) / n / 100;
         const derivedBlend = {
           drive_footfall: Math.round(avgFootfall * 100) / 100,
-          build_brand:    Math.round(avgBrand    * 100) / 100,
-          retain_loyalty: Math.round(avgLoyalty  * 100) / 100,
+          build_brand:    Math.round((avgBrand + avgLoyalty) * 100) / 100,  // Merge loyalty into brand
         };
         if (!weekContext.brand_voice.content_strategy) {
           weekContext.brand_voice.content_strategy = { goal_blend: derivedBlend } as any;
         } else {
           weekContext.brand_voice.content_strategy.goal_blend = derivedBlend;
         }
-        console.log('[get-weekly-strategy] Derived goal_blend from programme splits:', derivedBlend);
+        console.log('[get-weekly-strategy] Derived goal_blend from programme splits (2D framework):', derivedBlend);
       }
     }
 
@@ -2020,7 +2055,43 @@ serve(async (req)=>{
         
         // ===== POST-PROCESS: Fix booking signal flow =====
         console.log('[get-weekly-strategy] POST-PROCESS: Mapping cta_mode → cta_intent and resolving post dates...');
-        const angles = strategy.strategic_brief?.angles ?? [];
+        let angles = strategy.strategic_brief?.angles ?? [];
+        
+        // PRIORITY-BASED SORTING FOR DAY ASSIGNMENT
+        // Sort post_ideas by priority: booking > footfall > brand > other
+        // This ensures high-value intents get assigned to optimal days first
+        // NOTE: We preserve original slot_id from Phase 1 - do NOT relabel!
+        console.log('[POST-PROCESS] Original slot assignments:', angles.map((a: any) => ({ slot: a.slot_id, cta_mode: a.cta_mode, goal_mode: a.goal_mode })));
+        
+        // Sort angles by priority for logging (angles array is used for strategic_brief)
+        angles.sort((a: any, b: any) => {
+          const priorityA = getSlotPriority(a.cta_mode, a.goal_mode);
+          const priorityB = getSlotPriority(b.cta_mode, b.goal_mode);
+          return priorityA - priorityB;
+        });
+        
+        console.log('[POST-PROCESS] Priority-sorted angles (slot_id preserved):', angles.map((a: any) => ({ slot: a.slot_id, cta_mode: a.cta_mode, goal_mode: a.goal_mode, priority: getSlotPriority(a.cta_mode, a.goal_mode) })));
+        
+        // Sort post_ideas by priority for day assignment (highest priority posts get best days)
+        strategy.post_ideas.sort((a: any, b: any) => {
+          const angle_a = angles.find((ang: any) => ang.slot_id === a.slot_id);
+          const angle_b = angles.find((ang: any) => ang.slot_id === b.slot_id);
+          
+          const priorityA = getSlotPriority(angle_a?.cta_mode || a.cta_mode, angle_a?.goal_mode || a.goal_mode);
+          const priorityB = getSlotPriority(angle_b?.cta_mode || b.cta_mode, angle_b?.goal_mode || b.goal_mode);
+          
+          return priorityA - priorityB;
+        });
+        
+        console.log('[POST-PROCESS] Post ideas reordered by priority:', strategy.post_ideas.map((p: any) => ({ slot: p.slot_id, title: p.headline?.substring(0, 40) })));
+        
+        // Update strategic_brief.angles to use priority-sorted order
+        if (strategy.strategic_brief) {
+          strategy.strategic_brief.angles = angles;
+        }
+        
+        // NEW: Track assigned days to prevent slot collisions
+        const assignedDays = new Set<string>();
         
         for (const idea of strategy.post_ideas) {
           const angle = angles.find((a: any) => String(a.slot_id) === String(idea.slot_id));
@@ -2030,16 +2101,64 @@ serve(async (req)=>{
           idea.cta_intent = ctaModeToIntent(angle.cta_mode, idea.goal_mode);
           
           // FIX 2b: deterministic post date from target_days + lead_days offset
+          // NEW: Pass assignedDays to ensure each slot gets a unique day
           const leadDays = weekContext.cta_rules?.booking_nudge_lead_days ?? 2;
           const resolvedDate = resolvePostDate(
             angle.target_days ?? [],
             weekContext.available_days,
             angle.cta_mode,
             leadDays,
+            assignedDays, // Exclude days already assigned to previous slots
           );
           idea.suggested_day = resolvedDate;
           if (idea.timing_intelligence) {
             idea.timing_intelligence.suggested_post_date = resolvedDate;
+          }
+          
+          // Track this day as assigned so next slot won't use it
+          assignedDays.add(resolvedDate);
+          console.log(`[POST-PROCESS] Slot ${idea.slot_id} assigned to ${resolvedDate} (excluded: [${Array.from(assignedDays).join(', ')}])`);
+
+          // FIX: Menu grounding for non-dish slots.
+          // Slots with content_focus !== 'menu_item' never receive a menu_item_id,
+          // leaving generate-text-from-idea with nothing factual to anchor to for
+          // that service period. Attach a short, real menu fact here — sourced from
+          // menu_summaries already fetched for weekContext — so atmosphere/
+          // craving_visual/behind_scenes posts have something concrete to reference
+          // instead of inventing vague phrases like "hjemmelavede morgenmadstilbud".
+          if (!idea.menu_item_used && !idea.menu_item_id) {
+            const period = (idea.service_period || '').toLowerCase();
+            const allSummaries = weekContext.menu_summaries || [];
+
+            // Match on the raw service_periods array (English keys, e.g. "lunch"), not on
+            // the localized display title. "any" or an unmatched period pools bullets
+            // across every available summary instead of defaulting to index[0].
+            const periodMatches = period && period !== 'any'
+              ? allSummaries.filter((m: any) => (m.service_periods || []).includes(period))
+              : [];
+            const summaryPool = periodMatches.length > 0 ? periodMatches : allSummaries;
+
+            // Collect every bullet line across the candidate summaries into one flat pool.
+            const bulletPool: string[] = [];
+            for (const m of summaryPool) {
+              if (!m?.summary) continue;
+              const lines = m.summary
+                .split('\n')
+                .map((l: string) => l.replace(/^[-•\s]+/, '').trim())
+                .filter((l: string) => l.length > 15);
+              bulletPool.push(...lines);
+            }
+
+            if (bulletPool.length > 0) {
+              // Rotate through bullets instead of always taking the first line, so
+              // grounding varies across slots and weeks rather than repeating.
+              const slotSeed = typeof idea.slot_id === 'string'
+                ? [...idea.slot_id].reduce((a, c) => a + c.charCodeAt(0), 0)
+                : Number(idea.id) || 0;
+              const idx = slotSeed % bulletPool.length;
+              idea.menu_context_snippet = bulletPool[idx].slice(0, 200);
+              console.log(`[POST-PROCESS] Slot ${idea.slot_id} grounded with menu_context_snippet (period=${period || 'any'}, pool=${bulletPool.length}):`, idea.menu_context_snippet.slice(0, 60));
+            }
           }
         }
         
