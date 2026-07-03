@@ -38,12 +38,14 @@ export interface MenuStatusUI {
  * @param status - Internal database status
  * @param sourceType - Type of menu source (optional, for context-specific messaging)
  * @param errorCode - Optional error code for specific error messages
+ * @param errorMessage - Custom error message from backend (takes precedence over generic messages)
  * @returns User-friendly UI state with Danish labels
  */
 export function getMenuStatusUI(
   status: MenuSourceStatus,
   sourceType?: MenuSourceType,
-  errorCode?: string
+  errorCode?: string,
+  errorMessage?: string
 ): MenuStatusUI {
   switch (status) {
     case 'pending':
@@ -79,7 +81,7 @@ export function getMenuStatusUI(
       }
 
     case 'failed':
-      return getFailedStatusUI(sourceType, errorCode)
+      return getFailedStatusUI(sourceType, errorCode, errorMessage)
 
     default:
       return {
@@ -117,8 +119,28 @@ function getProcessingDescription(sourceType?: MenuSourceType): string {
  */
 function getFailedStatusUI(
   sourceType?: MenuSourceType,
-  errorCode?: string
+  errorCode?: string,
+  errorMessage?: string
 ): MenuStatusUI {
+  // If we have a custom error message from backend, use it
+  if (errorMessage) {
+    return {
+      title: 'Vi kunne ikke læse menukortet',
+      description: errorMessage,
+      variant: 'error',
+      icon: '❌',
+      showProgress: false,
+      primaryAction: {
+        label: 'Tilføj manuelt',
+        action: 'manual'
+      },
+      secondaryAction: {
+        label: 'Upload PDF',
+        action: 'upload'
+      }
+    }
+  }
+
   // Check for specific error codes first
   if (errorCode === 'no_text_extracted') {
     return {

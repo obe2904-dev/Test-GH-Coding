@@ -224,8 +224,6 @@ export async function generateContentPlanSplit(
       finalCtaIntent = 'traffic';
     } else if (goalMode === 'build_brand') {
       finalCtaIntent = 'engagement';
-    } else if (goalMode === 'retain_loyalty') {
-      finalCtaIntent = 'awareness';
     }
     
     console.log(`[Phase 2b] Processing post ${i + 1}/${contentPlan.length} (ID: ${slot.id}, type: ${slot.type}, cta_mode: ${ctaMode || 'none'}, goal: ${goalMode || 'none'}, cta_intent: ${finalCtaIntent})`);

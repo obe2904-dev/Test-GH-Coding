@@ -12,7 +12,6 @@
  * goal_mode drives the CTA instruction inside each template:
  *   drive_footfall → hard CTA: time, booking, phone number
  *   build_brand    → soft CTA or none; memorable and shareable
- *   retain_loyalty → no explicit CTA required; warmth and recognition
  *
  * CRITICAL DESIGN:
  * - product_menu / craving_visual posts receive menu-items → can mention dishes
@@ -268,18 +267,11 @@ export async function generatePostDetail(
     'Blød CTA: Opfordre følgerne til at tagge en ven eller et familiemedlem de vil tage med — konkret og personligt.',
     'Blød CTA: Del en insider-indsigt, et råd eller en lille hemmelighed fra køkkenet/stedet — ingen salgspres, bare genuint kendskab.',
   ];
-  const retainLoyaltyCtaFlavors = [
-    'Ingen eksplicit CTA: Fokusér på varme, genkendelse og stamgæst-følelsen — lad stamgæsterne nikke genkendende.',
-    'Ingen eksplicit CTA: Tak de trofaste gæster direkte og personligt — vis at du husker dem.',
-    'Ingen eksplicit CTA: Del en sæsonritual eller tradition der kun stamgæsterne kender — eksklusivt og nærværende.',
-  ];
   const ctaInstruction = goalMode === 'drive_footfall'
     ? buildFootfallCta()
     : goalMode === 'build_brand'
       ? brandBuilderCtaFlavors[ctaFlavorIndex % brandBuilderCtaFlavors.length]
-      : goalMode === 'retain_loyalty'
-        ? retainLoyaltyCtaFlavors[ctaFlavorIndex % retainLoyaltyCtaFlavors.length]
-        : ''; // no goal_mode → no special instruction
+      : ''; // no goal_mode → no special instruction
 
   // Opening/closing time for the post’s specific day
   const openTimeForDay: string | null = context.daily_open_time?.[postSlot.suggested_day] ?? null;
@@ -565,11 +557,6 @@ Forretningen HAR IKKE udeservering.
       const anchors = cs.brand_anchors as string[];
       return anchors[postIndex % anchors.length];
     }
-    if (goalMode === 'retain_loyalty' && cs.loyalty_hooks?.length > 0) {
-      // ✅ Rotate through loyalty hooks
-      const hooks = cs.loyalty_hooks as string[];
-      return hooks[postIndex % hooks.length];
-    }
     return '';
   })();
   // Line 1: who they are + who they serve
@@ -629,11 +616,10 @@ Forretningen HAR IKKE udeservering.
       return `${weekArgPrefix}POST-ROLLE I UGENS ARC: BRANDFORANKRING — ${capitalDay} er en god dag til at vise det der underbygger ugens argument: folkene bag, håndværket, det der adskiller stedet. Ikke salg — identitet og fortælling der giver ugens argument troværdighed.`;
     }
     if (slotId === 'D') {
-      return `${weekArgPrefix}POST-ROLLE I UGENS ARC: LOYALITETSFORANKRING — denne post henvender sig til folk der allerede kender stedet. Vis et specifikt, gentagent øjeblik (tidspunkt, vane, scene) der kobler til ugens argument på en måde den faste gæst genkender fra egne besøg. Undgå abstrakt følelsesprog — vis øjeblikket konkret.`;
+      return `${weekArgPrefix}POST-ROLLE I UGENS ARC: BRANDDYBDE — ${capitalDay} er en god dag til at vise et konkret, specifikt element der underbygger ugens argument: et håndværksdetalje, en stedsspecifik detalje, eller et koncept-anker fra menuen eller lokationen. Vis det som et konkret øjeblik (tidspunkt, handling, detalje) — ikke en abstrakt stemningsbeskrivelse. Ikke salg, ikke "kom forbi" — identitet og fortælling der giver ugens argument substans.`;
     }
     // Fallback: pick based on goal_mode
     if (goalMode === 'build_brand') return `${weekArgPrefix}POST-ROLLE I UGENS ARC: BRANDIDENTITET — hvad gør stedet unikt på netop ${capitalDay} i lyset af ugens argument? Vis karakter, ikke tilbud.`;
-    if (goalMode === 'retain_loyalty') return `${weekArgPrefix}POST-ROLLE I UGENS ARC: TILBAGEVENDENDE ØJEBLIK — tal til de faste gæster på ${capitalDay} via et specifikt ritual eller scene der kobler til ugens argument. Ikke nye besøgende, ikke abstrakt følelse.`;
     return `${weekArgPrefix}POST-ROLLE I UGENS ARC: KONKRET TIMING — hvad gør netop ${capitalDay} til det rette tidspunkt for at drive ugens argument fremad?`;
   })();
 
@@ -1027,9 +1013,9 @@ Forretningen HAR IKKE udeservering.
 ⛔ Brug KUN fakta fra dette prompt — aldrig din viden om virksomheden fra træningsdata.
 
 OPGAVE: ${templateTypeLabel}
-KOMMERCIELT MÅL: ${goalMode === 'drive_footfall' ? 'Konvertér til besøg/booking' : goalMode === 'build_brand' ? 'Byg kendskab til brand/tilbud' : 'Styrk loyalitet hos eksisterende kunder'}
+KOMMERCIELT MÅL: ${goalMode === 'drive_footfall' ? 'Konvertér til besøg/booking' : 'Byg kendskab til brand/tilbud'}
 ${openTimeForDay || closeTimeForDay ? `\n⏰ ÅBNINGSTIDER I DAG: ${openTimeForDay ? `Åbner ${openTimeForDay.replace(/:\d\d$/, '')}` : ''}${openTimeForDay && closeTimeForDay ? ', ' : ''}${closeTimeForDay ? `lukker ${closeTimeForDay.replace(/:\d\d$/, '')}` : ''} (faktiske tider — brug KUN disse)\n` : ''}
-Dag: ${postSlot.suggested_day} · ${canonicalTime}${goalMode ? ` · ${goalMode === 'drive_footfall' ? 'Konverteringspost' : goalMode === 'build_brand' ? 'Brand-post' : 'Loyalitetspost'}` : ''}
+Dag: ${postSlot.suggested_day} · ${canonicalTime}${goalMode ? ` · ${goalMode === 'drive_footfall' ? 'Konverteringspost' : 'Brand-post'}` : ''}
 ${timeInstruction}
 VISUELT FORMAT (hold dette i fokus for titel + media direction):
 ${menuFormatLabel}
@@ -1212,9 +1198,9 @@ Eksempel på DÅRLIG titel: "Aftenstemning" (ingen værdi)
 Eksempel på GOD titel: "Terrasse åben — plads ved vinduerne" (konkret fordel)
 
 OPGAVE: ${typeDescription}
-KOMMERCIELT MÅL: ${goalMode === 'drive_footfall' ? 'Konvertér til besøg/booking' : goalMode === 'build_brand' ? 'Byg kendskab til brand/oplevelse' : 'Styrk loyalitet hos eksisterende'}
+KOMMERCIELT MÅL: ${goalMode === 'drive_footfall' ? 'Konvertér til besøg/booking' : 'Byg kendskab til brand/oplevelse'}
 ${openTimeForDay || closeTimeForDay ? `\n⏰ ÅBNINGSTIDER I DAG: ${openTimeForDay ? `Åbner ${openTimeForDay.replace(/:\d\d$/, '')}` : ''}${openTimeForDay && closeTimeForDay ? ', ' : ''}${closeTimeForDay ? `lukker ${closeTimeForDay.replace(/:\d\d$/, '')}` : ''} (faktiske tider — brug KUN disse)\n` : ''}
-Dag: ${postSlot.suggested_day} · ${canonicalTime}${goalMode ? ` · ${goalMode === 'drive_footfall' ? 'Konverteringspost' : goalMode === 'build_brand' ? 'Brand-post' : 'Loyalitetspost'}` : ''}
+Dag: ${postSlot.suggested_day} · ${canonicalTime}${goalMode ? ` · ${goalMode === 'drive_footfall' ? 'Konverteringspost' : 'Brand-post'}` : ''}
 ${timeInstruction}
 VISUELT FORMAT (hold dette i fokus for titel + media direction):
 ${experienceFormatLabel}

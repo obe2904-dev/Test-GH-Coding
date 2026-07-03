@@ -202,6 +202,28 @@ export function validateAgainstVoice(
   }
   
   // =========================================================================
+  // 7b. RHETORICAL QUESTIONS WITH ABSTRACT OBJECTS (Critical)
+  // =========================================================================
+  // Pattern: "Kan du se/mærke/føle/fornemme <abstract noun>?" — ungrounded filler
+  // the model reaches for when it has no concrete fact to anchor a sentence to
+  // (e.g. "Kan du se omsorgen?"). Same failure class as banned words/phrases —
+  // enforce it the same way instead of leaving it as a prompt-only instruction.
+  const RHETORICAL_ABSTRACT_PATTERN =
+    /\b(kan|kunne)\s+(du|i)\s+(se|mærke|føle|fornemme|opleve)\b[^?]{0,40}\b(omsorg\w*|stemning\w*|nærvær\w*|\bro\w*|følelse\w*|glæde\w*|energi\w*|magi\w*|kærlighed\w*|passion\w*|hygge\w*|varme\w*|sjæl\w*)\b[^?]*\?/gi
+
+  const rhetoricalMatches = generatedText.match(RHETORICAL_ABSTRACT_PATTERN)
+  if (rhetoricalMatches) {
+    for (const match of rhetoricalMatches) {
+      violations.push({
+        type: 'pattern_match',
+        severity: 'critical',
+        text: match,
+        rule: 'Rhetorical question with abstract-noun object — ungrounded filler, not a real question. Replace with a concrete detail or remove.'
+      })
+    }
+  }
+  
+  // =========================================================================
   // 8. GENERIC MARKETING PHRASES (Warning)
   // =========================================================================
   if (stripPatterns?.generic_marketing) {

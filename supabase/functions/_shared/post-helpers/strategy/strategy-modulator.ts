@@ -29,7 +29,6 @@ export interface WeeklyModulation {
   week_goal_blend: {
     drive_footfall: number;
     build_brand: number;
-    retain_loyalty: number;
   };
   week_content_category_weights: {
     product_menu: number;
@@ -167,14 +166,13 @@ function computeModulationScore(context: WeekContext): ModulationScore {
   if ((sp?.weeks_analyzed ?? 0) >= 3 && cs?.goal_blend) {
     const rates = sp!.goal_mode_rates as Record<string, number>;
     const blend = cs.goal_blend;
-    const total = blend.drive_footfall + blend.build_brand + blend.retain_loyalty;
+    const total = blend.drive_footfall + blend.build_brand;
     if (total > 0) {
       const blendNorm = {
         drive_footfall: blend.drive_footfall / total,
         build_brand:    blend.build_brand    / total,
-        retain_loyalty: blend.retain_loyalty / total,
       };
-      for (const key of ['drive_footfall', 'build_brand', 'retain_loyalty'] as const) {
+      for (const key of ['drive_footfall', 'build_brand'] as const) {
         if (Math.abs((rates[key] || 0) - blendNorm[key]) > 0.20) {
           score += 1.0;
           factors.push('historical_divergence');
@@ -301,13 +299,13 @@ function buildModulationPrompt(context: WeekContext, intensity: 'light' | 'stron
 
   const sp = context.previous_week?.selection_patterns;
   const historicalHint = (sp?.weeks_analyzed ?? 0) >= 2
-    ? `Historisk publicering (${sp!.weeks_analyzed} uger): drive_footfall ${Math.round(((sp!.goal_mode_rates as any)?.drive_footfall || 0) * 100)}%, build_brand ${Math.round(((sp!.goal_mode_rates as any)?.build_brand || 0) * 100)}%, retain_loyalty ${Math.round(((sp!.goal_mode_rates as any)?.retain_loyalty || 0) * 100)}%`
+    ? `Historisk publicering (${sp!.weeks_analyzed} uger): drive_footfall ${Math.round(((sp!.goal_mode_rates as any)?.drive_footfall || 0) * 100)}%, build_brand ${Math.round(((sp!.goal_mode_rates as any)?.build_brand || 0) * 100)}%`
     : 'Ikke tilstrækkelig historisk data endnu';
 
   return `Du er content-strateg for ${context.business_name}. Justér den ugentlige content-strategi ud fra ugens konkrete kontekst.
 
 BASELINE (normal fordeling — udgangspunkt):
-- goal_blend: drive_footfall ${bg.drive_footfall}%, build_brand ${bg.build_brand}%, retain_loyalty ${bg.retain_loyalty}%
+- goal_blend: drive_footfall ${bg.drive_footfall}%, build_brand ${bg.build_brand}%
 - content_category_weights: product_menu ${bw.product_menu}%, craving_visual ${bw.craving_visual}%, behind_scenes ${bw.behind_scenes}%, team_people ${bw.team_people}%
 
 UGENS KARAKTER:
@@ -347,7 +345,7 @@ Din justering skal afspejle det naturlige besøgsvindue for denne virksomhedstyp
 - morning_cafe / brunch_cafe: tyngdepunktet er hverdagsmorgen og weekendbrunch — vægt craving_visual og product_menu for dagtimerne; events og payday har begrænset aftenvægt
 - lunch_restaurant / fast_casual: tyngdepunktet er hverdagsfrokost 11:30–14:00 — drive_footfall er primær driver; weekendvægt lavere end for aftenkoncept
 - dinner_restaurant / full_service_restaurant: tyngdepunktet er aften og weekender — social motivation og brand-opbygning vejer tungt; payday og events er stærke signaler
-- evening_bar / wine_bar / late_night_bar: tyngdepunktet er aften, sociale events og fredage — build_brand og retain_loyalty frem for footfall-push; senklukning forstærker weekend-signaler
+- evening_bar / wine_bar / late_night_bar: tyngdepunktet er aften, sociale events og fredage — build_brand frem for footfall-push; senklukning forstærker weekend-signaler
 - all_day_cafe: dækker hele dagen — brug primary_daypart_this_week til at afgøre om vægten denne uge falder på morgen/middag eller eftermiddag
 - hybrid_day_to_evening (fx café+restaurant+bar, frokoststed+aftenbar): dækker flere perioder — serviceprogrammer og menu-programmer viser alle aktive perioder; brug primary_daypart_this_week som autoritet for DENNE UGES tyngdepunkt. Juster ikke blindt mod aftenvægt bare fordi virksomheden har bar — vægten skal følge hvad konteksten (vejr, event, timing) faktisk driver trafik til DENNE uge.
 
@@ -361,7 +359,7 @@ LOKATIONS-FRAMING: Brug lokationskategorier og besøgsmotiver til at farve indho
 - waterfront / destination + motiver som "destination_meal" / "familieudflug": løft craving_visual og build_brand — folk rejser til stedet, oplevelsesfremstilling virker
 - city_center + motiver som "office_lunch" / "quick_meal": løft drive_footfall og product_menu — nytteframing og synlighed i hverdagen virker
 - tourist_area / tourist_context = Ja: løft build_brand og behind_scenes — introductory framing frem for loyalty; stedet er nyt for mange
-- residential (ingen turistboost): løft retain_loyalty — hverdagslokal framing, stamkunder og genbesøg er primær driver
+- residential (ingen turistboost): hverdagslokal framing, stamkunder og genbesøg er primær driver
 - Hvis lokation scorer højt på FLERE kategorier: vægt efter den kategori med højest score; de andre kategorier kan understøtte men ikke overstyre
 
 DAGSDEL × VEJR-KRYDS: Kombiner vejr-adfærdseffekt og vejr-dagsdelseffekt til konkret indholdsretning:
@@ -386,11 +384,11 @@ Sekundære motivationer nuancerer men overstyrer ALDRIG primær retning. Brug de
 - salary_week + øk.relevans high: løft craving_visual og build_brand (spend-intent er åben); if løndag = torsdag/fredag løft OGSÅ drive_footfall for weekend-push
 - salary_week + øk.relevans medium: let løft craving_visual; ingen footfall-push — løn udløser ikke nødvendigvis besøg, men sænker prisfølsomheden
 - salary_week + løndag = mandag/tirsdag + high: temper forventning — spend spredes over ugen, ingen skarp weekend-effekt
-- budget_conscious + øk.relevans high: løft retain_loyalty og value-framing i product_menu; sænk premium craving_visual — gæster er prisfølsomme, loyalitet og konkret tilbud virker bedre end forkælelsesframing
-- budget_conscious + øk.relevans medium: marginal retain_loyalty-nuance; flyt IKKE category weights
+- budget_conscious + øk.relevans high: løft value-framing i product_menu; sænk premium craving_visual — gæster er prisfølsomme, konkret tilbud virker bedre end forkælelsesframing
+- budget_conscious + øk.relevans medium: minimal justering; flyt IKKE category weights
 - normal_spend: hold baseline — ingen timing-baseret justering; lad arketype og motivation bære vægten
 - december_high: løft build_brand + craving_visual uanset uge-position — december er en samlet premium-periode
-- december_fase = jul_nytaar: løft retain_loyalty og behind_scenes; de faste gæster er tilbage
+- december_fase = jul_nytaar: løft build_brand og behind_scenes; de faste gæster er tilbage
 VIGTIGT: Økonomi-framing overstyrer ALDRIG arketype-baseline — den justerer kun inden for intensity-grænsen.
 
 VIGTIGT: Arketype sætter den naturlige retning — konteksten (vejr, events, payday) sætter intensiteten. Juster KUN inden for ±${intensity === 'strong' ? '15' : '8'}pp fra baseline.
@@ -405,7 +403,7 @@ REGLER:
 
 Returner UDELUKKENDE valid JSON:
 {
-  "week_goal_blend": { "drive_footfall": number, "build_brand": number, "retain_loyalty": number },
+  "week_goal_blend": { "drive_footfall": number, "build_brand": number },
   "week_content_category_weights": { "product_menu": number, "craving_visual": number, "behind_scenes": number, "team_people": number },
   "week_strategic_rationale": "string",
   "modulation_factors": ["string"]
@@ -423,7 +421,7 @@ export async function generateWeeklyModulation(context: WeekContext): Promise<We
   if (!cs?.goal_blend) {
     console.log('[Modulator] No baseline content_strategy — returning defaults');
     return {
-      week_goal_blend:               { drive_footfall: 50, build_brand: 25, retain_loyalty: 25 },
+      week_goal_blend:               { drive_footfall: 65, build_brand: 35 },
       week_content_category_weights: { product_menu: 35, craving_visual: 25, behind_scenes: 25, team_people: 15 },
       week_strategic_rationale:      'Ingen baseline content strategy fundet — standardfordeling anvendt.',
       modulation_factors:            ['no_baseline'],
@@ -477,7 +475,6 @@ export async function generateWeeklyModulation(context: WeekContext): Promise<We
       week_goal_blend: {
         drive_footfall: normBlend.drive_footfall,
         build_brand:    normBlend.build_brand,
-        retain_loyalty: normBlend.retain_loyalty,
       },
       week_content_category_weights: {
         product_menu:   normCCW.product_menu,
@@ -500,7 +497,6 @@ export async function generateWeeklyModulation(context: WeekContext): Promise<We
       blend_delta: {
         drive_footfall: modulation.week_goal_blend.drive_footfall - cs.goal_blend.drive_footfall,
         build_brand:    modulation.week_goal_blend.build_brand    - cs.goal_blend.build_brand,
-        retain_loyalty: modulation.week_goal_blend.retain_loyalty - cs.goal_blend.retain_loyalty,
       },
     });
 

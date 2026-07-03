@@ -2246,7 +2246,7 @@ Respond ONLY with JSON (no markdown):
       "footfall_primary": "Day-Day HH:MM",
       "footfall_secondary": "Day-Day HH:MM",
       "brand_builder": "Day HH:MM",
-      "loyalty": "Day-Day HH:MM"
+      "brand_builder_secondary": "Day-Day HH:MM"
     },
     "cta_emphasis": "walk_in",
     "rationale": "2-3 sentences explaining why these windows fit this specific business"
@@ -2293,7 +2293,9 @@ Respond ONLY with JSON (no markdown):
       // Derive goal_blend from business_programme_profiles (if available)
       // This is a BASELINE that the weekly modulator can deviate from based on context.
       // Over time, posts should trend toward this mix, but individual weeks can vary.
-      let goal_blend = { drive_footfall: 50, build_brand: 30, retain_loyalty: 20 }  // default fallback
+      // TWO-DIMENSIONAL FRAMEWORK: Only tactical goals (drive_footfall, build_brand)
+      // retain_loyalty removed - loyalty is an outcome, not a tactical goal
+      let goal_blend = { drive_footfall: 60, build_brand: 40 }  // default fallback
       let goal_blend_source = 'default'
       
       try {
@@ -2304,26 +2306,29 @@ Respond ONLY with JSON (no markdown):
         
         if (programmes && programmes.length > 0) {
           // Aggregate baseline_goal_split from all programmes
-          const agg = programmes.reduce((acc, p) => {
+          const agg = programmes.reduce((acc: { drive_footfall: number; strengthen_brand: number; retain_regulars: number }, p: any) => {
             const split = p.baseline_goal_split || {}
             acc.drive_footfall += split.drive_footfall || 0
             acc.strengthen_brand += split.strengthen_brand || 0  // V5 field name
-            acc.retain_regulars += split.retain_regulars || 0    // V5 field name
+            acc.retain_regulars += split.retain_regulars || 0    // V5 field name (will be merged into build_brand)
             return acc
           }, { drive_footfall: 0, strengthen_brand: 0, retain_regulars: 0 })
           
           const total = agg.drive_footfall + agg.strengthen_brand + agg.retain_regulars
           
           if (total > 0) {
-            // Normalize to 100% and rename to weekly plan taxonomy
+            // TWO-DIMENSIONAL FRAMEWORK: Merge retain_regulars into build_brand
+            // Loyalty is an outcome of good brand-building, not a separate tactical goal
             const normalized_total = agg.drive_footfall + agg.strengthen_brand + agg.retain_regulars
+            const footfall_pct = (agg.drive_footfall / normalized_total) * 100
+            const brand_pct = ((agg.strengthen_brand + agg.retain_regulars) / normalized_total) * 100
+            
             goal_blend = {
-              drive_footfall: Math.round((agg.drive_footfall / normalized_total) * 100),
-              build_brand: Math.round((agg.strengthen_brand / normalized_total) * 100),      // RENAME from strengthen_brand
-              retain_loyalty: Math.round((agg.retain_regulars / normalized_total) * 100)     // RENAME from retain_regulars
+              drive_footfall: Math.round(footfall_pct),
+              build_brand: Math.round(brand_pct)
             }
             goal_blend_source = `${programmes.length} programmes`
-            console.log(`[${requestId}] Stage PS: goal_blend from programmes: ${JSON.stringify(goal_blend)} (${programmes.map(p => p.programme_type).join(', ')})`)
+            console.log(`[${requestId}] Stage PS: goal_blend from programmes: ${JSON.stringify(goal_blend)} (${programmes.map((p: any) => p.programme_type).join(', ')})`)
           } else {
             console.warn(`[${requestId}] Stage PS: programmes exist but baseline_goal_split totals 0 — using booking_model fallback`)
           }
@@ -2335,12 +2340,12 @@ Respond ONLY with JSON (no markdown):
       // Fallback to booking_model_type template if no programmes or query failed
       if (goal_blend_source === 'default') {
         if (ps?.booking_model_type === 'booking_only') {
-          // Booking-only: customers already decided → focus on brand + loyalty
-          goal_blend = { drive_footfall: 30, build_brand: 45, retain_loyalty: 25 }
+          // Booking-only: customers already decided → focus on brand
+          goal_blend = { drive_footfall: 30, build_brand: 70 }
           goal_blend_source = 'booking_only template'
         } else if (ps?.booking_model_type === 'walk_in') {
           // Walk-in: need to capture impulse → focus on footfall
-          goal_blend = { drive_footfall: 55, build_brand: 25, retain_loyalty: 20 }
+          goal_blend = { drive_footfall: 70, build_brand: 30 }
           goal_blend_source = 'walk_in template'
         } else {
           goal_blend_source = 'hybrid template'

@@ -16,7 +16,7 @@ export type GoalMode = 'footfall' | 'brand' | 'retention';
 
 /**
  * Normalize Phase 1 goal_mode values to contentTypeSystem GoalMode enum
- * Phase 1 uses: drive_footfall, enhance_brand, build_brand, increase_loyalty, retain_loyalty
+ * Phase 1 uses: drive_footfall, build_brand
  * Allocator uses: footfall, brand, retention
  */
 export function normalizeGoalMode(rawGoalMode: string): GoalMode {

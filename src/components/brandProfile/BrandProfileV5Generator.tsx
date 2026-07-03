@@ -27,8 +27,7 @@ export function BrandProfileV5Generator({
   if (generating) {
     return (
       <GenerationProgress
-        message="Generating V5 Brand Profile (Layers 1-4)..."
-        subtitle="This may take 20-30 seconds"
+        message="Generating V5 Brand Profile (Layers 1-4)... This may take 20-30 seconds"
       />
     );
   }

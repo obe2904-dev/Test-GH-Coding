@@ -9,10 +9,13 @@ interface SetupCompletionStatus {
   profileState: CompletionState
   menu: boolean
   menuState: CompletionState
+  menuProcessing: boolean
   location: boolean
   locationState: CompletionState
+  locationProcessing: boolean
   brandProfile: boolean
   brandState: CompletionState
+  brandProcessing: boolean
   loading: boolean
 }
 
@@ -29,10 +32,13 @@ export function useSetupCompletion() {
     profileState: 'none',
     menu: false,
     menuState: 'none',
+    menuProcessing: false,
     location: false,
     locationState: 'none',
+    locationProcessing: false,
     brandProfile: false,
     brandState: 'none',
+    brandProcessing: false,
     loading: true
   })
 
@@ -43,10 +49,13 @@ export function useSetupCompletion() {
         profileState: 'none', 
         menu: false, 
         menuState: 'none',
+        menuProcessing: false,
         location: false, 
         locationState: 'none',
+        locationProcessing: false,
         brandProfile: false, 
         brandState: 'none',
+        brandProcessing: false,
         loading: false 
       })
       return
@@ -71,10 +80,13 @@ export function useSetupCompletion() {
           profileState: 'none', 
           menu: false, 
           menuState: 'none',
+          menuProcessing: false,
           location: false, 
           locationState: 'none',
+          locationProcessing: false,
           brandProfile: false, 
           brandState: 'none',
+          brandProcessing: false,
           loading: false 
         })
         return
@@ -83,15 +95,26 @@ export function useSetupCompletion() {
       console.log('[useSetupCompletion] Checking completion for business:', business.id)
 
       // Check each completion status
-      const [menuResults, brandProfile, locationIntelligence, businessProfile, businessLocation, openingHours] = await Promise.all([
-        // Menu: Has successful extraction
+      const [menuResultsAll, menuResultsDone, menuProcessing, brandProfile, locationIntelligence, businessProfile, businessLocation, openingHours] = await Promise.all([
+        // Menu: Get ALL menu results to check total count
+        supabase
+          .from('menu_results_v2')
+          .select('id, status, time_start, time_end')
+          .eq('business_id', business.id),
+        
+        // Menu: Get all done extractions (we'll filter for timing in JS)
+        supabase
+          .from('menu_results_v2')
+          .select('id, time_start, time_end')
+          .eq('business_id', business.id)
+          .eq('status', 'done'),
+        
+        // Menu: Check if currently processing
         supabase
           .from('menu_results_v2')
           .select('id')
           .eq('business_id', business.id)
-          .eq('status', 'done')
-          .limit(1)
-          .maybeSingle(),
+          .in('status', ['queued', 'processing']),
         
         // Brand Profile: Check for V5 JSONB column (single source of truth)
         // Legacy flat columns may be deprecated or nulled
@@ -147,28 +170,54 @@ export function useSetupCompletion() {
       const profileAnyFilled = profileChecks.some(Boolean)
       const profileState: CompletionState = profileComplete ? 'complete' : profileAnyFilled ? 'partial' : 'none'
 
-      // Menu completion state
-      const menuHasData = !!menuResults.data
-      const menuState: CompletionState = menuHasData ? 'complete' : 'none'
+      // Menu completion state - check ALL menu results WITH timing
+      const totalMenus = menuResultsAll.data?.length || 0
+      
+      // Debug: Log all done menus and their timing
+      console.log('[useSetupCompletion] All done menus:', menuResultsDone.data?.map(m => ({
+        id: m.id,
+        time_start: m.time_start,
+        time_end: m.time_end,
+        hasTiming: !!(m.time_start && m.time_end)
+      })))
+      
+      // Filter done menus to only count those with actual timing assigned (matching UI logic)
+      const doneMenusWithTiming = menuResultsDone.data?.filter(m => 
+        m.time_start && m.time_end
+      ) || []
+      const doneMenus = doneMenusWithTiming.length
+      const processingMenus = menuProcessing.data?.length || 0
+      
+      const menuHasData = totalMenus > 0
+      const menuAllDone = totalMenus > 0 && doneMenus === totalMenus && processingMenus === 0
+      const menuSomeDone = doneMenus > 0 && doneMenus < totalMenus
+      const menuState: CompletionState = menuAllDone ? 'complete' : (menuHasData ? 'partial' : 'none')
+      const menuIsProcessing = processingMenus > 0
 
-      // Location completion state - check for actual data fields
+      // Location completion state - check for actual data fields that get populated
       const locationData = locationIntelligence.data as {
         neighborhood?: string | null
         area_type?: string | null
         neighborhood_character?: string | null
-        who_analysis?: unknown
-        when_analysis?: unknown
-        why_analysis?: unknown
+        category_scores?: Record<string, number> | null
+        location_type_matches?: Record<string, unknown> | null
       } | null
+      
+      const hasCategoryScores = locationData?.category_scores && 
+        typeof locationData.category_scores === 'object' && 
+        Object.keys(locationData.category_scores).length > 0
+        
+      const hasLocationTypes = locationData?.location_type_matches &&
+        typeof locationData.location_type_matches === 'object' &&
+        Object.keys(locationData.location_type_matches).length > 0
+      
       const locationChecks = [
-        hasText(locationData?.neighborhood),
-        hasText(locationData?.area_type),
-        hasText(locationData?.neighborhood_character),
-        !!locationData?.who_analysis,
-        !!locationData?.when_analysis,
-        !!locationData?.why_analysis
+        hasText(locationData?.neighborhood_character), // Area Character text
+        hasText(locationData?.area_type), // Area type
+        hasCategoryScores, // Location Types percentages
+        hasLocationTypes // Location type analysis
       ]
-      const locationComplete = locationChecks.filter(Boolean).length >= 3 // At least 3 key fields
+      const locationComplete = locationChecks.filter(Boolean).length >= 2 // At least 2 key fields (neighborhood_character + category_scores is enough)
       const locationAnyFilled = locationChecks.some(Boolean)
       const locationState: CompletionState = locationComplete ? 'complete' : locationAnyFilled ? 'partial' : 'none'
 
@@ -205,9 +254,20 @@ export function useSetupCompletion() {
           openingHoursFilled,
           profileState
         },
-        menu: { hasData: menuHasData, menuState },
+        menu: { 
+          totalMenus, 
+          doneMenus, // with timing assigned
+          doneMenusWithoutFilter: menuResultsDone.data?.length || 0,
+          processingMenus, 
+          menuAllDone,
+          menuState,
+          menuIsProcessing 
+        },
         location: { 
-          data: locationIntelligence.data, 
+          neighborhood_character: hasText(locationData?.neighborhood_character),
+          area_type: hasText(locationData?.area_type),
+          category_scores: hasCategoryScores,
+          location_type_matches: hasLocationTypes,
           locationState,
           checks: locationChecks 
         },
@@ -224,12 +284,15 @@ export function useSetupCompletion() {
       setStatus({
         profile: profileComplete,
         profileState,
-        menu: menuHasData,
+        menu: menuAllDone,
         menuState,
+        menuProcessing: menuIsProcessing,
         location: locationState !== 'none',
         locationState,
+        locationProcessing: false, // TODO: Add location processing detection if needed
         brandProfile: brandState !== 'none',
         brandState,
+        brandProcessing: false, // TODO: Add brand processing detection if needed
         loading: false
       })
     }

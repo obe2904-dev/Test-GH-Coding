@@ -573,15 +573,6 @@ export function BrandProfilePageV5() {
                                     <div className="bg-[#0A7D5F] h-2 rounded-full" style={{ width: `${prog.baseline_goal_split.strengthen_brand}%` }} />
                                   </div>
                                 </div>
-                                <div>
-                                  <div className="flex justify-between text-xs mb-1">
-                                    <span>{t('brandProfileV5.retainRegulars')}</span>
-                                    <span className="font-medium">{prog.baseline_goal_split.retain_regulars}%</span>
-                                  </div>
-                                  <div className="w-full bg-gray-200 rounded-full h-2">
-                                    <div className="bg-[#6B5CE7] h-2 rounded-full" style={{ width: `${prog.baseline_goal_split.retain_regulars}%` }} />
-                                  </div>
-                                </div>
                               </div>
                             )}
                             <p className="text-xs text-slate-600 mt-3">

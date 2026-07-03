@@ -10,7 +10,7 @@ export interface Suggestion {
   menuItemName?: string         // specific menu item name from v2 idea
   menuItemDescription?: string  // DB description for menu item (weekly_plan source)
   ctaIntent?: string            // 'visit' | 'social' | 'engagement' | 'save'
-  goalMode?: 'drive_footfall' | 'build_brand' | 'retain_loyalty'  // weekly_plan source
+  goalMode?: 'drive_footfall' | 'build_brand'  // weekly_plan source
   photoIdea?: string
   source?: 'ai_ideas' | 'weekly_plan'  // caller origin
   // legacy fields (backward compat)
@@ -75,7 +75,7 @@ export interface PromptOptions {
   weeklyPlanContext: string   // pre-built UGEPLANKONTEKST block; empty string for AI Ideer path
   isWeeklyPlan: boolean       // drives startRules and context block injection
   ctaStyle: 'strict' | 'soft' // strict = verbatim booking CTA with URL; soft = model integrates naturally
-  goalMode?: string           // weekly_plan: 'drive_footfall' | 'build_brand' | 'retain_loyalty'
+  goalMode?: string           // weekly_plan: 'drive_footfall' | 'build_brand'
   bookingLink?: string | null // booking URL for drive_footfall CTA
   voiceRationale: string      // v5: voice_rationale — "Hvorfor denne anbefaling?" — register constraint
   venueIdentity: string       // v5: recognizable_interior_identity.value — factual venue description
@@ -122,7 +122,8 @@ export interface PromptOptions {
   localLocationReference?: string | null // Operator-set location phrase (highest priority)
   locationMarketingHooks?: string[] | null // Owner-validated location copy phrases (approved poetic source)
   signatureThemes?: string[] | null      // tone_dna.culinary_character.signature_themes (concept anchors)
-  business_identity_persona?: string    // V5.5: Full business identity persona
+  business_identity_persona?: string    // V5.5: Full business identity persona (DEPRECATED - use marketing_manager_brief)
+  marketing_manager_brief?: string      // V5.8: Synthesized strategic marketing guidance (~200 words, includes UNDGÅ ALTID)
   enhanced_social_examples?: any[]      // V5.5: Enhanced social examples
   enhanced_avoid_examples?: any[]       // V5.5: Enhanced avoid examples
 }

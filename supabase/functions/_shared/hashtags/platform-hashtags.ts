@@ -9,6 +9,7 @@ export interface PlatformHashtagContext {
   detectedDishName?: string | null
   detectedDishDescription?: string | null
   locationVocabulary?: string[] | null  // FIX 03-B: Location-specific hashtag vocabulary
+  language?: string | null              // Language code (da, sv, de, en) for localized hashtags
   // FIX 04: Stable business-profile signals for venue classification
   aiPlaceSynopsis?: string | null      // e.g. "Korean BBQ and sushi restaurant in central Silkeborg"
   menuDescription?: string | null      // e.g. "Korean-inspired fusion with AYCE options"
@@ -29,6 +30,147 @@ type HashtagLayerName =
   | 'dietary'
   | 'campaign'
   | 'community'
+
+// Localized hashtags based on language
+interface LocalizedHashtags {
+  coffeeLovers: string
+  brunchTime: string
+  drinkLovers: string
+  lunchBreak: string
+  dateNight: string
+  cozyCafe: string
+  foodLovers: string
+  weekendBrunch: string
+  fridayDrinks: string
+  summerDrinks: string
+  christmasMenu: string
+  newMenu: string
+  veganFood: string
+  vegetarianFood: string
+  glutenFree: string
+  plantBased: string
+  healthyLunch: string
+  summerMenu: string
+  brunchLaunch: string
+  coffeeDeal: string
+  tasteAndWin: string
+  drinkLocal: string
+  eatLocal: string
+  supportLocal: string
+}
+
+function getLocalizedHashtags(language: string): LocalizedHashtags {
+  switch (language) {
+    case 'da':  // Danish
+      return {
+        coffeeLovers: 'KaffeElskere',
+        brunchTime: 'BrunchTid',
+        drinkLovers: 'DrinksElskere',
+        lunchBreak: 'Frokostpause',
+        dateNight: 'DateNat',
+        cozyCafe: 'HyggeligCafe',
+        foodLovers: 'MadElskere',
+        weekendBrunch: 'WeekendBrunch',
+        fridayDrinks: 'FredagsDrinks',
+        summerDrinks: 'SommerDrinks',
+        christmasMenu: 'Julemenu',
+        newMenu: 'NytMenukort',
+        veganFood: 'VeganskMad',
+        vegetarianFood: 'VegetariskMad',
+        glutenFree: 'Glutenfri',
+        plantBased: 'Plantebaseret',
+        healthyLunch: 'SundFrokost',
+        summerMenu: 'Sommermenu',
+        brunchLaunch: 'NytBrunchkort',
+        coffeeDeal: 'KaffeTilbud',
+        tasteAndWin: 'SmagOgVind',
+        drinkLocal: 'DrikLokalt',
+        eatLocal: 'SpisLokalt',
+        supportLocal: 'StøtLokalt',
+      }
+    case 'sv':  // Swedish
+      return {
+        coffeeLovers: 'KaffeÄlskare',
+        brunchTime: 'BrunchDags',
+        drinkLovers: 'DrinksÄlskare',
+        lunchBreak: 'Lunchpaus',
+        dateNight: 'DateKväll',
+        cozyCafe: 'MysKafé',
+        foodLovers: 'MatÄlskare',
+        weekendBrunch: 'HelgBrunch',
+        fridayDrinks: 'FredagsDrinks',
+        summerDrinks: 'SommarDrinks',
+        christmasMenu: 'Julmeny',
+        newMenu: 'NyMeny',
+        veganFood: 'VeganMat',
+        vegetarianFood: 'VegetariskMat',
+        glutenFree: 'Glutenfri',
+        plantBased: 'Växtbaserad',
+        healthyLunch: 'NyttigLunch',
+        summerMenu: 'Sommarmeny',
+        brunchLaunch: 'NyBrunchmeny',
+        coffeeDeal: 'KaffeErbjudande',
+        tasteAndWin: 'SmakaOchVinn',
+        drinkLocal: 'DrickLokalt',
+        eatLocal: 'ÄtLokalt',
+        supportLocal: 'StödLokalt',
+      }
+    case 'de':  // German
+      return {
+        coffeeLovers: 'KaffeeLovers',
+        brunchTime: 'BrunchZeit',
+        drinkLovers: 'DrinkLovers',
+        lunchBreak: 'Mittagspause',
+        dateNight: 'DateNight',
+        cozyCafe: 'GemütlichesCafé',
+        foodLovers: 'EssensLovers',
+        weekendBrunch: 'WochenendBrunch',
+        fridayDrinks: 'FreitagDrinks',
+        summerDrinks: 'SommerDrinks',
+        christmasMenu: 'Weihnachtsmenü',
+        newMenu: 'NeueSpeisekarte',
+        veganFood: 'VeganesEssen',
+        vegetarianFood: 'VegetarischesEssen',
+        glutenFree: 'Glutenfrei',
+        plantBased: 'Pflanzenbasiert',
+        healthyLunch: 'GesunderLunch',
+        summerMenu: 'Sommermenü',
+        brunchLaunch: 'NeueBrunchkarte',
+        coffeeDeal: 'KaffeeAngebot',
+        tasteAndWin: 'SchmeckenUndGewinnen',
+        drinkLocal: 'TrinkenLokal',
+        eatLocal: 'EssenLokal',
+        supportLocal: 'UnterstützenLokal',
+      }
+    default:  // English fallback
+      return {
+        coffeeLovers: 'CoffeeLovers',
+        brunchTime: 'BrunchTime',
+        drinkLovers: 'DrinkLovers',
+        lunchBreak: 'LunchBreak',
+        dateNight: 'DateNight',
+        cozyCafe: 'CozyCafe',
+        foodLovers: 'FoodLovers',
+        weekendBrunch: 'WeekendBrunch',
+        fridayDrinks: 'FridayDrinks',
+        summerDrinks: 'SummerDrinks',
+        christmasMenu: 'ChristmasMenu',
+        newMenu: 'NewMenu',
+        veganFood: 'VeganFood',
+        vegetarianFood: 'VegetarianFood',
+        glutenFree: 'GlutenFree',
+        plantBased: 'PlantBased',
+        healthyLunch: 'HealthyLunch',
+        summerMenu: 'SummerMenu',
+        brunchLaunch: 'BrunchLaunch',
+        coffeeDeal: 'CoffeeDeal',
+        tasteAndWin: 'TasteAndWin',
+        drinkLocal: 'DrinkLocal',
+        eatLocal: 'EatLocal',
+        supportLocal: 'SupportLocal',
+      }
+  }
+}
 
 // FIX 03-B: Updated platform limits to support ranges (FB: 0-2, IG: 3-5)
 const PLATFORM_LIMITS: Record<'facebook' | 'instagram', { min: number; max: number }> = {
@@ -105,22 +247,25 @@ function inferLifestyleTag(context: PlatformHashtagContext, categoryTag: string)
     .join(' ')
     .toLowerCase()
 
+  const lang = context.language || 'da'
+  const tags = getLocalizedHashtags(lang)
+
   // Coffee: only if the post itself is about coffee
-  if (/(coffee|cafe|café|espresso|latte|cappuccino|cortado|filterkaffe|kaffebar)/.test(text)) return 'CoffeeLovers'
+  if (/(coffee|cafe|café|espresso|latte|cappuccino|cortado|filterkaffe|kaffebar)/.test(text)) return tags.coffeeLovers
   
   // Brunch: only if post mentions it
-  if (/(brunch|morgenmad)/.test(text)) return 'BrunchTime'
+  if (/(brunch|morgenmad)/.test(text)) return tags.brunchTime
   
   // Drinks: only if post mentions it
-  if (/(cocktail|drinks?|vin|øl|beer|bar)/.test(text)) return 'DrinkLovers'
+  if (/(cocktail|drinks?|vin|øl|beer|bar)/.test(text)) return tags.drinkLovers
   
   // Meal occasions: only if post mentions them
-  if (/(lunch|frokost)/.test(text)) return 'LunchBreak'
-  if (/(dinner|aftensmad)/.test(text) && /(date|par|romantisk)/.test(text)) return 'DateNight'
-  if (/(cozy|hygg|warm|varm|indendørs|inside)/.test(text)) return 'CozyCafe'
+  if (/(lunch|frokost)/.test(text)) return tags.lunchBreak
+  if (/(dinner|aftensmad)/.test(text) && /(date|par|romantisk)/.test(text)) return tags.dateNight
+  if (/(cozy|hygg|warm|varm|indendørs|inside)/.test(text)) return tags.cozyCafe
 
   // Food in general — only if food words appear in the post
-  if (/(food|mad|dish|ret|menu|meal|måltid|smag|serverer)/.test(text)) return 'FoodLovers'
+  if (/(food|mad|dish|ret|menu|meal|måltid|smag|serverer)/.test(text)) return tags.foodLovers
 
   // IMPORTANT: no venue-category fallback here.
   // A café posting about a concert or an event should NOT get #CoffeeLovers.
@@ -130,13 +275,16 @@ function inferLifestyleTag(context: PlatformHashtagContext, categoryTag: string)
 function inferOccasionTag(context: PlatformHashtagContext): string {
   const text = [context.text, context.detectedDishDescription].filter(Boolean).join(' ').toLowerCase()
 
-  if (/(weekend|lørdag|saturday|søndag|sunday)/.test(text) && /(brunch|morgenmad)/.test(text)) return 'WeekendBrunch'
-  if (/(friday|fredag)/.test(text) && /(drink|drinks|cocktail|bar|vin|øl|beer)/.test(text)) return 'FridayDrinks'
-  if (/(lunch|frokost)/.test(text)) return 'LunchBreak'
-  if (/(date night|datenight|aften)/.test(text)) return 'DateNight'
-  if (/(summer|sommer)/.test(text) && /(drink|drinks|cocktail|bar)/.test(text)) return 'SummerDrinks'
-  if (/(christmas|jul|jule)/.test(text)) return 'ChristmasMenu'
-  if (/(new menu|newmenu|ny menu|lan(?:c|)ering|launch)/.test(text)) return 'NewMenu'
+  const lang = context.language || 'da'
+  const tags = getLocalizedHashtags(lang)
+
+  if (/(weekend|lørdag|saturday|søndag|sunday)/.test(text) && /(brunch|morgenmad)/.test(text)) return tags.weekendBrunch
+  if (/(friday|fredag)/.test(text) && /(drink|drinks|cocktail|bar|vin|øl|beer)/.test(text)) return tags.fridayDrinks
+  if (/(lunch|frokost)/.test(text)) return tags.lunchBreak
+  if (/(date night|datenight|aften)/.test(text)) return tags.dateNight
+  if (/(summer|sommer)/.test(text) && /(drink|drinks|cocktail|bar)/.test(text)) return tags.summerDrinks
+  if (/(christmas|jul|jule)/.test(text)) return tags.christmasMenu
+  if (/(new menu|newmenu|ny menu|lan(?:c|)ering|launch)/.test(text)) return tags.newMenu
 
   return ''
 }
@@ -144,11 +292,14 @@ function inferOccasionTag(context: PlatformHashtagContext): string {
 function inferDietaryTag(context: PlatformHashtagContext): string {
   const text = [context.text, context.detectedDishDescription].filter(Boolean).join(' ').toLowerCase()
 
-  if (/(vegan|vegansk)/.test(text)) return 'VeganFood'
-  if (/(vegetarian|vegetarisk)/.test(text)) return 'VegetarianFood'
-  if (/(glutenfri|gluten free|glutenfree)/.test(text)) return 'GlutenFree'
-  if (/(plant based|plantebaseret|plantebaseret)/.test(text)) return 'PlantBased'
-  if (/(healthy|sund|sundt)/.test(text)) return 'HealthyLunch'
+  const lang = context.language || 'da'
+  const tags = getLocalizedHashtags(lang)
+
+  if (/(vegan|vegansk)/.test(text)) return tags.veganFood
+  if (/(vegetarian|vegetarisk)/.test(text)) return tags.vegetarianFood
+  if (/(glutenfri|gluten free|glutenfree)/.test(text)) return tags.glutenFree
+  if (/(plant based|plantebaseret|plantebaseret)/.test(text)) return tags.plantBased
+  if (/(healthy|sund|sundt)/.test(text)) return tags.healthyLunch
 
   return ''
 }
@@ -156,20 +307,25 @@ function inferDietaryTag(context: PlatformHashtagContext): string {
 function inferCampaignTag(context: PlatformHashtagContext): string {
   const text = [context.text, context.detectedDishDescription].filter(Boolean).join(' ').toLowerCase()
 
-  if (/(new menu|ny menu|menu launch|launch|introducing|introduktion)/.test(text)) return 'NewMenu'
-  if (/(summer menu|sommermenu)/.test(text)) return 'SummerMenu'
-  if (/(brunch launch|brunchmenu)/.test(text)) return 'BrunchLaunch'
-  if (/(coffee deal|kaffe tilbud|tilbud)/.test(text)) return 'CoffeeDeal'
-  if (/(win|konkurrence|competition|taste and win)/.test(text)) return 'TasteAndWin'
+  const lang = context.language || 'da'
+  const tags = getLocalizedHashtags(lang)
+
+  if (/(new menu|ny menu|menu launch|launch|introducing|introduktion)/.test(text)) return tags.newMenu
+  if (/(summer menu|sommermenu)/.test(text)) return tags.summerMenu
+  if (/(brunch launch|brunchmenu)/.test(text)) return tags.brunchLaunch
+  if (/(coffee deal|kaffe tilbud|tilbud)/.test(text)) return tags.coffeeDeal
+  if (/(win|konkurrence|competition|taste and win)/.test(text)) return tags.tasteAndWin
 
   return ''
 }
 
 function inferCommunityTag(context: PlatformHashtagContext): string {
+  const lang = context.language || 'da'
+  const tags = getLocalizedHashtags(lang)
   const category = inferVenueCategory(context)
-  if (category === 'Bar') return 'DrinkLocal'
-  if (category === 'Cafe' || category === 'Restaurant' || category === 'Bakery') return 'EatLocal'
-  return 'SupportLocal'
+  if (category === 'Bar') return tags.drinkLocal
+  if (category === 'Cafe' || category === 'Restaurant' || category === 'Bakery') return tags.eatLocal
+  return tags.supportLocal
 }
 
 function buildLayers(context: PlatformHashtagContext): Record<HashtagLayerName, string[]> {

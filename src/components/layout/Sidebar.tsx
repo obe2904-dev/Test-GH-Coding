@@ -146,6 +146,13 @@ const PhotoIcon = ({ className }: { className?: string }) => (
   </svg>
 )
 
+const PulsingDot = ({ className }: { className?: string }) => (
+  <span className={`relative flex h-3 w-3 ${className}`}>
+    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#0A7D5F] opacity-75"></span>
+    <span className="relative inline-flex rounded-full h-3 w-3 bg-[#0A7D5F]"></span>
+  </span>
+)
+
 export function Sidebar({ className = '' }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -172,14 +179,43 @@ export function Sidebar({ className = '' }: SidebarProps) {
     const isSequentialLock = item.isSequentialLock
     const isCompleted = item.completed
     const isPartial = item.completionState === 'partial'
+    const isEmpty = item.completionState === 'none'
     const isHovered = hoveredSidebarItem === item.id
+    // Show pulsing dot for unlocked incomplete items (empty OR partial)
+    const shouldShowPulsingDot = !isLocked && !isCompleted && (isEmpty || isPartial)
     
     if (isLocked) {
+      // Determine where to navigate when locked item is clicked
+      let navigateTo = '/dashboard/plans' // Default: upgrade page for free tier
+      let isDisabled = false // Disable if prerequisite is processing
+      
+      // For paid tier sequential locks, navigate to the FIRST incomplete step in the chain
+      if (isSequentialLock) {
+        if (item.id === 'menu') {
+          navigateTo = '/dashboard/profile' // Menu requires profile
+        } else if (item.id === 'location') {
+          navigateTo = '/dashboard/menu' // Location requires menu
+          isDisabled = completion.menuProcessing // Disable if menu is generating
+        } else if (item.id === 'brand-profile') {
+          // Brand requires the entire chain - find first incomplete step
+          if (completion.menuState !== 'complete') {
+            navigateTo = '/dashboard/menu' // Menu not complete, start there
+            isDisabled = completion.menuProcessing // Disable if menu is generating
+          } else {
+            navigateTo = '/dashboard/location' // Menu done, go to location
+            isDisabled = completion.locationProcessing // Disable if location is generating
+          }
+        }
+      }
+      
       return (
         <button
           key={item.id}
-          onClick={() => navigate('/dashboard/plans')}
-          className="group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium text-text-muted hover:bg-surface-alt hover:text-text opacity-60"
+          onClick={() => !isDisabled && navigate(navigateTo)}
+          disabled={isDisabled}
+          className={`group relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-sm font-medium text-text-muted hover:bg-surface-alt hover:text-text opacity-60 ${
+            isDisabled ? 'cursor-not-allowed opacity-40' : ''
+          }`}
         >
           <Icon className="w-5 h-5 flex-shrink-0" />
           <span className={`truncate ${isHovered ? 'font-semibold text-text' : ''}`}>{item.label}</span>
@@ -204,8 +240,15 @@ export function Sidebar({ className = '' }: SidebarProps) {
           <>
             <Icon className={`w-5 h-5 flex-shrink-0 ${isActive || isHovered ? 'text-[#0A7D5F]' : ''}`} />
             <span className={`truncate flex-1 ${isActive || isHovered ? 'font-semibold text-text' : ''}`}>{item.label}</span>
-            {isCompleted && !completion.loading && (
-              <CheckCircleIcon className="w-4 h-4 text-[#0A7D5F] flex-shrink-0" />
+            {!completion.loading && (
+              <>
+                {isCompleted && (
+                  <CheckCircleIcon className="w-4 h-4 text-[#0A7D5F] flex-shrink-0" />
+                )}
+                {!isCompleted && shouldShowPulsingDot && (
+                  <PulsingDot className="flex-shrink-0" />
+                )}
+              </>
             )}
           </>
         )}
@@ -216,21 +259,19 @@ export function Sidebar({ className = '' }: SidebarProps) {
   return (
     <div className={`w-72 bg-surface border-r border-border flex flex-col h-screen ${className}`}>
       {/* Logo */}
-      <div className="px-4 py-4 flex items-center justify-between gap-3">
+      <div className="px-4 py-4 flex items-center gap-3">
         <h1 className="text-2xl font-bold text-brand">
           Post2Grow
         </h1>
-        {isWeeklyPlanLocked && (
-          <button
-            onClick={() => navigate('/dashboard/plans')}
-            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all"
-          >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
-            </svg>
-            Opgrader
-          </button>
-        )}
+        <button
+          onClick={() => navigate('/dashboard/plans')}
+          className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all"
+        >
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+          </svg>
+          Opgrader
+        </button>
       </div>
 
       {/* Main Navigation */}
@@ -251,8 +292,8 @@ export function Sidebar({ className = '' }: SidebarProps) {
               
               {renderNavItem({ id: 'profile', label: t('navigation.setup.profile'), icon: GlobeIcon, path: '/dashboard/profile', completed: completion.profileState === 'complete', completionState: completion.profileState })}
               {renderNavItem({ id: 'menu', label: t('navigation.setup.menu'), icon: MenuIcon, path: '/dashboard/menu', locked: isFree || (!isFree && completion.profileState !== 'complete'), isSequentialLock: !isFree && completion.profileState !== 'complete', completed: completion.menu, completionState: completion.menuState })}
-              {renderNavItem({ id: 'location', label: t('navigation.setup.location'), icon: MapPinIcon, path: '/dashboard/location', locked: isFree || (!isFree && completion.menuState === 'none'), isSequentialLock: !isFree && completion.menuState === 'none', completed: completion.location, completionState: completion.locationState })}
-              {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand', locked: isFree || (!isFree && completion.locationState === 'none'), isSequentialLock: !isFree && completion.locationState === 'none', completed: completion.brandProfile, completionState: completion.brandState })}
+              {renderNavItem({ id: 'location', label: t('navigation.setup.location'), icon: MapPinIcon, path: '/dashboard/location', locked: isFree || (!isFree && completion.menuState !== 'complete'), isSequentialLock: !isFree && completion.menuState !== 'complete', completed: completion.location, completionState: completion.locationState })}
+              {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand', locked: isFree || (!isFree && completion.locationState !== 'complete'), isSequentialLock: !isFree && completion.locationState !== 'complete', completed: completion.brandProfile, completionState: completion.brandState })}
             </div>
           )}
         </div>

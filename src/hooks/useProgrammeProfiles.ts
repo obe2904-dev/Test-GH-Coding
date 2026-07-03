@@ -12,7 +12,6 @@ export interface ProgrammeProfile {
   baseline_goal_split: {
     drive_footfall: number;
     strengthen_brand: number;
-    retain_regulars: number;
   };
   decision_timing: string;
   content_type_affinity: {
@@ -83,24 +82,37 @@ export function useProgrammeProfiles(businessId: string | undefined) {
       }
 
       // Parse JSONB fields
-      const parsedProgrammes = (data || []).map((programme: any) => ({
-        ...programme,
-        time_windows: programme.time_windows || [],
-        operating_days: programme.operating_days || [],
-        menu_evidence: programme.menu_evidence || [],
-        baseline_goal_split: 
+      const parsedProgrammes = (data || []).map((programme: any) => {
+        // Parse baseline_goal_split
+        let goalSplit = 
           typeof programme.baseline_goal_split === 'string'
             ? JSON.parse(programme.baseline_goal_split)
-            : programme.baseline_goal_split || { drive_footfall: 0, strengthen_brand: 0, retain_regulars: 0 },
-        content_type_affinity:
-          typeof programme.content_type_affinity === 'string'
-            ? JSON.parse(programme.content_type_affinity)
-            : programme.content_type_affinity || {},
-        audience_segments:
-          typeof programme.audience_segments === 'string'
-            ? JSON.parse(programme.audience_segments)
-            : programme.audience_segments || [],
-      }));
+            : programme.baseline_goal_split || { drive_footfall: 0, strengthen_brand: 0 };
+        
+        // Migrate legacy 3-goal structure to 2-goal framework
+        if ('retain_regulars' in goalSplit) {
+          goalSplit = {
+            drive_footfall: goalSplit.drive_footfall || 0,
+            strengthen_brand: (goalSplit.strengthen_brand || 0) + (goalSplit.retain_regulars || 0)
+          };
+        }
+        
+        return {
+          ...programme,
+          time_windows: programme.time_windows || [],
+          operating_days: programme.operating_days || [],
+          menu_evidence: programme.menu_evidence || [],
+          baseline_goal_split: goalSplit,
+          content_type_affinity:
+            typeof programme.content_type_affinity === 'string'
+              ? JSON.parse(programme.content_type_affinity)
+              : programme.content_type_affinity || {},
+          audience_segments:
+            typeof programme.audience_segments === 'string'
+              ? JSON.parse(programme.audience_segments)
+              : programme.audience_segments || [],
+        };
+      });
 
       console.log('[useProgrammeProfiles] ✅ Parsed programmes:', parsedProgrammes.length, parsedProgrammes.map(p => p.programme_name));
       setProgrammes(parsedProgrammes);

@@ -45,7 +45,6 @@ export function validateActivationCompliance(
   const goalDistribution: Record<string, number> = {
     drive_footfall: 0,
     build_brand: 0,
-    retain_loyalty: 0,
   };
   
   // ═══════════════════════════════════════════════════════════════

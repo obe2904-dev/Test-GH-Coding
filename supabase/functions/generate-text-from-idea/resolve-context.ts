@@ -1094,7 +1094,10 @@ export async function resolveContentContext(
 
   const menuItemDescription = sanitizeMenuDesc(rawMenuItemDescription)
   const contentType = suggestion.contentType || 'atmosphere'
-  const isMenuPost = contentType === 'menu_item' || contentType === 'product_menu' || contentType === 'craving_visual'
+  // FIX: craving_visual is a Phase C type-allocation label, not proof a dish was assigned.
+  // Only treat as a menu post when a real dish name is present — otherwise this slot
+  // falls through to the atmosphere/context branch below, where it belongs.
+  const isMenuPost = !!menuItemName && (contentType === 'menu_item' || contentType === 'product_menu' || contentType === 'craving_visual')
 
   // Derive a default goalMode for AI Ideer when none is explicitly set.
   // menu_item/product posts → drive_footfall; all other types → build_brand.
@@ -1112,7 +1115,7 @@ export async function resolveContentContext(
     const descPart = menuItemDescription ? `\n${menuItemDescription}` : ''
     if (contentType === 'behind_scenes') {
       contentBlock = `SCENE: ${hook}\nRET DER FORBEREDES: ${menuItemLabel}${categoryPart}${descPart}`
-    } else if (contentType === 'atmosphere' || contentType === 'retain_loyalty') {
+    } else if (contentType === 'atmosphere') {
       contentBlock = `STEMNING: ${hook}\nRET DER NÆVNES: ${menuItemLabel}${categoryPart}${descPart}`
     } else {
       // product_menu / menu_item / craving_visual
@@ -1138,11 +1141,67 @@ export async function resolveContentContext(
   } else {
     if (contentType === 'behind_scenes') {
       contentBlock = `SCENE: ${hook}`
-    } else if (isMenuPost) {
-      // menu post without a named item — use legacy menu list fallback below
-      contentBlock = `RET: ${hook}`
     } else {
       contentBlock = `STEMNING: ${hook}`
+    }
+    
+    // FIX: Brand-building posts need SPECIFIC, FACTUAL brand anchors to avoid
+    // generic restaurant language ("friske grøntsager skæres med præcision").
+    // Build a pool of ALL available brand differentiators and REQUIRE at least one.
+    const isBrandBuildingPost = resolvedGoalMode === 'build_brand' || contentType === 'behind_scenes'
+    
+    if (isBrandBuildingPost) {
+      // Collect all available brand anchors (menu, venue, themes, character)
+      const brandAnchors: Array<{type: string, content: string}> = []
+      
+      if (suggestion.menuContextSnippet) {
+        brandAnchors.push({
+          type: 'MENUSIGNATUR',
+          content: suggestion.menuContextSnippet
+        })
+      }
+      
+      if (businessContext?.venueIdentity && businessContext.venueIdentity.trim().length > 20) {
+        brandAnchors.push({
+          type: 'STEDSIDENTITET', 
+          content: businessContext.venueIdentity.trim()
+        })
+      }
+      
+      if (businessContext?.venueScene && businessContext.venueScene.trim().length > 20) {
+        brandAnchors.push({
+          type: 'SCENEKARAKTER',
+          content: businessContext.venueScene.trim()
+        })
+      }
+      
+      // Add signature themes if available (from tone_dna)
+      const signatureThemes = businessContext?.tone_dna?.culinary_character?.signature_themes
+      if (Array.isArray(signatureThemes) && signatureThemes.length > 0) {
+        brandAnchors.push({
+          type: 'SIGNATURTEMAER',
+          content: signatureThemes.slice(0, 4).join('\n• ')
+        })
+      }
+      
+      if (brandAnchors.length > 0) {
+        // Present ALL anchors but require using at least one
+        contentBlock += `\n\nBRANDFORSKELLE (PÅKRÆVET — mindst ét element fra EN af disse kilder SKAL bruges):\n\n`
+        
+        brandAnchors.forEach(anchor => {
+          contentBlock += `${anchor.type}:\n${anchor.content}\n\n`
+        })
+        
+        contentBlock += `⚠️ BRANDFORANKRING: Dette er faktuelle detaljer der gør dette sted unikt — IKKE valgfri kontekst.\nVælg den vinkel der passer bedst til denne posts formål og roter mellem kilder på tværs af ugen.\n• Menusignatur: brug ved bag-om-scenen i køkkenet, tilberedning, råvarer\n• Stedsidentitet/Scenekarakter: brug ved atmosfære, lokation, værtskab\n• Signaturtemaer: brug ved filosofi, værdier, approach\n\nGenerisk restaurantsprog ("friske råvarer", "med omhu tilberedt") uden specifik brandforankring er FORBUDT.`
+      } else if (suggestion.menuContextSnippet) {
+        // Fallback: only menu context available
+        contentBlock += `\nMENUKONTEKST (brug naturligt hvis relevant): ${suggestion.menuContextSnippet}`
+      }
+    } else {
+      // For drive_footfall: menu context is optional flavor, not required
+      if (suggestion.menuContextSnippet) {
+        contentBlock += `\nMENUKONTEKST (faktuel detalje, brug naturligt hvis relevant): ${suggestion.menuContextSnippet}`
+      }
     }
     // For AI Ideas: inject occasion_context or first sentence of whyExplanation as occasion/context.
     // Non-menu posts use KONTEKST (scene/occasion angle).

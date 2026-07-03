@@ -18,9 +18,9 @@ function classifyCitySize(
   cityName: string
 ): 'large' | 'medium' | 'small' {
   // Known Danish cities — hardcoded to avoid relying on AI population estimates
-  const LARGE_CITIES = ['København', 'Aarhus'];         // 200k+
+  const LARGE_CITIES = ['København'];                    // 200k+
   const MEDIUM_CITIES = [                                // 50k–200k
-    'Odense', 'Aalborg', 'Esbjerg', 'Randers', 'Kolding',
+    'Aarhus', 'Odense', 'Aalborg', 'Esbjerg', 'Randers', 'Kolding',
     'Horsens', 'Vejle', 'Roskilde', 'Herning', 'Silkeborg',
     'Næstved', 'Fredericia', 'Viborg', 'Køge', 'Holstebro',
   ];
@@ -236,6 +236,69 @@ export function buildWeeklyPlanContext(s: Suggestion, captionFirstLineUsedAsHook
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+// CONTENT TYPE CLASSIFICATION — Single source of truth
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Comprehensive list of content types that should be treated as "atmosphere-like"
+ * posts requiring special handling for factual constraints, scene/mood opening rules,
+ * and photo analysis as primary factual anchor.
+ * 
+ * BUG FIX: Prevents contentType gaps where posts skip critical guardrails.
+ * Previously: three separate local arrays disagreed, creating posts that got geo
+ * narrative but skipped factual constraints.
+ */
+const ATMOSPHERE_LIKE_CONTENT_TYPES = [
+  'atmosphere',
+  'behind_scenes',
+  'team_people',
+  'availability',
+  'general_invitation',
+  'guest_moment',
+  'seasonal',
+  'event',
+  'offer',
+] as const
+
+/**
+ * Checks if a contentType should be treated as an atmosphere-like post.
+ * Replaces three separate, disagreeing local definitions throughout the file.
+ */
+function isAtmosphereLikeContentType(contentType: string | null | undefined): boolean {
+  return ATMOSPHERE_LIKE_CONTENT_TYPES.includes(contentType as any)
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// FORBIDDEN OPENER HELPER — Prevents markdown headers and literal title echo
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Builds the forbidden opener block that bans:
+ * 1. Markdown headers (####, ###, etc.)
+ * 2. Literal echo of the hook/title as opening sentence
+ * 
+ * BUG FIX: Weekly Plan posts were missing this entirely, allowing #### headers.
+ * Now shared between buildAIIdeasPrompt and buildWeeklyPlanPrompt.
+ */
+function buildForbiddenOpenerBlock(hook: string, language: string): string {
+  const hasHook = hook.trim().length > 10
+  
+  const blocks: Record<string, string> = {
+    da: hasHook
+      ? `- Skriv IKKE dette som åbningssætning ordret: "${hook.slice(0, 80)}" — åbn med et konkret element fra INDHOLD\n- FORBUDT: Markdown overskrifter (#### eller andre # symboler) — skriv kun almindelig tekst\n`
+      : '- FORBUDT: Markdown overskrifter (#### eller andre # symboler) — skriv kun almindelig tekst\n',
+    sv: hasHook
+      ? `- Skriv INTE detta som öppningsmening ordagrant: "${hook.slice(0, 80)}" — öppna med ett konkret element från INNEHÅLL\n- FÖRBJUDET: Markdown-rubriker (#### eller andra # symboler) — skriv bara vanlig text\n`
+      : '- FÖRBJUDET: Markdown-rubriker (#### eller andra # symboler) — skriv bara vanlig text\n',
+    de: hasHook
+      ? `- Schreibe NICHT diesen Satz wörtlich als Eröffnungssatz: "${hook.slice(0, 80)}" — öffne stattdessen mit einem konkreten Element aus dem INHALT\n- VERBOTEN: Markdown-Überschriften (#### oder andere # Symbole) — schreibe nur normalen Text\n`
+      : '- VERBOTEN: Markdown-Überschriften (#### oder andere # Symbole) — schreibe nur normalen Text\n',
+  }
+  
+  return blocks[language as 'da' | 'sv' | 'de'] || blocks.da
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 // SHARED TONE CORE
 // Single source of truth for all invariant prompt constraints.
 // Both buildAIIdeasPrompt() and buildWeeklyPlanPrompt() consume this.
@@ -344,8 +407,18 @@ This text is journalism, not creative fiction. You may ONLY write about what is 
   const cappedAvoidVocab     = brandAvoidVocab.slice(0, 4)
   const cappedContentAnchors = contentAnchors.slice(0, 10)
 
-  const isSceneMoodPost = contentType === 'behind_scenes' || contentType === 'atmosphere' || contentType === 'team_people'
-  const qualityNote = isPaid ? '\nTeksten skal føles poleret og personlig — ikke generisk.' : ''
+  const isSceneMoodPost = isAtmosphereLikeContentType(contentType)
+  
+  // Free tier quality note: neutral-positive tone, anti-poetic for atmosphere
+  const freeTierQualityNote = !isPaid && (contentType === 'atmosphere' || contentType === 'seasonal' || contentType === 'behind_scenes')
+    ? '\nFREE TIER TONE: Neutral-positive, faktuel og konkret. FORBUDT: poetisk/abstrakt sprog ("kaffedamp stiger op", "glemme tid og sted", "nyd nuet", "stemningen folder sig ud"). Skriv som en simpel, venlig information — ikke som litteratur.'
+    : !isPaid
+      ? '\nFREE TIER TONE: Neutral-positive og konkret. Undgå overdreven marketing-tone.'
+      : ''
+  
+  const qualityNote = isPaid 
+    ? '\nTeksten skal føles poleret og personlig — ikke generisk.' 
+    : freeTierQualityNote
 
   return {
     faktaforbud, dishRules, sensoryRules,
@@ -374,6 +447,90 @@ const GOAL_DIRECTIVE_MAP: Record<string, Record<string, string>> = {
     sv: 'Syfte: Tala direkt till stamgäster — skriv som om du talar till någon som redan känner stället och känner sig hemma där.\nSkrivsätt: Insider-register · anta gemensam kontext, förklara inte det uppenbara · kontinuitet snarare än nyhet — det som alltid är bra, eller det som är tillbaka igen.',
     de: 'Zweck: Sprich direkt zu Stammgästen — schreibe, als würden du mit jemandem sprechen, der den Ort bereits kennt und sich dort zu Hause fühlt.\nSchreibstil: Insider-Register · nehme gemeinsamen Kontext an, erkläre nicht das Offensichtliche · Kontinuität statt Neuheit — was immer gut ist, oder was wieder da ist.',
   },
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// buildSimplifiedVoiceBlock — V5.8 consolidation approach
+// Uses marketing_manager_brief as single source of truth instead of 8 separate fields
+// ══════════════════════════════════════════════════════════════════════════
+function buildSimplifiedVoiceBlock(opts: {
+  marketingManagerBrief?: string,
+  forbiddenPhrases?: string[],
+  goalMode?: string,
+  language?: string,
+  isSceneMoodPost?: boolean,
+  venueIdentity?: string,
+  locationVocabulary?: string[],
+  neighborhoodCharacter?: string,
+  locationMarketingHooks?: string[],
+  signatureThemes?: string[],
+  contentType?: string,
+  hasOutdoorSeating?: boolean,
+}): string {
+  const lang = opts.language || 'da'
+  
+  // If no marketing manager brief, return empty (should not happen in production)
+  if (!opts.marketingManagerBrief) {
+    console.error('❌ marketing_manager_brief missing - brand profile needs regeneration')
+    return ''
+  }
+
+  const goalDirectiveMap: Record<string, string> = {
+    build_brand: 'STRATEGISK VEJLEDNING (dette er ikke bare skrivestil — brandets stemme ER pointen med dette opslag):',
+    drive_footfall: 'STRATEGISK VEJLEDNING (brug brandets stemme til at gøre invitationen konkret og stedsspecifik — ikke generisk):',
+    retain_loyalty: 'STRATEGISK VEJLEDNING (skriv i brandets stemme som om du taler til nogen der allerede kender stedet):',
+  }
+  
+  const header = opts.goalMode && goalDirectiveMap[opts.goalMode] 
+    ? goalDirectiveMap[opts.goalMode]
+    : 'STRATEGISK VEJLEDNING:'
+
+  let block = `${header}\n\n${opts.marketingManagerBrief}\n`
+
+  // For atmosphere/behind_scenes/team_people: photo analysis is the PRIMARY factual anchor
+  if (opts.isSceneMoodPost) {
+    if (opts.venueIdentity) {
+      block += `\n📸 PRIMÆR FAKTAKILDE — eneste gyldige kilde til rumlig og visuel beskrivelse. Tilsidesætter enhver impression fra brandeksempler. Brug UDELUKKENDE det der er beskrevet her:\n${opts.venueIdentity}\n`
+    } else {
+      block += `\n⚠️ Ingen fotobeskrivelse er tilgængelig. Opfind IKKE visuel atmosfære eller interiørdetaljer. Basér det konkrete element udelukkende på konceptankre og stedsidentitet ovenfor.\n`
+    }
+  }
+
+  // Location vocabulary BEFORE tone/examples — establishes these as PRIMARY FACTS
+  if (opts.locationVocabulary && opts.locationVocabulary.length > 0)  {
+    block += `\n📍 FAKTISKE LOKATIONSREFERENCER — dokumenterede stedsbeskrivelser for DENNE virksomhed:\n${opts.locationVocabulary.map(term => `  • ${term}`).join('\n')}`
+    block += `\nNår du refererer til lokation: brug PRÆCIST disse termer (ikke generiske alternativer).\n`
+  }
+  
+  // FACTUAL CONSTRAINT FOR ATMOSPHERE/AVAILABILITY POSTS (no verified interior description)
+  const isAtmosphereOrAvailability = isAtmosphereLikeContentType(opts.contentType)
+  if (isAtmosphereOrAvailability && !opts.venueIdentity) {
+    const locationVocabForPrompt = (opts.locationVocabulary && opts.locationVocabulary.length > 0)
+      ? opts.locationVocabulary.join(', ') 
+      : 'verificerede lokationsreferencer'
+    
+    const outdoorSeatingNote = opts.hasOutdoorSeating === true 
+      ? 'udeservering (verificeret)' 
+      : opts.hasOutdoorSeating === false 
+        ? '' 
+        : 'udeservering (kun hvis verificeret)'
+    const factualAnchors = ['åbningstider', outdoorSeatingNote, 'konkrete retter fra menuen']
+      .filter(x => x)
+      .join(', ')
+    block += `\n🚫 FAKTUEL BEGRÆNSNING — ATMOSFÆREPOST UDEN VERIFICERET INDRETNINGSBESKRIVELSE:
+- Du har INGEN verificeret beskrivelse af indretningen, vinduerne, lyset eller interiøret.
+- Du MÅ IKKE opfinde sanselige detaljer om interiøret (vinduer, lys, gulv, indretning, stemning inde).
+- Brug KUN verificerede lokationsreferencer: ${locationVocabForPrompt}.
+- Faktuelle ankerpunkter du KAN bruge: ${factualAnchors}.
+${opts.hasOutdoorSeating === false ? '- 🚫 NÆVN IKKE udeservering, terrasse eller udendørs spisning — virksomheden har IKKE udendørs pladser.\n' : ''}- Hvis intet konkret at sige: skriv én sætning om location + én om hvad der serveres nu. Stop.\n`
+  }
+
+  // Add critical forbidden phrases as enforcement layer
+  if (opts.forbiddenPhrases && opts.forbiddenPhrases.length > 0) {
+    block += `\n🚫 KRITISKE FORBUDS (brug ALDRIG disse fraser):\n${opts.forbiddenPhrases.slice(0, 10).map(p => `• ${p}`).join('\n')}\n`
+  }
+
+  return `\n${block}\n`
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -422,7 +579,7 @@ function buildBrandBlock(o: BrandBlockOptions): string {
   // FIX 01: FACTUAL CONSTRAINT FOR ATMOSPHERE/AVAILABILITY POSTS (no verified interior description)
   // When contentType is atmosphere or availability AND no venue identity is available, the model
   // must be explicitly constrained from inventing interior/window/light details.
-  const isAtmosphereOrAvailability = o.contentType === 'atmosphere' || o.contentType === 'availability'
+  const isAtmosphereOrAvailability = isAtmosphereLikeContentType(o.contentType)
   if (isAtmosphereOrAvailability && !o.venueIdentity && !o.venueScene) {
     const locationVocabForPrompt = o.locationVocabulary.length > 0 
       ? o.locationVocabulary.join(', ') 
@@ -582,14 +739,23 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     : ''
 
   // atmosphereVoiceHint — atmosphere/seasonal posts with no dish anchor.
-  const atmosphereHintMap: Record<string, string> = {
+  // Different versions for free vs paid tier
+  const atmosphereHintMapPaid: Record<string, string> = {
     da: 'STEMNINGSOPSLAG UDEN MENUINFORMATION: Opfind IKKE stedsatmosfære, location-fakta ELLER abstrakt stemning. Abstrakte stemningsord som "hygge", "varme", "ro", "hverdagen trænger til" er forbudt som åbner. Brug i stedet ét KONKRET element som ankerpunkt: en handling der sker i lokalet, en fysisk genstand, et tidspunkt eller et faktum om stedet. Reducer til: (1) konkret element fra INDHOLD eller BRANDSTEMME-blokken, (2) ét faktuelt tilbud fra ÅBNINGSTID hvis tilgængeligt, (3) CTA.',
     sv: 'STÄMNINGSINLÄGG UTAN MENYINFORMATION: Uppfinn INTE platsatmosphere, platsfakta ELLER abstrakt stämning. Abstrakta stämningsord som "mysighet", "värme", "ro", "vardagen behöver" är förbjudna som öppning. Använd istället ett KONKRET element som ankpunkt: en handling som sker i lokalen, ett fysiskt föremål, en tidpunkt eller ett faktum om stället. Reducera till: (1) konkret element från INNEHÅLL eller VARUMÄRKESRÖST-blocket, (2) ett faktabaserat erbjudande från ÖPPETTIDER om tillgängligt, (3) CTA.',
     de: 'STIMMUNGSBEITRAG OHNE MENÜINFORMATION: Erfinde KEINE Ortsatmosphäre, Ortsfakten ODER abstrakte Stimmung. Abstrakte Stimmungswörter wie "Gemütlichkeit", "Wärme", "Ruhe", "der Alltag braucht" sind als Eröffnung verboten. Verwende stattdessen ein KONKRETES Element als Ankerpunkt: eine Handlung im Lokal, ein physischer Gegenstand, eine Uhrzeit oder eine Tatsache über den Ort. Reduziere auf: (1) konkretes Element aus INHALT oder MARKENSTIMME-Block, (2) ein faktisches Angebot aus ÖFFNUNGSZEITEN wenn verfügbar, (3) CTA.',
   }
+  const atmosphereHintMapFree: Record<string, string> = {
+    da: 'STEMNINGSOPSLAG (FREE TIER): Skriv KUN om faktuelle elementer fra INDHOLD eller ÅBNINGSTID. ABSOLUT FORBUDT: poetisk/abstrakt stemningsbeskrivelse ("kaffedamp stiger op", "gæsterne deler historier", "glemme tid og sted", "nyd nuet", "hyggelige omgivelser", "indbydende atmosfære"). Reducer til: (1) Hvad tidspunkt det er ("eftermiddagen"), (2) Hvad der serveres (hvis nævnt i INDHOLD), (3) CTA. Maksimum 2 korte sætninger + CTA.',
+    sv: 'STÄMNINGSINLÄGG (FREE TIER): Skriv KUN om faktuella element från INNEHÅLL eller ÖPPETTIDER. ABSOLUT FÖRBJUDET: poetisk/abstrakt stämningsbeskrivning ("kaffedoft stiger", "gästerna delar historier", "glömma tid och rum", "njut av stunden", "mysig miljö", "välkomnande atmosfär"). Reducera till: (1) Vilken tid det är, (2) Vad som serveras (om nämnt), (3) CTA. Max 2 korta meningar + CTA.',
+    de: 'STIMMUNGSBEITRAG (FREE TIER): Schreibe NUR über faktische Elemente aus INHALT oder ÖFFNUNGSZEITEN. ABSOLUT VERBOTEN: poetische/abstrakte Stimmungsbeschreibung ("Kaffeeduft steigt auf", "Gäste teilen Geschichten", "Zeit und Ort vergessen", "genieße den Moment", "gemütliche Umgebung", "einladende Atmosphäre"). Reduziere auf: (1) Welche Tageszeit, (2) Was serviert wird (falls genannt), (3) CTA. Max 2 kurze Sätze + CTA.',
+  }
   const isAtmosphereNoMenu = (contentType === 'atmosphere' || contentType === 'seasonal') && !menuItemName
   const atmosphereHint = isAtmosphereNoMenu
-    ? `${atmosphereHintMap[language] || atmosphereHintMap.da}\n`
+    ? (isPaid 
+        ? `${atmosphereHintMapPaid[language] || atmosphereHintMapPaid.da}\n`
+        : `${atmosphereHintMapFree[language] || atmosphereHintMapFree.da}\n`
+      )
     : ''
 
   // ── FAKTUEL FORANKRING — Consolidated factual anchoring (paid tier, Danish only) ──
@@ -604,7 +770,7 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
         ? `\nGodkendte stedsformuleringer (ejer-valideret — må bruges direkte):\n${locationMarketingHooks.slice(0, 3).map((h: string) => `• "${h}"`).join('\n')}`
         : ''
 
-      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.`)
+      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.\n• VÆR ØKONOMISK MED STEDREFERENCE: Brug ikke samme formulering ("ved åen, midt i X")\n  i hvert opslag. Variér placering i sætningen, udelad det når maden/oplevelsen\n  er stærk nok alene, eller find naturlige måder at vise stedet gennem kontext\n  frem for at nævne det direkte. Overforbrug slider formuleringen ned.`)
     }
 
     // Part B: Concept anchor requirement for non-menu posts
@@ -654,25 +820,9 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
   }
   const writingPostureLine = `${writingPostureMap[language] || writingPostureMap.da}\n`
 
-  // forbiddenOpener — prevents literal echo of the idea title as opening sentence.
-  const forbiddenOpenerDA = hook.trim().length > 10
-    ? `- Skriv IKKE dette som åbningssætning ordret: "${hook.slice(0, 80)}" — åbn med et konkret element fra INDHOLD\n- FORBUDT: Markdown overskrifter (#### eller andre # symboler) — skriv kun almindelig tekst\n`
-    : '- FORBUDT: Markdown overskrifter (#### eller andre # symboler) — skriv kun almindelig tekst\n'
-  const forbiddenOpenerSV = hook.trim().length > 10
-    ? `- Skriv INTE detta som öppningsmening ordagrant: "${hook.slice(0, 80)}" — öppna med ett konkret element från INNEHÅLL\n- FÖRBJUDET: Markdown-rubriker (#### eller andra # symboler) — skriv bara vanlig text\n`
-    : '- FÖRBJUDET: Markdown-rubriker (#### eller andra # symboler) — skriv bara vanlig text\n'
-  const forbiddenOpenerDE = hook.trim().length > 10
-    ? `- Schreibe NICHT diesen Satz wörtlich als Eröffnungssatz: "${hook.slice(0, 80)}" — öffne stattdessen mit einem konkreten Element aus dem INHALT\n- VERBOTEN: Markdown-Überschriften (#### oder andere # Symbole) — schreibe nur normalen Text\n`
-    : '- VERBOTEN: Markdown-Überschriften (#### oder andere # Symbole) — schreibe nur normalen Text\n'
-  const forbiddenOpener: Record<string, string> = { da: forbiddenOpenerDA, sv: forbiddenOpenerSV, de: forbiddenOpenerDE }
-
-  // AI Ideas: lighter brand block — same source, trimmed at call site.
-  const aiWritingRules   = cappedWritingRules.slice(0, 3)
-  const aiGoodExamples   = isSceneMoodPost ? cappedGoodExamples.slice(0, 1) : []
-  const aiPreferVocab    = cappedPreferVocab.slice(0, 5)
-  const aiAvoidVocab     = cappedAvoidVocab.slice(0, 5)
-  const aiSigPhrases     = brandSignaturePhrases.slice(0, 2)
-  const aiContentAnchors = cappedContentAnchors.slice(0, 5)
+  // forbiddenOpener — prevents literal echo of the idea title as opening sentence + markdown headers.
+  // BUG FIX: Extracted to shared helper to ensure Weekly Plan gets same rule.
+  const forbiddenOpener = buildForbiddenOpenerBlock(hook, language)
 
   // Goal directive — same source as Weekly Plan; activates the shared GOAL_DIRECTIVE_MAP.
   // AI Ideas always has a resolvedGoalMode (drive_footfall for menu, build_brand for other).
@@ -681,28 +831,48 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     : ''
   const goalDirectiveLine = resolvedAIDirective ? `${resolvedAIDirective}\n` : ''
 
-  const brandBlock = buildBrandBlock({
-    brandTone, voiceConstraints,
-    brandWritingRules: aiWritingRules,
-    brandGoodExamples: aiGoodExamples,
-    brandAvoidExamples: [],
-    brandPreferVocab: aiPreferVocab,
-    brandAvoidVocab: aiAvoidVocab,
-    locationVocabulary: opts.locationVocabulary,
-    brandSignaturePhrases: aiSigPhrases,
-    contentAnchors: aiContentAnchors,
-    thingsToAvoid: opts.thingsToAvoid,
-    goalMode,
-    isSceneMoodPost,
-    voiceRationale,
-    venueIdentity,
-    venueScene: opts.venueScene,  // FIX 01: Pass venueScene for atmosphere constraint check
-    contentType,  // FIX 01: Pass contentType for atmosphere/availability constraint check
-    businessCharacter,
-    identityKeywords,
-    formalityLevel: opts.formalityLevel,
-    humorLevel: opts.humorLevel,
-  })
+  // FORBIDDEN WORDS enforcement
+  const forbiddenWords = opts.forbidden_phrases || [];
+  
+  // V5.8 SIMPLIFIED VOICE BLOCK: Use marketing_manager_brief as single source (AI Ideas path)
+  const brandBlock = opts.marketing_manager_brief
+    ? buildSimplifiedVoiceBlock({
+        marketingManagerBrief: opts.marketing_manager_brief,
+        forbiddenPhrases: forbiddenWords,
+        goalMode,
+        language,
+        isSceneMoodPost,
+        venueIdentity,
+        locationVocabulary: opts.locationVocabulary,
+        neighborhoodCharacter,
+        locationMarketingHooks,
+        signatureThemes,
+        contentType,
+        hasOutdoorSeating: opts.hasOutdoorSeating,
+      })
+    : buildBrandBlock({
+        // Fallback to old method with trimmed fields for AI Ideas
+        brandTone, voiceConstraints,
+        brandWritingRules: cappedWritingRules.slice(0, 3),
+        brandGoodExamples: isSceneMoodPost ? cappedGoodExamples.slice(0, 1) : [],
+        brandAvoidExamples: [],
+        brandPreferVocab: cappedPreferVocab.slice(0, 5),
+        brandAvoidVocab: cappedAvoidVocab.slice(0, 5),
+        locationVocabulary: opts.locationVocabulary,
+        brandSignaturePhrases: brandSignaturePhrases.slice(0, 2),
+        contentAnchors: cappedContentAnchors.slice(0, 5),
+        thingsToAvoid: opts.thingsToAvoid,
+        goalMode,
+        isSceneMoodPost,
+        voiceRationale,
+        venueIdentity,
+        venueScene: opts.venueScene,
+        contentType,
+        businessCharacter,
+        identityKeywords,
+        formalityLevel: opts.formalityLevel,
+        humorLevel: opts.humorLevel,
+      })
 
   const ctaHeader = {
     da: ctaStyle === 'strict' ? 'FAST CTA (skal stå til sidst, ordret):' : 'AFSLUTNING — integrer naturligt i teksten:',
@@ -754,6 +924,7 @@ ${anledningRule.da}
 8) ${finalEmojiInstruction}
    ☕ MÅ KUN bruges, hvis kaffe, espresso, latte eller cappuccino er eksplicit nævnt som en drik i selve teksten — "Café" i virksomhedsnavnet tæller IKKE.
 9) ${selectedCta ? ctaRule8.da : 'Ingen CTA påkrævet for dette opslag — lad teksten tale for sig selv'}${qualityNote}
+10) Stil ALDRIG retoriske spørgsmål til læseren hvor objektet er et abstrakt substantiv ("Kan du se/mærke/føle omsorgen/stemningen/nærværet/roen?"). Spørgsmål er kun tilladt når objektet er konkret og handlingsorienteret (fx "Har du prøvet X?", "Kender du Y?").
 
 OUTPUT
 Returner KUN dette JSON på én linje (ingen markdown, ingen forklaring):
@@ -776,6 +947,7 @@ ${anledningRule.sv}
 8) ${finalEmojiInstruction}
    ☕ FÅR BARA användas om kaffe, espresso, latte eller cappuccino uttryckligen nämns som en dryck i texten — "Café" i företagsnamnet räknas INTE.
 9) ${selectedCta ? ctaRule8.sv : 'Ingen CTA krävs för detta inlägg — låt texten tala för sig själv'}
+10) Ställ ALDRIG retoriska frågor till läsaren där objektet är ett abstrakt substantiv ("Kan du se/känna omtanken/stämningen/närväron?"). Frågor är bara tillåtna när objektet är konkret och handlingsinriktat (t.ex. "Har du provat X?", "Känner du till Y?").
 
 OUTPUT
 Returnera KUN detta JSON på en rad (ingen markdown, ingen förklaring):
@@ -798,6 +970,7 @@ ${anledningRule.de}
 8) ${emojiInstruction}
    ☕ DARF NUR genutzt werden, wenn Kaffee, Espresso, Latte oder Cappuccino ausdrücklich als Getränk im Text erwähnt wird — "Café" im Firmennamen zählt NICHT.
 9) ${selectedCta ? ctaRule8.de : 'Keine CTA erforderlich für diesen Beitrag — lass den Text für sich sprechen'}
+10) Stelle NIEMALS rhetorische Fragen an den Leser, bei denen das Objekt ein abstraktes Substantiv ist ("Kannst du die Sorgfalt/Atmosphäre/Nähe spüren?"). Fragen sind nur erlaubt, wenn das Objekt konkret und handlungsorientiert ist (z.B. "Hast du X probiert?", "Kennst du Y?").
 
 
 OUTPUT
@@ -959,89 +1132,102 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
 
   // FORBIDDEN WORDS enforcement (extracted from voice_guardrails)
   const forbiddenWords = opts.forbidden_phrases || [];
-  const forbiddenWordsBlock = forbiddenWords.length > 0
-    ? `\n⛔ FORBUDTE ORD (brug ALDRIG disse — brug alternativer fra skrivereglerne):\n${forbiddenWords.slice(0, 8).map(w => `  • "${w}"`).join('\n')}\n`
-    : '';
+  
+  // V5.8 SIMPLIFIED VOICE BLOCK: Use marketing_manager_brief as single source
+  // Replaces complex assembly of 8+ separate brand voice fields
+  const brandBlock = opts.marketing_manager_brief
+    ? buildSimplifiedVoiceBlock({
+        marketingManagerBrief: opts.marketing_manager_brief,
+        forbiddenPhrases: forbiddenWords,
+        goalMode,
+        language,
+        isSceneMoodPost,
+        venueIdentity,
+        locationVocabulary: opts.locationVocabulary,
+        neighborhoodCharacter,
+        locationMarketingHooks,
+        signatureThemes,
+        contentType,
+        hasOutdoorSeating: opts.hasOutdoorSeating,
+      })
+    : buildBrandBlock({
+        // Fallback to old method if no marketing_manager_brief (should not happen in production)
+        brandTone, voiceConstraints,
+        brandWritingRules: cappedWritingRules,
+        brandGoodExamples: wpGoodExamples,
+        brandAvoidExamples: wpAvoidExamples,
+        brandPreferVocab: wpPreferVocab,
+        brandAvoidVocab: wpAvoidVocab,
+        locationVocabulary: opts.locationVocabulary,
+        brandSignaturePhrases: brandSignaturePhrases.slice(0, 3),
+        contentAnchors: wpContentAnchors,
+        thingsToAvoid: opts.thingsToAvoid,
+        goalMode,
+        isSceneMoodPost,
+        voiceRationale,
+        venueIdentity,
+        venueScene: opts.venueScene,
+        contentType,
+        businessCharacter,
+        identityKeywords,
+        formalityLevel: opts.formalityLevel,
+        humorLevel: opts.humorLevel,
+      })
 
-  const brandBlock = buildBrandBlock({
-    brandTone, voiceConstraints,
-    brandWritingRules: cappedWritingRules,
-    brandGoodExamples: wpGoodExamples,
-    brandAvoidExamples: wpAvoidExamples,
-    brandPreferVocab: wpPreferVocab,
-    brandAvoidVocab: wpAvoidVocab,
-    locationVocabulary: opts.locationVocabulary,
-    brandSignaturePhrases: brandSignaturePhrases.slice(0, 3),
-    contentAnchors: wpContentAnchors,
-    thingsToAvoid: opts.thingsToAvoid,
-    goalMode,
-    isSceneMoodPost,
-    voiceRationale,
-    venueIdentity,
-    venueScene: opts.venueScene,  // FIX 01: Pass venueScene for atmosphere constraint check
-    contentType,  // FIX 01: Pass contentType for atmosphere/availability constraint check
-    businessCharacter,
-    identityKeywords,
-    formalityLevel: opts.formalityLevel,
-    humorLevel: opts.humorLevel,
-  })
+  // V5.8 SIMPLIFICATION: Tone DNA is now in marketing_manager_brief
+  // Keep this block only if no marketing_manager_brief (fallback)
+  const toneDNASection = opts.marketing_manager_brief ? '' : (() => {
+    const toneDNABlock: string[] = []
 
-  // ═══ TONE DNA BLOCK ═══
-  const toneDNABlock: string[] = []
-
-  if (tone_dna_summary) {
-    toneDNABlock.push(`STRATEGISK TONE:\n${tone_dna_summary}`)
-  }
-
-  if (tone_do_list && tone_do_list.length > 0) {
-    toneDNABlock.push(`TONE — GØR DETTE:\n${tone_do_list.map(r => `- ${r}`).join('\n')}`)
-  }
-
-  if (tone_dont_list && tone_dont_list.length > 0) {
-    toneDNABlock.push(`TONE — UNDGÅ DETTE:\n${tone_dont_list.map(r => `- ${r}`).join('\n')}`)
-  }
-
-  if (location_natural_vocab && location_natural_vocab.length > 0) {
-    toneDNABlock.push(`FORETRUKKET LOKATIONS-VOKABULAR — ROTER mellem disse (brug ikke samme hver gang):\n${location_natural_vocab.map((v, i) => `  ${i + 1}. "${v}"`).join('\n')}`)
-  }
-
-  if (location_avoid_vocab && location_avoid_vocab.length > 0) {
-    toneDNABlock.push(`UNDGÅ DISSE ORD (clasher med lokation): ${location_avoid_vocab.join(', ')}`)
-  }
-
-  // V5.6: Use humor_character if available (richer guidance), otherwise fall back to humor_style
-  const humor_character = (opts as any).humor_character
-  if (humor_character && humor_character.permission_level !== 'none') {
-    const parts = [`Niveau: ${humor_character.permission_level}`]
-    if (humor_character.execution_style) {
-      parts.push(`Stil: ${humor_character.execution_style}`)
+    if (tone_dna_summary) {
+      toneDNABlock.push(`STRATEGISK TONE:\n${tone_dna_summary}`)
     }
-    if (humor_character.tone_descriptors && humor_character.tone_descriptors.length > 0) {
-      parts.push(`Register: ${humor_character.tone_descriptors.join(', ')}`)
-    }
-    toneDNABlock.push(`HUMOR KARAKTER:\n  ${parts.join('\n  ')}`)
-  } else if (humor_style && humor_style !== 'none') {
-    // Legacy fallback
-    const humorMap: Record<string, string> = {
-      playful: 'Let og lidt selvironisk — aldrig på bekostning af maden eller stedet',
-      dry: 'Tør og afdæmpet — brug sparsomt',
-      warm: 'Varm og inkluderende — ingen jokes',
-      none: ''
-    }
-    const humorInstruction = humorMap[humor_style] || humor_style
-    if (humorInstruction) {
-      toneDNABlock.push(`HUMOR: ${humorInstruction}`)
-    }
-  }
 
-  const toneDNASection = toneDNABlock.length > 0
-    ? `\n\n${toneDNABlock.join('\n\n')}`
-    : ''
+    if (tone_do_list && tone_do_list.length > 0) {
+      toneDNABlock.push(`TONE — GØR DETTE:\n${tone_do_list.map(r => `- ${r}`).join('\n')}`)
+    }
+
+    if (tone_dont_list && tone_dont_list.length > 0) {
+      toneDNABlock.push(`TONE — UNDGÅ DETTE:\n${tone_dont_list.map(r => `- ${r}`).join('\n')}`)
+    }
+
+    if (location_natural_vocab && location_natural_vocab.length > 0) {
+      toneDNABlock.push(`FORETRUKKET LOKATIONS-VOKABULAR — ROTER mellem disse (brug ikke samme hver gang):\n${location_natural_vocab.map((v, i) => `  ${i + 1}. "${v}"`).join('\n')}`)
+    }
+
+    if (location_avoid_vocab && location_avoid_vocab.length > 0) {
+      toneDNABlock.push(`UNDGÅ DISSE ORD (clasher med lokation): ${location_avoid_vocab.join(', ')}`)
+    }
+
+    const humor_character = (opts as any).humor_character
+    if (humor_character && humor_character.permission_level !== 'none') {
+      const parts = [`Niveau: ${humor_character.permission_level}`]
+      if (humor_character.execution_style) {
+        parts.push(`Stil: ${humor_character.execution_style}`)
+      }
+      if (humor_character.tone_descriptors && humor_character.tone_descriptors.length > 0) {
+        parts.push(`Register: ${humor_character.tone_descriptors.join(', ')}`)
+      }
+      toneDNABlock.push(`HUMOR KARAKTER:\n  ${parts.join('\n  ')}`)
+    } else if (humor_style && humor_style !== 'none') {
+      const humorMap: Record<string, string> = {
+        playful: 'Let og lidt selvironisk — aldrig på bekostning af maden eller stedet',
+        dry: 'Tør og afdæmpet — brug sparsomt',
+        warm: 'Varm og inkluderende — ingen jokes',
+        none: ''
+      }
+      const humorInstruction = humorMap[humor_style] || humor_style
+      if (humorInstruction) {
+        toneDNABlock.push(`HUMOR: ${humorInstruction}`)
+      }
+    }
+
+    return toneDNABlock.length > 0 ? `\n\n${toneDNABlock.join('\n\n')}` : ''
+  })()
 
   // Fix 4: Geographic narrative — ONLY for atmosphere/location posts
   // For food posts, menu item is the anchor. For atmosphere posts, location IS the content.
-  const isAtmospherePost = ['atmosphere', 'behind_scenes', 'team_people', 'general_invitation']
-    .includes(contentType || '')
+  const isAtmospherePost = isAtmosphereLikeContentType(contentType)
   
   const geoNarrativeBlock = locationIntelligenceNarrative && isAtmospherePost
     ? `\n\nLOKATIONSKONTEKST (gælder især for stemnings- og stedsposter):\n${locationIntelligenceNarrative}`
@@ -1059,7 +1245,7 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
         ? `\nGodkendte stedsformuleringer (ejer-valideret — må bruges direkte):\n${locationMarketingHooks.slice(0, 3).map((h: string) => `• "${h}"`).join('\n')}`
         : ''
 
-      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.`)
+      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.\n• VÆR ØKONOMISK MED STEDREFERENCE: Brug ikke samme formulering ("ved åen, midt i X")\n  i hvert opslag. Variér placering i sætningen, udelad det når maden/oplevelsen\n  er stærk nok alene, eller find naturlige måder at vise stedet gennem kontext\n  frem for at nævne det direkte. Overforbrug slider formuleringen ned.`)
     }
 
     // Part B: Concept anchor requirement for non-menu posts
@@ -1125,13 +1311,17 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     ? (wpSceneMoodOpeningHintMap[lang] || wpSceneMoodOpeningHintMap.da)
     : ''
 
+  // forbiddenOpener — prevents literal echo of the hook as opening + markdown headers.
+  // BUG FIX: Weekly Plan was missing this entirely, allowing #### headers.
+  const wpForbiddenOpener = buildForbiddenOpenerBlock(hook, language)
+
   const templates: Record<string, string> = {
     da: `OPGAVE
 Skriv ÉN social media-tekst til ${businessName} i ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INDHOLD (skriv om KUN dette):
 ${contentBlock}
-${brandBlock}${toneDNASection}${geoNarrativeBlock}${forbiddenWordsBlock}${hoursBlock}${faktaforbud.da}${citySizeGuard}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}
+${brandBlock}${toneDNASection}${geoNarrativeBlock}${hoursBlock}${faktaforbud.da}${citySizeGuard}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}${wpForbiddenOpener}
 ${wpCtaSection}${wpBookingCtaBlock}KRAV TIL TEKSTEN
 1) Længde: 300-450 tegn INKL. emojis og CTA
 ${startRules.da}
@@ -1148,6 +1338,7 @@ ${dishRules.da}
    ☕ MÅ KUN bruges, hvis kaffe, espresso, latte eller cappuccino er eksplicit nævnt som en drik i selve teksten — "Café" i virksomhedsnavnet tæller IKKE.
 8) ${selectedCta ? ctaRule8.da : 'Ingen CTA påkrævet for dette opslag — lad teksten tale for sig selv'}${qualityNote}
 9) Sætninger med kun subjekt + intransitivt verbum er forbudt overalt — "X venter", "X kalder", "X lokker" er scenefylde.
+10) Stil ALDRIG retoriske spørgsmål til læseren hvor objektet er et abstrakt substantiv ("Kan du se/mærke/føle omsorgen/stemningen/nærværet/roen?"). Spørgsmål er kun tilladt når objektet er konkret og handlingsorienteret (fx "Har du prøvet X?", "Kender du Y?").
 
 OUTPUT
 Returner KUN dette JSON på én linje (ingen markdown, ingen forklaring):
@@ -1158,7 +1349,7 @@ Skriv EN social media-text till ${businessName} i ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INNEHÅLL (skriv om BARA detta):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.sv}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}
+${brandBlock}${hoursBlock}${faktaforbud.sv}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}${wpForbiddenOpener}
 ${wpCtaSection}${wpBookingCtaBlock}KRAV
 1) Längd: 300-450 tecken INKL. emojis och CTA
 ${startRules.sv}
@@ -1170,6 +1361,7 @@ ${dishRules.sv}
    ☕ FÅR BARA användas om kaffe, espresso, latte eller cappuccino uttryckligen nämns som en dryck i texten — "Café" i företagsnamnet räknas INTE.
 8) ${selectedCta ? ctaRule8.sv : 'Ingen CTA krävs för detta inlägg — låt texten tala för sig själv'}
 9) Meningar med bara subjekt + intransitivt verb är förbjudna genomgående — "X väntar", "X kallar", "X lockar" är scenfyllnad.
+10) Ställ ALDRIG retoriska frågor till läsaren där objektet är ett abstrakt substantiv ("Kan du se/känna omtanken/stämningen/närväron?"). Frågor är bara tillåtna när objektet är konkret och handlingsinriktat (t.ex. "Har du provat X?", "Känner du till Y?").
 
 OUTPUT
 Returnera KUN detta JSON på en rad (ingen markdown, ingen förklaring):
@@ -1180,7 +1372,7 @@ Schreibe EINEN Social-Media-Text für ${businessName} in ${city}.
 ${goalDirectiveLine}${weeklyPlanContext}${weeklyRoleFrame}
 INHALT (schreibe NUR über dieses):
 ${contentBlock}
-${brandBlock}${hoursBlock}${faktaforbud.de}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}
+${brandBlock}${hoursBlock}${faktaforbud.de}${wpFactualAnchoringBlock}${wpSceneMoodOpeningHint}${wpForbiddenOpener}
 ${wpCtaSection}${wpBookingCtaBlock}ANFORDERUNGEN
 1) Länge: 300-450 Zeichen INKL. Emojis und CTA
 ${startRules.de}
@@ -1192,6 +1384,7 @@ ${dishRules.de}
    ☕ DARF NUR genutzt werden, wenn Kaffee, Espresso, Latte oder Cappuccino ausdrücklich als Getränk im Text erwähnt wird — "Café" im Firmennamen zählt NICHT.
 8) ${selectedCta ? ctaRule8.de : 'Keine CTA erforderlich für diesen Beitrag — lass den Text für sich sprechen'}
 9) Sätze nur mit Subjekt + intransitivem Verb sind durchgehend verboten — "X wartet", "X ruft", "X lockt" sind Szenenerfüllung.
+10) Stelle NIEMALS rhetorische Fragen an den Leser, bei denen das Objekt ein abstraktes Substantiv ist ("Kannst du die Sorgfalt/Atmosphäre/Nähe spüren?"). Fragen sind nur erlaubt, wenn das Objekt konkret und handlungsorientiert ist (z.B. "Hast du X probiert?", "Kennst du Y?").
 
 OUTPUT
 Gib NUR dieses JSON auf einer Zeile zurück (kein Markdown, keine Erklärung):

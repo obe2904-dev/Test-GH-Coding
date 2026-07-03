@@ -60,6 +60,54 @@ export function validatePublicUrl(url: string): void {
 }
 
 /**
+ * Detects if a URL is a Google Docs, Dropbox, or other document-sharing platform URL.
+ * These platforms require special handling and cannot be processed by the menu extraction system.
+ * 
+ * @param url - URL to check
+ * @returns Error message if URL is an unsupported document platform, null if it's supported
+ */
+export function detectUnsupportedDocumentUrl(url: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null // Invalid URL - let other validation handle it
+  }
+
+  const hostname = parsed.hostname.toLowerCase()
+  const path = parsed.pathname.toLowerCase()
+  
+  // Google Docs (published or editing URLs)
+  if (hostname === 'docs.google.com' || hostname.endsWith('.docs.google.com')) {
+    if (path.includes('/document/') || path.includes('/spreadsheets/') || path.includes('/presentation/')) {
+      return 'Vi kan desværre ikke hente menuer fra Google Docs. Download dit menukort som PDF eller link direkte til jeres hjemmeside.'
+    }
+  }
+  
+  // Google Drive shared files
+  if (hostname === 'drive.google.com') {
+    return 'Vi kan desværre ikke hente filer fra Google Drive. Upload filen direkte eller link til jeres hjemmeside.'
+  }
+  
+  // Dropbox shared links
+  if (hostname === 'dropbox.com' || hostname === 'www.dropbox.com' || hostname.endsWith('.dropbox.com')) {
+    return 'Vi kan desværre ikke hente filer fra Dropbox. Upload filen direkte eller link til jeres hjemmeside.'
+  }
+  
+  // Microsoft OneDrive / SharePoint
+  if (hostname.includes('sharepoint.com') || hostname.includes('onedrive.live.com') || hostname.includes('1drv.ms')) {
+    return 'Vi kan desværre ikke hente filer fra OneDrive/SharePoint. Upload filen direkte eller link til jeres hjemmeside.'
+  }
+  
+  // iCloud shared links
+  if (hostname.includes('icloud.com')) {
+    return 'Vi kan desværre ikke hente filer fra iCloud. Upload filen direkte eller link til jeres hjemmeside.'
+  }
+  
+  return null // URL is supported
+}
+
+/**
  * Detects if HTML content appears to be a login/authentication page.
  * Prevents accidentally extracting password fields or protected content.
  * 

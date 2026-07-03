@@ -315,19 +315,18 @@ export const BRAND_PROFILE_SCHEMA = {
       properties: {
         primary_goal: {
           type: "string",
-          enum: ["drive_footfall", "build_brand", "retain_loyalty"],
-          description: "The single dominant social-media goal for this business. drive_footfall = get people through the door; build_brand = distinctive identity and awareness; retain_loyalty = keep regulars engaged."
+          enum: ["drive_footfall", "build_brand"],
+          description: "The single dominant social-media goal for this business. drive_footfall = get people through the door; build_brand = distinctive identity and awareness."
         },
         goal_blend: {
           type: "object",
           properties: {
             drive_footfall: { type: "number", minimum: 0, maximum: 100 },
-            build_brand: { type: "number", minimum: 0, maximum: 100 },
-            retain_loyalty: { type: "number", minimum: 0, maximum: 100 }
+            build_brand: { type: "number", minimum: 0, maximum: 100 }
           },
-          required: ["drive_footfall", "build_brand", "retain_loyalty"],
+          required: ["drive_footfall", "build_brand"],
           additionalProperties: false,
-          description: "Percentage split across the three goal modes. MUST sum to 100. Example for a destination dining restaurant: drive_footfall=50, build_brand=30, retain_loyalty=20."
+          description: "Percentage split across the two goal modes. MUST sum to 100. Example for a destination dining restaurant: drive_footfall=65, build_brand=35."
         },
         footfall_signals: {
           type: "array",

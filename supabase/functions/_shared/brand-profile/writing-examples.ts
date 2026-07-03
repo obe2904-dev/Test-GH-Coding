@@ -643,6 +643,9 @@ async function aiGenerateCTALibrary(
   const systemPrompt = language === 'da'
     ? `Du er ekspert i at skrive call-to-action (CTA) tekster for danske restauranter og cafeer.
 
+KERNEPRINCIP: Alle CTAs skal lyde som én person der taler til en anden person.
+Ikke corporate-speak, ikke marketing-afdelingen — bare menneskeligt, ægte og varmt.
+
 Din opgave er at generere BRAND-SPECIFIKKE CTAs der:
 ✅ Matcher virksomhedens stemme og arketype
 ✅ Henviser til specifikke egenskaber (lokation, mad, service)
@@ -653,10 +656,14 @@ Din opgave er at generere BRAND-SPECIFIKKE CTAs der:
 VIGTIGT:
 - CTAs skal være specifikke for DENNE virksomhed
 - Brug location_reference hvis relevant
-- Tilpas til archetype (fine dining = formelt, café = casual)
+- Tilpas til archetype (fine dining = elegant personlig, café = varm casual)
 - Vær regional bevidst (København = international, Aarhus = traditionel)
+- Selv formelle CTAs skal føles som menneske-til-menneske samtale
 - Generer 3-5 variationer per intent/style`
     : `You are an expert at writing call-to-action (CTA) texts for Danish restaurants and cafes.
+
+CORE PRINCIPLE: All CTAs must sound like one person talking to another person.
+Not corporate-speak, not marketing department — just human, genuine, and warm.
 
 Your task is to generate BRAND-SPECIFIC CTAs that:
 ✅ Match the business's voice and archetype
@@ -668,8 +675,9 @@ Your task is to generate BRAND-SPECIFIC CTAs that:
 IMPORTANT:
 - CTAs must be specific to THIS business
 - Use location_reference when relevant
-- Adapt to archetype (fine dining = formal, café = casual)
+- Adapt to archetype (fine dining = elegantly personal, café = warmly casual)
 - Be regionally aware (Copenhagen = international, Aarhus = traditional)
+- Even formal CTAs should feel like human-to-human conversation
 - Generate 3-5 variations per intent/style`
 
   const archetypeGuidance = business.archetype || business.business_category || 'restaurant'
@@ -691,28 +699,33 @@ ${voice.tone_rules.slice(0, 3).map((r, i) => `${i + 1}. ${r}`).join('\n')}
 
 === CTA REQUIREMENTS ===
 
+VIGTIGT: Alle CTAs skal lyde som én person der taler til en anden person.
+Ikke corporate, ikke marketing-speak — bare menneskeligt og ægte.
+
 1. VISIT CTAs (casual style):
-   - Uformelle "kom forbi" vendinger
+   - Varm, venlig "kom forbi" tone
    - Reference lokation hvis relevant: "${locationPhrase || 'i [område]'}"
    - Eksempel: "Kom forbi ${locationPhrase}" eller "Vi ses snart!"
    - Generer 3-4 variationer
 
-2. VISIT CTAs (formal style):
-   - Mere sofistikerede vendinger
-   - Passer til fine dining/premium
-   - Eksempel: "Besøg os ${locationPhrase}" eller "Velkommen til ${business.business_name}"
+2. VISIT CTAs (elevated style):
+   - Stadig personlig men elegant (ikke stiv eller corporate)
+   - Som en sommelier eller chef der inviterer dig — ikke et firma
+   - Eksempel: "Vi glæder os til at se dig ${locationPhrase}" eller "Lad os byde dig velkommen"
+   - UNDGÅ: "Besøg os" (for stivt), "Velkommen til [firmanavn]" (upersonligt)
    - Generer 3-4 variationer
 
 3. BOOKING CTAs (soft style):
-   - Blide opfordringer til reservation
-   - Ikke presserende
-   - Eksempel: "Book bord hvis du vil være sikker"
+   - Hjælpsom, ikke presserende
+   - Som en ven der giver dig et godt råd
+   - Eksempel: "Book bord hvis du vil være sikker på en plads" eller "Ring og book — så er du sikker"
    - Generer 3-4 variationer
 
-4. BOOKING CTAs (urgent style):
-   - Mere presserende
-   - Skaber urgency
-   - Eksempel: "Book nu – få pladser tilbage"
+4. BOOKING CTAs (reminder style):
+   - Venlig påmindelse, ikke urgency eller FOMO
+   - Stadig personlig og hjælpsom
+   - Eksempel: "Vi anbefaler at booke" eller "Book gerne på forhånd — så er du sikker"
+   - UNDGÅ: "Book nu!", "Få pladser!", "Før det er for sent", "det er tit fuldt" (unsubstantiated claims)
    - Generer 3-4 variationer
 
 5. ENGAGEMENT CTAs (question style):
@@ -754,7 +767,9 @@ RETURN AS JSON:
   "avoid_phrases": ["Forældet phrase 1", "Forældet phrase 2"],
   "default_style": "casual" eller "formal",
   "booking_priority": "soft" eller "urgent"
-}`
+}
+
+HUSK: Alle CTAs skal lyde menneskeligt — som én person til en anden, ikke som marketing.`
     : `Generate brand-specific CTAs for ${business.business_name}.
 [English version of same prompt structure...]`
 
@@ -820,12 +835,12 @@ RETURN AS JSON:
     return {
       cta_library: {
         visit: {
-          casual: ['Kom forbi!', 'Vi ses snart', 'Hop forbi'],
-          formal: [`Besøg os ${locationPhrase}`, `Velkommen til ${business.business_name}`]
+          casual: ['Kom forbi!', 'Vi ses snart', 'Kig forbi'],
+          formal: [`Vi glæder os til at se dig ${locationPhrase}`, `Låd os byde dig velkommen`, 'Vi har åbent for dig']
         },
         booking: {
-          soft: ['Book bord online', 'Book dit bord'],
-          urgent: ['Book nu', 'Sikr dig et bord']
+          soft: ['Book bord hvis du vil være sikker', 'Book gerne på forhånd'],
+          urgent: ['Vi anbefaler at booke', 'Book gerne — så er du sikker']
         },
         engagement: {
           question: ['Hvad synes du?', 'Hvad ville du vælge?'],

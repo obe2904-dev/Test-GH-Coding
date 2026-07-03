@@ -12,7 +12,7 @@ const corsHeaders = {
  * This function delegates to generate-text-from-idea (which uses buildWeeklyPlanPrompt)
  * rather than the weaker plan-post-prompt system. This ensures regeneration gets:
  *   - UGEPLANKONTEKST weekly frame
- *   - goal_mode directive (drive_footfall / build_brand / retain_loyalty)
+ *   - goal_mode directive (drive_footfall / build_brand)
  *   - faktaforbud (no hallucinated facts)
  *   - sensory rules and dish description rules
  *   - full brand voice and tone-of-voice profile

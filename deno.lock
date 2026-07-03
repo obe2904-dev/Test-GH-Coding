@@ -575,6 +575,7 @@
         "npm:react-i18next@^16.1.4",
         "npm:react-router-dom@^6.21.0",
         "npm:react@^18.2.0",
+        "npm:supabase@^2.109.0-beta.8",
         "npm:tailwindcss@^3.4.0",
         "npm:typescript@^5.2.2",
         "npm:vite@^7.2.6",

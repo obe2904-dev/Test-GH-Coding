@@ -108,6 +108,11 @@ function toLocalISODate(date: Date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
+function toLocalISOTime(date: Date = new Date()): string {
+  // Convert to local time by adjusting for timezone offset
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, -1)
+}
+
 function addDaysToLocalDate(date: Date, days: number): string {
   const copy = new Date(date)
   copy.setDate(copy.getDate() + days)
@@ -294,7 +299,6 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
         body: {
           businessId,
           count: 3,
-          tier: currentTier,
           regenerate,  // Always request a refresh on explicit regenerate clicks
           localTime: opts?.localTime,
           localDate: opts?.localDate ?? toLocalISODate(),
@@ -515,7 +519,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
     const handleGenerate = () => {
       setShowGate(false)
       fetchSuggestions(true, {
-        localTime: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, -1),
+        localTime: toLocalISOTime(),
         userContext: userContext.trim() || undefined,
       })
     }
@@ -590,7 +594,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
         </p>
         {!error.includes(t('dashboard.quotaExceeded')) && (
           <button
-            onClick={() => fetchSuggestions(true)}
+            onClick={() => fetchSuggestions(true, { localTime: toLocalISOTime(), localDate: toLocalISODate() })}
             className="px-4 py-2 bg-cta text-white rounded-lg hover:bg-cta-hover transition-colors text-sm font-medium"
           >
             {t('dashboard.retrySuggestions')}
@@ -611,7 +615,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
           {t('dashboard.aiIdeasDescription')}
         </p>
         <button
-          onClick={() => fetchSuggestions(true)}
+          onClick={() => fetchSuggestions(true, { localTime: toLocalISOTime(), localDate: toLocalISODate() })}
           className="px-4 py-2 bg-cta text-white rounded-lg hover:bg-cta-hover transition-colors text-sm font-medium flex items-center gap-2"
         >
           <span>✨</span>
@@ -858,7 +862,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
 
       {/* Regenerate button */}
       <button
-        onClick={() => fetchSuggestions(true, { localDate: toLocalISODate() })}
+        onClick={() => fetchSuggestions(true, { localTime: toLocalISOTime(), localDate: toLocalISODate() })}
         disabled={isAtRegenerationLimit || false}
         className={`w-full text-center text-sm py-2 border rounded-lg transition-colors ${
           isAtRegenerationLimit

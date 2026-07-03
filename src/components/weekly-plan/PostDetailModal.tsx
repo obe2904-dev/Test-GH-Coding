@@ -112,11 +112,12 @@ export function PostDetailModal({ post, onClose, onUpdate: _onUpdate, planId: _p
                       Slot {post.strategicContext.slot_id}
                     </span>
                   )}
-                  {post.strategicContext.goal_mode && (
+                  {post.strategicContext.cta_intent && (
                     <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-100 text-blue-800">
-                      {post.strategicContext.goal_mode === 'drive_footfall' ? '💰 Drive Footfall' :
-                       post.strategicContext.goal_mode === 'build_brand' ? '🎨 Build Brand' :
-                       '🤝 Retain Loyalty'}
+                      {post.strategicContext.cta_intent === 'booking' ? t('weeklyPlan.overview.cta.booking') :
+                       post.strategicContext.cta_intent === 'traffic' ? t('weeklyPlan.overview.cta.traffic') :
+                       post.strategicContext.cta_intent === 'engagement' ? t('weeklyPlan.overview.cta.engagement') :
+                       t('weeklyPlan.overview.cta.awareness')}
                     </span>
                   )}
                 </div>

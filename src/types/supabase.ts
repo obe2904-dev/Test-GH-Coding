@@ -425,9 +425,11 @@ export type Database = {
           raw_competitive_venues: Json | null
           schema_version: number | null
           street_visibility: string | null
+          traffic_rhythm: Json | null
           updated_at: string | null
           user_confirmed_at: string | null
           view_type: string[] | null
+          who: Json | null
           when_analysis: Json | null
           when_analysis_internal: Json | null
           who_analysis: Json | null
@@ -463,11 +465,13 @@ export type Database = {
           raw_competitive_venues?: Json | null
           schema_version?: number | null
           street_visibility?: string | null
+          traffic_rhythm?: Json | null
           updated_at?: string | null
           user_confirmed_at?: string | null
           view_type?: string[] | null
           when_analysis?: Json | null
           when_analysis_internal?: Json | null
+          who?: Json | null
           who_analysis?: Json | null
           who_analysis_internal?: Json | null
           why_analysis?: Json | null
@@ -495,17 +499,15 @@ export type Database = {
           nearby_hospitality?: Json | null
           neighborhood?: string | null
           neighborhood_character?: string | null
-          outdoor_space_type?: string | null
-          physical_context?: Json | null
-          public_transport?: Json | null
-          raw_competitive_venues?: Json | null
           schema_version?: number | null
           street_visibility?: string | null
+          traffic_rhythm?: Json | null
           updated_at?: string | null
           user_confirmed_at?: string | null
           view_type?: string[] | null
           when_analysis?: Json | null
           when_analysis_internal?: Json | null
+          who?: Json | null
           who_analysis?: Json | null
           who_analysis_internal?: Json | null
           why_analysis?: Json | null

@@ -679,7 +679,10 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
               businessId={businessId}
               onUpdate={async (guidelines) => {
                 try {
-                  const { error } = await supabase
+                  // TODO: post_length_guidelines field doesn't exist in current schema
+                  // Consider adding to brand_profile_v5 JSON or creating new column
+                  console.log('Post length guidelines update skipped (field not in schema):', guidelines);
+                  /* const { error } = await supabase
                     .from('business_brand_profile')
                     .update({ post_length_guidelines: guidelines })
                     .eq('business_id', businessId);
@@ -687,7 +690,7 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
                   if (error) {
                     console.error('Failed to save post length guidelines:', error);
                     throw error;
-                  }
+                  } */
                   
                   console.log('✅ Post length guidelines saved successfully');
                 } catch (error) {

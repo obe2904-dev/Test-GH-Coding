@@ -90,15 +90,19 @@ export function ToneOfVoiceEditor({ businessId, currentProfile, onSave }: ToneOf
       
       if (fetchError) throw fetchError;
       
+      const currentProfile = (current?.brand_profile_v5 as Record<string, any>) || {};
+      const currentVoice = (currentProfile.voice as Record<string, any>) || {};
+      const currentGuardrails = (currentProfile.guardrails as Record<string, any>) || {};
+      
       const updatedProfile = {
-        ...(current?.brand_profile_v5 || {}),
+        ...currentProfile,
         version: '5.1',
         voice: {
-          ...(current?.brand_profile_v5?.voice || {}),
+          ...currentVoice,
           structural_rules: structuralRules
         },
         guardrails: {
-          ...(current?.brand_profile_v5?.guardrails || {}),
+          ...currentGuardrails,
           avoid_patterns: {
             brochure_language: brochureLanguage,
             superlatives: superlatives,

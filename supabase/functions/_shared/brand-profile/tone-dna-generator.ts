@@ -51,9 +51,9 @@ function classifyCitySize(
   cityName: string
 ): 'large' | 'medium' | 'small' {
   // Known Danish cities — hardcoded to avoid relying on AI population estimates
-  const LARGE_CITIES = ['København', 'Aarhus'];         // 200k+
+  const LARGE_CITIES = ['København'];                    // 200k+
   const MEDIUM_CITIES = [                                // 50k–200k
-    'Odense', 'Aalborg', 'Esbjerg', 'Randers', 'Kolding',
+    'Aarhus', 'Odense', 'Aalborg', 'Esbjerg', 'Randers', 'Kolding',
     'Horsens', 'Vejle', 'Roskilde', 'Herning', 'Silkeborg',
     'Næstved', 'Fredericia', 'Viborg', 'Køge', 'Holstebro',
   ];

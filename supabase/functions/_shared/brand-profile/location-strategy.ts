@@ -232,7 +232,7 @@ function generatePositioningAngles(
     if (demo.demographic === 'local_resident') {
       angles.push(`Strong local residential base — "your local" positioning`);
     }
-    if (demo.demographic === 'business_professional') {
+    if (demo.demographic === 'office_worker' || demo.demographic === 'business_professional') {
       angles.push(`Business district proximity — lunch and after-work positioning`);
     }
     if (demo.demographic === 'tourist') {
@@ -280,7 +280,7 @@ function generateContentTriggers(
   // --- Content triggers from programme timing ---
   for (const programme of programmes) {
     if (programme.type === 'lunch' && 
-        (reachable.some(d => d.demographic === 'business_professional') ||
+        (reachable.some(d => d.demographic === 'office_worker' || d.demographic === 'business_professional') ||
          reachable.some(d => d.demographic === 'local_resident'))) {
       const timeWindow = programme.time_windows[0] || 'lunch hours';
       triggers.push(`Lunch programme (${timeWindow}) — workday decision content`);

@@ -126,6 +126,7 @@ export function MenuSourceItem({
               status={mapMenuStatusToUIStatus(menu.status)}
               sourceType={menu.fileName ? 'pdf' : 'url'}
               menuLabel={(menu as any).label || menu.fileName || extractMenuNameFromUrl(menu.url)}
+              errorMessage={menu.error}
               onRetry={() => onExtract(menu.url)}
               compact
             />

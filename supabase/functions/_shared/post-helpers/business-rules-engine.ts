@@ -15,7 +15,7 @@
  */
 
 // Local type definitions to avoid circular dependencies
-type GoalMode = 'drive_footfall' | 'build_brand' | 'retain_loyalty';
+type GoalMode = 'drive_footfall' | 'build_brand';
 type ContentCategory = 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people';
 
 // ============================================================================
@@ -92,7 +92,7 @@ export interface PostingStrategy {
     footfall_primary?: string;    // e.g. "Thu-Fri 16:00"
     footfall_secondary?: string;  // e.g. "Fri-Sat 14:00"
     brand_builder?: string;       // e.g. "Mon 09:00"
-    loyalty?: string;             // e.g. "Wed-Thu 12:00"
+    brand_builder_secondary?: string;  // e.g. "Wed-Thu 12:00"
   };
   cta_emphasis?: 'walk_in' | 'booking' | 'hybrid';
   rationale?: string;
@@ -115,7 +115,7 @@ export function deriveSlotWindowsFromBookingModel(bookingModel: BookingModel | n
   footfall_primary: string;
   footfall_secondary: string;
   brand_builder: string;
-  loyalty: string;
+  brand_builder_secondary: string;
 } {
   const reservationOnly = bookingModel?.reservation_required === true && bookingModel?.accepts_walk_ins !== true;
   const walkInOnly = bookingModel?.accepts_walk_ins === true && bookingModel?.reservation_required !== true && !bookingModel?.has_booking_link;
@@ -126,7 +126,7 @@ export function deriveSlotWindowsFromBookingModel(bookingModel: BookingModel | n
       footfall_primary:   'Sun-Mon 19:00',
       footfall_secondary: 'Mon-Tue 12:00',
       brand_builder:      'Sat 10:00',
-      loyalty:            'Wed 11:00',
+      brand_builder_secondary: 'Wed 11:00',
     };
   }
 
@@ -136,7 +136,7 @@ export function deriveSlotWindowsFromBookingModel(bookingModel: BookingModel | n
       footfall_primary:   'Fri-Sat 17:00',
       footfall_secondary: 'Thu-Fri 15:00',
       brand_builder:      'Mon 09:00',
-      loyalty:            'Wed-Thu 12:00',
+      brand_builder_secondary: 'Wed-Thu 12:00',
     };
   }
 
@@ -145,7 +145,7 @@ export function deriveSlotWindowsFromBookingModel(bookingModel: BookingModel | n
     footfall_primary:   'Thu-Fri 16:00',
     footfall_secondary: 'Wed-Thu 12:00',
     brand_builder:      'Mon 09:00',
-    loyalty:            'Tue-Wed 11:00',
+    brand_builder_secondary: 'Tue-Wed 11:00',
   };
 }
 
@@ -348,11 +348,11 @@ export function generateSlotsFromRevenueDrivers(
   })
 
   // ────────────────────────────────────────────────────────────────────
-  // SLOT D: Flexible/Loyalty
+  // SLOT D: Brand Builder Secondary
   // ────────────────────────────────────────────────────────────────────
   
   // Use mid-week day from preferred_days if available
-  const flexibleTiming = psWindows?.loyalty ?? bmWindows?.loyalty ?? getFlexibleTiming(strategy.preferred_days, [
+  const flexibleTiming = psWindows?.brand_builder_secondary ?? bmWindows?.brand_builder_secondary ?? getFlexibleTiming(strategy.preferred_days, [
     primaryTiming.timing_window,
     slotBTiming.timing_window,
     brandBuilderTiming,
@@ -360,12 +360,12 @@ export function generateSlotsFromRevenueDrivers(
 
   slots.push({
     slot_id: 'D',
-    goal_mode: 'retain_loyalty',
+    goal_mode: 'build_brand',
     content_category: 'craving_visual',
     timing_window: flexibleTiming,
     revenue_moment_id: secondaryMoments[1]?.moment_id || primaryMoment.moment_id,
     revenue_moment_label: secondaryMoments[1]?.label || primaryMoment.label,
-    post_timing_rationale: 'Mid-week engagement',
+    post_timing_rationale: 'Mid-week brand depth',
   })
 
   console.log('[Business Rules Engine] Generated slots:', slots.map(s => 
@@ -569,7 +569,7 @@ function getBaseSlotsFallback(): SlotTemplate[] {
     },
     {
       slot_id: 'D',
-      goal_mode: 'retain_loyalty',
+      goal_mode: 'build_brand',
       content_category: 'craving_visual',
       timing_window: 'any',
       post_timing_rationale: 'Flexible (fallback)',

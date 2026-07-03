@@ -324,13 +324,11 @@ export async function generateStrategicBrief(
   const bookingSlots = brief.angles.filter(a => a.cta_mode === 'booking').length;
   const walkInSlots = brief.angles.filter(a => a.cta_mode === 'walk_in').length;
   const brandSlots = brief.angles.filter(a => a.goal_mode === 'build_brand').length;
-  const loyaltySlots = brief.angles.filter(a => a.goal_mode === 'retain_loyalty').length;
   
   const mixParts: string[] = [];
   if (bookingSlots > 0) mixParts.push(`${bookingSlots} opslag driver bookinger`);
   if (walkInSlots > 0) mixParts.push(`${walkInSlots} opslag driver besøg`);
   if (brandSlots > 0) mixParts.push(`${brandSlots} opslag styrker brand`);
-  if (loyaltySlots > 0) mixParts.push(`${loyaltySlots} opslag plejer stamgæster`);
   
   if (mixParts.length > 0) {
     const summaryLine = `Denne uge: ${mixParts.join(', ')}.`;
@@ -358,34 +356,21 @@ export async function generateStrategicBrief(
 
 // ============================================================
 // IDENTITY BLOCK BUILDER
-// Produces a stable 3-5 sentence identity paragraph from brand
-// profile fields. Injected at the top of both Phase 1 prompts
+// NEW V5.8 (July 2026): Prioritize marketing_guidance (consolidated brief) over
+// scattered legacy profile fields. Injected at the top of both Phase 1 prompts
 // so the AI reasons from verified facts, not reconstructed guesses.
 // ============================================================
 
 function buildIdentityBlock(context: WeekContext): string {
-  const bv = context.brand_voice as any;
-  const lines: string[] = [];
-
-  // Line 1: what the business is (essence or character)
-  const essence = bv?.brand_essence || bv?.voice_style || context.business_character || '';
-  if (essence) lines.push(essence.trim());
-
-  // Line 2: operational facts (business_character, if not already used as essence)
-  if (context.business_character && context.business_character !== essence) {
-    lines.push(context.business_character.trim());
+  // V5.8 (July 2026): Marketing guidance is the authoritative strategic source
+  // Contains synthesized positioning, voice rules, USPs, and CTA strategy
+  // Replaces all legacy field assembly - no fallback needed
+  if (!context.marketing_guidance) {
+    console.error('❌ marketing_guidance missing - brand profile needs regeneration');
+    return '';
   }
-
-  // Line 3: what makes them different
-  const differentiator = bv?.what_makes_us_different;
-  if (differentiator) lines.push(differentiator.trim());
-
-  // Line 4: menu/gastronomic character
-  const gastro = bv?.gastronomic_profile;
-  if (gastro) lines.push(gastro.trim());
-
-  if (lines.length === 0) return '';
-  return `## FORRETNINGSIDENTITET\n${lines.join('\n')}`;
+  
+  return `## STRATEGISK RETNING\n\n${context.marketing_guidance}\n`;
 }
 
 // ============================================================
@@ -638,6 +623,13 @@ function buildFullStrategyPrompt(
 ): string {
   const menuCapabilities = analyzeMenuCapabilities(context);
 
+  // Calculate slot distribution from content_strategy.goal_blend
+  const contentStrategy = (context.brand_voice as any)?.content_strategy;
+  const goalBlend = contentStrategy?.week_goal_blend ?? contentStrategy?.goal_blend;
+  const slotDistribution = goalBlend 
+    ? computeSlotCounts(targetPostCount, goalBlend)
+    : null;
+
   // Build business intelligence context for goal mode guidance
   const biGuidance = businessIntelligence?.servicePeriodStrategies && businessIntelligence.servicePeriodStrategies.length > 0 ? `
 ## GOAL MODE GUIDANCE
@@ -648,6 +640,33 @@ ${businessIntelligence.servicePeriodStrategies.map(sp => {
   }).join(' · ')}
 
 Tildel goal_mode (${targetPostCount} angles): MIX footfall/brand/loyalty → brug vægtninger som guide
+` : '';
+
+  // Add slot distribution guidance when goal_blend is available
+  const slotGuidance = slotDistribution ? `
+## SLOT DISTRIBUTION (${targetPostCount} slots total)
+
+Baseret på content_strategy.goal_blend (${goalBlend.drive_footfall || 50}% footfall, ${goalBlend.build_brand || 50}% brand):
+
+📊 **Påkrævet fordeling:**
+- **${slotDistribution.drive_footfall} slots SKAL være drive_footfall** (walking visits eller bookings — afgøres af booking_model)
+- **${slotDistribution.build_brand} slots SKAL være build_brand** (atmosfære, brand storytelling, craft, values)${slotDistribution.flexible > 0 ? `
+- **${slotDistribution.flexible} slot${slotDistribution.flexible > 1 ? 's' : ''} er FLEXIBLE** (DU bestemmer goal_mode baseret på ugens unikke kontekst)` : ''}
+
+${slotDistribution.flexible > 0 ? `
+🎯 **Flexible slot strategi:**
+Den flexible slot giver dig mulighed for at reagere på ugens specifikke kontekst:
+- **Sommer + heatwave?** → Brug flexible til craving_visual (is, cold drinks) — kan være enten footfall eller brand
+- **Nyt signature dish?** → Brug flexible til product_menu footfall post
+- **Cultural event?** → Brug flexible til behind_scenes brand post
+- **Slow week?** → Brug flexible til ekstra footfall post
+
+Vælg goal_mode for flexible slot(s) baseret på:
+1. Ugens unikke faktorer fra din contextual_analysis
+2. Hvad der giver mest værdi DENNE specifikke uge
+3. Balance mellem øjeblikkelig business (footfall) og langsigtet brand-værdi
+` : ''}
+⚠️ Mindste-krav er HÅNDHÆVET. Du kan ikke lave færre footfall eller brand posts end angivet.
 ` : '';
 
   const segmentGuidance = activationOutput ? `
@@ -677,7 +696,7 @@ Lav Step 4-6: Strategic brief for ${context.business_name}, uge ${context.week_n
 ${JSON.stringify(contextualAnalysis, null, 2)}
 
 ↑ Brug denne til strategien nedenfor.
-${biGuidance}
+${slotGuidance}${biGuidance}
 ${segmentGuidance}
 ${(() => {
   const forecasts = context.weather?.daily_forecasts as any[] | undefined;
@@ -1026,9 +1045,9 @@ Hver slot beskriver HVAD og HVORFOR — ikke HVORNÅR (timing bestemmes senere).
 - Slot 1, 2, 3, 4, ... (unikt ID for hver slot — bruges til præcis tracking)
 
 **Fordeling af goal_mode baseret på ugens kontekst:**
-- drive_footfall: Booking/footfall posts (weekend dinner, events, peak days)
-- build_brand: Atmosfære, beliggenhed, brand-fortælling  
-- retain_loyalty: Stamgæster, midtuge-boost, community
+- drive_bookings: Reservation-driving posts (dinner, events requiring booking)
+- drive_footfall: Walk-in/spontaneous visit posts (lunch, brunch, casual)
+- build_brand: Atmosfære, beliggenhed, brand-fortælling, craft, values
 
 **Target service periods (giver hint til timing-systemet):**
 - "dinner": Aftenservering (booking-fokus)
@@ -1120,7 +1139,7 @@ SVAR KUN MED JSON:
     {
       "slot_id": 4,
       "strategic_intent": "Mid-week retention post for regulars",
-      "goal_mode": "retain_loyalty",
+      "goal_mode": "build_brand",
       "cta_mode": "engagement",
       "booking_lead_days": null,
       "content_focus": "behind_scenes",
@@ -1200,14 +1219,14 @@ export function analyzeMenuCapabilities(context: WeekContext): MenuCapabilities[
  *  A — Footfall driver   goal_mode=drive_footfall  category=product_menu     Fri-Sat 14:00
  *  B — Footfall support  goal_mode=drive_footfall  category=product_menu     Wed-Thu 11:00
  *  C — Brand builder     goal_mode=build_brand     category=behind_scenes    Mon 09:00
- *  D — Flexible          goal_mode=contextual      category=contextual       any
+ *  D — Flexible          goal_mode=build_brand     category=contextual       any
  *
  * When N < 4, fewer slots are used (priority order: A → B → C → D).
  * When N > 4, slot D is repeated (as D1, D2, ...) with alternating categories.
  *
  * category_weights from content_strategy are used to pick the category for slot D.
  */
-type GoalMode = 'drive_footfall' | 'build_brand' | 'retain_loyalty';
+import type { GoalMode } from '../types/strategy-types.ts';
 type ContentCategory = 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people';
 
 interface SlotTemplate {
@@ -1220,12 +1239,13 @@ interface SlotTemplate {
 /**
  * Legacy BASE_SLOTS - kept as fallback when revenue_drivers unavailable
  * See business-rules-engine.ts for data-driven slot generation
+ * Slot D simplified to build_brand (brand outcome, not tactical goal)
  */
 const BASE_SLOTS_FALLBACK: SlotTemplate[] = [
   { slot_id: 'A', goal_mode: 'drive_footfall', content_category: 'product_menu',   timing_window: 'Fri-Sat 14:00' },
   { slot_id: 'B', goal_mode: 'drive_footfall', content_category: 'product_menu',   timing_window: 'Wed-Thu 11:00' },
   { slot_id: 'C', goal_mode: 'build_brand',    content_category: 'behind_scenes',  timing_window: 'Mon 09:00' },
-  { slot_id: 'D', goal_mode: 'retain_loyalty', content_category: 'craving_visual', timing_window: 'any' },
+  { slot_id: 'D', goal_mode: 'build_brand',    content_category: 'craving_visual', timing_window: 'any' },
 ];
 
 /**
@@ -1233,9 +1253,9 @@ const BASE_SLOTS_FALLBACK: SlotTemplate[] = [
  * Used when content_category_weights is not available.
  */
 const COMPATIBLE_CATS: Record<GoalMode, ContentCategory[]> = {
+  drive_bookings: ['product_menu', 'craving_visual'],
   drive_footfall: ['product_menu', 'craving_visual'],
-  build_brand:    ['behind_scenes', 'team_people'],
-  retain_loyalty: ['craving_visual', 'behind_scenes', 'team_people', 'product_menu'],
+  build_brand:    ['behind_scenes', 'team_people', 'craving_visual', 'product_menu'],
 };
 
 /**
@@ -1259,70 +1279,60 @@ function pickCategory(
 
 /**
  * Pick goal_mode for slot D based on content_strategy.
- * Prefer the second-highest goal after drive_footfall.
+ * Defaults to build_brand (flexible brand content)
  */
 function pickSlotDGoalMode(contentStrategy: any): GoalMode {
-  if (!contentStrategy?.goal_blend) return 'retain_loyalty';
-
-  // Prefer weekly modulation blend if available — falls back to static baseline
-  const blend = contentStrategy.week_goal_blend ?? contentStrategy.goal_blend;
-  // Remove drive_footfall (already covered by A+B), find next highest
-  const candidates: Array<[GoalMode, number]> = [
-    ['build_brand',    blend.build_brand    ?? 0],
-    ['retain_loyalty', blend.retain_loyalty ?? 0],
-  ];
-  candidates.sort((a, b) => b[1] - a[1]);
-  return candidates[0][0];
+  // Slot D is now always build_brand - simplified from three-goal system
+  return 'build_brand';
 }
 
 /**
- * Compute how many posts of each goal_mode to assign, driven by goal_blend weights.
- * Uses the Hamilton/largest-remainder method to ensure integer counts sum to targetPostCount.
+ * Compute how many posts of each goal_mode to assign based on tactical capabilities and content balance.
+ * NOTE: This function is now mostly superseded by priority-based slot assignment in POST-PROCESS.
+ * Kept for backward compatibility during migration period.
  */
 function computeSlotCounts(
   targetPostCount: number,
-  goalBlend: { drive_footfall?: number; build_brand?: number; retain_loyalty?: number }
-): { drive_footfall: number; build_brand: number; retain_loyalty: number } {
-  const df = goalBlend.drive_footfall ?? 0;
-  const bb = goalBlend.build_brand ?? 0;
-  const rl = goalBlend.retain_loyalty ?? 0;
-  const total = df + bb + rl;
+  goalBlend: { drive_footfall?: number; build_brand?: number }
+): { drive_footfall: number; build_brand: number; flexible: number } {
+  const df = goalBlend.drive_footfall ?? 50;
+  const bb = goalBlend.build_brand ?? 50;
+  const total = df + bb;
 
-  // Normalise weights (fall back to sensible defaults if blank)
+  // Normalise weights (fall back to 50/50 if blank)
   const w = total > 0
-    ? { drive_footfall: df / total, build_brand: bb / total, retain_loyalty: rl / total }
-    : { drive_footfall: 0.50, build_brand: 0.25, retain_loyalty: 0.25 };
+    ? { drive_footfall: df / total, build_brand: bb / total }
+    : { drive_footfall: 0.50, build_brand: 0.50 };
 
   // Raw floats
   const raw = {
     drive_footfall: w.drive_footfall * targetPostCount,
     build_brand:    w.build_brand    * targetPostCount,
-    retain_loyalty: w.retain_loyalty * targetPostCount,
   };
 
   // Floor all
   const counts = {
     drive_footfall: Math.floor(raw.drive_footfall),
     build_brand:    Math.floor(raw.build_brand),
-    retain_loyalty: Math.floor(raw.retain_loyalty),
   };
 
-  // Distribute remainder posts to whichever goal has the largest fractional part
-  const remainders = {
-    drive_footfall: raw.drive_footfall - counts.drive_footfall,
-    build_brand:    raw.build_brand    - counts.build_brand,
-    retain_loyalty: raw.retain_loyalty - counts.retain_loyalty,
-  };
-  let remaining = targetPostCount - counts.drive_footfall - counts.build_brand - counts.retain_loyalty;
-  const keys = ['drive_footfall', 'build_brand', 'retain_loyalty'] as const;
-  while (remaining > 0) {
-    const best = keys.reduce((a, b) => remainders[a] >= remainders[b] ? a : b);
-    counts[best]++;
-    remainders[best] = 0;
-    remaining--;
+  // Calculate remainder but DON'T auto-assign it — return as flexible count
+  // This allows AI to decide goal_mode for flexible slot(s) based on weekly context
+  const flexible = targetPostCount - counts.drive_footfall - counts.build_brand;
+
+  // FLOOR RULE: in any week with 3+ posts, at least 1 must be drive_footfall,
+  // even if goal_blend weights would otherwise round it to 0. A week with
+  // zero footfall/booking posts is not a valid output for an active business.
+  // NOTE: this floor is unconditional. If the product wants an opt-out for
+  // deliberate all-brand weeks (e.g. brand relaunch), that needs to be a
+  // separate explicit flag passed into this function — do not infer it here.
+  if (targetPostCount >= 3 && counts.drive_footfall === 0) {
+    counts.drive_footfall = 1;
+    counts.build_brand = Math.max(0, counts.build_brand - 1);
+    console.warn('[Phase 1] Footfall floor enforced: goal_blend would have produced 0 footfall posts — corrected to 1');
   }
 
-  return counts;
+  return { ...counts, flexible };
 }
 
 /**
@@ -1330,13 +1340,12 @@ function computeSlotCounts(
  * Slot count distribution is driven by content_strategy.goal_blend weights.
  * Falls back to sensible defaults when content_strategy is not available.
  *
- * Example for N=4 with default weights (df=0.5, bb=0.25, rl=0.25):
- *   drive_footfall=2 → A (Thu-Fri 14:00) + B (Wed-Thu 11:00)
- *   build_brand=1    → C (Mon 09:00)
- *   retain_loyalty=1 → D (any)
+ * Example for N=4 with default weights (df=0.65, bb=0.35):
+ *   drive_footfall=2-3 → A (Thu-Fri 14:00) + B (Wed-Thu 11:00)
+ *   build_brand=1-2    → C (Mon 09:00) + D (any)
  *
- * If build_brand=0.60, drive_footfall=0.30, retain_loyalty=0.10 with N=4:
- *   build_brand=2, drive_footfall=1, retain_loyalty=1  → C, C2, A, D
+ * If build_brand=0.60, drive_footfall=0.40 with N=4:
+ *   build_brand=2-3, drive_footfall=1-2  → C, D, A, B
  */
 export function assignSlotMetadata(
   angles: StrategicAngle[],
@@ -1386,6 +1395,7 @@ export function assignSlotMetadata(
   }
 
   let footfallCount = 0;
+  let brandCount = 0;
   const result = angles.map((angle, idx) => {
     const aiGoalMode     = (angle as any).goal_mode as GoalMode | undefined;
     const aiContentCatRaw = ((angle as any).content_category ?? (angle as any).suggested_content_category) as string | undefined;
@@ -1436,7 +1446,8 @@ export function assignSlotMetadata(
       slotId = footfallCount === 0 ? 'A' : 'B';
       footfallCount++;
     } else if (goalMode === 'build_brand') {
-      slotId = 'C';
+      slotId = brandCount === 0 ? 'C' : 'D';
+      brandCount++;
     } else {
       slotId = 'D';
     }
@@ -1463,34 +1474,32 @@ export function assignSlotMetadata(
   const actualCounts = {
     drive_footfall: result.filter(a => a.goal_mode === 'drive_footfall').length,
     build_brand:    result.filter(a => a.goal_mode === 'build_brand').length,
-    retain_loyalty: result.filter(a => a.goal_mode === 'retain_loyalty').length,
   };
   
-  console.log(`[Phase 1] AI output composition: ${actualCounts.drive_footfall} footfall, ${actualCounts.build_brand} brand, ${actualCounts.retain_loyalty} loyalty (of ${targetPostCount} posts)`);
+  console.log(`[Phase 1] AI output composition: ${actualCounts.drive_footfall} footfall, ${actualCounts.build_brand} brand (of ${targetPostCount} posts)`);
   
-  // If brand profile has goal_blend, enforce it strictly
+  // If brand profile has goal_blend, enforce it with flexible slot tolerance
   if (goalBlend) {
-    const expectedCounts = computeSlotCounts(targetPostCount, goalBlend);
-    console.log(`[Phase 1] Expected composition (from goal_blend): ${expectedCounts.drive_footfall} footfall, ${expectedCounts.build_brand} brand, ${expectedCounts.retain_loyalty} loyalty`);
+    const slotDistribution = computeSlotCounts(targetPostCount, goalBlend);
+    console.log(`[Phase 1] Expected composition (from goal_blend): ${slotDistribution.drive_footfall} footfall, ${slotDistribution.build_brand} brand, ${slotDistribution.flexible} flexible`);
     
+    // Allow flexible slots — only enforce minimum counts, not exact match
     const needsCorrection = 
-      actualCounts.drive_footfall !== expectedCounts.drive_footfall ||
-      actualCounts.build_brand !== expectedCounts.build_brand ||
-      actualCounts.retain_loyalty !== expectedCounts.retain_loyalty;
+      actualCounts.drive_footfall < slotDistribution.drive_footfall ||
+      actualCounts.build_brand < slotDistribution.build_brand;
     
     if (needsCorrection) {
       console.warn(`[Phase 1] Goal-blend mismatch detected — enforcing brand profile distribution`);
       
       // Strategy: reassign goal_mode to match expected counts
       // Priority: keep angles with strong reasoning, swap weakest matches
-      type GoalMode = 'drive_footfall' | 'build_brand' | 'retain_loyalty';
+      type GoalMode = 'drive_footfall' | 'build_brand';
       const corrections: Array<{ from: GoalMode; to: GoalMode; count: number }> = [];
       
-      // Calculate deltas
+      // Calculate deltas (enforce minimum counts only, not exact match)
       const deltas = {
-        drive_footfall: expectedCounts.drive_footfall - actualCounts.drive_footfall,
-        build_brand:    expectedCounts.build_brand - actualCounts.build_brand,
-        retain_loyalty: expectedCounts.retain_loyalty - actualCounts.retain_loyalty,
+        drive_footfall: slotDistribution.drive_footfall - actualCounts.drive_footfall,
+        build_brand:    slotDistribution.build_brand - actualCounts.build_brand,
       };
       
       // Find which goal_mode has surplus (negative delta) and which needs more (positive delta)
@@ -1524,6 +1533,19 @@ export function assignSlotMetadata(
           const oldGoalMode = angle.goal_mode;
           angle.goal_mode = bestDeficitGoal as any;
           
+          // Defensive check: warn if reasoning text contains Danish loyalty phrases
+          const loyaltyPhrases = ['faste gæster', 'loyale gæster', 'stamgæster', 'gæsteloyalitet', 'loyalitet'];
+          const textToCheck = [
+            (angle as any).reasoning || '',
+            (angle as any).content_direction || '',
+            (angle as any).menu_alignment || ''
+          ].join(' ').toLowerCase();
+          
+          const foundPhrase = loyaltyPhrases.find(phrase => textToCheck.includes(phrase));
+          if (foundPhrase) {
+            console.warn(`[Phase 1] WARNING: Angle "${(angle as any).focus}" contains loyalty phrase "${foundPhrase}" but goal_mode is ${angle.goal_mode} — this should not happen after TIER 1 fix. Check for stale data or missed code path.`);
+          }
+          
           // Update deltas
           deltas[fromGoal]++;
           deltas[bestDeficitGoal]--;
@@ -1536,8 +1558,11 @@ export function assignSlotMetadata(
             const priorFootfallCount = result.slice(0, angleIndex).filter(a => a.goal_mode === 'drive_footfall').length;
             angle.slot_id = priorFootfallCount === 0 ? 'A' : 'B';
           } else if (bestDeficitGoal === 'build_brand') {
-            angle.slot_id = 'C';
+            const angleIndex = result.indexOf(angle);
+            const priorBrandCount = result.slice(0, angleIndex).filter(a => a.goal_mode === 'build_brand').length;
+            angle.slot_id = priorBrandCount === 0 ? 'C' : 'D';
           } else {
+            // Defensive fallback (should never fire after TIER 1)
             angle.slot_id = 'D';
           }
         }
@@ -1547,9 +1572,8 @@ export function assignSlotMetadata(
       const finalCounts = {
         drive_footfall: result.filter(a => a.goal_mode === 'drive_footfall').length,
         build_brand:    result.filter(a => a.goal_mode === 'build_brand').length,
-        retain_loyalty: result.filter(a => a.goal_mode === 'retain_loyalty').length,
       };
-      console.log(`[Phase 1] Final composition after enforcement: ${finalCounts.drive_footfall} footfall, ${finalCounts.build_brand} brand, ${finalCounts.retain_loyalty} loyalty`);
+      console.log(`[Phase 1] Final composition after enforcement: ${finalCounts.drive_footfall} footfall, ${finalCounts.build_brand} brand`);
     }
   } else {
     // No goal_blend in brand profile — apply sensible warning
@@ -1588,8 +1612,8 @@ export function assignSlotMetadata(
   }
 
   // ── Day-spread enforcement: prevent all posts clustering on Thu-Fri ─────────
-  // If build_brand or retain_loyalty slots have a Thu/Fri timing_window, correct
-  // them to their canonical early-week windows so the week has posts Mon-Wed too.
+  // If build_brand slots have a Thu/Fri timing_window, correct them to their 
+  // canonical early-week windows so the week has posts Mon-Wed too.
   // Footfall slots (A/B) intentionally stay on Thu-Fri (peak conversion window).
   // Only applies when timing_window is the generic "Thu-Fri" fallback — not when
   // an occasion or specific event drives a Thu/Fri brand post (e.g. a Thursday
@@ -1597,7 +1621,6 @@ export function assignSlotMetadata(
   const THU_FRI_PATTERN = /^(Thu|Fri|Thu-Fri|Fri-Sat)/i;
   const EARLY_WEEK_DEFAULTS: Record<string, string> = {
     build_brand:    'Mon-Tue 09:00',
-    retain_loyalty: 'Wed-Thu 11:00',
   };
   for (const angle of result) {
     if (angle.goal_mode === 'drive_footfall') continue; // footfall stays Thu-Fri

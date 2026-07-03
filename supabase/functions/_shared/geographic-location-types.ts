@@ -324,45 +324,89 @@ export const GEOGRAPHIC_LOCATION_TYPES: Record<string, LocationExpectations> = {
     }
   },
   
-  // 7. MIXED-USE / MODERN DEVELOPMENT
-  mixed_use: {
-    locationTypeId: "mixed_use",
-    displayName: "Mixed-Use / Modern Development",
+  // 7. UNIVERSITY CAMPUS
+  university_campus: {
+    locationTypeId: "university_campus",
+    displayName: "University Campus",
     
     typical_customers: [
-      "local regulars",
-      "office workers",
-      "families with kids",
-      "remote workers",
-      "young professionals",
-      "friends / social groups"
+      "students",
+      "academic staff",
+      "researchers",
+      "administrative staff"
     ],
     
     typical_motivations: [
+      { motivation: "work/productivity", prevalence: "very_high" },
+      { motivation: "social meet-up", prevalence: "high" },
       { motivation: "routine habit", prevalence: "high" },
-      { motivation: "convenience", prevalence: "high" },
-      { motivation: "work/productivity", prevalence: "medium" },
-      { motivation: "social meet-up", prevalence: "medium" },
-      { motivation: "lunch necessity", prevalence: "medium" }
+      { motivation: "work break", prevalence: "medium" },
+      { motivation: "convenience", prevalence: "medium" }
     ],
     
     pace: "medium",
+    price_sensitivity: "high",
+    
+    winning_angles: [
+      "Student-friendly pricing",
+      "Study-friendly atmosphere",
+      "Quick service",
+      "Group seating",
+      "WiFi available",
+      "Extended hours during exams"
+    ],
+    
+    weather_sensitivity: "low",
+    
+    seasonality: {
+      pattern: "semester_only",
+      seasonal_weights: {
+        winter: 1.0,   // Full semester
+        spring: 1.0,   // Full semester
+        summer: 0.3,   // 70% drop during summer break
+        autumn: 1.0    // Full semester
+      }
+    }
+  },
+  
+  // 8. HOSPITAL CAMPUS
+  hospital_campus: {
+    locationTypeId: "hospital_campus",
+    displayName: "Hospital Campus",
+    
+    typical_customers: [
+      "medical and nursing staff",
+      "patients (outpatient)",
+      "visitors",
+      "administrative staff"
+    ],
+    
+    typical_motivations: [
+      { motivation: "work break", prevalence: "very_high" },
+      { motivation: "convenience", prevalence: "very_high" },
+      { motivation: "waiting time filler", prevalence: "high" },
+      { motivation: "energy boost/caffeine need", prevalence: "high" },
+      { motivation: "emotional support/comfort", prevalence: "medium" }
+    ],
+    
+    pace: "fast",
     price_sensitivity: "medium",
     
     winning_angles: [
-      "Versatile offering",
-      "All-day menu",
-      "Community hub",
-      "Modern atmosphere",
-      "Flexible seating"
+      "24/7 availability",
+      "Quick service",
+      "Healthy options",
+      "Takeaway focus",
+      "Comfort food",
+      "Early morning service"
     ],
     
-    weather_sensitivity: "medium",
+    weather_sensitivity: "low",
     
     seasonality: {
       pattern: "stable",
       seasonal_weights: {
-        winter: 0.95,
+        winter: 1.0,   // Completely consistent year-round
         spring: 1.0,
         summer: 1.0,
         autumn: 1.0
@@ -370,53 +414,52 @@ export const GEOGRAPHIC_LOCATION_TYPES: Record<string, LocationExpectations> = {
     }
   },
   
-  // 8. DESTINATION / DRIVE-TO AREA
-  destination: {
-    locationTypeId: "destination",
-    displayName: "Destination / Drive-To Area",
+  // 9. TOURIST DESTINATION AREA
+  tourist_destination: {
+    locationTypeId: "tourist_destination",
+    displayName: "Tourist Destination Area",
     
     typical_customers: [
-      "planned visitors",
-      "couples",
-      "celebration groups",
-      "food enthusiasts",
-      "weekend explorers"
+      "tourists and international visitors",
+      "leisure seekers",
+      "day trippers",
+      "some locals"
     ],
     
     typical_motivations: [
       { motivation: "destination visit", prevalence: "very_high" },
-      { motivation: "celebration/milestone", prevalence: "high" },
-      { motivation: "date/couple time", prevalence: "high" },
-      { motivation: "discovery/trying new", prevalence: "medium" },
-      { motivation: "family outing", prevalence: "medium" }
+      { motivation: "discovery/trying new", prevalence: "very_high" },
+      { motivation: "social meet-up", prevalence: "high" },
+      { motivation: "treat/reward", prevalence: "high" },
+      { motivation: "photo opportunity", prevalence: "medium" }
     ],
     
-    pace: "slow",
+    pace: "medium",
     price_sensitivity: "low",
     
     winning_angles: [
-      "Unique experience",
-      "Worth the trip",
-      "Reservations recommended",
-      "Parking available",
-      "Special occasion dining",
-      "Quality over convenience"
+      "Local experience",
+      "Tourist-friendly service",
+      "English menu available",
+      "Photo-worthy presentation",
+      "Central location",
+      "Memorable experience"
     ],
     
     weather_sensitivity: "medium",
     
     seasonality: {
-      pattern: "stable",
+      pattern: "summer_peak",
       seasonal_weights: {
-        winter: 0.9,
-        spring: 1.0,
-        summer: 1.05,
-        autumn: 1.0
+        winter: 0.5,   // 50% drop except Christmas markets
+        spring: 0.8,
+        summer: 1.0,   // Peak tourist season
+        autumn: 0.7
       }
     }
   },
 
-  // 9. PARK / NATURE AREA
+  // 10. PARK / NATURE AREA
   nature_park: {
     locationTypeId: "nature_park",
     displayName: "Park / Nature Area",

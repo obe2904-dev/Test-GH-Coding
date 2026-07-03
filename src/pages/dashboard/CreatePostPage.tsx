@@ -829,7 +829,6 @@ export function CreatePostPage() {
                 occasionContext: selectedSuggestionData.occasionContext || rawIdea?.occasion_context || '',
               },
               platforms: selectedPlatforms,
-              tier: currentTier,
             }
           })
         
@@ -1321,7 +1320,6 @@ export function CreatePostPage() {
       businessId: weeklyContentPlan?.businessId || businessData.business?.id,
       hastitle: !!(plan.contentSubject?.dish),
       platforms: selectedPlatforms,
-      tier: currentTier,
     })
     try {
       const { data, error } = await supabase.functions.invoke('generate-text-from-idea', {
@@ -1329,7 +1327,6 @@ export function CreatePostPage() {
           businessId: weeklyContentPlan?.businessId || businessData.business?.id,
           suggestion,
           platforms: selectedPlatforms.length > 0 ? selectedPlatforms : ['instagram', 'facebook'],
-          tier: currentTier,
         }
       })
 

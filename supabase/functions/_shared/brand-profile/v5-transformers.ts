@@ -169,10 +169,10 @@ function extractLocationBrandAnchors(
  * V5 stores commercial strategy per-programme, but Weekly Plan prompts expect
  * a single business-wide strategy. This function aggregates across programmes.
  * 
- * RETURNS ContentStrategy-compatible structure matching types.ts interface:
- * - goal_blend (not default_goal_split) with build_brand/retain_loyalty (not strengthen_brand/retain_regulars)
+ * TWO-DIMENSIONAL FRAMEWORK: Returns ContentStrategy-compatible structure:
+ * - goal_blend with drive_footfall/build_brand only (retain_regulars merged into build_brand)
  * - content_category_weights with product_menu/craving_visual/behind_scenes/team_people percentages
- * - primary_goal, footfall_signals, brand_anchors, loyalty_hooks
+ * - primary_goal, footfall_signals, brand_anchors
  * 
  * @param programmes - V5Programme array
  * @param menuOverview - Optional menu context for signature themes and craft signals
@@ -188,30 +188,30 @@ export function deriveContentStrategy(
   }
   
   // Calculate weighted average of goal splits
+  // TWO-DIMENSIONAL FRAMEWORK: Merge retain_regulars into build_brand
   const aggregateGoals = programmes.reduce((acc, prog) => {
     const split = prog.commercialOrientation?.baseline_goal_split
     if (split) {
       acc.drive_footfall += split.drive_footfall || 0
-      acc.build_brand += split.strengthen_brand || 0  // FIXED: map strengthen_brand → build_brand
-      acc.retain_loyalty += split.retain_regulars || 0  // FIXED: map retain_regulars → retain_loyalty
+      // Merge both strengthen_brand AND retain_regulars into build_brand
+      // Loyalty is an outcome of good brand-building, not a separate tactical goal
+      acc.build_brand += (split.strengthen_brand || 0) + (split.retain_regulars || 0)
     }
     return acc
-  }, { drive_footfall: 0, build_brand: 0, retain_loyalty: 0 })
+  }, { drive_footfall: 0, build_brand: 0 })
   
   const count = programmes.length
   
   // Normalize to 100%
-  const total = aggregateGoals.drive_footfall + aggregateGoals.build_brand + aggregateGoals.retain_loyalty
+  const total = aggregateGoals.drive_footfall + aggregateGoals.build_brand
   const goal_blend = {
-    drive_footfall: total > 0 ? Math.round((aggregateGoals.drive_footfall / total) * 100) : 33,
-    build_brand: total > 0 ? Math.round((aggregateGoals.build_brand / total) * 100) : 33,
-    retain_loyalty: total > 0 ? Math.round((aggregateGoals.retain_loyalty / total) * 100) : 34
+    drive_footfall: total > 0 ? Math.round((aggregateGoals.drive_footfall / total) * 100) : 50,
+    build_brand: total > 0 ? Math.round((aggregateGoals.build_brand / total) * 100) : 50
   }
   
   // Derive primary goal
   const primary_goal = goal_blend.drive_footfall >= 45 ? 'drive_footfall' 
     : goal_blend.build_brand >= 45 ? 'build_brand'
-    : goal_blend.retain_loyalty >= 45 ? 'retain_loyalty'
     : 'drive_footfall'  // Default to footfall for balanced businesses
   
   // Derive content_category_weights from programme types
@@ -228,10 +228,9 @@ export function deriveContentStrategy(
     ? { product_menu: 35, craving_visual: 30, behind_scenes: 20, team_people: 15 }  // Visual-focused for brunch
     : { product_menu: 35, craving_visual: 25, behind_scenes: 25, team_people: 15 }  // Default
   
-  // Extract signals from programme data
+  // Extract signals from programme data (TWO-DIMENSIONAL FRAMEWORK)
   const footfall_signals: string[] = []
   const brand_anchors: string[] = []
-  const loyalty_hooks: string[] = []
   
   programmes.forEach(p => {
     if (p.commercialOrientation?.decision_timing === 'spontaneous') {
@@ -240,10 +239,6 @@ export function deriveContentStrategy(
     
     // ✅ ENRICHED: Extract programme-specific brand anchors
     extractProgrammeBrandAnchors(p, brand_anchors)
-    
-    if (p.timeWindow?.recurring) {
-      loyalty_hooks.push(p.name)
-    }
   })
   
   // ✅ NEW: Extract menu-based brand anchors
@@ -255,14 +250,13 @@ export function deriveContentStrategy(
   // Fallback to sensible defaults if no signals found
   if (footfall_signals.length === 0) footfall_signals.push('daglig trafik')
   if (brand_anchors.length === 0) brand_anchors.push('kvalitet og håndværk')
-  if (loyalty_hooks.length === 0) loyalty_hooks.push('fast ugentligt besøg')
+  // loyalty_hooks removed - not used in two-dimensional framework
   
   return {
     primary_goal,
     goal_blend,  // FIXED: renamed from default_goal_split
     footfall_signals,
     brand_anchors,
-    loyalty_hooks,
     content_category_weights,  // ADDED: required for strategy modulator
     programmes_summary: programmes.map(p => ({
       name: p.name,

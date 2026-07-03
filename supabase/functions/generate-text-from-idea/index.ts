@@ -21,9 +21,10 @@ import { fetchBusinessContext, resolveContentContext } from './resolve-context.t
 import { selectCTA } from './select-cta.ts'
 import { buildWeeklyPlanContext, buildPrompt } from './prompt-builders.ts'
 import { callOpenAI } from './generate-text.ts'
-import { needsSpellingCheck, stripBannedClosers, stripAIDashes, stripEmojiViolations, stripIncompleteFragments, stripMetaInstructions, extractTopicKeyword, generateHashtags, validateSceneFormat } from './post-process.ts'
+import { needsSpellingCheck, stripBannedClosers, stripAbstractRhetoricalQuestions, stripAIDashes, stripEmojiViolations, stripIncompleteFragments, stripMetaInstructions, extractTopicKeyword, generateHashtags, validateSceneFormat } from './post-process.ts'
 import { validateAgainstVoice } from '../_shared/validation/validate-voice.ts'
 import { applyTargetedVoiceFixes } from './post-process-voice-fixes.ts'
+import { getBusinessTier } from '../_shared/tier-resolver.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -72,6 +73,7 @@ function normalizeSuggestionInput(rawSuggestion: any): any {
     holidayContext: rawSuggestion.holidayContext || rawSuggestion.holiday_context || undefined,
     guestMoment: rawSuggestion.guestMoment || rawSuggestion.guest_moment || undefined,
     strategyBrief: rawSuggestion.strategyBrief || rawSuggestion.strategy_brief || undefined,
+    menuContextSnippet: rawSuggestion.menuContextSnippet || rawSuggestion.menu_context_snippet || undefined,
     mediaDirection: rawSuggestion.mediaDirection || rawSuggestion.media_direction || undefined,
     sceneSpec: rawSuggestion.sceneSpec || rawSuggestion.scene_spec || undefined,
     slotId: rawSuggestion.slotId || rawSuggestion.slot_id || undefined,
@@ -87,12 +89,10 @@ serve(async (req) => {
 
   try {
     console.log('🚀 Function invoked, parsing request...')
-    const { businessId, suggestion: rawSuggestion, platforms = ['facebook'], tier = 'free' } = await req.json()
+    const { businessId, suggestion: rawSuggestion, platforms = ['facebook'] } = await req.json()
     const suggestion = normalizeSuggestionInput(rawSuggestion)
-    console.log('✅ Request parsed:', { businessId, suggestionId: suggestion?.id, tier })
     const source: 'ai_ideas' | 'weekly_plan' = suggestion.source || 'ai_ideas'
-    console.log('🎯 generate-text-from-idea called:', { businessId, title: suggestion.title, platforms, tier, source })
-
+    
     if (!businessId || !suggestion) {
       return new Response(
         JSON.stringify({ error: 'businessId and suggestion required' }),
@@ -100,12 +100,19 @@ serve(async (req) => {
       )
     }
 
-    const isPaid = tier !== 'free'
-    const model = isPaid ? 'gpt-4o' : 'gpt-4o-mini'
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
+
+    // Resolve subscription tier (single source of truth)
+    const { tier, isPaidTier } = await getBusinessTier(supabase, businessId)
+    console.log('💎 Tier resolution:', { tier, isPaidTier })
+    console.log('✅ Request parsed:', { businessId, suggestionId: suggestion?.id, tier })
+    console.log('🎯 generate-text-from-idea called:', { businessId, title: suggestion.title, platforms, tier, source })
+
+    const isPaid = isPaidTier
+    const model = isPaid ? 'gpt-4o' : 'gpt-4o-mini'
 
     // 1–2. Business context + brand voice + opening hours
     console.log('📊 Fetching business context...')
@@ -277,7 +284,8 @@ serve(async (req) => {
       humor_style: humorStyle,
       humor_character: humorCharacter,
       locationIntelligenceNarrative: biz.locationIntelligenceNarrative,  // Fix 4: geo narrative for atmosphere posts
-      business_identity_persona: biz.marketingManagerBrief || biz.businessIdentityPersona,  // V5.3: Prioritize marketing_manager_brief (synthesized) over business_identity_persona
+      business_identity_persona: biz.marketingManagerBrief || biz.businessIdentityPersona,  // V5.3: Prioritize marketing_manager_brief (synthesized) over business_identity_persona (DEPRECATED)
+      marketing_manager_brief: biz.marketingManagerBrief,  // V5.8: Synthesized strategic guidance (PREFERRED SOURCE)
       enhanced_social_examples: enhancedSocialExamples,
       enhanced_avoid_examples: enhancedAvoidExamples,
       // Factual anchoring: location and concept fields
@@ -430,6 +438,9 @@ serve(async (req) => {
     // 6b. Strip banned closers (training-data patterns that resist prompt-level bans)
     let cleanText = stripBannedClosers(rawText)
 
+    // 6b-2. Strip abstract rhetorical questions (e.g., "Kan du se omsorgen?")
+    cleanText = stripAbstractRhetoricalQuestions(cleanText)
+
     // 6c. Strip AI-tell dashes (em-dash/en-dash used as stylistic connectors)
     cleanText = stripAIDashes(cleanText)
     // Step 6c-b: FIX 05 — Enforce universal emoji rules (count + position)
@@ -472,6 +483,7 @@ serve(async (req) => {
     const extractedKeyword = extractTopicKeyword(content.contentBlock, content.menuItemName, aiKeyword)
     const hashtags = generateHashtags(biz.city, content.contentType, extractedKeyword, biz.businessName, {
       vertical: biz.vertical,
+      language: biz.language,                                 // Pass language for localized hashtags
       text: cleanText,
       detectedDishName: content.menuItemName || undefined,
       detectedDishDescription: content.menuItemDescription || undefined,

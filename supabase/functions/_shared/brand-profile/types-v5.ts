@@ -31,7 +31,6 @@ export interface V5Programme {
     baseline_goal_split: {
       drive_footfall: number;      // 0-100
       strengthen_brand: number;    // 0-100
-      retain_regulars: number;     // 0-100
     };
     content_type_affinity?: {
       product_showcase: number;    // 0-1

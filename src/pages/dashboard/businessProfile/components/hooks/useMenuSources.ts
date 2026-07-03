@@ -94,7 +94,7 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
         url: row.source_url,
         source: row.source_origin === 'ai_detected' ? 'ai' : 'manual',
         menuType: (row.menu_type as MenuType) || 'standard',
-        status: row.status === 'error' ? 'pending' : (row.status as MenuUrlState['status']),
+        status: (row.status as MenuUrlState['status']) || 'pending',
         error: row.error_message || undefined,
         fileName: row.file_name || undefined,
         isDeleting: false,
@@ -306,6 +306,8 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
         return 'Klar'
       case 'ignored':
         return 'Ignoreret'
+      case 'error':
+        return 'Fejl'
       default:
         return status
     }
@@ -320,6 +322,8 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
         return 'bg-green-50 text-green-700 border-green-200'
       case 'ignored':
         return 'bg-gray-50 text-gray-500 border-gray-200'
+      case 'error':
+        return 'bg-red-50 text-red-700 border-red-200'
       default:
         return 'bg-gray-50 text-gray-500 border-gray-200'
     }

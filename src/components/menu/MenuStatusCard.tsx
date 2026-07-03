@@ -16,6 +16,8 @@ interface MenuStatusCardProps {
   sourceType?: MenuSourceType
   /** Optional error code for specific error messages */
   errorCode?: string
+  /** Custom error message from backend (takes precedence over generic messages) */
+  errorMessage?: string
   /** Menu label (e.g., "Brunch", "Cocktails") */
   menuLabel?: string
   /** Callback when user clicks retry */
@@ -36,6 +38,7 @@ export function MenuStatusCard({
   status,
   sourceType,
   errorCode,
+  errorMessage,
   menuLabel,
   onRetry,
   onReview,
@@ -45,7 +48,7 @@ export function MenuStatusCard({
   className = ''
 }: MenuStatusCardProps) {
   // Get user-friendly UI state from mapping
-  const uiState = getMenuStatusUI(status, sourceType, errorCode)
+  const uiState = getMenuStatusUI(status, sourceType, errorCode, errorMessage)
 
   // Map actions to callbacks
   const handlePrimaryAction = () => {

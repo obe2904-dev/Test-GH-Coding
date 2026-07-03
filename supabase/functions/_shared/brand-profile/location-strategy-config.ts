@@ -2,9 +2,24 @@
  * Location Strategy Configuration
  * Centralized thresholds with data-driven defaults
  * 
+ * SCHEMA V3 (Physical Anchor Taxonomy):
+ * - Supports WHO field structure {primary, secondary, notes}
+ * - Enforces proximity gates for university_campus and hospital_campus
+ * - Backward compatible with v2 demographic_proximity scores
+ * 
  * Rationale: Hardcoded values provide stability, but can be overridden
  * per-business if needed. Track performance data to tune over time.
  */
+
+// V3: WHO type proximity gate requirements
+export const PROXIMITY_GATES = {
+  university_campus: { min: 400, max: 600 },  // meters
+  hospital_campus: { min: 300, max: 500 },    // meters
+  event_venue: { min: 200, max: 250 },        // meters (secondary only)
+  waterfront: { min: 0, max: 150 },           // meters
+  shopping: { min: 0, max: 200 },             // meters
+  transport_hub: { min: 0, max: 300 },        // meters
+} as const;
 
 export interface LocationStrategyConfig {
   // Budget thresholds (DKK)
@@ -16,7 +31,10 @@ export interface LocationStrategyConfig {
     student: {
       max_price: number;
     };
-    business_professional: {
+    office_worker: {
+      min_price: number;
+    };
+    business_professional: {  // DEPRECATED: Use office_worker instead (kept for backwards compatibility)
       min_price: number;
     };
   };
@@ -60,8 +78,11 @@ export const DEFAULT_LOCATION_STRATEGY_CONFIG: LocationStrategyConfig = {
     student: {
       max_price: 200 // DKK - based on SU budget constraints
     },
-    business_professional: {
+    office_worker: {
       min_price: 80 // DKK - below this skews too casual for business dining
+    },
+    business_professional: {  // DEPRECATED: Use office_worker (kept for backwards compatibility)
+      min_price: 80
     }
   },
   
@@ -147,15 +168,71 @@ export function isDemographicReachable(
     }
   }
 
-  // Business professional filters
-  if (demographic === 'business_professional') {
-    if (business.avg_price && business.avg_price < config.demographic_filters.business_professional.min_price) {
+  // Business professional / office worker filters (both keys supported during transition)
+  if (demographic === 'office_worker' || demographic === 'business_professional') {
+    const filterConfig = config.demographic_filters.office_worker
+      ?? config.demographic_filters.business_professional;
+    if (business.avg_price && business.avg_price < filterConfig.min_price) {
       return {
         is_reachable: false,
-        filter_reason: `price ${business.avg_price} DKK below business professional minimum threshold ${config.demographic_filters.business_professional.min_price} DKK`
+        filter_reason: `price ${business.avg_price} DKK below office worker minimum threshold ${filterConfig.min_price} DKK`
       };
     }
   }
 
   return { is_reachable: true };
+}
+
+/**
+ * V3: Validate WHO type against proximity gate requirements
+ * Certain WHO types require strict distance verification to qualifying landmarks
+ */
+export function validateWhoProximityGate(
+  whoType: string,
+  landmarks: Array<{ name: string; type: string; distance_meters?: number }>
+): { is_valid: boolean; reason?: string; landmark?: string } {
+  const requiresGate = ['student', 'medical_staff', 'hospital_visitor'];
+  if (!requiresGate.includes(whoType)) {
+    return { is_valid: true }; // No gate required
+  }
+  
+  // Student requires university within 400-600m
+  if (whoType === 'student') {
+    const university = landmarks.find(l => 
+      l.type === 'university' && 
+      l.distance_meters &&
+      l.distance_meters >= PROXIMITY_GATES.university_campus.min &&
+      l.distance_meters <= PROXIMITY_GATES.university_campus.max
+    );
+    
+    if (!university) {
+      return {
+        is_valid: false,
+        reason: `No university found within ${PROXIMITY_GATES.university_campus.min}-${PROXIMITY_GATES.university_campus.max}m range`
+      };
+    }
+    
+    return { is_valid: true, landmark: university.name };
+  }
+  
+  // Medical staff and hospital visitors require hospital within 300-500m
+  if (whoType === 'medical_staff' || whoType === 'hospital_visitor') {
+    const hospital = landmarks.find(l => 
+      l.type === 'hospital' && 
+      l.distance_meters &&
+      l.distance_meters >= PROXIMITY_GATES.hospital_campus.min &&
+      l.distance_meters <= PROXIMITY_GATES.hospital_campus.max
+    );
+    
+    if (!hospital) {
+      return {
+        is_valid: false,
+        reason: `No hospital found within ${PROXIMITY_GATES.hospital_campus.min}-${PROXIMITY_GATES.hospital_campus.max}m range`
+      };
+    }
+    
+    return { is_valid: true, landmark: hospital.name };
+  }
+  
+  return { is_valid: true };
 }

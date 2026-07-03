@@ -57,6 +57,7 @@ import { silentCorrect } from '../_shared/utils/silent-correct.ts'
 // NEW: Dynamic suggestion count + behavioral logic (June 2026)
 import { calculateDynamicSuggestions, type CalculationContext } from '../_shared/content-planning/dynamic-suggestion-calculator.ts'
 import { analyzeBehavioralContext, type BehavioralAnalysisInput, type MenuItem as BehavioralMenuItem } from '../_shared/content-planning/behavioral-context-analyzer.ts'
+import { getBusinessTier } from '../_shared/tier-resolver.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -524,14 +525,14 @@ serve(async (req) => {
   }
 
   try {
-    const { businessId, count = 1, tier = 'free', regenerate = false, localTime, clientTime, localDate, userContext, debug = false } = await req.json()
+    const { businessId, count = 1, regenerate = false, localTime, clientTime, localDate, userContext, debug = false } = await req.json()
     
     // Use client-provided local time if available — eliminates timezone inference errors.
     // The client sends new Date().toISOString() at the moment the user presses "Generate".
     // Accept both `localTime` (production field name) and `clientTime` (test/debug alias).
     const clientNow = (localTime || clientTime) ? new Date(localTime || clientTime) : new Date()
     
-    console.log('🎯 get-quick-suggestions called (SINGLE SUGGESTION MODE):', { businessId, tier, regenerate, localTime: localTime ?? 'server', userContext: userContext ? '[provided]' : undefined })
+    console.log('🎯 get-quick-suggestions called (SINGLE SUGGESTION MODE):', { businessId, regenerate, localTime: localTime ?? 'server', userContext: userContext ? '[provided]' : undefined })
     
     if (!businessId) {
       return new Response(JSON.stringify({ error: 'businessId required' }), {
@@ -645,14 +646,12 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey)
 
+    // ── Resolve subscription tier (single source of truth) ──
+    const { tier, isPaidTier, isProTier } = await getBusinessTier(supabase, businessId)
+    console.log('💎 Tier resolution:', { tier, isPaidTier, isProTier })
+
     // ── Get today's date for caching and quota checks ──
     const today = localDate || `${clientNow.getFullYear()}-${String(clientNow.getMonth() + 1).padStart(2, '0')}-${String(clientNow.getDate()).padStart(2, '0')}`
-
-    // ── Tier-based logic ──
-    const isPaidTier = tier === 'standardplus' || tier === 'premium'
-    // Smart (standardplus): multiple menu-item suggestions only — no atmosphere, no behind-the-scenes.
-    // Pro (premium): full content mix via planner (atmosphere, BTS, etc.)
-    const isProTier = tier === 'premium'
 
     // ── Check daily quota (FREE and PAID tiers, only if regenerating = new generation) ──
     if (regenerate) {
@@ -1165,11 +1164,22 @@ serve(async (req) => {
         // Tier 1 (marketing filler) → discarded via isMarketingSentence
         // Tier 2 (audience abstractions) → discarded
         // Tier 3 (specific verifiable facts) → kept as Slot B/C idea signals:
-        //   quoted dish/concept names, dietary options, drink programmes, kids menus
+        //   quoted dish/concept names, dietary options, drink programmes, kids menus,
+        //   craftsmanship signals, local sourcing, innovation, cultural identity, etc.
         const quotedNamePattern = /["«»„"""]([^"«»„"""]{3,50})["«»„"""]/g
         const dietaryPattern = /vegansk|vegetarisk|glutenfri|laktosefri|halal|kosher|plantebaseret/i
         const drinkPattern = /vinmenu|Ad Libitum|cocktailmenu|øl.?menu|drinks.?menu/i
         const kidPattern = /børnemenu|børneret|barnemenuen/i
+        
+        // Brand-building patterns (for C/D slots) — craftsmanship, sourcing, innovation, identity
+        const craftsmanshipPattern = /hjemmelavet|håndlavet|friskbagt|håndpillede?|hånd.?rullet|hånd.?skåret|selv.?lavet/i
+        const localSourcingPattern = /lokale? (råvarer|ingredienser|producenter)|traditionelle danske|fra Vesterhav|dansk produceret/i
+        const innovationPattern = /moderne (tilgang|twist|præsentation|fortolkning)|kreativ|nyfortolkning|fusion/i
+        const culturalIdentityPattern = /(Skandinavisk|dansk|fransk|italiensk|asiatisk) (madkultur|frokostkultur|traditioner|køkken)/i
+        const experiencePattern = /(luksuriøs|global|alsidig|social|delbar|intim|hyggelig) oplevelse/i
+        const qualitySignalPattern = /fokus på kvalitet|premium ingredienser|autentisk smag|høj kvalitet|økologisk/i
+        const familyFriendlyPattern = /børnevenlig|familier|børn velkommen|family.?friendly/i
+        const customizationPattern = /tilpasning|variation|valgmuligheder|personlig|kan sammensættes/i
 
         for (const result of sortedResults) {
           if (!result.ai_summary || typeof result.ai_summary !== 'string') continue
@@ -1199,6 +1209,47 @@ serve(async (req) => {
             // Kids menu
             if (kidPattern.test(line)) {
               menuIntelligenceFacts.push(`${periodLabel}Børnemenu tilgængelig`)
+              continue
+            }
+            // Craftsmanship signals
+            if (craftsmanshipPattern.test(line)) {
+              menuIntelligenceFacts.push(`${periodLabel}${line.slice(0, 80).replace(/[,;].*$/, '')}`)
+              continue
+            }
+            // Local sourcing
+            if (localSourcingPattern.test(line)) {
+              menuIntelligenceFacts.push(`${periodLabel}${line.slice(0, 80).replace(/[,;].*$/, '')}`)
+              continue
+            }
+            // Innovation signals
+            if (innovationPattern.test(line)) {
+              menuIntelligenceFacts.push(`${periodLabel}${line.slice(0, 80).replace(/[,;].*$/, '')}`)
+              continue
+            }
+            // Cultural identity
+            if (culturalIdentityPattern.test(line)) {
+              menuIntelligenceFacts.push(`${periodLabel}${line.slice(0, 80).replace(/[,;].*$/, '')}`)
+              continue
+            }
+            // Experience signals
+            if (experiencePattern.test(line)) {
+              menuIntelligenceFacts.push(`${periodLabel}${line.slice(0, 80).replace(/[,;].*$/, '')}`)
+              continue
+            }
+            // Quality signals
+            if (qualitySignalPattern.test(line)) {
+              menuIntelligenceFacts.push(`${periodLabel}${line.slice(0, 80).replace(/[,;].*$/, '')}`)
+              continue
+            }
+            // Family-friendly signals
+            if (familyFriendlyPattern.test(line)) {
+              menuIntelligenceFacts.push(`${periodLabel}${line.slice(0, 80).replace(/[,;].*$/, '')}`)
+              continue
+            }
+            // Customization options
+            if (customizationPattern.test(line)) {
+              menuIntelligenceFacts.push(`${periodLabel}${line.slice(0, 80).replace(/[,;].*$/, '')}`)
+              continue
             }
           }
         }
@@ -2715,7 +2766,9 @@ serve(async (req) => {
       ? `\n\n──── BEKRÆFTEDE FACTS (eneste gyldige kilde til concrete_anchor for Slot C) ────\nconcrete_anchor MÅ KUN vælges herfra — opfind IKKE nye facts om stedet:\n${confirmedFacts.map(f => `- ${f}`).join('\n')}\n`
       : ''
     
-    // Menu intelligence block for Slot C — dietary options, drink programmes, named concepts from ai_summary
+    // Menu intelligence block for Slot C — brand-building signals from ai_summary:
+    // dietary/kids/drinks, craftsmanship, local sourcing, innovation, cultural identity,
+    // experience quality, family-friendly, customization options
     const menuIntelligenceBlock = menuIntelligenceFacts.length > 0
       ? `\n\n──── MENU INTELLIGENCE (ide-signaler fra ai_summary) ────\n${menuIntelligenceFacts.map(f => `- ${f}`).join('\n')}\n`
       : ''

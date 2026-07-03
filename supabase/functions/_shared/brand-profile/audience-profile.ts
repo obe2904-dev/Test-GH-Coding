@@ -177,7 +177,6 @@ interface CommercialOrientationData {
   baseline_goal_split: {
     drive_footfall: number;
     strengthen_brand: number;
-    retain_regulars: number;
   };
   decision_timing: string;          // "spontaneous" | "planned" | "mixed"
   content_type_affinity: {
@@ -1305,7 +1304,8 @@ function validateDemographicFiltering(
       const patterns: Record<string, string[]> = {
         'tourist': ['turist', 'tourist', 'visitor', 'besøgende', 'traveler', 'rejsende'],
         'student': ['student', 'studerende', 'university', 'universitet', 'college'],
-        'business_professional': ['business', 'forretning', 'corporate', 'kontor', 'office'],
+        'office_worker': ['business', 'forretning', 'corporate', 'kontor', 'office'],
+        'business_professional': ['business', 'forretning', 'corporate', 'kontor', 'office'],  // alias
         'local_resident': ['local', 'lokal', 'resident', 'beboer', 'neighbor']
       };
 

@@ -431,10 +431,7 @@ serve(async (req)=>{
           content_strategy,
           recognizable_interior_identity,
           things_to_avoid,
-          content_focus,
           core_offerings,
-          tone_model,
-          tone_of_voice,
           enhanced_social_examples,
           enhanced_avoid_examples,
           updated_at
@@ -935,21 +932,37 @@ serve(async (req)=>{
               if (dishName) {
                 // Skip blocked dish name patterns (add-ons, surcharges, admin lines)
                 if (BLOCKED_DISH_PATTERNS.some((rx)=>rx.test(dishName.trim()))) continue;
+                
                 // Skip pure price-supplement entries: no description AND price < 50 DKK
                 const dishPrice = parseFloat(dish.price || '9999');
                 if (!dish.description && dishPrice < 50) continue;
+                
+                // MANDATORY DESCRIPTION REQUIREMENT: Skip items without meaningful descriptions
+                // This filters out incomplete menu entries like just "Bacon" or price-only items
+                const dishDescription = dish.description || dish.short_desc || '';
+                const trimmedName = dishName.trim();
+                const trimmedDesc = dishDescription.trim();
+                
+                // Skip if name is too short (likely an add-on like "Bacon", "Sauce")
+                if (trimmedName.length < 5) continue;
+                
+                // Skip if description is missing or too short (min 20 chars for meaningful content)
+                // Exception: Signature items can have shorter descriptions (they're curated)
+                const isSignatureItem = !!(item.is_signature || dish.isSignature);
+                if (!isSignatureItem && trimmedDesc.length < 20) continue;
+                
                 const menuEntry = {
                   id: dish.id || undefined,  // UUID from menu_items_normalized
                   name: dishName,
-                  description: dish.description || dish.short_desc || undefined,
+                  description: trimmedDesc || undefined,
                   category: categoryName || undefined,
                   price: dish.price || undefined,
-                  isSignature: !!(item.is_signature || dish.isSignature),
+                  isSignature: isSignatureItem,
                   // Carry the parent menu row's service_periods so Phase 2b can filter by slot time
                   service_periods: Array.isArray(item.service_periods) ? item.service_periods : []
                 };
                 allMenuItems.push(menuEntry);
-                if (item.is_signature || dish.isSignature) {
+                if (isSignatureItem) {
                   signatureItems.push(menuEntry);
                 }
               }
@@ -1263,8 +1276,8 @@ serve(async (req)=>{
           console.log('[get-weekly-strategy] Previous flexible DOWs:', previousFlexibleDows);
         }
         // STEP 6b-iv: PREVIOUS SLOT CONTENT TYPES — extract slot_id → content_category from
-        // the most recent past week so Phase 1 can rotate build_brand / retain_loyalty
-        // assignments and avoid an identical structural sequence two weeks in a row.
+        // the most recent past week so Phase 1 can rotate build_brand content categories
+        // and avoid an identical structural sequence two weeks in a row.
         const mostRecentStrategy = pastStrategies[0];
         if (mostRecentStrategy) {
           const ideas = mostRecentStrategy.post_ideas || [];
@@ -1476,18 +1489,6 @@ serve(async (req)=>{
           }
           return avoid || {};
         })(),
-        // Parse content_focus as content_pillars
-        content_pillars: (()=>{
-          const focus = brandProfile.content_focus;
-          if (typeof focus === 'string') {
-            try {
-              return JSON.parse(focus);
-            } catch  {
-              return {};
-            }
-          }
-          return focus || {};
-        })(),
         // V5 specific enrichment fields
         never_say: brandProfile.voice_guardrails?.never_say || brandProfile.never_say || [],
         core_offerings: (()=>{
@@ -1503,7 +1504,6 @@ serve(async (req)=>{
         })(),
         // V2 fields — Brand Profile V2 (March 2026)
         brand_essence: brandProfile.brand_essence || '',
-        tone_of_voice: brandProfile.tone_of_voice || null,
         // Voice guardrails — structured never_say + avoid patterns for text generation
         voice_guardrails: (()=>{
           const vg = brandProfile.voice_guardrails;
@@ -1545,17 +1545,6 @@ serve(async (req)=>{
         cta_preferences: brandProfile.brand_profile_v5?.voice?.writing_examples?.cta_preferences || null,
         // Identity fields for Phase 1 strategy grounding
         gastronomic_profile: (brandProfile as any).gastronomic_profile || null,
-        tone_model: (()=>{
-          const tm = brandProfile.tone_model;
-          if (typeof tm === 'string') {
-            try {
-              return JSON.parse(tm);
-            } catch  {
-              return null;
-            }
-          }
-          return tm || null;
-        })(),
         // Content strategy — drives Phase 1 slot assignment (goal_mode + content_category per post)
         content_strategy: (()=>{
           const cs = brandProfile.content_strategy;

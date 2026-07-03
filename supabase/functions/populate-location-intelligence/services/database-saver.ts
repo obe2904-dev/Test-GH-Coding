@@ -43,7 +43,7 @@ export class DatabaseSaver {
     // Migration 20260522000002 moved student/tourist to demographic_proximity
     // But old data may still have these keys in category_scores — explicitly remove them
     if (schemaVersion >= 2 && dataToSave.category_scores) {
-      const demographicKeys = ['student', 'tourist', 'local_resident', 'business_professional', 'family'];
+      const demographicKeys = ['student', 'tourist', 'local_resident', 'business_professional', 'office_worker', 'family', 'shopper'];
       let cleaned = false;
       
       for (const key of demographicKeys) {

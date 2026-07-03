@@ -97,6 +97,9 @@ import { generateLocationStrategy } from '../_shared/brand-profile/location-stra
 // Import drinks filter from shared data-gatherer
 import { isDrinksOnlyMenu } from '../_shared/brand-profile/data-gatherer.ts'
 
+// V3 Architecture: Import audience filter for permitted_who_types computation
+import { filterAudienceLabels } from '../_shared/utils/audience-filter.ts'
+
 // Import segment timing utilities for gap-time handling
 import { buildStrategicCoverage } from '../_shared/utils/segment-timing-matcher.ts'
 import type { StrategicCoverage } from '../_shared/utils/segment-timing-matcher.ts'
@@ -300,23 +303,31 @@ async function fetchBusinessData(
   location: any
   operations: any
   openingHours: any[]
+  userProfile: any
 }> {
+  // STEP 1: Fetch business first to get owner_id
+  const { data: businessData, error: businessError } = await supabaseClient
+    .from('businesses')
+    .select('*, local_location_reference, business_locations!inner(postal_code, city)')
+    .eq('id', businessId)
+    .eq('business_locations.is_primary', true)
+    .single()
+
+  if (businessError || !businessData) {
+    throw new Error(`Business not found: ${businessError?.message || 'Unknown error'}`)
+  }
+
+  // STEP 2: Fetch everything else in parallel, including user profile using owner_id
   const [
-    { data: businessData, error: businessError },
     { data: existingProfile },
     { data: businessProfile },
     { data: menuResultsRaw, error: menuFetchError },
     { data: location, error: locationError },
     { data: operations },
     { data: openingHours },
-    { data: menuResultsWithDishes }
+    { data: menuResultsWithDishes },
+    { data: userProfile }
   ] = await Promise.all([
-    supabaseClient
-      .from('businesses')
-      .select('*, local_location_reference, business_locations!inner(postal_code, city)')
-      .eq('id', businessId)
-      .eq('business_locations.is_primary', true)
-      .single(),
     supabaseClient
       .from('business_brand_profile')
       .select('tone_of_voice, tone_keywords, tone_model, typical_openings, things_to_avoid, voice_constraints, target_audience, communication_goal, emotional_promise, brand_context, recognizable_interior_identity, visual_character, venue_scene, humor_level, menu_overview_summary, gastronomic_profile, signature_themes, strategic_audience_segments, business_character')
@@ -338,7 +349,7 @@ async function fetchBusinessData(
       .order('completed_at', { ascending: false }),
     supabaseClient
       .from('business_location_intelligence')
-      .select('neighborhood, neighborhood_character, area_type, category_scores, demographic_proximity, physical_context, raw_competitive_venues, landmarks_nearby, nearby_hospitality, category_modifiers, location_marketing_hooks, local_location_reference, concept_fit_by_category, latitude, longitude')
+      .select('neighborhood, neighborhood_character, area_type, category_scores, demographic_proximity, who, traffic_rhythm, physical_context, raw_competitive_venues, landmarks_nearby, nearby_hospitality, category_modifiers, location_marketing_hooks, local_location_reference, concept_fit_by_category, latitude, longitude')
       .eq('business_id', businessId)
       .maybeSingle(),
     supabaseClient
@@ -356,12 +367,14 @@ async function fetchBusinessData(
       .eq('business_id', businessId)
       .eq('status', 'done')
       .not('representative_dishes', 'is', null)
-      .order('completed_at', { ascending: false })
+      .order('completed_at', { ascending: false }),
+    supabaseClient
+      .from('profiles')
+      .select('selected_platforms')
+      .eq('id', businessData.owner_id)  // ✅ FIX: Use owner_id from business, not business_id
+      .maybeSingle()
   ])
-
-  if (businessError || !businessData) {
-    throw new Error(`Business not found: ${businessError?.message || 'Unknown error'}`)
-  }
+  
   if (locationError) {
     console.warn('⚠️ Location intelligence query failed — proceeding without it')
   }
@@ -379,7 +392,8 @@ async function fetchBusinessData(
     menuResultsWithDishes: menuResultsWithDishes || [],
     location: location || null,
     operations: operations || null,
-    openingHours: openingHours || []
+    openingHours: openingHours || [],
+    userProfile: userProfile || null
   }
 }
 
@@ -558,6 +572,7 @@ serve(async (req) => {
     const location = fetchedData.location
     const operations = fetchedData.operations
     const openingHours = fetchedData.openingHours
+    const userProfile = fetchedData.userProfile
 
     // Extract additional data from fetched results
     const omOsText = businessProfile?.long_description || ''
@@ -1040,7 +1055,9 @@ serve(async (req) => {
           area_type: location?.area_type,
           neighborhood: location?.neighborhood,
           local_location_reference: business.local_location_reference || location?.local_location_reference,  // Source of truth: businesses table
-          nearby_hospitality: location?.nearby_hospitality
+          nearby_hospitality: location?.nearby_hospitality,
+          category_scores: location?.category_scores || {},        // Full multi-valued location signal
+          demographic_proximity: location?.demographic_proximity || {}  // Demographic dimensions
         },
         {
           price_range: normalizedMenuItems && normalizedMenuItems.length > 0 ? {
@@ -1549,6 +1566,32 @@ serve(async (req) => {
     console.log(`[${requestId}]    Commercial mode: ${commercialMode} (from ${dedupedProgrammesEnriched.length} programmes)`)
     console.log(`[${requestId}]    Goal split: ${JSON.stringify(normalizedGoalSplit)}`)
     
+    // V5.8: Extract service periods and platforms for enhanced marketing brief
+    const servicePeriods = [...new Set(dedupedProgrammesEnriched.map(p => p.programme.type))];
+    
+    // Parse selected_platforms from profiles table (stored as JSON string)
+    let selectedPlatforms: string[] = [];
+    if (fetchedData.userProfile?.selected_platforms) {
+      try {
+        const platformData = fetchedData.userProfile.selected_platforms;
+        // Handle both JSON string and already-parsed array
+        selectedPlatforms = typeof platformData === 'string' 
+          ? JSON.parse(platformData) 
+          : platformData;
+      } catch (e) {
+        console.warn(`[${requestId}] ⚠️ Failed to parse selected_platforms:`, e);
+        selectedPlatforms = [];
+      }
+    }
+    
+    console.log(`[${requestId}] 📱 V5.8 Enhancement Data:`)
+    console.log(`[${requestId}]    Service periods: ${servicePeriods.length > 0 ? servicePeriods.join(', ') : 'NONE'}`)
+    console.log(`[${requestId}]    Selected platforms: ${selectedPlatforms.length > 0 ? selectedPlatforms.join(', ') : 'NONE'}`)
+    console.log(`[${requestId}]    User profile found: ${fetchedData.userProfile ? 'YES' : 'NO'}`)
+    if (fetchedData.userProfile) {
+      console.log(`[${requestId}]    Platforms in profile (raw): ${JSON.stringify(fetchedData.userProfile.selected_platforms)}`)
+    }
+    
     const marketingManagerBrief = await generateMarketingManagerBrief(
       {
         businessIdentityPersona: businessIdentityPersona.system_persona,
@@ -1558,6 +1601,12 @@ serve(async (req) => {
           formality_level: voiceProfile.formality_level,
           humor_style: voiceProfile.humor_style,
           sentence_structure: voiceProfile.sentence_structure
+        },
+        voiceGuardrails: {  // NEW V5.9: Voice guardrails for validation
+          never_say: guardrails.never_say || [],
+          generic_marketing: guardrails.generic_marketing || [],
+          superlatives: guardrails.superlatives || [],
+          avoid_patterns: guardrails.avoid_patterns
         },
         commercialMode,
         primaryUSP: extractedUSPs.primary_usp.score >= 80 ? extractedUSPs.primary_usp.text : undefined,
@@ -1588,6 +1637,8 @@ serve(async (req) => {
             }
           }
         }),
+        selectedPlatforms: selectedPlatforms.length > 0 ? selectedPlatforms : undefined,  // V5.8: Platform context
+        servicePeriods: servicePeriods.length > 0 ? servicePeriods : undefined,  // V5.8: Service period context
         businessName: business.name,
         businessCategory: business.category || business.business_category || '',
         language  // Multi-language support: da, sv, no, de, en
@@ -1737,27 +1788,57 @@ serve(async (req) => {
     }
 
     // Save programme profiles (Layers 1, 2, 4)
-    const programmeProfilesToSave = dedupedProgrammesEnriched.map(({ programme, commercialOrientation, audienceProfile }) => ({
-      business_id: businessId,
-      programme_type: programme.type,
-      programme_name: programme.label,
-      time_windows: [`${programme.timeWindow.start}-${programme.timeWindow.end}`],
-      operating_days: programme.daysOfWeek,
-      menu_evidence: programme.menuEvidence,
-      confidence: programme.confidence === 'high' ? 0.9 : programme.confidence === 'medium' ? 0.7 : 0.5,
-      is_active: true,  // CRITICAL: Required for RLS policy to return records
-      menu_results_v2_id: programme.metadata?.menuResultId || null,  // CRITICAL: Track source menu for data lineage
-      baseline_goal_split: commercialOrientation.baseline_goal_split,
-      decision_timing: commercialOrientation.decision_timing,
-      content_type_affinity: commercialOrientation.content_type_affinity,
-      commercial_reasoning: commercialOrientation.reasoning,
-      price_positioning: commercialOrientation.price_positioning || null,  // NEW V5.3: Per-programme pricing
-      audience_segments: audienceProfile.audience_segments,
-      segment_confidence: audienceProfile.segment_confidence,
-      segment_reasoning: audienceProfile.segment_reasoning,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }))
+    const programmeProfilesToSave = dedupedProgrammesEnriched.map(({ programme, commercialOrientation, audienceProfile }) => {
+      // NEW V3: Compute permitted_who_types using audience filter with price-gating
+      // Extract max menu price for this programme (used for student price gate: > 150 DKK)
+      const programmePriceData = analyzeProgrammePricing(
+        normalizedMenuItems || [],
+        programme.type,
+        programme.label,
+        globalAvgPrice
+      )
+      const maxMenuPrice = programmePriceData.max
+      
+      // Apply audience filter to get price-gated WHO types
+      // V3: Uses location.who if available, falls back to demographic_proximity (v2)
+      const audienceFilterResult = filterAudienceLabels(
+        location?.demographic_proximity || null,  // v2 fallback
+        maxMenuPrice,
+        location?.category_scores || null,
+        location?.who || null  // v3 primary source
+      )
+      
+      return {
+        business_id: businessId,
+        programme_type: programme.type,
+        programme_name: programme.label,
+        time_windows: [`${programme.timeWindow.start}-${programme.timeWindow.end}`],
+        operating_days: programme.daysOfWeek,
+        menu_evidence: programme.menuEvidence,
+        confidence: programme.confidence === 'high' ? 0.9 : programme.confidence === 'medium' ? 0.7 : 0.5,
+        is_active: true,  // CRITICAL: Required for RLS policy to return records
+        menu_results_v2_id: programme.metadata?.menuResultId || null,  // CRITICAL: Track source menu for data lineage
+        baseline_goal_split: commercialOrientation.baseline_goal_split,
+        decision_timing: commercialOrientation.decision_timing,
+        draw_type: commercialOrientation.draw_type,  // NEW: Commercial draw type (passing_trade|local_draw|destination_draw)
+        reachable_guest_profile: commercialOrientation.reachable_guest_profile,  // NEW: Who actually visits (filtered by price/hours)
+        permitted_who_types: audienceFilterResult.permittedKeys,  // NEW V3: Price-gated WHO types for this programme
+        content_type_affinity: commercialOrientation.content_type_affinity,
+        commercial_reasoning: commercialOrientation.reasoning,
+        price_positioning: commercialOrientation.price_positioning || null,  // NEW V5.3: Per-programme pricing
+        audience_segments: audienceProfile.audience_segments,
+        segment_confidence: audienceProfile.segment_confidence,
+        segment_reasoning: audienceProfile.segment_reasoning,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    })
+
+    // Debug log: Show permitted_who_types for each programme
+    console.log(`[${requestId}] 👥 Permitted WHO types by programme:`)
+    programmeProfilesToSave.forEach(p => {
+      console.log(`[${requestId}]    ${p.programme_name}: [${p.permitted_who_types?.join(', ') || 'none'}] (max price: ${p.price_positioning || 'unknown'})`)
+    })
 
     const { error: saveError } = await supabaseClient
       .from('business_programme_profiles')
@@ -1834,7 +1915,12 @@ serve(async (req) => {
             characteristics: geographicContext.city_profile.characteristics
           },
           location_advantages: geographicContext.location_context.advantages,
-          narrative: geographicContext.narrative  // Full Danish narrative sent to AI
+          narrative: geographicContext.narrative,  // Full Danish narrative sent to AI
+          // V3: Raw location intelligence fields for weekly plan consumption
+          neighborhood: location?.neighborhood,
+          area_type: location?.area_type,
+          category_scores: location?.category_scores,
+          location_marketing_hooks: location?.location_marketing_hooks
         },
         // NEW V5.3: Extracted USPs from Layer 0
         usps: extractedUSPs,

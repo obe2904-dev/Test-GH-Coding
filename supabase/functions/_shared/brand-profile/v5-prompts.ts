@@ -71,14 +71,16 @@ KRITISKE PRINCIPPER:
    NOTE: Walk-in only ≠ automatisk spontaneous (se foodtruck eksempel ovenfor)
 
 3. DECISION TIMING OPTIONS:
-   - "last_minute": Same-day decision (0-2 timer før besøg) → 60-70% footfall baseline
+   - "last_minute": Same-day decision (0-2 timer før besøg) → 65-75% footfall baseline
    - "planned": Advance booking (1-7 dage før) → 25-35% footfall baseline  
-   - "hybrid": BÅDE spontan og planlagt → 40-50% footfall baseline (balanced)
+   - "hybrid": BÅDE spontan og planlagt → 45-55% footfall baseline (balanced)
 
-4. 6 CONTENT TYPES mapper til 3 GOAL MODES:
-   - Drive Footfall: Product + Urgency (synlig menu, tidsbegrænset appel)
-   - Strengthen Brand: Place + Process + Proof (location, bagvedscenen, social bevis)
-   - Retain Regulars: Retention (community, ingen CTA)
+4. TWO-DIMENSIONAL FRAMEWORK (2 GOALS):
+   - Drive Footfall: Product + Urgency (synlig menu, tidsbegrænset appel, walk-in incitament)
+   - Strengthen Brand: Place + Process + Proof + Retention (location, bagvedscenen, social bevis, community)
+   
+   VIGTIGT: Retention (loyal gæster, community) er et RESULTAT af god brand-building, ikke et separat mål.
+   Merge retention ind i "strengthen_brand" - loyalty skabes gennem konsekvent brand experience.
 
 5. BASELINE er STATISK:
    - Dette er "normal operations" strategi
@@ -89,8 +91,7 @@ OUTPUT FORMAT (JSON):
 {
   "baseline_goal_split": {
     "drive_footfall": <0-100>,
-    "strengthen_brand": <0-100>,
-    "retain_regulars": <0-100>
+    "strengthen_brand": <0-100>
   },
   "decision_timing": "last_minute" | "planned" | "hybrid",
   "content_type_affinity": {

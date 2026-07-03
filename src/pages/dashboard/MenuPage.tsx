@@ -558,6 +558,8 @@ function MenuPage() {
                 next.delete(cardId)
                 return next
               })
+              // Don't auto-expand cards after extraction - keep them collapsed
+              // setExpandedCards(prev => new Set(prev).add(cardId))
               
               // Update menu_sources status
               await supabase
@@ -1304,11 +1306,13 @@ function MenuPage() {
                 const isSelected = selectedUrls.has(item.url)
                 const menuCard = menuCards.find(card => card.source_url === item.url)
                 const isExpanded = menuCard ? expandedCards.has(menuCard.id) : false
+                const isMissingTime = menuCard?.status === 'extracted' && (!menuCard?.time_start || !menuCard?.time_end)
 
                 return (
                   <div 
                     key={item.url} 
                     className={`bg-surface rounded-lg border-2 transition-colors ${
+                      isMissingTime ? 'border-error border-4' :
                       isSelected ? 'border-cta' : 
                       menuCard?.status === 'pending' ? 'border-orange-200 bg-orange-50/30' : 
                       'border-border'
@@ -1512,8 +1516,8 @@ function MenuPage() {
                                 </>
                               ) : (
                                 <>
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-error-surface text-error-text border border-error">
-                                    ⚠️ Ingen tid
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-error-surface text-error-text border-2 border-error animate-pulse">
+                                    ⚠️ INGEN TID
                                   </span>
                                   {editingTimingCardId !== menuCard.result_id && (
                                     <button

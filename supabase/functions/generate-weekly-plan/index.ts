@@ -4,6 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { generateWeeklyPlan, saveWeeklyPlan } from '../_shared/post-helpers/weekly-plan-generator.ts'
 import { validateStrategyFeasibility, buildCapabilitiesFromProfile, formatValidationReport } from '../_shared/post-helpers/strategy-feasibility-validator.ts'
 import { countryToLanguageCode } from '../_shared/helpers/country-to-language.ts'
+import { getBusinessTier } from '../_shared/tier-resolver.ts'
 
 // v1.7 - Enhanced with opening_hours table and menu service periods extraction
 // v1.8 - V17 Robustness: GPT-4o + positive framing + validation (hotfix2: model tracking)
@@ -36,8 +37,44 @@ const MENU_TO_SERVICE_PERIOD: Record<string, string> = {
   AFTEN: 'dinner', Aften: 'dinner', DINNER: 'dinner', AFTENSMAD: 'dinner',
 }
 
+function derivePrimaryServicePeriod(servicePeriods: Record<string, any>): string {
+  const periodCount = Object.keys(servicePeriods).length
+  if (periodCount >= 3 || (servicePeriods.brunch && servicePeriods.lunch && servicePeriods.dinner)) {
+    return 'all_day'
+  }
+  if (servicePeriods.brunch && servicePeriods.lunch) return 'brunch_lunch'
+  if (servicePeriods.dinner && !servicePeriods.lunch) return 'dinner_only'
+  if (servicePeriods.brunch && !servicePeriods.lunch) return 'brunch_only'
+  return 'lunch'
+}
+
 function deriveServicePeriods(menuItems: any[]): { servicePeriods: Record<string, any>; primaryServicePeriod: string } {
   const servicePeriods: Record<string, any> = {}
+
+  // Fast-path: menu_items_normalized rows have service_period_name but no structured_data.menuPeriods.
+  // Detect this shape and build servicePeriods directly from the column.
+  const hasNormalizedShape = menuItems.some(
+    (m: any) => m.service_period_name && !m.structured_data?.menuPeriods
+  )
+
+  if (hasNormalizedShape) {
+    const countByPeriod: Record<string, number> = {}
+    for (const item of menuItems) {
+      const sp = item.service_period_name as string | undefined
+      if (!sp) continue
+      const periodType = MENU_TO_SERVICE_PERIOD[sp] ?? 'other'
+      if (periodType === 'other') continue
+      countByPeriod[periodType] = (countByPeriod[periodType] || 0) + 1
+    }
+    for (const [periodType, count] of Object.entries(countByPeriod)) {
+      servicePeriods[periodType] = { enabled: true, itemCount: count }
+    }
+
+    // Re-use the same primaryServicePeriod derivation logic below
+    const primaryServicePeriod = derivePrimaryServicePeriod(servicePeriods)
+    return { servicePeriods, primaryServicePeriod }
+  }
+
   const menuServicePeriods = new Map<string, { start: string; end: string; items: string[] }>()
 
   for (const menuRecord of menuItems) {
@@ -71,18 +108,7 @@ function deriveServicePeriods(menuItems: any[]): { servicePeriods: Record<string
     }
   }
 
-  let primaryServicePeriod = 'lunch'
-  const periodCount = Object.keys(servicePeriods).length
-  if (periodCount >= 3 || (servicePeriods.brunch && servicePeriods.lunch && servicePeriods.dinner)) {
-    primaryServicePeriod = 'all_day'
-  } else if (servicePeriods.brunch && servicePeriods.lunch) {
-    primaryServicePeriod = 'brunch_lunch'
-  } else if (servicePeriods.dinner && !servicePeriods.lunch) {
-    primaryServicePeriod = 'dinner_only'
-  } else if (servicePeriods.brunch && !servicePeriods.lunch) {
-    primaryServicePeriod = 'brunch_only'
-  }
-
+  const primaryServicePeriod = derivePrimaryServicePeriod(servicePeriods)
   return { servicePeriods, primaryServicePeriod }
 }
 
@@ -485,8 +511,6 @@ serve(async (req) => {
       // No snapshot available — fetch everything from DB (strategy exists but has no snapshot yet)
       const [
         { data: _brandProfile },
-        { data: _businessProfile },
-        { data: _locationIntel },
         { data: _menuItemsNormalized },
         { data: _menuItemsRaw },
         { data: _businessProgrammes },
@@ -495,8 +519,6 @@ serve(async (req) => {
         { data: _recentPlansRaw },
       ] = await Promise.all([
         supabaseClient.from('business_brand_profile').select('*, voice_guardrails, business_identity_persona, marketing_manager_brief').eq('business_id', business.id).single(),
-        supabaseClient.from('business_profile').select('*').eq('business_id', business.id).single(),
-        supabaseClient.from('business_location_intelligence').select('*').eq('business_id', business.id).single(),
         supabaseClient.from('menu_items_normalized').select('item_name, item_description, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', business.id).eq('menu_language', countryToLanguageCode(business.country)),
         // Fetch all statuses, filter by language below (so we have IDs to cross-reference)
         supabaseClient.from('menu_results_v2').select('id, language_code, structured_data, service_periods, is_signature, ai_summary, source_url, service_period_name').eq('business_id', business.id).eq('status', 'done'),
@@ -528,8 +550,8 @@ serve(async (req) => {
         // Keep business_character short - don't overwrite with long guidance
       }
       
-      businessProfile = _businessProfile
-      locationIntel = _locationIntel
+      // V3: Location intelligence now comes from brand profile geographic_context (no direct query)
+      locationIntel = null
       // Filter menu_items_normalized to local-language menus only
       menuItemsNormalized = (_menuItemsNormalized ?? []).filter(
         (item: any) => !item.menu_result_id || localMenuResultIdsNoSnap.size === 0 || localMenuResultIdsNoSnap.has(item.menu_result_id)
@@ -622,10 +644,9 @@ serve(async (req) => {
     
     console.log('[generate-weekly-plan] Menu data source:', menuDataSource, `(${processedMenuForWeekly.length} items)`);
 
-    // Resolve tier: from strategy, fallback to business record
-    const resolvedTier: 'smart' | 'pro' = strategy?.subscription_tier
-      ? (strategy.subscription_tier as 'smart' | 'pro')
-      : (business.subscription_tier === 'pro' ? 'pro' : 'smart')
+    // Resolve subscription tier (single source of truth)
+    const { legacyTier: resolvedTier } = await getBusinessTier(supabaseClient, business.id)
+    console.log('[generate-weekly-plan] Tier resolution:', { resolvedTier })
 
     // Filter out price-modifier add-ons (e.g. "GLUTENFRI PASTA +20,-", "EKSTRA SOVS +10")
     // These are option additions scraped alongside real dishes and pollute content ideas.
@@ -730,8 +751,8 @@ serve(async (req) => {
       businessId: business.id,
       businessName: business.name,
       businessType: input.businessType,
-      city: locationIntel?.neighborhood || 'unknown',
-      areaType: locationIntel?.area_type,
+      city: brandProfile?.layer_0_intelligence?.geographic_context?.neighborhood || brandProfile?.layer_0_intelligence?.geographic_context?.city || 'unknown',
+      areaType: brandProfile?.layer_0_intelligence?.geographic_context?.area_type,
       
       // Opening hours
       openingHoursDays: Object.keys(openingHours).length,
@@ -753,9 +774,9 @@ serve(async (req) => {
       },
       signatureDishes: menuItems?.filter(m => m.is_signature).length || 0,  // ✨ From database
       
-      // Location
-      hasLocationIntel: !!locationIntel,
-      waterfrontScore: locationIntel?.category_scores?.waterfront,
+      // Location (V3: from brand profile)
+      hasLocationIntel: !!brandProfile?.layer_0_intelligence?.geographic_context,
+      waterfrontScore: brandProfile?.layer_0_intelligence?.geographic_context?.category_scores?.waterfront,
       outdoorSeating: businessOps?.has_outdoor_seating,
       
       // Platforms

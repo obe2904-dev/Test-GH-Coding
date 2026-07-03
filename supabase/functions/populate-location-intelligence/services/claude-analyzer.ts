@@ -48,6 +48,17 @@ const PROHIBITED_PHRASES_BY_SIZE: Record<string, string[]> = {
   'small':  ['pulserende', 'urban energi', 'kosmopolit', 'byens puls', 'storby', 'byliv', 'metropol']
 };
 
+// Prohibited outdoor space terms — use neutral "udendørsservering" unless we have factual data
+const PROHIBITED_OUTDOOR_TERMS = [
+  'terrasse',
+  'terrasser',
+  'veranda',
+  'balkon',
+  'gårdhave',
+  'altan',
+  'tagterrasse'
+];
+
 // Danish waterfront vocabulary — street/area name fragments that signal water proximity.
 // Used to boost waterfront scoring and select correct Danish terminology.
 const DANISH_WATERFRONT_SIGNALS = [
@@ -89,11 +100,22 @@ export interface LocationContextInput {
   hospitality_count?: number;
 }
 
-// NEW: Location Analysis Output - scores + character
+// NEW: Location Analysis Output - Physical Anchor Taxonomy v3
 export interface LocationAnalysis {
-  category_scores: Record<string, number>;
-  demographic_proximity: Record<string, number>;
-  area_type: string;
+  category_scores: Record<string, number>;  // 9 location types (0-100 scores)
+  who: {
+    primary: string[];      // Primary WHO types (70%+ presence)
+    secondary: string[];    // Secondary WHO types (30-70% presence)
+    notes?: string;         // Optional clarifying notes with proximity evidence
+  };
+  traffic_rhythm: {
+    weekly_pattern: 'monday_friday_even' | 'friday_saturday_peak' | 'saturday_dominant' | 'weekend_peak' | 'weekday_lunch_only' | 'all_week_even' | 'semester_only';
+    peak_hours: string;     // Danish format with en-dash
+    dead_periods: string;   // When is it empty
+    seasonal_pattern: 'stable' | 'summer_peak' | 'winter_peak' | 'semester_only' | 'retail_calendar';
+    seasonal_note?: string; // Optional seasonal details
+  };
+  area_type: string;        // Best single descriptor from the 9 types
   rich_neighborhood_character: string;
 }
 
@@ -357,33 +379,44 @@ export class AIAnalyzer {
           }
         }
         
-        // FIX 2a: Student score validation - cap at 25 if not a university city
-        if (result.demographic_proximity?.student > 25) {
+        // FIX 2a: WHO field validation - student proximity gate
+        if (result.who?.primary?.includes('student') || result.who?.secondary?.includes('student')) {
           const isUniversityCity = DANISH_UNIVERSITY_CITIES.some(uc => 
             city.toLowerCase().includes(uc.toLowerCase())
           );
           
           if (!isUniversityCity) {
             console.warn(
-              `⚠️ Student score capped: ${result.demographic_proximity.student} → 25 ` +
-              `(${city} is not a university city)`
+              `⚠️ Student WHO type rejected: ${city} is not a university city. ` +
+              `Removing student from who.primary and who.secondary.`
             );
-            result.demographic_proximity.student = Math.min(25, result.demographic_proximity.student);
+            if (result.who.primary) {
+              result.who.primary = result.who.primary.filter(w => w !== 'student');
+            }
+            if (result.who.secondary) {
+              result.who.secondary = result.who.secondary.filter(w => w !== 'student');
+            }
           }
         }
         
-        // FIX 2b: Tourist score validation - cap at 30 if not a major tourist destination
-        if (result.demographic_proximity?.tourist > 30) {
+        // FIX 2b: WHO field validation - tourist proximity validation
+        if (result.who?.primary?.includes('tourist') || result.who?.secondary?.includes('tourist')) {
           const isTouristDestination = MAJOR_TOURIST_DESTINATIONS.some(td => 
             city.toLowerCase().includes(td.toLowerCase())
           );
           
           if (!isTouristDestination) {
             console.warn(
-              `⚠️ Tourist score capped: ${result.demographic_proximity.tourist} → 30 ` +
-              `(${city} is not a major tourist destination)`
+              `⚠️ Tourist WHO type demoted: ${city} is not a major tourist destination. ` +
+              `Moving tourist from primary to secondary if present.`
             );
-            result.demographic_proximity.tourist = Math.min(30, result.demographic_proximity.tourist);
+            if (result.who.primary?.includes('tourist')) {
+              result.who.primary = result.who.primary.filter(w => w !== 'tourist');
+              if (!result.who.secondary) result.who.secondary = [];
+              if (!result.who.secondary.includes('tourist')) {
+                result.who.secondary.push('tourist');
+              }
+            }
           }
         }
         
@@ -396,25 +429,50 @@ export class AIAnalyzer {
             result.neighborhood_character.toLowerCase().includes(phrase)
           );
           
-          if (hasProhibited) {
-            console.warn(
-              `⚠️ neighborhood_character bruger upassende sprog for ${citySize} by (${city}). ` +
-              `Falder tilbage til faktuel tekst...`
-            );
+          // FIX 5: Outdoor space terminology validation
+          const hasProhibitedOutdoorTerms = PROHIBITED_OUTDOOR_TERMS.some(term =>
+            result.neighborhood_character.toLowerCase().includes(term)
+          );
+          
+          if (hasProhibited || hasProhibitedOutdoorTerms) {
+            if (hasProhibited) {
+              console.warn(
+                `⚠️ neighborhood_character bruger upassende sprog for ${citySize} by (${city}). ` +
+                `Falder tilbage til faktuel tekst...`
+              );
+            }
+            if (hasProhibitedOutdoorTerms) {
+              console.warn(
+                `⚠️ neighborhood_character bruger specifik udendørs terminologi uden faktuelle data. ` +
+                `Brug neutral term "udendørsservering". Falder tilbage til faktuel tekst...`
+              );
+            }
             
-            // Fallback to simple factual synthesis
+            // Fallback to richer factual synthesis
             const areaLabel = waterfrontContext.isWaterfront
               ? waterfrontContext.term
               : this.areaTypeToLabel(result.area_type);
-            result.neighborhood_character = `${city} ${areaLabel}.`;
+            const hospitalityNote = hospitalityPlaces.length > 8
+              ? ` Høj tæthed af spisesteder i området (${hospitalityPlaces.length} inden for 300m).`
+              : '';
+            const waterfrontNote = (result.category_scores?.waterfront || 0) > 60
+              ? ` Beliggende ${waterfrontContext.term}.`
+              : '';
+            result.neighborhood_character = `${city} ${areaLabel}.${waterfrontNote}${hospitalityNote}`;
             console.log(`🔧 Syntetiseret neighborhood_character: "${result.neighborhood_character}"`);
           }
         }
         
         return {
           category_scores: result.category_scores || {},
-          demographic_proximity: result.demographic_proximity || {},
-          area_type: result.area_type || 'mixed_use',
+          who: result.who || { primary: [], secondary: [] },
+          traffic_rhythm: result.traffic_rhythm || {
+            weekly_pattern: 'friday_saturday_peak',
+            peak_hours: '11:00–21:00',
+            dead_periods: 'ikke identificeret',
+            seasonal_pattern: 'stable'
+          },
+          area_type: result.area_type || 'city_centre',
           rich_neighborhood_character: result.neighborhood_character || '',
         };
       }
@@ -521,7 +579,11 @@ LOKATION:
 Adresse: ${input.formatted_address}
 Kvarter/område: ${input.neighborhood || 'Ukendt'}
 Spisesteder inden for 300m: ${input.hospitality_count || 0}
-Nærliggende steder: ${input.landmarks?.slice(0, 6).map(l => l.name).join(', ') || 'ingen'}
+Nærliggende steder (med distance i meter):
+${input.landmarks?.slice(0, 6).map(l => {
+  const dist = l.walking_distance_meters || l.distance_meters || 'ukendt';
+  return `  • ${l.name} (${l.type}): ${dist}m`;
+}).join('\n') || '  ingen'}
 ${input.local_location_reference
   ? `\nEJERENS EGEN STEDSBESKRIVELSE: "${input.local_location_reference}"
 Dette er virksomhedens egne ord for sin beliggenhed — brug denne terminologi
@@ -567,97 +629,430 @@ Bystørrelser i Danmark (kalibrér sproget herefter):
 OPGAVE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHYSICAL ANCHOR TAXONOMY v3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Du analyserer BUSINESS-BLIND fysiske fakta om denne lokation.
+Ignorer forretningens type. Fokuser på: HVOR er dette sted? HVEM er fysisk her? HVORNÅR?
+
 Søg evt. efter kontekst om lokationen, og returner derefter:
 
-1. category_scores — geografiske lokationstyper (0–100)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. CATEGORY_SCORES — De 9 Fysiske Ankertyper (0–100)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Scorerne besvarer ét spørgsmål pr. kategori:
-"I hvilken grad er DENNE kategori den primære grund til, at kunder befinder sig i dette område?"
-
-Score efter KUNDERNES TILTRÆKNINGSKRAFT, ikke geografisk nærhed.
-
-REGEL: En kategori scorer højt KUN hvis en kunde specifikt ville opsøge
-denne lokationstype for at besøge stedet.
-At noget befinder sig i nærheden retfærdiggør IKKE en høj score alene.
-
-Kategoridefinitioner:
+KRITISK: Score efter HVAD der tiltrækker fodgængere til området, ikke forretningens type.
 
 city_centre (0–100)
-  Høj: Stedet ligger i den aktive bykerne — gågade, torv, tæt mix af butikker og
-  restauranter. Kunder er her fordi det er et travlt byknudepunkt.
-  Lav: Stedet er i en by, men ikke i dens kommercielle centrum.
-
-waterfront (0–100)
-  Høj: Vand er en direkte del af lokationsoplevelsen — havnepromenade, søbred,
-  kanalside, terrasse langs å, udsigt til vand fra stedet.
-  En café på Åboulevarden ved Aarhus Å scorer HØJT (70+) — åen er synlig og
-  udgør en central del af stedets identitet.
-  Lav: Vand eksisterer i nærheden men er ikke en del af grunden til at kunder vælger stedet.
-
-  VIGTIGT: "Å" i en adresse er næsten altid et stærkt waterfront-signal i Danmark.
-  Åboulevarden, Åen, Ådalen, Ågade → alle signalerer vandnærhed.
-
-nature_park (0–100)
-  Høj: Stedet er fysisk placeret i eller ved indgangen til et naturområde —
-  skov, sø, strand eller sti. Kunder kommer her på grund af naturen.
-  Lav: Et naturområde eksisterer i samme by, men stedet selv er ikke i det.
-
-residential (0–100)
-  Høj: Stedet betjener primært et lokalt opland — folk ankommer til fods fra
-  nærliggende boliger. Lav besøgs- eller transitstrøm fra andre områder.
-  Lav: Området tiltrækker folk fra et bredere opland.
-
-office (0–100)
-  Høj: Nærliggende arbejdspladser genererer den dominerende kundestrøm —
-  frokosttrængsel, eftermiddagsbesøg, forretningsmøder.
-  Lav: Der er kontorer i nærheden, men de er ikke den primære driver af fodgængerflow.
-
-shopping_district (0–100)
-  Høj: Stedet er inde i eller direkte op til en primær detailhandelszone
-  og fanger shoppere som sin primære målgruppe.
-  Lav: Der er butikker i nærheden, men detailhandel er ikke områdets dominerende karakter.
+  Høj (70+): Gågade, torv, aktiv handelskerne med tæt butiks/restaurantmix.
+  Lav (0–25): I en by, men ikke dens kommercielle centrum.
 
 transport_hub (0–100)
-  Høj: Stedet er i eller umiddelbart ved et større transitknudepunkt —
-  togstationshal, færgeterminal, busstation. Kunder passerer igennem.
-  Lav: Et busstoppested eller station er inden for gåafstand.
+  Høj (70+): I eller umiddelbart ved togstation, busstation, færgeterminal, metro.
+  Vigtigt: Kun IF der er FYSISK transitflow (folk skifter transport).
+  Lav (0–25): Busstoppested i nærheden tæller IKKE.
 
-tourist_destination (0–100)
-  Høj: Lokationen i sig selv tiltrækker besøgende — historisk kvarter, større
-  attraktion, velkendt landemærke. Turister udgør en betydelig del af forbipasserende.
-  Lav: Byen har turistattraktioner, men dette specifikke område fungerer ikke som turistzone.
+shopping_district (0–100)
+  Høj (70+): Inde i primær detailhandelszone (stormagasiner, butiksrække).
+  Lav (0–25): Enkelte butikker i nærheden.
+
+waterfront (0–100)
+  Høj (70+): Vand er synligt og en del af stedets identitet (havnepromenade, åbred, kanalkant).
+  SIGNAL: "Å" i adresse = næsten altid høj score (Åboulevarden = 75+).
+  Lav (0–25): Vand findes i byen, men ikke ved stedet.
+
+office (0–100)
+  Høj (70+): Nærliggende kontorbyggeri genererer frokost/mødeflow.
+  Lav (0–25): Kontorer eksisterer, men driver ikke fodgængerflow.
+
+residential (0–100)
+  Høj (70+): Betjener lokale beboere, lav transitstrøm.
+  Lav (0–25): Området tiltrækker folk fra bredere opland.
+
+university_campus (0–100) — NYT
+  PROXIMITY GATE: Scorer 70+ KUN hvis universitet ligger 400–600m væk.
+  KRITISK: Tjek de præcise distancer i "Nærliggende steder" listen ovenfor.
+  Hvis intet universitet har distance ≤600m → score SKAL være ≤25.
+  Høj (70+): Universitetsområde dominerer (studiehaller, bibliotek, kantiner synlige).
+  Lav (0–25): Universitet i byen, men ikke ved stedet.
+  BEMÆRK: Aarhus/København/Odense kan score højt. Silkeborg kan IKKE.
+  
+  EKSEMPLER:
+  ✅ "Syddansk Universitet Kolding: 450m" → university_campus: 75
+  ❌ "Syddansk Universitet Kolding: 726m" → university_campus: 15 (for langt væk)
+  ❌ IBA/UC institutioner tæller KUN hvis de har "universitet" i navnet
+
+hospital_campus (0–100) — NYT
+  PROXIMITY GATE: Scorer 70+ KUN hvis hospital ligger 300–500m væk.
+  KRITISK: Tjek de præcise distancer i "Nærliggende steder" listen ovenfor.
+  Hvis intet hospital har distance ≤500m → score SKAL være ≤25.
+  Høj (70+): Hospital/klinikområde med medicinsk personale og besøgende.
+  Lav (0–25): Hospital i byen, men ikke ved stedet.
+
+tourist_destination (0–100) — REDEFINERET
+  Høj (70+): OMRÅDE-LEVEL turistzone (historisk kvarter, attraktionszone, ikonisk gade).
+  IKKE single landmarks (Rundetårn alene = content hook, IKKE location type).
+  Kræver: turiststrøm + flere attraktioner + turistinfrastruktur.
+  Eksempler: Nyhavn (hele kvarter), Skagen centrum, Ribe gamle by.
+  Lav (0–25): Enkelte attraktioner, men ingen turistzone-karakter.
+
+nature_park (0–100)
+  Høj (70+): I eller ved indgang til naturområde (skov, sø, strand, sti).
+  Lav (0–25): Natur findes i byen, men stedet er ikke i det.
 
 Kalibrering:
-- Scores er uafhængige. De behøver IKKE summere til 100.
-- De fleste steder vil have 1–2 høje scores (60+) og resten lave (0–25).
-- En score over 60 betyder at kategorien reelt former, hvorfor kunder er her.
-  Undgå at oppuste sekundære kategorier fordi de er "lidt relevante".
-- Tænk i det faktiske gadebillede: hvad ser man fra indgangen?
+- Scores summerer IKKE til 100 (uafhængige dimensioner).
+- De fleste steder: 1–2 høje (60+), resten lave (0–25).
+- 60+ = kategorien FORMER hvorfor folk er her.
+- Tænk faktisk gadebillede: hvad ser man fra døren?
 
-2. demographic_proximity — hvem PASSERER FORBI dette område (0–100):
-   - local_resident: bruger lokale dette område dagligt?
-   - tourist: besøger turister dette område?
-   - student: er dette et studenterdomineret område?
-   - business_professional: er der kontorfolk i området?
-   - family: er det et familieorienteret område (skoler, parker)?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+KAUSAL RÆKKEFØLGE — OBLIGATORISK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-   VIGTIGT: Basér demografiske scores på områdets faktiske karakter,
-   ikke blot nærhed til én institution.
-   Et enkelt universitetscampus i en ikke-studenterdomineret by scorer LAVT (10–25).
-   Aarhus er en studenterby. Silkeborg er ikke.
-   Turister scores HØJT i kystbyer, historiske bykerner og kendte attraktionssteder.
+Følg ALTID denne rækkefølge. Afvig aldrig:
 
-3. area_type — den bedste enkeltbetegnelse fra:
-   city_centre / waterfront / residential / office / transport_hub /
-   shopping_district / tourist_destination / nature_park / mixed_use
+  1. category_scores (LOKATIONSTYPE) → bestemmer traffic_rhythm
+  2. traffic_rhythm → bestemmer hvornår folk er til stede
+  3. who → bestemmer hvem der er til stede på disse tidspunkter
 
-   Vælg den kategori der bedst forklarer HVAD der primært tiltrækker kunder til dette sted.
-   Et sted kan have to høje scores (fx city_centre: 85, waterfront: 70) —
-   vælg den der er mest definerende for stedets identitet.
+ALDRIG den omvendte vej:
+  ❌ demographic scores → traffic_rhythm (FORKERT)
+  ❌ "office_worker scorer højt → området er dødt om aftenen" (FORKERT)
 
-4. neighborhood_character — 2–3 sætninger PÅ DANSK der beskriver området.
+Eksempel på korrekt rækkefølge:
+  city_centre: 80 + waterfront: 75 → traffic_rhythm: peak_days "both",
+  evening active, summer_peak → office_worker + leisure_walker + shopper
+  er alle til stede på DERES respektive tidspunkter
+
+Eksempel på fejl at undgå:
+  office_worker: 90 → "døde perioder: efter 17:00 og weekender" (FORKERT)
+  office_worker beskriver hvem der PASSERER FORBI til frokost,
+  ikke hvornår OMRÅDET som helhed er aktivt.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. WHO — Hvem er fysisk i dette område?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Producér who-objektet i tre trin:
+
+TRIN 1: Bestem primary og secondary fra category_scores
+  Brug følgende mapping — scores er for category_scores, ikke demographic:
+
+  city_centre ≥70 + waterfront ≥70 (kombineret):
+    primary:   [leisure_walker, local_resident]
+    secondary: [shopper (hvis shopping_district ≥50), tourist
+                (hvis tourist_destination ≥50), office_worker (hvis office ≥60)]
+
+    REGLER FOR DENNE KOMBINATION:
+    - leisure_walker er ALTID primary når waterfront ≥70 — folk der
+      går langs åen/havnen er det definerende træk ved waterfront
+      lokationer, uanset om city_centre scorer højere
+    - shopper er ALTID secondary, ALDRIG primary, når waterfront ≥70
+      — shopping er et supplement til promenaden, ikke omvendt
+    - office_worker er ALTID secondary i city_centre ≥70 lokationer,
+      uanset office category_score:
+      * Normal tilstedeværelse: september–juni (morgenkaffe + efter-arbejde)
+      * Markant reduceret: juli (uge 28–32) og juleperioden (uge 52–1)
+      * Denne sæsonvariation fremgår af traffic_rhythm.seasonal_pattern
+        — det behøver ikke gentages i who.notes
+
+  city_centre ≥70 UDEN waterfront (waterfront <60):
+    primary:   [local_resident, shopper (hvis shopping_district ≥50),
+                office_worker (hvis office ≥60)]
+    secondary: [tourist (hvis tourist_destination ≥50), leisure_walker]
+
+  waterfront ≥70 UDEN city_centre (city_centre <60):
+    primary:   [leisure_walker, local_resident]
+    secondary: [tourist (hvis tourist_destination ≥50)]
+    — office_worker og shopper er ikke relevante for rene waterfront
+      lokationer uden bymidte-karakter
+
+  office ≥70 (og city_centre <60):
+    primary: office_worker
+    secondary: local_resident
+
+  residential ≥70:
+    primary: local_resident, family
+    secondary: office_worker (hvis nogen kontorer nearby)
+
+  shopping_district ≥70:
+    primary: shopper
+    secondary: local_resident, office_worker
+
+  university_campus ≥70 OG campus inden for 600m (se trin 2):
+    primary: student, office_worker (academic staff)
+    secondary: local_resident
+    
+    PROXIMITY CHECK: Før du tildeler student som primary, SKAL du verificere
+    at et universitet i "Nærliggende steder" har distance ≤600m.
+    Hvis ingen universitet er ≤600m → student må IKKE være i primary eller secondary.
+
+  hospital_campus ≥70 OG hospital inden for 500m:
+    primary: medical_staff, hospital_visitor
+    secondary: local_resident
+
+  Vælg primary: 2-3 typer med stærkest tilstedeværelse
+  Vælg secondary: 1-2 typer med moderat tilstedeværelse
+  
+  MANGLENDE TYPER ER FEJL:
+  - shopping_district ≥50 → shopper SKAL være i secondary eller primary
+  - waterfront ≥60 → leisure_walker SKAL være i secondary eller primary
+  - tourist_destination ≥50 → tourist SKAL være i secondary
+
+TRIN 2: Proximity gate for who.notes — fire absolutte regler
+
+REGEL 1 — AFSTAND:
+  who.notes må KUN indeholde referencer til landmarks der findes i
+  "Nærliggende steder" listen ovenfor MED distance ≤ 600m (university)
+  eller ≤ 500m (hospital).
+  
+  VIGTIGT: Brug de præcise distance-tal fra "Nærliggende steder" listen.
+  Du må IKKE estimere eller gætte på distancer.
+  
+  Hvis intet qualifying landmark er inden for tærsklen:
+    → sæt who.notes = null eksplicit
+    → skriv IKKE en note om atmosfære, karakter eller nærliggende steder
+  
+  Tjek: er der et qualifying landmark i "Nærliggende steder" inden for tærsklen?
+    JA → note er tilladt, brug den præcise distance fra listen
+    NEJ → who.notes = null. Stop. Skriv ingen note.
+  
+  EKSEMPEL KORREKT:
+  "Nærliggende steder" viser "Syddansk Universitet Kolding (education): 450m"
+  → who.notes = "Syddansk Universitet Kolding 450m — studerende..."
+  
+  EKSEMPEL FORKERT:
+  "Nærliggende steder" viser "Syddansk Universitet Kolding (education): 726m"
+  → who.notes = null (fordi 726m > 600m threshold)
+
+REGEL 2 — POI SIGNIFICANCE (gælder KUN for tourist grounding):
+  who.notes må IKKE citere en enkelt POI som begrundelse for tourist-tilstedeværelse,
+  medmindre POI'en er et genuint signifikant turistmål.
+  
+  SIGNIFIKANTE POIs (OK at citere):
+  ✅ Nationale/internationale attraktioner (ARoS, Tivoli, Den Lille Havfrue)
+  ✅ UNESCO sites (Kronborg, Jelling, Stevns Klint)
+  ✅ Store kulturinstitutioner (Nationalmuseet, Louisiana)
+  ✅ Ikoniske landmarks med stor besøgsvolume (Nyhavn, Skagen Grenen)
+  
+  IKKE-SIGNIFIKANTE POIs (brug IKKE som tourist-grounding):
+  ❌ Almindelige kirker og domkirker (Aarhus Domkirke, Ribe Domkirke)
+    → Disse er ofte i landmarks_nearby, men tiltrækker få turister
+  ❌ Lokale museer uden national betydning
+  ❌ Generiske tourist_attraction tags fra Google Places
+  ❌ Monumenter, statuer, springvand uden ikonisk status
+  
+  HVIS tourist ER i who.secondary MEN ingen signifikant POI findes:
+  → Sæt who.notes = null. Citer IKKE mindre lokale POIs som begrundelse.
+  → Tourist-tilstedeværelse kan skyldes general citycentre-karakter, ikke en enkelt POI.
+  
+  Eksempler:
+  ✅ "ARoS Kunstmuseum 200m — turister besøger museet og regnbuepanoramaet"
+  ❌ "Aarhus Domkirke 162m — turister tiltrækkes af den historiske katedral"
+     (domkirken er ikke et signifikant turistmål — brug IKKE)
+
+REGEL 3 — SPROG:
+  who.notes skal ALTID være på dansk.
+  Engelsk er forbudt i who.notes, uanset om resten af AI-svaret er på engelsk.
+  "Aarhus University is nearby" → UGYLDIG (engelsk)
+  "Aarhus Universitetshospital 280m — hospitalspersonale..." → GYLDIG (dansk)
+
+REGEL 4 — INDHOLD:
+  who.notes må KUN indeholde:
+  ✅ Institutionens navn + præcis afstand fra landmarks_nearby data
+  ✅ Hvilke people-types dette genererer og hvornår
+  ❌ ALDRIG: "bidrager til", "dynamisk atmosfære", "ungdommelig stemning"
+  ❌ ALDRIG: subjektive vurderinger af områdets karakter
+  ❌ ALDRIG: distancer du har beregnet eller estimeret selv
+
+  Korrekt eksempel:
+  "Aarhus Universitetshospital 280m — hospitalspersonale og besøgende
+  til stede alle ugens dage, inkl. tidlige morgener fra 06:00"
+  
+  Forkert eksempel:
+  "Aarhus University is nearby, contributing to a youthful and dynamic
+  atmosphere." (engelsk + subjektiv + landmark uden for tærsklen)
+
+TRIN 3: 11 VALID WHO TYPES (brug KUN disse):
+  local_resident, office_worker, student, shopper, tourist, commuter,
+  leisure_walker, family, medical_staff, hospital_visitor, event_visitor
+
+SCORE KALIBRERING FOR SHOPPER:
+  shopper må ALDRIG overstige 70 i demographic_proximity, selv hvis
+  shopping_district category_score er høj.
+  
+  Begrundelse: shopping_district score beskriver lokationens
+  shopping-karakter, ikke om folk primært shopper på netop denne
+  gade. En restaurant på en boulevard tæt på et stormagasin har
+  shopping-gæster, men de er et supplement — ikke lokationens
+  dominerende funktion.
+  
+  Korrekt kalibrering:
+  - shopping_district ≥70 + lokation er i/ved shoppingzone: shopper 60-70
+  - shopping_district 50-69 + nærliggende stormagasin: shopper 45-60
+  - shopping_district 50-69 + waterfront eller city_centre dominant: shopper 35-50
+
+Output-struktur:
+{
+  "who": {
+    "primary": ["office_worker", "local_resident", "shopper"],
+    "secondary": ["leisure_walker", "tourist"],
+    "notes": null
+  }
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. TRAFFIC_RHYTHM — AFLЕД FRA category_scores, IKKE fra demographic scores
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Bestem traffic_rhythm udelukkende fra de højest scorende category_scores
+og nearby_hospitality data. Demographic scores (who) påvirker IKKE
+traffic_rhythm — de beskriver hvem der er til stede, ikke hvornår.
+
+REGLER FOR HVERT FELT:
+
+weekly_pattern — det ugentlige trafikmønster (vælg ét):
+  
+  'monday_friday_even'    — jævn fordeling hele ugen (residential, hospital_campus)
+  'friday_saturday_peak'  — fredag eftermiddag + lørdag er de kommercielle toppe
+                            (city_centre F&B, waterfront, de fleste restauranter og caféer)
+  'saturday_dominant'     — lørdag er klart den travleste dag (shopping_district)
+  'weekend_peak'          — lørdag + søndag, ingen markant fredagsuplift
+                            (nature_park, rene turist-lokationer)
+  'weekday_lunch_only'    — kun hverdage, weekend næsten død (rent office-område)
+  'all_week_even'         — konstant alle dage inkl. weekend (hospital_campus, transport_hub)
+  'semester_only'         — aktiv i semestret, kollapser i sommerferien (university_campus)
+
+VÆLG 'friday_saturday_peak' NÅR:
+  - city_centre ≥70 OG waterfront ≥60
+  - city_centre ≥70 OG shopping_district ≥50
+  - city_centre ≥70 uden dominerende office-karakter (office <60)
+  Dette gælder de fleste restauranter og caféer i dansk bymidteContext.
+
+VÆLG IKKE 'monday_friday_even' for lokationer med city_centre ≥70 —
+  jævn ugefordeling er kun korrekt for residential og hospital.
+
+peak_hours REGLER:
+
+city_centre ≥70 + waterfront ≥60 (f.eks. Åboulevarden, havnepromenader):
+  Korrekt: "09:30–22:00" eller "09:30–23:00"
+  FORKERT: "08:00–09:30 og 11:30–13:30"
+  
+  Begrundelse: En å-boulevard eller havnepromenade er ikke et
+  transportknudepunkt. Morgenrush (08:00–09:30) foregår med cyklister
+  og buspassagerer der PASSERER FORBI, ikke stopper. Reel handel
+  starter når promenaden bliver en destination: ~09:30.
+  
+  Formiddagsdip er minimalt for waterfront-lokationer — folk kommer
+  både til brunch, frokost, eftermiddag og aften.
+
+office ≥70 + waterfront <50 (rent erhvervskvarter):
+  Korrekt: "08:00–09:30 og 11:30–13:30"
+  Dette er det eneste tilfælde hvor 08:00 er korrekt startpunkt.
+
+transport_hub ≥60:
+  Korrekt: "07:00–09:00 og 16:00–18:00"
+  Kun transport_hub har ægte 07:00-traffic.
+
+residential dominant:
+  Korrekt: "07:30–09:00 og 17:30–21:00"
+  Tidlig morgen er korrekt for residential — folk går hjemmefra.
+
+Alle andre kombinationer:
+  Kombiner signaler fra TOP 2 category_scores:
+  - city_centre (uden waterfront): 08:00–09:30 (morgenkaffe) + 11:30–13:30 (frokost) + 17:00–22:00 (aften)
+  - city_centre + waterfront: 09:30–22:00 (se regel ovenfor)
+  - waterfront (alene): 12:00–22:00 (eftermiddag og aften)
+  - office: 08:00–09:30 + 11:30–13:30 (kun hverdage)
+  - shopping_district: 10:00–19:00
+  - residential: 07:30–09:00 + 17:30–21:00
+  Hvis TOP 2 giver overlappende mønstre → kombiner dem
+
+dead_periods:
+  ⚠️ KRITISK: dead_periods beskriver LOKATIONENS døde perioder,
+  ikke den specifikke forretnings åbningstider.
+
+  - city_centre ≥70: ingen åbenlyse døde perioder (altid "Tidlig morgen
+    05:00–08:00" hvis noget)
+  - city_centre ≥70 + waterfront ≥70: "Tidlig morgen 05:00–08:00" — 
+    ALDRIG "efter 17:00" eller "weekender" for denne kombination
+  - office dominant + city_centre <60: "efter 17:00 og weekender"
+  - shopping_district: "mandag–tirsdag formiddag"
+  
+  REGEL: Hvis nearby_hospitality.density_label = "high" OG breakdown
+  indeholder bars eller restauranter → området er IKKE dødt om aftenen
+  eller weekenden, uanset hvad office_worker scoren er.
+  16 spisesteder inden for 300m inkl. barer = aktiv aften og weekend.
+
+seasonal_pattern:
+  Vælg ÉT mønster baseret på TOP scoring kategori:
+  - city_centre dominant + waterfront ≥60: "summer_peak"
+  - city_centre dominant uden waterfront: "stable"
+  - waterfront dominant: "summer_peak"
+  - university_campus dominant (≥70 OG inden for 600m): "semester_only"
+  - shopping_district dominant: "retail_calendar"
+  - residential: "stable"
+  - nature_park: "summer_peak"
+
+  ⚠️ seasonal_note MÅ IKKE modsige seasonal_pattern:
+  - "stable" + negativ sommernote = UGYLDIG KOMBINATION
+  - "summer_peak" + positiv sommernote = korrekt
+  - Hvis du skriver en note om sommerfald (-X%) → brug IKKE "stable"
+  - University semester-fald hører til "semester_only" — brug det kun
+    hvis university_campus scorer ≥70 OG campus er inden for 600m
+
+Output-struktur:
+{
+  "traffic_rhythm": {
+    "weekly_pattern": "friday_saturday_peak",
+    "peak_hours": "09:30–22:00",
+    "dead_periods": "Tidlig morgen 05:00–09:30",
+    "seasonal_pattern": "summer_peak",
+    "seasonal_note": "Sommer: +20–30% (åen og udeservering)"
+  }
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. AREA_TYPE — Bedste enkeltbetegnelse
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Vælg ÉN af de 9 typer:
+city_centre / transport_hub / shopping_district / waterfront / office /
+residential / university_campus / hospital_campus / tourist_destination / nature_park
+
+Logik: Tag den type med højeste score (hvis 60+). Ved tie (fx city_centre 80, waterfront 75),
+vælg den mest definerende for stedets identitet.
+
+5. neighborhood_character — 2–3 sætninger PÅ DANSK der beskriver området.
+
+   MINIMUM: 2 sætninger. En enkelt sætning er IKKE acceptabelt.
+   
    Hvad slags sted er dette? Hvad omgiver det? Hvad er atmosfæren?
    Nævn IKKE den specifikke virksomhed. Giv IKKE marketingråd.
+
+   TILLADT (faktuel beskrivelse):
+   ✅ "Åboulevarden ligger i Aarhus Centrum direkte langs Aarhus Å."
+   ✅ "Området har høj tæthed af restauranter og caféer (16 inden for 300m)."
+   ✅ "Aarhus Domkirke ligger 162m væk."
+   ✅ "Mange steder tilbyder udendørsservering langs åen." (neutral term)
+   
+   UDENDØRS SERVERING — NEUTRAL TERMINOLOGI:
+   Brug ALTID "udendørsservering" som neutral term.
+   Brug ALDRIG specifikke termer som "terrasse", "veranda", "balkon", "gårdhave"
+   medmindre du har faktuelle data der bekræfter den præcise type.
+   Hvis data ikke specificerer typen → brug "udendørsservering".
+   
+   FORBUDT (marketing og subjektiv vurdering — uændret):
+   ❌ "pulserende", "hyggelig", "fantastisk", "unik atmosfære"
+   ❌ Menneskelige aktiviteter: "udforske", "nyde", "opleve"
+   ❌ Retninger: "vest", "øst", "nord", "syd"
+   ❌ Relative positioner: "ved siden af", "overfor"
+   ❌ Specifikke udendørs typer uden data: "terrasser", "veranda", "balkon"
+   
+   Brug nearby_hospitality.total_count, landmarks_nearby navne og
+   afstande, og waterfront/area_type karakteren som faktuelle ankre.
 
    Skalér sproget til byens faktiske størrelse:
    - Stor by (250k+): urban energi, mangfoldigt, dynamisk — passende referencer
@@ -665,30 +1060,59 @@ Kalibrering:
      lokal fællesskabsfølelse, nærhed til natur eller vand hvis relevant
    - Lille by (<50k): lokal karakter, roligt tempo, kendte lokale steder
 
-   For mellemstore danske byer (Silkeborg, Horsens, Viborg):
-   Nævn specifikke lokale kendetegn (fx Silkeborg Søerne, gågaden, Torvet) —
-   IKKE "pulserende byliv" eller "byens puls".
-
    Brug KORREKTE danske vandtermer:
    ✅ "ved åen", "langs åen", "ved Aarhus Å" — for å-lokationer
    ✅ "ved søen", "ved Silkeborg Søerne" — for søer
    ✅ "ved havnen", "i havnekvarteret" — for havne
    ❌ "ved floden", "ved riveren", "ved elven" — ALDRIG brug disse
 
-   Eksempel god output for Åboulevarden, Aarhus:
-   "Åboulevarden ligger centralt i Aarhus Centrum, direkte ved Aarhus Å der løber
-   gennem bykernen. Gaden er omgivet af restauranter og caféer med terrasser langs åen,
-   og ARoS Kunstmuseum er inden for få minutters gang."
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VALIDERINGSTJEK FØR OUTPUT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-   Eksempel god output for Silkeborg:
-   "Centralt i Silkeborg med gågaden og Torvet inden for gangafstand,
-   tæt på Silkeborg Søerne og naturstier."
+Gennemfør disse tjek på din output FØR du returnerer JSON:
 
-   Eksempel DÅRLIG output (upassende for dansk mellemstor by):
-   "I hjertet af Silkeborgs pulserende byliv med konstant urban energi og kosmopolitisk stemning."
+1. KAUSAL TJEK:
+   Er traffic_rhythm.dead_periods afledt fra category_scores (korrekt)
+   eller fra demographic_proximity scores (forkert)?
+   Hvis fra demographic → omskriv fra category_scores.
+
+2. SÆSON MODSIGELSE:
+   Er seasonal_pattern = "stable" OG seasonal_note negativ (f.eks. "-40%")?
+   → Skift seasonal_pattern til det korrekte mønster eller fjern noten.
+
+3. PROXIMITY HALLUCINATION:
+   Indeholder who.notes en distance (Xm, X minutters gang)?
+   → Verificer at denne præcis distance eksisterer i landmarks_nearby data.
+   Hvis du ikke kan finde den eksakte distance i data → fjern noten.
+
+4. TOURIST GROUNDING SIGNIFICANCE:
+   Indeholder who.notes en reference til en kirke, domkirke eller almindelig tourist_attraction?
+   → Verificer at POI'en er genuint signifikant (ARoS, Tivoli, UNESCO site, etc.)
+   Hvis POI'en er en almindelig kirke/domkirke → fjern noten, sæt who.notes = null
+   Eksempel FEJL: "Aarhus Domkirke 162m — turister tiltrækkes af..." → FJERN
+   Eksempel OK: "ARoS Kunstmuseum 200m — turister besøger museet..."
+
+5. MANGLENDE WHO TYPER:
+   - shopping_district score ≥50 OG shopper ikke i who → FEJL, tilføj
+   - waterfront score ≥60 OG leisure_walker ikke i who → FEJL, tilføj
+   - tourist_destination score ≥50 OG tourist ikke i who → FEJL, tilføj
+
+6. OFFICE MØNSTER I IKKE-OFFICE LOKATION:
+   Er dead_periods "efter 17:00" eller "weekender" OG city_centre ≥70?
+   → FORKERT. City centres er ikke døde om aftenen. Omskriv.
+   Er dead_periods "efter 17:00" OG nearby_hospitality inkl. barer?
+   → FORKERT. Barer genererer aftentrafik. Omskriv.
+
+7. WEEKLY_PATTERN TJEK:
+   Er weekly_pattern = 'monday_friday_even' OG category_scores har
+   city_centre ≥70? → FORKERT. City_centre F&B bruger 'friday_saturday_peak'.
+   
+   Er peak_hours starter kl. 08:00 OG location er city_centre + waterfront
+   uden transport_hub ≥60? → FORKERT. Ret til 09:30.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT FORMAT
+OUTPUT FORMAT (Physical Anchor Taxonomy v3)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Returner KUN valid JSON uden markdown, uden forklaring, uden preamble:
@@ -696,20 +1120,27 @@ Returner KUN valid JSON uden markdown, uden forklaring, uden preamble:
 {
   "category_scores": {
     "city_centre": 0-100,
-    "waterfront": 0-100,
-    "nature_park": 0-100,
-    "residential": 0-100,
-    "office": 0-100,
-    "shopping_district": 0-100,
     "transport_hub": 0-100,
-    "tourist_destination": 0-100
+    "shopping_district": 0-100,
+    "waterfront": 0-100,
+    "office": 0-100,
+    "residential": 0-100,
+    "university_campus": 0-100,
+    "hospital_campus": 0-100,
+    "tourist_destination": 0-100,
+    "nature_park": 0-100
   },
-  "demographic_proximity": {
-    "local_resident": 0-100,
-    "tourist": 0-100,
-    "student": 0-100,
-    "business_professional": 0-100,
-    "family": 0-100
+  "who": {
+    "primary": ["office_worker", "local_resident"],
+    "secondary": ["tourist"],
+    "notes": "Optional proximity/temporal clarification"
+  },
+  "traffic_rhythm": {
+    "weekly_pattern": "friday_saturday_peak",
+    "peak_hours": "09:30–22:00",
+    "dead_periods": "Tidlig morgen 05:00–09:30",
+    "seasonal_pattern": "summer_peak",
+    "seasonal_note": "Optional seasonal details"
   },
   "area_type": "city_centre",
   "neighborhood_character": "dansk tekst her..."

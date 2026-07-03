@@ -274,7 +274,7 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
       da: [
         'Kom forbi i dag 😊',
         'Vi ses snart? ☕',
-        'Hop forbi',
+        'Kig forbi',
         'Vi glæder os til at se dig'
       ],
       sv: ['Titta förbi idag ☀️', 'Ses vi snart? 😊'],
@@ -285,13 +285,13 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
   
   // ADVANCE-PLANNING (reservation required): Emphasize booking
   if (reservationRequired && ctaIntent === 'visit' && bookingLink) {
-    // Always use booking-focused CTAs
+    // Always use booking-focused CTAs (but keep them conversational and helpful)
     const bookingFocusedCTAs: Record<string, string[]> = {
       da: [
         'Book bord online 👇',
         'Book dit bord 📅',
         'Se menuen og book bord',
-        'Sikr dig et bord — book nu'
+        'Book gerne — så er du sikker'
       ],
       sv: ['Boka bord online 👇', 'Reservera din plats 📅'],
       de: ['Tisch online buchen 👇', 'Reservieren Sie Ihren Platz 📅']

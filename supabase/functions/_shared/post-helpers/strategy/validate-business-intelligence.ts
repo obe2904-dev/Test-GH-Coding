@@ -143,18 +143,17 @@ export function validateBusinessIntelligenceUsage(
   const goalCounts = {
     drive_footfall: postIdeas.filter(p => p.goal_mode === 'drive_footfall').length,
     build_brand: postIdeas.filter(p => p.goal_mode === 'build_brand').length,
-    retain_loyalty: postIdeas.filter(p => p.goal_mode === 'retain_loyalty').length,
     unassigned: postIdeas.filter(p => !p.goal_mode).length
   };
   
-  const totalAssigned = goalCounts.drive_footfall + goalCounts.build_brand + goalCounts.retain_loyalty;
+  const totalAssigned = goalCounts.drive_footfall + goalCounts.build_brand;
   
   if (totalAssigned === 0) {
     issues.push({
       severity: 'critical',
       category: 'goal_distribution',
       message: 'No goal modes assigned to posts',
-      details: 'Every post should have a goal_mode (drive_footfall, build_brand, or retain_loyalty)'
+      details: 'Every post should have a goal_mode (drive_footfall or build_brand)'
     });
   } else {
     // Check if ALL posts have the same goal_mode
@@ -165,7 +164,7 @@ export function validateBusinessIntelligenceUsage(
         message: 'All posts have same goal (drive_footfall)',
         details: 'Expected: Mix of goals based on service period strategies. All footfall suggests lack of brand-building.'
       });
-      recommendations.push('Include build_brand posts for awareness and retain_loyalty posts for community');
+      recommendations.push('Include build_brand posts for awareness and brand-building');
     } else if (goalCounts.build_brand === totalAssigned && totalAssigned > 1) {
       issues.push({
         severity: 'warning',

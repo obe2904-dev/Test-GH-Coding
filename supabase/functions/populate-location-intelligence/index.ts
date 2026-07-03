@@ -10,6 +10,7 @@ import { GoogleMapsService } from './services/google-maps.ts';
 import { LocationAnalyzer } from './services/location-analyzer.ts';
 import { DatabaseSaver } from './services/database-saver.ts';
 import { AIAnalyzer } from './services/claude-analyzer.ts';
+import { convertWhoToDemographicProximity } from './services/who-to-demographics-converter.ts';
 
 /**
  * Major Danish cities that Google sometimes returns as "neighborhood" for nearby smaller towns.
@@ -21,8 +22,8 @@ const MAJOR_DANISH_CITIES = [
   'Herning', 'Silkeborg', 'Næstved', 'Fredericia', 'Viborg'
 ];
 
-// Schema v2: category_scores (geographic location types) + demographic_proximity (who passes by)
-const LOCATION_SCHEMA_VERSION = 2;
+// Schema v3: Physical Anchor Taxonomy with who + traffic_rhythm (replaces demographic_proximity)
+const LOCATION_SCHEMA_VERSION = 3;
 
 /**
  * Synthesize a location phrase from city and area_type when Google doesn't provide neighborhood data.
@@ -31,13 +32,14 @@ const LOCATION_SCHEMA_VERSION = 2;
 function synthesizeNeighborhoodFromAreaType(city: string, areaType: string): string {
   const areaTypeMappings: Record<string, string> = {
     'city_centre': `${city} centrum`,
-    'residential': `${city} boligområde`,
-    'office': `${city} erhvervsområde`,
     'transport_hub': `${city} transportknudepunkt`,
-    'waterfront': `${city} ved vandet`,
     'shopping_district': `${city} shoppingområde`,
-    'mixed_use': city, // Just city name for mixed-use
-    'destination': `${city} attraktion`,
+    'waterfront': `${city} ved vandet`,
+    'office': `${city} erhvervsområde`,
+    'residential': `${city} boligområde`,
+    'university_campus': `${city} universitetsområde`,
+    'hospital_campus': `${city} hospitalsområde`,
+    'tourist_destination': `${city} turistområde`,
     'nature_park': `${city} naturområde`,
   };
 
@@ -100,17 +102,54 @@ function applyPOIFallbackScores(
     office: ratio(['lawyer', 'accounting', 'bank', 'insurance_agency']),
     transport_hub: nearbyPlaces.some(p => ['train_station', 'subway_station'].includes(p.type) && p.distance_meters < 300) ? 80 : 15,
     shopping_district: ratio(['shopping_mall', 'clothing_store', 'shoe_store', 'jewelry_store']),
+    university_campus: nearbyPlaces.some(p => p.type === 'university' && p.distance_meters < 600) ? 70 : 10,
+    hospital_campus: nearbyPlaces.some(p => p.type === 'hospital' && p.distance_meters < 500) ? 70 : 10,
     tourist_destination: ratio(['tourist_attraction', 'museum', 'hotel', 'art_gallery']),
     nature_park: ratio(['park', 'campground', 'beach']),
   };
 
-  analyzedLocation.demographic_proximity = {
-    local_resident: 50,  // safe neutral default
-    tourist: analyzedLocation.category_scores.tourist_destination > 40 ? 45 : 20,
-    student: 15,         // conservative default — avoid false high scores
-    business_professional: analyzedLocation.category_scores.office > 30 ? 40 : 15,
-    family: ratio(['primary_school', 'park', 'playground', 'child_care']) > 20 ? 35 : 15,
+  // Synthesize WHO field from POI patterns
+  const whoTypes: string[] = [];
+  const secondaryWhoTypes: string[] = [];
+  
+  if (analyzedLocation.category_scores.residential > 40) whoTypes.push('local_resident');
+  if (analyzedLocation.category_scores.office > 30) whoTypes.push('office_worker');
+  if (analyzedLocation.category_scores.shopping_district > 40) whoTypes.push('shopper');
+  if (analyzedLocation.category_scores.tourist_destination > 40) whoTypes.push('tourist');
+  if (analyzedLocation.category_scores.university_campus > 60) whoTypes.push('student');
+  if (analyzedLocation.category_scores.hospital_campus > 60) whoTypes.push('medical_staff');
+  if (analyzedLocation.category_scores.transport_hub > 60) secondaryWhoTypes.push('commuter');
+  if (analyzedLocation.category_scores.waterfront > 50 || analyzedLocation.category_scores.nature_park > 50) {
+    secondaryWhoTypes.push('leisure_walker');
+  }
+  if (ratio(['primary_school', 'park', 'playground']) > 20) secondaryWhoTypes.push('family');
+  
+  analyzedLocation.who = {
+    primary: whoTypes.length > 0 ? whoTypes : ['local_resident'],  // Fallback to local_resident
+    secondary: secondaryWhoTypes,
+    notes: 'POI-inferred (not AI-validated)'
   };
+
+  // DUAL-WRITE: Synthesize demographic_proximity from who for backward compatibility
+  analyzedLocation.demographic_proximity = convertWhoToDemographicProximity(analyzedLocation.who);
+
+  // Synthesize TRAFFIC_RHYTHM from area type
+  const areaType = Object.entries(analyzedLocation.category_scores)
+    .sort(([, a], [, b]) => (b as number) - (a as number))[0]?.[0] || 'city_centre';
+  
+  const rhythmPatterns: Record<string, any> = {
+    office: { weekly_pattern: 'weekday_lunch_only', peak_hours: '08:00–09:30 og 11:30–13:30', dead_periods: 'efter 17:00 og weekender', seasonal_pattern: 'stable' },
+    transport_hub: { weekly_pattern: 'all_week_even', peak_hours: '07:00–09:00 og 16:00–18:00', dead_periods: 'weekend middage', seasonal_pattern: 'stable' },
+    shopping_district: { weekly_pattern: 'saturday_dominant', peak_hours: '10:00–19:00', dead_periods: 'mandag–tirsdag', seasonal_pattern: 'retail_calendar' },
+    waterfront: { weekly_pattern: 'friday_saturday_peak', peak_hours: '11:00–22:00', dead_periods: 'Vinterhverdage efter 17:00', seasonal_pattern: 'summer_peak', seasonal_note: 'Sommer: +30–50% (udeservering og promenade)' },
+    nature_park: { weekly_pattern: 'weekend_peak', peak_hours: '12:00–18:00', dead_periods: 'hverdage og vinter', seasonal_pattern: 'summer_peak' },
+    university_campus: { weekly_pattern: 'semester_only', peak_hours: '08:00–18:00', dead_periods: 'weekender og sommerferien', seasonal_pattern: 'semester_only' },
+    hospital_campus: { weekly_pattern: 'all_week_even', peak_hours: '08:00–20:00', dead_periods: 'nat', seasonal_pattern: 'stable' },
+    city_centre: { weekly_pattern: 'friday_saturday_peak', peak_hours: '09:30–22:00', dead_periods: 'Tidlig morgen 05:00–09:30', seasonal_pattern: 'summer_peak', seasonal_note: 'Sommer: +15–25%' },
+    residential: { weekly_pattern: 'monday_friday_even', peak_hours: '07:30–09:00 og 17:30–21:00', dead_periods: 'hverdage 10:00–16:00', seasonal_pattern: 'stable' },
+  };
+  
+  analyzedLocation.traffic_rhythm = rhythmPatterns[areaType] || rhythmPatterns['city_centre'];
 
   analyzedLocation.area_type = Object.entries(analyzedLocation.category_scores)
     .sort(([, a], [, b]) => (b as number) - (a as number))[0]?.[0] || 'mixed_use';
@@ -128,7 +167,8 @@ function applyPOIFallbackScores(
   console.log('📍 Fallback scores applied (POI-based, not AI-validated)');
   console.log(`   Reliability: ${analyzedLocation._fallback_warning.reliability} (${total} POIs)`);
   console.log('   category_scores:', analyzedLocation.category_scores);
-  console.log('   demographic_proximity:', analyzedLocation.demographic_proximity);
+  console.log('   who:', analyzedLocation.who);
+  console.log('   traffic_rhythm:', analyzedLocation.traffic_rhythm);
   
   // Cache poisoning guard: prevents bad fallback scores being written to DB for 90 days
   analyzedLocation._is_fallback = true;
@@ -316,7 +356,17 @@ serve(async (req) => {
         geocodeResult.longitude,
         1500 // 1.5km radius for cultural venues
       );
-      console.log(`✅ Found ${nearbyPlaces.length} nearby places`);
+      
+      // Filter retail landmarks to 500m — beyond that they don't
+      // generate meaningful foot traffic for a restaurant
+      nearbyPlaces = nearbyPlaces.filter(place => {
+        if (['department_store', 'shopping_mall'].includes(place.type)) {
+          return place.distance_meters <= 500;
+        }
+        return true; // Keep all other landmark types at full radius
+      });
+      
+      console.log(`✅ Found ${nearbyPlaces.length} nearby places (retail filtered to 500m)`);
     } catch (placesError) {
       console.error('❌ Error finding nearby places:', placesError);
       // Continue with empty array - analysis will work with limited data
@@ -511,17 +561,28 @@ serve(async (req) => {
           neighborhood_character_length: aiResult.rich_neighborhood_character?.length || 0,
           neighborhood_character_preview: aiResult.rich_neighborhood_character?.substring(0, 80) || 'NULL',
           category_scores_keys: Object.keys(aiResult.category_scores || {}),
-          demographic_keys: Object.keys(aiResult.demographic_proximity || {}),
+          who_primary: aiResult.who?.primary || [],
+          who_secondary: aiResult.who?.secondary || [],
+          has_traffic_rhythm: !!aiResult.traffic_rhythm,
         });
         
-        // Validate AI returned usable scores
+        // Validate AI returned usable scores and new v3 fields
         const hasScores = Object.keys(aiResult.category_scores || {}).length > 0;
-        const hasDemographics = Object.keys(aiResult.demographic_proximity || {}).length > 0;
+        const hasWho = aiResult.who && (aiResult.who.primary?.length > 0 || aiResult.who.secondary?.length > 0);
+        const hasTrafficRhythm = !!aiResult.traffic_rhythm;
 
-        if (hasScores && hasDemographics) {
+        if (hasScores && hasWho && hasTrafficRhythm) {
           // Replace analyzer's rule-based scores with AI's context-aware scores
           analyzedLocation.category_scores = aiResult.category_scores;
-          analyzedLocation.demographic_proximity = aiResult.demographic_proximity;
+          
+          // NEW v3 fields: who and traffic_rhythm
+          analyzedLocation.who = aiResult.who;
+          analyzedLocation.traffic_rhythm = aiResult.traffic_rhythm;
+          
+          // DUAL-WRITE: Synthesize demographic_proximity from who for backward compatibility
+          // Architecture Spec Step 2: "Keep demographic_proximity populated during transition"
+          analyzedLocation.demographic_proximity = convertWhoToDemographicProximity(aiResult.who);
+          
           analyzedLocation.area_type = aiResult.area_type;
           analyzedLocation.neighborhood_character = aiResult.rich_neighborhood_character;
           
@@ -536,7 +597,9 @@ serve(async (req) => {
               office:             'i erhvervsområdet',
               shopping_district:  'i shoppingområdet',
               transport_hub:      'ved stationen',
-              destination:        'som destinationssted',
+              university_campus:  'ved universitetsområdet',
+              hospital_campus:    'ved hospitalsområdet',
+              tourist_destination: 'som destinationssted',
               nature_park:        'ved naturområdet',
             };
             const areaLabel = areaTypeLabels[analyzedLocation.area_type] || 'i byen';
@@ -545,11 +608,15 @@ serve(async (req) => {
           }
           
           console.log(`✅ AI scores: ${JSON.stringify(aiResult.category_scores)}`);
-          console.log(`✅ Demographics: ${JSON.stringify(aiResult.demographic_proximity)}`);
+          console.log(`✅ WHO primary: ${aiResult.who.primary.join(', ')}`);
+          console.log(`✅ WHO secondary: ${aiResult.who.secondary.join(', ')}`);
+          console.log(`✅ Traffic rhythm: weekly_pattern=${aiResult.traffic_rhythm.weekly_pattern}, seasonal=${aiResult.traffic_rhythm.seasonal_pattern}`);
+          console.log(`✅ Demographics (synthesized from WHO): ${JSON.stringify(analyzedLocation.demographic_proximity)}`);
           console.log(`✅ Area type: ${aiResult.area_type}`);
           console.log(`✅ Neighborhood character: ${aiResult.rich_neighborhood_character?.substring(0, 80)}...`);
         } else {
-          console.warn('⚠️ AI returned empty scores — using POI fallback');
+          console.warn('⚠️ AI returned incomplete data — using POI fallback');
+          console.warn(`  hasScores=${hasScores}, hasWho=${hasWho}, hasTrafficRhythm=${hasTrafficRhythm}`);
           applyPOIFallbackScores(analyzedLocation, nearbyPlaces, hospitalityPlaces);
         }
       } catch (error) {

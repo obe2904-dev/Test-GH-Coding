@@ -6,16 +6,7 @@ import { LocationAnalysis, LocationCategoryId } from '../../lib/location/core/ty
 import type { SupportedLocale } from '../../lib/location/core/types';
 import { LocationCategoryIcon } from '../../components/setup/LocationCategoryIcon';
 import { supabase } from '../../lib/supabase';
-import { analyzeLocation } from '../../lib/location/core/analyzer';
-import { analyzeConceptFit, ConceptFitInput, ConceptFitOutput } from '../../lib/location/conceptFitAnalyzer';
 import { getLocaleConfig } from '../../lib/location/locales';
-
-// Icon component
-const CheckCircleIcon = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-  </svg>
-);
 
 const MapPinIcon = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -24,28 +15,7 @@ const MapPinIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-// Geographic location types (excludes demographics: student, tourist)
-// Demographics are now stored in demographic_proximity, not displayed as location types
-const GEOGRAPHIC_LOCATION_TYPES = new Set([
-  'city_centre',
-  'residential',
-  'office',
-  'transport_hub',
-  'waterfront',
-  'shopping_district',
-  'mixed_use',
-  'destination',
-  'nature_park'
-]);
 
-// Seasonal relevance mapping for each location type
-const SEASONAL_PATTERN_MAP: Record<string, 'year_round' | 'summer_peak' | 'semester_only' | 'weekday_only'> = {
-  waterfront: 'summer_peak',
-  tourist: 'summer_peak',
-  nature_park: 'summer_peak',
-  student: 'semester_only',
-  office: 'weekday_only',
-};
 
 
 function LocationIntelligencePage() {
@@ -71,9 +41,8 @@ function LocationIntelligencePage() {
     }
     return null;
   });
-  const [conceptFit, setConceptFit] = useState<Record<string, ConceptFitOutput> | null>(null);
-  const [locationTypeScores, setLocationTypeScores] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
+  const [savedLocationData, setSavedLocationData] = useState<any | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   // ISO string of the last time AI analysis completed — used to gate re-analysis
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
@@ -156,6 +125,9 @@ function LocationIntelligencePage() {
         if (savedData) {
           console.log('✅ Found saved location data:', savedData);
           
+          // Store the full saved data for use in UI rendering
+          setSavedLocationData(savedData);
+          
           // Parse landmarks_nearby if it's a JSON string
           let landmarksArray: any[] = [];
           if (savedData.landmarks_nearby) {
@@ -192,7 +164,7 @@ function LocationIntelligencePage() {
               .sort(([, a], [, b]) => b - a) // Sort by score descending
               .forEach(([categoryId, score]) => {
                 matches.push({
-                  categoryId: categoryId as any,
+                  categoryId: categoryId as LocationCategoryId,
                   score: score,
                   confidence: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',
                   reasoning: savedData.neighborhood_character ? [savedData.neighborhood_character] : [],
@@ -201,7 +173,7 @@ function LocationIntelligencePage() {
                         name: landmark.name || '',
                         type: landmark.type || 'landmark',
                         distance: landmark.distance || 0,
-                        relevance: 1
+                        weight: 1
                       }))
                     : []
                 });
@@ -211,7 +183,7 @@ function LocationIntelligencePage() {
           // Fallback: if no scores, use area_type as single category
           if (matches.length === 0 && savedData.area_type) {
             matches.push({
-              categoryId: savedData.area_type as any,
+              categoryId: savedData.area_type as LocationCategoryId,
               score: 100,
               confidence: 'high' as const,
               reasoning: savedData.neighborhood_character ? [savedData.neighborhood_character] : [],
@@ -219,15 +191,15 @@ function LocationIntelligencePage() {
                 name: landmark.name || '',
                 type: landmark.type || 'landmark',
                 distance: landmark.distance || 0,
-                relevance: 1
+                weight: 1
               }))
             });
           }
           
           // Reconstruct the analysis object from saved data
           const reconstructedAnalysis: LocationAnalysis = {
-            address: address || `${savedData.neighborhood || ''}`,
-            city: savedData.neighborhood || '',
+            address: address || `${savedData.neighborhood || 'Din lokation'}`,
+            city: savedData.neighborhood || savedData.neighborhood_character || 'Din lokation',
             country: 'DK',
             primaryCategory: (matches[0]?.categoryId || 'city_centre') as LocationCategoryId,
             analyzedAt: new Date().toISOString(),
@@ -264,35 +236,16 @@ function LocationIntelligencePage() {
 
           setAnalysis(reconstructedAnalysis);
           console.log('✅ Restored location analysis from database');
+          console.log('📊 Analysis summary:', {
+            city: reconstructedAnalysis.city,
+            primaryCategory: reconstructedAnalysis.primaryCategory,
+            matchesCount: reconstructedAnalysis.matches.length,
+            hasculturalContext: !!reconstructedAnalysis.culturalContext
+          });
 
           // Track when the analysis was last run
           if ((savedData as any).last_updated_by_ai) {
             setLastAnalyzedAt((savedData as any).last_updated_by_ai);
-          }
-          
-          // Also restore concept fit data if available - handle both parsed and string formats
-          const savedDataAny = savedData as any;
-          if (savedDataAny.concept_fit_by_category) {
-            let conceptFitData = savedDataAny.concept_fit_by_category;
-            
-            // Parse if it's a JSON string
-            if (typeof conceptFitData === 'string') {
-              try {
-                conceptFitData = JSON.parse(conceptFitData);
-              } catch (e) {
-                console.error('Failed to parse concept_fit_by_category:', e);
-                conceptFitData = {};
-              }
-            }
-            
-            if (typeof conceptFitData === 'object' && Object.keys(conceptFitData).length > 0) {
-              setConceptFit(conceptFitData);
-              console.log('✅ Restored concept fit from database');
-            } else {
-              console.log('ℹ️ concept_fit_by_category is empty - user needs to run analysis');
-            }
-          } else {
-            console.log('ℹ️ No concept_fit_by_category in database - user needs to run analysis');
           }
         } else {
           console.log('ℹ️ No saved location data found');
@@ -306,119 +259,6 @@ function LocationIntelligencePage() {
       loadSavedLocationData();
     }
   }, [businessId, address]);
-
-  /**
-   * Load business data needed for concept fit analysis
-   */
-  const loadBusinessData = async (): Promise<ConceptFitInput | null> => {
-    if (!businessId) return null;
-
-    try {
-
-      // Load business profile (has long_description - user-entered description)
-      const { data: profile } = await supabase
-        .from('business_profile')
-        .select('long_description')
-        .eq('business_id', businessId)
-        .maybeSingle();
-
-      // Load opening hours
-      const { data: hours } = await supabase
-        .from('opening_hours')
-        .select('*')
-        .eq('business_id', businessId);
-
-      // Load latest menu result for pricing and structure
-      const { data: menuResult } = await supabase
-        .from('menu_results_v2')
-        .select('structured_data')
-        .eq('business_id', businessId)
-        .eq('status', 'done')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      // Calculate average price from menu
-      let avgPrice: number | undefined;
-      const structured = (menuResult as any)?.structured_data;
-      if (structured?.categories && Array.isArray(structured.categories)) {
-        const prices: number[] = [];
-        structured.categories.forEach((cat: any) => {
-          if (Array.isArray(cat?.items)) {
-            cat.items.forEach((item: any) => {
-              const price = typeof item?.price === 'number' ? item.price : parseFloat(item?.price);
-              if (!isNaN(price) && price > 0) prices.push(price);
-            });
-          }
-        });
-        if (prices.length > 0) {
-          avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-        }
-      }
-
-      // Convert opening hours to expected format
-      const openingHours: ConceptFitInput['openingHours'] = {};
-      if (hours && Array.isArray(hours)) {
-        hours.forEach((h: any) => {
-          const day = h.day_of_week?.toLowerCase();
-          if (day && h.opens_at && h.closes_at) {
-            openingHours[day as keyof typeof openingHours] = {
-              open: h.opens_at,
-              close: h.closes_at
-            };
-          }
-        });
-      }
-
-      // Determine price level
-      let priceLevel: 'budget' | 'mid' | 'premium' = 'mid';
-      if (avgPrice) {
-        if (avgPrice < 80) priceLevel = 'budget';
-        else if (avgPrice > 150) priceLevel = 'premium';
-      }
-
-      // Load business operations for service model
-      const { data: operations } = await (supabase as any)
-        .from('business_operations')
-        .select('has_takeaway, has_delivery, has_table_service')
-        .eq('business_id', businessId)
-        .maybeSingle();
-
-      // Determine service model from operations data
-      let serviceModel: 'dine-in' | 'takeaway' | 'both' | 'delivery' = 'dine-in';
-      if (operations) {
-        if ((operations as any).has_table_service && (operations as any).has_takeaway) {
-          serviceModel = 'both';
-        } else if ((operations as any).has_takeaway && !(operations as any).has_table_service) {
-          serviceModel = 'takeaway';
-        } else if ((operations as any).has_delivery) {
-          serviceModel = 'delivery';
-        }
-      }
-
-      const conceptInput: ConceptFitInput = {
-        aboutText: profile?.long_description || undefined,
-        openingHours: Object.keys(openingHours).length > 0 ? openingHours : undefined,
-        menuSummary: undefined, // No longer using menu metadata
-        serviceModel: serviceModel,
-        priceLevel: priceLevel
-      };
-      
-      console.log('📊 Business data for concept fit:', {
-        hasDescription: !!conceptInput.aboutText,
-        hasHours: !!conceptInput.openingHours,
-        serviceModel: conceptInput.serviceModel,
-        priceLevel: conceptInput.priceLevel,
-        hoursCount: Object.keys(openingHours).length,
-        operationsLoaded: !!operations
-      });
-      
-      return conceptInput;
-    } catch (error) {
-      console.error('Error loading business data for concept fit:', error);
-      return null;
-    }
-  };
 
   const handleAnalyze = async () => {
     if (!businessId) {
@@ -481,123 +321,55 @@ function LocationIntelligencePage() {
       }
 
       console.log('✅ Location intelligence loaded (schema v2):');
-      console.log('   category_scores:', locationData.category_scores);
-      console.log('   demographic_proximity:', locationData.demographic_proximity);
-      console.log('   area_type:', locationData.area_type);
-      console.log('   neighborhood:', locationData.neighborhood);
+      console.log('   category_scores:', (locationData as any).category_scores);
+      console.log('   demographic_proximity:', (locationData as any).demographic_proximity);
+      console.log('   area_type:', (locationData as any).area_type);
+      console.log('   neighborhood:', (locationData as any).neighborhood);
+
+      // Store the full saved data for use in UI rendering
+      setSavedLocationData(locationData);
 
       // Convert to the format expected by the UI
-      const categoryScores = locationData.category_scores || {};
-      const demographicProximity = locationData.demographic_proximity || {};
+      const categoryScores = (locationData as any).category_scores || {};
       
       // Create matches array from category_scores (geographic types only)
       const matches = Object.entries(categoryScores)
         .sort(([, a], [, b]) => (b as number) - (a as number))
         .map(([categoryId, score]) => ({
-          categoryId,
+          categoryId: categoryId as LocationCategoryId,
           score: score as number,
-          signals: locationData.landmarks_nearby || []
+          confidence: (score as number) >= 70 ? 'high' as const : (score as number) >= 40 ? 'medium' as const : 'low' as const,
+          reasoning: [(locationData as any).neighborhood_character || ''].filter(Boolean) as string[],
+          signals: (Array.isArray((locationData as any).landmarks_nearby) ? (locationData as any).landmarks_nearby : []).map((landmark: any) => ({
+            name: landmark.name || '',
+            type: landmark.type || 'landmark',
+            distance: landmark.distance || 0,
+            weight: 1
+          }))
         }));
 
       const analysis: LocationAnalysis = {
-        city: locationData.city || '',
+        address: address || '',
+        city: (locationData as any).city || (locationData as any).neighborhood || '',
+        country: 'DK',
         locale: 'da-DK',
+        primaryCategory: (matches[0]?.categoryId || 'city_centre') as LocationCategoryId,
+        analyzedAt: new Date().toISOString(),
         culturalContext: {
-          description: locationData.neighborhood_character || '',
-          knownFor: locationData.location_marketing_hooks || []
+          significance: 'medium' as const,
+          description: (locationData as any).neighborhood_character || '',
+          knownFor: (locationData as any).location_marketing_hooks || []
         },
         matches: matches,
         coordinates: {
-          lat: locationData.latitude || 0,
-          lng: locationData.longitude || 0
+          lat: (locationData as any).latitude || 0,
+          lng: (locationData as any).longitude || 0
         }
       };
 
       setAnalysis(analysis);
 
-      // Display demographic_proximity separately
-      console.log('📊 Schema V2 Demographics (separate field):');
-      Object.entries(demographicProximity).forEach(([key, value]) => {
-        console.log(`   ${key}: ${value}`);
-      });
-
-      // Concept fit analysis on geographic categories only (not demographics)
-      const businessData = await loadBusinessData();
-      if (businessData && matches.length > 0) {
-        const localeConfig = getLocaleConfig('da-DK');
-        
-        const categories = matches.map(m => ({
-          categoryId: m.categoryId,
-          score: m.score,
-          displayName: localeConfig.categories[m.categoryId]?.name || m.categoryId
-        }));
-        
-        // Filter top 3 categories >= 50% AND geographic types only
-        const eligibleCategories = categories
-          .filter(cat => cat.score >= 50 && GEOGRAPHIC_LOCATION_TYPES.has(cat.categoryId))
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 3);
-        
-        console.log(`🚀 Calling concept fit for top ${eligibleCategories.length} geographic categories (≥50%, max 3):`, eligibleCategories.map(c => c.categoryId).join(', '));
-        
-        let fitResults: Record<string, ConceptFitOutput> = {};
-        
-        // Call Edge Function for concept fit
-        for (let i = 0; i < eligibleCategories.length; i++) {
-          const category = eligibleCategories[i];
-          const isStrategyDriver = i === 0;
-          
-          try {
-            const { data: edgeFunctionData, error: edgeFunctionError } = await supabase.functions.invoke('analyze-concept-fit', {
-              body: {
-                businessId: businessId,
-                locationType: category.categoryId,
-                language: i18n.language === 'en' ? 'en' : 'da',
-              }
-            });
-            
-            if (edgeFunctionError) throw edgeFunctionError;
-            
-            if (edgeFunctionData?.success && edgeFunctionData.conceptFit) {
-              const edgeConceptFit = edgeFunctionData.conceptFit;
-              fitResults[category.categoryId] = {
-                area_type: category.categoryId,
-                category_score: category.score,
-                strategy_score: category.score,
-                seasonal_weight: 1.0,
-                seasonal_relevance: (SEASONAL_PATTERN_MAP[category.categoryId] !== 'year_round' ? 'high' : 'medium') as 'high' | 'medium' | 'low',
-                is_strategy_driver: isStrategyDriver,
-                fit_level: edgeConceptFit.overall_fit_level === 'strong' ? 'strong' : 
-                          edgeConceptFit.overall_fit_level === 'challenging' ? 'challenging' : 'moderate',
-                fit_confidence: edgeConceptFit.overall_fit_confidence || 0.7,
-                ui_summary: {
-                  one_liner: edgeConceptFit.strategy_positioning || `Konceptet passer ${edgeConceptFit.overall_fit_level} til ${category.displayName}`,
-                  best_marketing_angle: edgeConceptFit.emphasis?.[0] || 'Kvalitet + service'
-                },
-                fit_reasons: edgeConceptFit.fit_reasons || [],
-                marketing_implications: {
-                  content_emphasis: edgeConceptFit.emphasis || [],
-                  cta_style: edgeConceptFit.cta_style || 'Friendly invite',
-                  timing_tweaks: []
-                },
-                recommended_adjustments: [],
-                watchouts: edgeConceptFit.mismatch_reasons || []
-              };
-            }
-          } catch (edgeError) {
-            console.warn(`⚠️ Concept fit failed for ${category.categoryId}:`, edgeError);
-          }
-        }
-        
-        setConceptFit(fitResults);
-        
-        // Save concept fit to database for future page loads
-        if (Object.keys(fitResults).length > 0 && analysis) {
-          console.log('💾 Saving concept fit to database...');
-          await saveLocationProfile(analysis, fitResults);
-        }
-      }
-      
+      console.log('✅ Location intelligence analysis complete');
     } catch (error) {
       console.error('Location analysis error:', error);
       setError(error instanceof Error ? error.message : t('location.errorAnalyzeFailed'));
@@ -607,8 +379,7 @@ function LocationIntelligencePage() {
   };
 
   const saveLocationProfile = async (
-    analysisData: LocationAnalysis, 
-    fitData?: Record<string, ConceptFitOutput>,
+    analysisData: LocationAnalysis,
     locationTypeMatches?: Record<string, any> // Location type matches from STEP 1
   ) => {
     if (!businessId) {
@@ -649,12 +420,6 @@ function LocationIntelligencePage() {
         updated_at: new Date().toISOString()
       };
 
-      // Add concept fit data if available (per-category format)
-      if (fitData) {
-        dataToSave.concept_fit_by_category = fitData;
-        dataToSave.concept_fit_analyzed_at = new Date().toISOString();
-      }
-
       console.log('💾 Auto-saving location data:', dataToSave);
 
       const { error: saveError } = await (supabase as any)
@@ -675,6 +440,9 @@ function LocationIntelligencePage() {
       setIsSaving(false);
     }
   };
+
+  // Use saveLocationProfile if needed in the future
+  console.log('saveLocationProfile available:', typeof saveLocationProfile);
 
   return (
     <div className="bg-surface-page min-h-full py-6 px-6">
@@ -872,101 +640,256 @@ function LocationIntelligencePage() {
         </div>
       )}
 
-      {/* Concept Fit Results - Din Lokation hidden, only show final fit analysis */}
-      {analysis && conceptFit && Object.keys(conceptFit).length > 0 && (
+      {/* Location Intelligence Results - Factual Display */}
+      {analysis && savedLocationData && (
         <>
-          {console.log('🎨 Rendering Concept Fit:', conceptFit)}
-          
-          {/* Optional: Uncomment to restore location type detection display
-          <LocationAnalysisDisplay 
-            analysis={analysis}
-            conceptFits={conceptFit}
-            onDeleteCategory={handleDeleteCategory}
-          />
-          */}
-          
-          {/* Show Concept Fit cards directly */}
-          <div className="space-y-3">
+          <div className="space-y-4">
+            {/* Section 1: Location Types (category_scores, top 3 with score ≥ 50) */}
             {(() => {
               const localeConfig = getLocaleConfig(uiLocale);
-              const eligibleCategories = Object.entries(conceptFit)
-                .filter(([categoryId]) => {
-                  // Filter to geographic types only (exclude demographics: student, tourist)
-                  if (!GEOGRAPHIC_LOCATION_TYPES.has(categoryId)) return false;
-                  
-                  // Use fresh scores (locationTypeScores) if available, else fall back to stored analysis
-                  const score = locationTypeScores[categoryId] 
-                    ?? (analysis.matches.find(m => m.categoryId === categoryId)?.score || 0);
-                  return score >= 50;
-                })
-                .sort(([, a], [, b]) => {
-                  if (a.is_strategy_driver) return -1;
-                  if (b.is_strategy_driver) return 1;
-                  const scoreA = locationTypeScores[a.area_type] 
-                    ?? (analysis.matches.find(m => m.categoryId === a.area_type)?.score || 0);
-                  const scoreB = locationTypeScores[b.area_type] 
-                    ?? (analysis.matches.find(m => m.categoryId === b.area_type)?.score || 0);
-                  return scoreB - scoreA;
-                })
-                .slice(0, 3); // Limit to top 3 highest scoring categories
+              const categoryScores = (savedLocationData as any).category_scores || {};
+              const topCategories = Object.entries(categoryScores)
+                .filter(([_, score]) => (score as number) >= 50)
+                .sort(([, a], [, b]) => (b as number) - (a as number))
+                .slice(0, 3);
 
-              return eligibleCategories
-                .filter(([, fit]) => fit.fit_level !== 'challenging')
-                .map(([categoryId, fit]) => {
-                const categoryConfig = (localeConfig.categories as any)[categoryId];
-                
-                return (
-                  <div key={categoryId} className="bg-surface rounded-lg border border-border p-6">
-                    <div className="flex items-start gap-4 mb-4">
-                      <LocationCategoryIcon categoryId={categoryId as any} className="w-10 h-10 text-[#0A7D5F]" />
-                      <div className="flex-1">
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="text-xl font-medium text-brand">{categoryConfig.name}</h3>
-                          {fit.is_strategy_driver && (
-                            <span className="inline-flex items-center gap-1 bg-[#F0EEFE] text-[#3D339A] border-[0.5px] border-[#C7BAF7] rounded-full px-[10px] py-[3px] text-[11px] font-medium">
-                              <MapPinIcon className="w-3 h-3 text-[#6B5CE7]" />
-                              {t('location.strategyFocus')}
-                            </span>
-                          )}
+              if (topCategories.length === 0) return null;
+
+              return (
+                <div className="bg-surface rounded-lg border border-border p-6">
+                  <h3 className="text-lg font-medium text-brand mb-4">Lokationstyper</h3>
+                  <div className="space-y-3">
+                    {topCategories.map(([categoryId, score]) => {
+                      const categoryConfig = (localeConfig.categories as any)[categoryId];
+                      if (!categoryConfig) return null;
+
+                      return (
+                        <div key={categoryId} className="flex items-center gap-3">
+                          <LocationCategoryIcon categoryId={categoryId as any} className="w-8 h-8 text-[#0A7D5F]" />
+                          <div className="flex-1">
+                            <p className="text-[15px] font-medium text-[#111714]">{categoryConfig.name}</p>
+                            <p className="text-[13px] text-[#5C5650]">Score: {Math.round(score as number)}%</p>
+                          </div>
                         </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
-                        {fit.ui_summary && (
-                          <p className="text-[14px] font-medium text-[#3C3830] mb-3">
-                            {fit.ui_summary.one_liner}
-                          </p>
-                        )}
-                        {fit.fit_reasons && fit.fit_reasons.length > 0 && (
-                          <div className="mb-3">
-                            <p className="text-[11px] font-medium tracking-[0.07em] uppercase text-[#A09A91] mb-1">{t('location.strengths')}</p>
-                            <ul className="text-[13px] text-[#5C5650] space-y-1" style={{lineHeight: '1.7'}}>
-                              {fit.fit_reasons.map((reason: string, i: number) => (
-                                <li key={i} className="flex items-start gap-2">
-                                  <CheckCircleIcon className="w-[14px] h-[14px] text-[#0A7D5F] flex-shrink-0 mt-0.5" />
-                                  <span>{reason}</span>
-                                </li>
-                              ))}
-                            </ul>
+            {/* Section 2: WHO - Physical Anchor Taxonomy v3 */}
+            {(() => {
+              const who = (savedLocationData as any).who;
+              const whoLabels: Record<string, string> = {
+                local_resident: 'Lokale beboere',
+                office_worker: 'Kontoransatte',
+                student: 'Studerende',
+                shopper: 'Shoppende',
+                tourist: 'Turister/besøgende',
+                commuter: 'Pendlere',
+                leisure_walker: 'Fritidsgæster',
+                family: 'Familier',
+                medical_staff: 'Hospitalspersonale',
+                hospital_visitor: 'Hospitalsbesøgende',
+                event_visitor: 'Eventgæster',
+                business_professional: 'Kontoransatte',
+              };
+
+              // V3: Use WHO field if available, otherwise fall back to demographic_proximity (v2)
+              if (who && (who.primary?.length > 0 || who.secondary?.length > 0)) {
+                return (
+                  <div className="bg-surface rounded-lg border border-border p-6">
+                    <h3 className="text-lg font-medium text-brand mb-4">Hvem er i området</h3>
+                    <div className="space-y-4">
+                      {who.primary && who.primary.length > 0 && (
+                        <div>
+                          <p className="text-[13px] font-medium text-[#5C5650] mb-2">Primær (70%+ tilstedeværelse)</p>
+                          <div className="space-y-1">
+                            {who.primary.map((whoType: string) => (
+                              <div key={whoType} className="flex items-center gap-2">
+                                <span className="text-[14px] text-[#0A7D5F] font-medium">●</span>
+                                <span className="text-[14px] text-[#3C3830]">{whoLabels[whoType] || whoType}</span>
+                              </div>
+                            ))}
                           </div>
-                        )}
-                        {fit.marketing_implications && (
-                          <div className="mt-3 bg-[#F0EEFE] border-[0.5px] border-[#C7BAF7] rounded-lg px-[14px] py-3">
-                            <p className="text-[12px] font-medium text-[#3D339A] tracking-[0.05em] uppercase mb-1">{t('location.marketingStrategy')}</p>
-                            {fit.marketing_implications.content_emphasis && fit.marketing_implications.content_emphasis.length > 0 ? (
-                              <ul className="text-[13px] text-[#5547C4] space-y-1">
-                                {fit.marketing_implications.content_emphasis.map((item: string, i: number) => (
-                                  <li key={i}>&rarr; {item}</li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <p className="text-[13px] text-[#5547C4]">{fit.ui_summary?.best_marketing_angle}</p>
-                            )}
+                        </div>
+                      )}
+                      {who.secondary && who.secondary.length > 0 && (
+                        <div>
+                          <p className="text-[13px] font-medium text-[#5C5650] mb-2">Sekundær (30-70% tilstedeværelse)</p>
+                          <div className="space-y-1">
+                            {who.secondary.map((whoType: string) => (
+                              <div key={whoType} className="flex items-center gap-2">
+                                <span className="text-[14px] text-[#8A8577]">○</span>
+                                <span className="text-[14px] text-[#3C3830]">{whoLabels[whoType] || whoType}</span>
+                              </div>
+                            ))}
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
+                      {who.notes && (
+                        <div className="mt-3 pt-3 border-t border-border">
+                          <p className="text-[13px] text-[#5C5650] italic">{who.notes}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
-              });
+              }
+              
+              // V2 fallback: demographic_proximity
+              const demographicProximity = (savedLocationData as any).demographic_proximity || {};
+              const demographicLabels: Record<string, string> = {
+                local_resident: 'Lokale beboere',
+                office_worker: 'Kontorarbejdere',
+                business_professional: 'Kontorarbejdere', // alias
+                tourist: 'Turister og besøgende',
+                student: 'Studerende',
+                family: 'Familier',
+                shopper: 'Shoppende',
+              };
+
+              const demographics = Object.entries(demographicProximity)
+                .filter(([key]) => key !== 'business_professional' || !demographicProximity.office_worker)
+                .sort(([, a], [, b]) => (b as number) - (a as number));
+
+              if (demographics.length === 0) return null;
+
+              return (
+                <div className="bg-surface rounded-lg border border-border p-6">
+                  <h3 className="text-lg font-medium text-brand mb-4">Hvem er i området</h3>
+                  <div className="space-y-2">
+                    {demographics.map(([key, score]) => {
+                      const label = demographicLabels[key] || key;
+                      return (
+                        <div key={key} className="flex items-center justify-between">
+                          <span className="text-[14px] text-[#3C3830]">{label}</span>
+                          <span className="text-[14px] font-medium text-[#0A7D5F]">{Math.round(score as number)}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Section 2b: TRAFFIC RHYTHM - When does this location generate foot traffic */}
+            {(() => {
+              const trafficRhythm = (savedLocationData as any).traffic_rhythm;
+              if (!trafficRhythm) return null;
+
+              const weeklyPatternLabels: Record<string, string> = {
+                'friday_saturday_peak': 'Fredag–lørdag peak',
+                'saturday_dominant':    'Lørdag dominerer',
+                'weekend_peak':         'Weekend peak',
+                'weekday_lunch_only':   'Hverdagsfrokost',
+                'all_week_even':        'Jævn hele ugen',
+                'monday_friday_even':   'Mandag–fredag + weekend',
+                'semester_only':        'Semesterbaseret',
+                // Legacy support
+                weekday: 'Hverdage',
+                weekend: 'Weekend',
+                both: 'Begge dage',
+              };
+
+              const seasonalPatternLabels: Record<string, string> = {
+                stable: 'Stabil året rundt',
+                summer_peak: 'Sommertoppen',
+                semester_only: 'Kun semestertid',
+                retail_calendar: 'Detailhandelskalender',
+              };
+
+              return (
+                <div className="bg-surface rounded-lg border border-border p-6">
+                  <h3 className="text-lg font-medium text-brand mb-4">Trafikrytme</h3>
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-[13px] font-medium text-[#5C5650]">Ugentligt mønster</p>
+                      <p className="text-[14px] text-[#3C3830]">{weeklyPatternLabels[trafficRhythm.weekly_pattern || trafficRhythm.peak_days] || trafficRhythm.weekly_pattern || trafficRhythm.peak_days}</p>
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-medium text-[#5C5650]">Peak-timer</p>
+                      <p className="text-[14px] text-[#3C3830]">{trafficRhythm.peak_hours}</p>
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-medium text-[#5C5650]">Døde perioder</p>
+                      <p className="text-[14px] text-[#3C3830]">{trafficRhythm.dead_periods}</p>
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-medium text-[#5C5650]">Sæsonmønster</p>
+                      <p className="text-[14px] text-[#3C3830]">{seasonalPatternLabels[trafficRhythm.seasonal_pattern] || trafficRhythm.seasonal_pattern}</p>
+                    </div>
+                    {trafficRhythm.seasonal_note && (
+                      <div className="mt-2 pt-2 border-t border-border">
+                        <p className="text-[13px] text-[#5C5650] italic">{trafficRhythm.seasonal_note}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Section 3: Physical Context */}
+            {(() => {
+              const physicalContext = (savedLocationData as any).physical_context;
+              const nearbyHospitality = (savedLocationData as any).nearby_hospitality;
+
+              if (!physicalContext && !nearbyHospitality) return null;
+
+              const pedestrianFlowLabels: Record<string, string> = {
+                very_high: 'Meget høj',
+                high: 'Høj',
+                medium: 'Middel',
+                low: 'Lav',
+              };
+
+              return (
+                <div className="bg-surface rounded-lg border border-border p-6">
+                  <h3 className="text-lg font-medium text-brand mb-4">Fysisk kontekst</h3>
+                  <div className="space-y-3">
+                    {physicalContext && (
+                      <>
+                        <div>
+                          <p className="text-[12px] font-medium text-[#A09A91] uppercase tracking-wider mb-1">Fodgængerflow</p>
+                          <p className="text-[14px] text-[#3C3830]">{pedestrianFlowLabels[physicalContext.pedestrian_flow] || physicalContext.pedestrian_flow}</p>
+                        </div>
+                        {physicalContext.transit_within_150m && (
+                          <div>
+                            <p className="text-[12px] font-medium text-[#A09A91] uppercase tracking-wider mb-1">Offentlig transport</p>
+                            <p className="text-[14px] text-[#3C3830]">
+                              {physicalContext.nearest_transit?.name 
+                                ? `${physicalContext.nearest_transit.name} (${Math.round(physicalContext.nearest_transit.distance_meters)}m)`
+                                : 'Inden for 150m'}
+                            </p>
+                          </div>
+                        )}
+                        {physicalContext.parking_within_300m && (
+                          <div>
+                            <p className="text-[12px] font-medium text-[#A09A91] uppercase tracking-wider mb-1">Parkering</p>
+                            <p className="text-[14px] text-[#3C3830]">Inden for 300m</p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {nearbyHospitality && (
+                      <div>
+                        <p className="text-[12px] font-medium text-[#A09A91] uppercase tracking-wider mb-1">Hospitality i området</p>
+                        <p className="text-[14px] text-[#3C3830]">
+                          {nearbyHospitality.total_count} steder inden for {nearbyHospitality.radius_meters}m
+                          {nearbyHospitality.breakdown && (
+                            <span className="text-[#5C5650] ml-1">
+                              ({nearbyHospitality.breakdown.restaurant || 0} restauranter, 
+                              {nearbyHospitality.breakdown.cafe || 0} cafeer, 
+                              {nearbyHospitality.breakdown.bar || 0} barer)
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
             })()}
           </div>
 
@@ -976,22 +899,6 @@ function LocationIntelligencePage() {
             </div>
           )}
         </>
-      )}
-
-      {/* Fallback: Show message when analysis exists but no concept fit */}
-      {analysis && (!conceptFit || Object.keys(conceptFit).length === 0) && (
-        <div className="bg-surface rounded-lg border border-border p-6 mb-6">
-          <div className="flex items-start gap-4 mb-4">
-            <div className="flex-1">
-              <p className="text-sm text-text-secondary">
-                {t('location.basicDataSubtitle', 'Din lokation er analyseret. Detaljeret konceptanalyse genereres når kategori-scores er højere (≥40%).')}
-              </p>
-              <p className="text-xs text-text-muted mt-3">
-                💡 {t('location.lowScoreHint', 'Tip: Scores under 40% udløser ikke detaljeret konceptanalyse. Dette er normalt for unikke lokationer.')}
-              </p>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Navigation buttons */}

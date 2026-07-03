@@ -20,18 +20,19 @@ Access: Public (anyone can sign up)
 Testers: NO - keep testers out of production!
 ```
 
-### Staging Project (NEW - To Be Created)
+### Staging Project ✅ CREATED
 
 ```
 Name: social-media-saas-staging
-Project Ref: [FILL IN AFTER CREATING]
-URL: https://[YOUR_NEW_REF].supabase.co
-Anon Key: [FILL IN AFTER CREATING]
+Project Ref: oadwluspjlsnxhgakral
+URL: https://oadwluspjlsnxhgakral.supabase.co
+Anon Key: [Get from Supabase Dashboard → Project Settings → API]
 
 Used by: Vercel preview deployments, external testing
 Contains: Test data only (safe to wipe/reset)
 Access: Restricted to approved_testers whitelist
 Testers: YES - safe for external testers
+Created: 2026-07-02
 ```
 
 ---
@@ -83,7 +84,7 @@ npx supabase link --project-ref kvqdkohdpvmdylqgujpn
 
 ### Switch to staging:
 ```bash
-npx supabase link --project-ref [YOUR_STAGING_REF]
+npx supabase link --project-ref oadwluspjlsnxhgakral
 ```
 
 ### Check Vercel environment:
@@ -104,11 +105,11 @@ VALUES ('tester@example.com', 'Tester Name');
 
 Before letting external testers access:
 
-- [ ] Staging project ref is different from `kvqdkohdpvmdylqgujpn`
+- [ ] Staging project ref is `oadwluspjlsnxhgakral` (different from `kvqdkohdpvmdylqgujpn`)
 - [ ] Staging anon key is different from production anon key
 - [ ] `approved_testers` table exists in staging SQL editor
 - [ ] `approved_testers` table does NOT exist in production SQL editor
-- [ ] Vercel preview environment uses staging URL (not production)
+- [ ] Vercel preview environment uses staging URL (https://oadwluspjlsnxhgakral.supabase.co)
 - [ ] Edge functions deployed to staging project
 - [ ] Staging project has no real customer data
 

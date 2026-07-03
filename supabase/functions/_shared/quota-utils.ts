@@ -4,13 +4,14 @@
  * Shared quota validation utilities for Edge Functions
  * 
  * BUSINESS-LEVEL QUOTAS:
- * - Tier/plan is stored at business level (businesses.plan)
+ * - Tier is stored at business level (businesses.stripe_subscription_tier)
  * - All team members of a business share the same quota
  * - Quota usage is tracked at business level, not user level
  */
 
 // @deno-types="npm:@supabase/supabase-js@2"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { getBusinessTier } from './tier-resolver.ts'
 
 export type UserTier = 'free' | 'standardplus' | 'premium'
 type QuotaType = 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis'
@@ -25,7 +26,7 @@ type UsageColumn =
   | 'website_analysis_this_month'
 
 interface BusinessUsage {
-  plan?: string | null
+  id: string
   ai_generations_today?: number | null
   ai_generations_this_month?: number | null
   pdf_uploads_today?: number | null
@@ -102,14 +103,14 @@ export async function getUserQuota(
   // Get user's business (as owner or team member)
   const { data: business, error: businessError } = await supabase
     .from('businesses')
-    .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
+    .select('id, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
     .eq('owner_id', userId)
     .maybeSingle()
   
   if (businessError) {
     console.error(`❌ Error fetching business for owner_id ${userId}:`, businessError)
   } else if (business) {
-    console.log(`✅ Found business as owner: ${business.id}, plan: ${business.plan}`)
+    console.log(`✅ Found business as owner: ${business.id}`)
   } else {
     console.log(`⚠️ No business found for owner_id: ${userId}, checking team members...`)
   }
@@ -131,7 +132,7 @@ export async function getUserQuota(
       console.log(`✅ Found team membership: business_id ${teamMember.business_id}`)
       const { data: teamBusiness, error: teamBusinessError } = await supabase
         .from('businesses')
-        .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
+        .select('id, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
         .eq('id', teamMember.business_id)
         .maybeSingle()
       
@@ -155,10 +156,9 @@ export async function getUserQuota(
     }
   }
   
-  console.log(`✅ Using business: ${businessData.id}, plan: ${businessData.plan}`)
-
-  // Get tier from business plan
-  const tier: UserTier = (businessData.plan as UserTier) || 'free'
+  // Get tier from tier-resolver (single source of truth: businesses.stripe_subscription_tier)
+  const { tier } = await getBusinessTier(supabase, businessData.id)
+  console.log(`✅ Using business: ${businessData.id}, tier: ${tier}`)
   
   // Get usage from the correct column
   const columnKey = columnMap[quotaType][period]

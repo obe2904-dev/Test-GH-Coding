@@ -3,7 +3,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 // @ts-ignore - Deno ESM import with specific version
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 import { parseMenuPeriods } from '../_shared/menuPeriodParser.ts'
-import { validatePublicUrl, looksLikeLoginPage } from '../_shared/url-security.ts'
+import { validatePublicUrl, looksLikeLoginPage, detectUnsupportedDocumentUrl } from '../_shared/url-security.ts'
 import { normalizeProgrammeName } from '../_shared/content-planning/service-period-detector.ts'
 
 // @ts-ignore - Deno global
@@ -1452,6 +1452,29 @@ serve(async (req: Request) => {
           success: false,
           resultId,
           error: `URL blocked: ${urlError instanceof Error ? urlError.message : 'Invalid URL'}`,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Check for unsupported document platforms (Google Docs, Dropbox, etc.)
+    const unsupportedDocError = detectUnsupportedDocumentUrl(url)
+    if (unsupportedDocError) {
+      console.error('❌ Unsupported document platform:', unsupportedDocError)
+      await supabaseService
+        .from('menu_results_v2')
+        .update({
+          status: 'error',
+          error_message: unsupportedDocError,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', resultId)
+      
+      return new Response(
+        JSON.stringify({
+          success: false,
+          resultId,
+          error: unsupportedDocError,
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )

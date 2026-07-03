@@ -73,7 +73,7 @@ export interface WeeklyPlanSuggestion {
   menuItemName?: string    // DB item name (when menu post)
   menuItemDescription?: string  // DB item description (when menu post)
   rationale?: string       // Phase 2b strategic rationale — displayed in UI only, NOT passed to copy AI
-  goalMode?: 'drive_footfall' | 'build_brand' | 'retain_loyalty'
+  goalMode?: 'drive_footfall' | 'build_brand'
   // Weekly Plan occasion/context fields — activate richer prompt in generate-text-from-idea
   guestMoment?: string          // occasion / guest angle (whyThisDish[0] for non-menu; selectionRationale for menu)
   timingDay?: string            // timing.day (e.g. "Fredag")

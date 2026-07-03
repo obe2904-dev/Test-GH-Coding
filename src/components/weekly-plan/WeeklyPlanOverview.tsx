@@ -773,8 +773,8 @@ export function WeeklyPlanOverview({
                     {post.strategicContext?.drink_pairing && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-700">🍸 {post.strategicContext.drink_pairing}</span>
                     )}
-                    {post.caption.ctaType && (() => {
-                      const chip = getCTAChip(post.caption.ctaType, t)
+                    {post.strategicContext?.cta_intent && (() => {
+                      const chip = getCTAChip(post.strategicContext.cta_intent, t)
                       return (
                         <span className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${chip.classes}`}>
                           {chip.label}

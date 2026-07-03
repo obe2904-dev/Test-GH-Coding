@@ -197,6 +197,69 @@ export function stripAIDashes(text: string): string {
     .trim()
 }
 
+// ── stripAbstractRhetoricalQuestions ───────────────────────────────────────
+// FIX: Rhetorical questions with abstract-noun objects — defensive post-processing
+// guard against prompt rule #10 violations. Removes entire sentence containing the pattern.
+// 
+// Pattern: "Kan du se/mærke/føle <abstract noun>?" where the object is ungrounded
+// filler (omsorg, stemning, nærvær, ro, varme, atmosfære, hygge, etc.)
+// 
+// This is distinct from concrete action questions which are allowed:
+// ✅ "Har du prøvet X?" (concrete object)
+// ❌ "Kan du se omsorgen?" (abstract object)
+export function stripAbstractRhetoricalQuestions(text: string): string {
+  // Define abstract noun patterns for Danish, Swedish, German
+  const abstractNouns = [
+    // Danish
+    'omsorgen?', 'stemningen?', 'nærværet?', 'roen?', 'varmen?', 
+    'atmosfæren?', 'hyggen?', 'kvaliteten?', 'dedikationen?',
+    'håndværket?', 'passionen?', 'kærligheden?',
+    // Swedish  
+    'omtanken?', 'stämningen?', 'närvaron?', 'lugnet?', 'värmen?',
+    'atmosfären?', 'mysen?', 'kvaliteten?',
+    // German
+    'Sorgfalt?', 'Atmosphäre?', 'Nähe?', 'Ruhe?', 'Wärme?',
+    'Qualität?', 'Leidenschaft?'
+  ];
+
+  // Danish pattern: "Kan du se/mærke/føle/fornemme <abstract noun>?"
+  const danishPattern = /\b[Kk]an du (se|mærke|føle|fornemme)\b[^.!?]*\?/gi;
+  
+  // Swedish pattern: "Kan du se/känna <abstract noun>?"
+  const swedishPattern = /\b[Kk]an du (se|känna)\b[^.!?]*\?/gi;
+  
+  // German pattern: "Kannst du (die|den|das) <abstract noun> (spüren|sehen|fühlen)?"
+  const germanPattern = /\b[Kk]annst du (die|den|das)\b[^.!?]*\?/gi;
+
+  let cleaned = text;
+
+  // Check each potential rhetorical question against abstract noun list
+  [danishPattern, swedishPattern, germanPattern].forEach(pattern => {
+    const matches = cleaned.match(pattern);
+    if (matches) {
+      matches.forEach(match => {
+        // Check if the match contains any abstract noun
+        const hasAbstractNoun = abstractNouns.some(noun => 
+          match.toLowerCase().includes(noun.replace('?', ''))
+        );
+        
+        if (hasAbstractNoun) {
+          // Remove the entire sentence (including leading space/period)
+          cleaned = cleaned.replace(new RegExp(`\\s*${escapeRegExp(match)}\\s*`, 'gi'), ' ');
+        }
+      });
+    }
+  });
+
+  // Clean up spacing and return
+  return cleaned.replace(/\s{2,}/g, ' ').trim();
+}
+
+// Helper: Escape special regex characters
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // ── stripEmojiViolations ───────────────────────────────────────────────────
 // FIX 05: Universal emoji safety net. Enforces count and position rules only.
 // Does NOT make cuisine-specific decisions — the prompt handles that.
@@ -294,6 +357,7 @@ export function generateHashtags(
     extractedKeyword,
     vertical: context.vertical,
     businessCharacter: context.businessCharacter,
+    language: context.language,                  // Pass language for localized hashtags
     locationVocabulary,
     text: context.text,
     detectedDishName: context.detectedDishName,
