@@ -75,9 +75,9 @@ export function SocialPlatformCard({
               type="checkbox"
               checked={isEnabled}
               onChange={(e) => onToggleEnabled(e.target.checked)}
-              className="w-4 h-4 text-primary-600 bg-gray-100 border-gray-300 rounded focus:ring-primary-500 focus:ring-2"
+              className="w-4 h-4 text-cta bg-gray-100 border-gray-300 rounded focus:ring-cta focus:ring-2"
             />
-            <span className="text-sm text-gray-600">{t('connections.enable')}</span>
+            <span className="text-sm text-[#6B7280]">{t('connections.enable')}</span>
           </label>
           
           {/* Connection Status Indicator */}
@@ -86,7 +86,7 @@ export function SocialPlatformCard({
               isConnected && isEnabled ? 'bg-green-500' : 
               isEnabled ? 'bg-red-500' : 'bg-gray-300'
             }`} />
-            <span className="text-sm text-gray-600">{t('connections.status')}</span>
+            <span className="text-sm text-[#6B7280]">{t('connections.status')}</span>
           </div>
         </div>
       </div>
@@ -106,7 +106,7 @@ export function SocialPlatformCard({
       {/* Disabled Notice */}
       {!isEnabled && (
         <div className="mb-3 p-2 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-600">
+          <p className="text-xs text-[#6B7280]">
             Enable this platform to connect and start posting.
           </p>
         </div>

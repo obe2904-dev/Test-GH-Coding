@@ -1,0 +1,42 @@
+{
+  "posts": {
+    "title": "Post Idéer",
+    "subtitle": "AI-genererede posts baseret på dine forretningsmål",
+    "generate": "Generer nye idéer",
+    "generating": "Genererer posts...",
+    "noPosts": "Ingen post-idéer endnu. Klik 'Generer nye idéer' for at komme i gang.",
+    "status": {
+      "draft": "Kladde",
+      "approved": "Godkendt",
+      "scheduled": "Planlagt",
+      "posted": "Postet",
+      "rejected": "Afvist"
+    },
+    "platform": {
+      "instagram": "Instagram",
+      "facebook": "Facebook",
+      "both": "Begge"
+    },
+    "actions": {
+      "approve": "Godkend",
+      "reject": "Afvis",
+      "edit": "Rediger",
+      "schedule": "Planlæg",
+      "post": "Post nu"
+    },
+    "goalAligned": "Tilpasset mål",
+    "postTime": "Foreslået tidspunkt",
+    "visualTips": "Foto-tips",
+    "hashtags": "Hashtags",
+    "caption": "Tekst",
+    "composition": "Komposition",
+    "lighting": "Belysning",
+    "subject": "Motiv",
+    "colors": "Farver",
+    "generationSuccess": "{{count}} nye post-idéer genereret!",
+    "generationError": "Kunne ikke generere posts. Prøv igen.",
+    "noGoals": "Du har ingen aktive mål. Opret et mål først for at generere målrettede posts.",
+    "smartLimit": "Smart-planen giver 3 post-idéer. Opgrader til Pro for flere.",
+    "proUnlimited": "Pro-planen giver ubegrænsede post-idéer."
+  }
+}

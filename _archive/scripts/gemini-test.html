@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini API Tester</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        textarea {
+            min-height: 100px;
+            font-family: inherit;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .secondary {
+            background: #2196F3;
+        }
+        .secondary:hover {
+            background: #0b7dda;
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .success {
+            background: #e8f5e9;
+            border: 1px solid #4CAF50;
+        }
+        .error {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            color: #c62828;
+        }
+        .info {
+            background: #e3f2fd;
+            border: 1px solid #2196F3;
+        }
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Gemini API Tester</h1>
+        
+        <div class="form-group">
+            <label for="apiKey">Gemini API Key:</label>
+            <input type="password" id="apiKey" placeholder="AIza..." value="AIzaSyDJ6b4xc66Tv_EBRwyor_8Vc2i6ALXHmKA">
+        </div>
+
+        <div class="form-group">
+            <label for="model">Model Name:</label>
+            <input type="text" id="model" placeholder="e.g., gemini-1.5-flash" value="gemini-1.5-flash">
+            <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">
+                💡 Use "List Available Models" button to see which models your API key supports
+            </small>
+        </div>
+
+        <div class="form-group">
+            <label for="prompt">Test Prompt:</label>
+            <textarea id="prompt" placeholder="Enter your test prompt...">Hello! Please respond with a simple JSON object containing: {"status": "success", "message": "Hello from Gemini!"}</textarea>
+        </div>
+
+        <div>
+            <button onclick="listModels()">📋 List Available Models</button>
+            <button class="secondary" onclick="testAPI()">🚀 Test API Call</button>
+        </div>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function listModels() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const resultDiv = document.getElementById('result');
+            
+            if (!apiKey) {
+                resultDiv.innerHTML = '<div class="result error">Please enter an API key</div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div class="result loading">Loading available models...</div>';
+
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+                
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`API Error (${response.status}): ${error}`);
+                }
+
+                const data = await response.json();
+                const models = data.models
+                    .filter(m => m.name.includes('gemini'))
+                    .map(m => {
+                        const name = m.name.replace('models/', '');
+                        const methods = m.supportedGenerationMethods || [];
+                        return `• ${name}\n  Methods: ${methods.join(', ')}`;
+                    })
+                    .join('\n\n');
+
+                resultDiv.innerHTML = `<div class="result info"><strong>✅ Available Models (${data.models.length} total):</strong>\n\n${models}</div>`;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="result error"><strong>❌ Error:</strong>\n${error.message}</div>`;
+            }
+        }
+
+        async function testAPI() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const model = document.getElementById('model').value;
+            const prompt = document.getElementById('prompt').value.trim();
+            const resultDiv = document.getElementById('result');
+            
+            if (!apiKey || !prompt) {
+                resultDiv.innerHTML = '<div class="result error">Please enter both API key and prompt</div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div class="result loading">Calling Gemini API...</div>';
+
+            try {
+                const requestBody = {
+                    contents: [{
+                        role: 'user',
+                        parts: [{ text: prompt }]
+                    }],
+                    generationConfig: {
+                        temperature: 0.7,
+                        maxOutputTokens: 2048,
+                        responseMimeType: 'application/json'
+                    }
+                };
+
+                const response = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    }
+                );
+
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`API Error (${response.status}): ${error}`);
+                }
+
+                const data = await response.json();
+                
+                if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    throw new Error('Unexpected response structure: ' + JSON.stringify(data, null, 2));
+                }
+
+                const responseText = data.candidates[0].content.parts[0].text;
+                
+                resultDiv.innerHTML = `<div class="result success"><strong>✅ Success! Response from ${model}:</strong>\n\n${responseText}\n\n<strong>Full Response:</strong>\n${JSON.stringify(data, null, 2)}</div>`;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="result error"><strong>❌ Error:</strong>\n${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>

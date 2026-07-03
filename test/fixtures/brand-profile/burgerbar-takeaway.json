@@ -1,0 +1,41 @@
+{
+  "name": "burgerbar-takeaway",
+  "dataSources": {
+    "business": {
+      "id": "fixture-3",
+      "business_name": "Burger Station",
+      "name": "Burger Station",
+      "city": "Aalborg",
+      "country": "DK",
+      "vertical": "burger_bar",
+      "website_url": "https://burgerstation.dk"
+    },
+    "location": {
+      "enrichment": {
+        "macro": { "country": "DK", "city": "Aalborg", "city_tier": "TIER_2" },
+        "micro": {
+          "area_type": "transit_hub",
+          "nearby_signals": ["Aalborg Busterminal"],
+          "confidence": 0.8
+        }
+      }
+    },
+    "profile": {
+      "short_description": "Hurtig burgerbar med takeaway ved busstationen i Aalborg.",
+      "business_category": "fast_food"
+    },
+    "menu": [
+      { "name": "Classic Burger", "description": "Oksekød, salat, tomat, dressing" },
+      { "name": "Crispy Chicken", "description": "Sprød kylling med coleslaw" },
+      { "name": "Pommes frites", "description": "Hjemmelavede fries" },
+      { "name": "Milkshake", "description": "Vanilje, chokolade, jordbær" }
+    ],
+    "images": [],
+    "websiteAnalysis": {
+      "headers": ["Burger klar på 10 min", "Tag med eller spis her"],
+      "cta_texts": ["Bestil nu", "Se menu"],
+      "hero_texts": ["Hurtig mad med smag"]
+    },
+    "socialAccounts": []
+  }
+}

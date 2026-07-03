@@ -1,0 +1,10 @@
+pytesseract==0.3.10
+PyMuPDF==1.23.8
+Pillow==10.1.0
+requests==2.31.0
+supabase==2.4.1
+openai==1.55.3
+python-dotenv==1.0.0
+Flask==3.0.0
+# google-cloud-documentai==2.30.0  # Only needed if DOCAI_PROCESSOR_ID is set in Cloud Run env vars.
+# Install separately: pip install google-cloud-documentai==2.30.0

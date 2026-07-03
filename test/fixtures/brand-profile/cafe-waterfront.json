@@ -1,0 +1,40 @@
+{
+  "name": "cafe-waterfront",
+  "dataSources": {
+    "business": {
+      "id": "fixture-1",
+      "business_name": "Café ved Åen",
+      "name": "Café ved Åen",
+      "city": "Aarhus",
+      "country": "DK",
+      "vertical": "cafe",
+      "website_url": "https://cafeveddaen.dk"
+    },
+    "location": {
+      "enrichment": {
+        "macro": { "country": "DK", "city": "Aarhus", "city_tier": "TIER_2" },
+        "micro": {
+          "area_type": "waterfront",
+          "nearby_signals": ["Aarhus Å"],
+          "confidence": 0.9
+        }
+      }
+    },
+    "profile": {
+      "short_description": "Café med brunch og frokost direkte ved Aarhus Å.",
+      "business_category": "cafe"
+    },
+    "menu": [
+      { "name": "Brunch", "description": "Med æg, avocado og surdejsbrød" },
+      { "name": "Kaffe", "description": "Espressobaserede drikke" },
+      { "name": "Frokost", "description": "Smørrebrød og sandwich" }
+    ],
+    "images": [],
+    "websiteAnalysis": {
+      "headers": ["Brunch ved åen", "Frokost i roligt tempo"],
+      "cta_texts": ["Book bord", "Se menukort"],
+      "hero_texts": ["Nyd brunch ved Aarhus Å"]
+    },
+    "socialAccounts": []
+  }
+}

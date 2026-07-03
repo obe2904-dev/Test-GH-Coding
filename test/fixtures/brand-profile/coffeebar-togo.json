@@ -1,0 +1,41 @@
+{
+  "name": "coffeebar-togo",
+  "dataSources": {
+    "business": {
+      "id": "fixture-5",
+      "business_name": "Kaffebaren",
+      "name": "Kaffebaren",
+      "city": "Aarhus",
+      "country": "DK",
+      "vertical": "coffee_shop",
+      "website_url": "https://kaffebaren-aarhus.dk"
+    },
+    "location": {
+      "enrichment": {
+        "macro": { "country": "DK", "city": "Aarhus", "city_tier": "TIER_2" },
+        "micro": {
+          "area_type": "pedestrian_zone",
+          "nearby_signals": ["Strøget", "Søndergade"],
+          "confidence": 0.82
+        }
+      }
+    },
+    "profile": {
+      "short_description": "Specialkaffebar på gågaden i Aarhus — til dem der er på farten.",
+      "business_category": "coffee_shop"
+    },
+    "menu": [
+      { "name": "Espresso", "description": "Single og double shot" },
+      { "name": "Flat White", "description": "Dobbelt espresso med mikrodampet mælk" },
+      { "name": "Croissant", "description": "Buttery, bagt om morgenen" },
+      { "name": "Cold Brew", "description": "12 timers koldbryg" }
+    ],
+    "images": [],
+    "websiteAnalysis": {
+      "headers": ["Kaffe til farten", "Specialkaffe på gågaden"],
+      "cta_texts": ["Se kort", "Find os"],
+      "hero_texts": ["Snup en kaffe på vej"]
+    },
+    "socialAccounts": []
+  }
+}

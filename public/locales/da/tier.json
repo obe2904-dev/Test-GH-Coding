@@ -1,0 +1,34 @@
+{
+  "tier": {
+    "smart": "Smart",
+    "pro": "Pro",
+    "currentPlan": "Din plan: {{tier}}",
+    "upgradeToPro": "Opgrader til Pro",
+    "upgradePrompt": {
+      "title": "Opgrader til Pro for fuld kontrol",
+      "description": "Smart-planen giver dig AI-drevet markedsføring med minimal konfiguration. Pro-planen giver dig fuld kontrol til at finjustere alt.",
+      "benefits": {
+        "unlimitedGoals": "Ubegrænsede forretningsmål",
+        "fullEditing": "Rediger alle AI-genererede data",
+        "advancedAnalytics": "Dybdegående performance-analyse",
+        "prioritySupport": "Prioriteret support",
+        "customization": "Fuld tilpasning af brand profil"
+      },
+      "cta": "Opgrader til Pro - DKK 399/md",
+      "keepSmart": "Bliv på Smart-planen"
+    },
+    "featureLocked": {
+      "title": "Pro-funktion",
+      "message": "Denne funktion er kun tilgængelig på Pro-planen",
+      "unlock": "Lås op med Pro"
+    },
+    "smart": {
+      "tagline": "AI gør arbejdet. Du godkender.",
+      "description": "Smart-planen er perfekt til travle ejere der vil have effektiv markedsføring uden kompleksitet."
+    },
+    "pro": {
+      "tagline": "Fuld kontrol. Maksimal fleksibilitet.",
+      "description": "Pro-planen giver dig alle AI-fordele plus mulighed for at tilpasse og optimere hvert detail."
+    }
+  }
+}

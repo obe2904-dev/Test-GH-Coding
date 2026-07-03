@@ -1,0 +1,72 @@
+{
+  "header": {
+    "title": "Overview",
+    "subtitle": "Manage what you offer and view AI-extracted information",
+    "subtitle2": "Manage what you offer and view AI-extracted information"
+  },
+  "findOn": "Find information on",
+  "detect": {
+    "find": "Find information",
+    "searching": "Searching..."
+  },
+  "error": {
+    "noWebsite": "No website found",
+    "analyzeFailed": "Menu analysis failed",
+    "noMenusFound": "No menus found",
+    "linkAlreadyAdded": "This link is already added",
+    "addFailed": "Failed to add menu",
+    "analyzeMenuFailed": "Menu analysis failed",
+    "saveEdit": "Failed to save changes"
+  },
+  "info": {
+    "noNewMenus": "No new menus found"
+  },
+  "batch": {
+    "extracting": "Extracting menus...",
+    "inQueue": "in queue",
+    "helper": "Menus are extracting in the background"
+  },
+  "delete": {
+    "inProgress": "Cannot delete while extraction is in progress",
+    "confirm": "Are you sure you want to delete this menu?"
+  },
+  "item": {
+    "name": "Name",
+    "description": "Description",
+    "price": "Price"
+  },
+  "addManual": "Add link",
+  "addManualText": "Write it manually",
+  "add": {
+    "link": "Add from link",
+    "text": "Add from text",
+    "linkPlaceholder": "Paste menu URL...",
+    "add": "Add",
+    "analyze": "Analyze menu"
+  },
+  "free": {
+    "upgradeTitle": "Upgrade to add what you offer",
+    "description": "",
+    "cta": "View plans"
+  },
+  "metadata": {
+    "title": "Menu Metadata",
+    "subtitle": "AI-generated insights from your menu",
+    "lastUpdated": "Last updated",
+    "never": "Never",
+    "reanalyze": "Re-analyze",
+    "analyzeButton": "Analyze menu automatically",
+    "analyzing": "Analyzing menu...",
+    "noData": "We can automatically analyze your menu and extract information about food philosophy, organic focus, coffee program, and more.",
+    "foodPhilosophy": "Food Philosophy",
+    "totalItems": "Total menu items",
+    "signatureItems": "Signature dishes",
+    "organicCertified": "Organic certified",
+    "localIngredients": "{{percent}}% local ingredients",
+    "specialtyCoffee": "Specialty coffee",
+    "wineList": "Wine list",
+    "fullBar": "Full bar",
+    "loading": "Loading menu data...",
+    "errorNoItems": "No menu items found. Add menu first."
+  }
+}

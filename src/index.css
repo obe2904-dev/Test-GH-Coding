@@ -1,9 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* ── Brand identity ─────────────────────────────────────────── */
+    --color-brand: #0F2E32;
+
+    /* ── CTA (primary action) ───────────────────────────────────── */
+    --color-cta: #0A7D5F;
+    --color-cta-hover: #076849;
+    --color-cta-surface: #E0F7F0;
+    --color-cta-text: #065F46;
+
+    /* ── Accent — Lilac & Mint ──────────────────────────────────── */
+    --color-accent: #C7BAF7;
+    --color-accent-surface: #F5F3FE;
+    --color-accent-text: #4A3580;
+    --color-mint: #88F2D7;
+
+    /* ── Semantic — Success ─────────────────────────────────────── */
+    --color-success: #6EAF96;
+    --color-success-surface: #F0FAF6;
+    --color-success-text: #065F46;
+
+    /* ── Semantic — Warning ─────────────────────────────────────── */
+    --color-warning: #B45309;
+    --color-warning-surface: #FFFBEB;
+    --color-warning-text: #92400E;
+
+    /* ── Semantic — Error ───────────────────────────────────────── */
+    --color-error: #DC2626;
+    --color-error-surface: #FEF2F2;
+    --color-error-text: #991B1B;
+
+    /* ── Semantic — Info ────────────────────────────────────────── */
+    --color-info: #7C3AED;
+    --color-info-surface: #EDE9FE;
+    --color-info-text: #5B21B6;
+
+    /* ── Surfaces ───────────────────────────────────────────────── */
+    --color-bg: #FAFAFA;
+    --color-surface: #FFFFFF;
+    --color-surface-alt: #F4F6F8;
+    --color-background-secondary: #F4F6F8;
+
+    /* ── Text ───────────────────────────────────────────────────── */
+    --color-text: #0F2E32;
+    --color-text-secondary: #4A5568;
+    --color-text-muted: #64748B;
+    --color-text-inverse: #FFFFFF;
+
+    /* ── Borders ────────────────────────────────────────────────── */
+    --color-border-subtle: #F1F5F9;
+    --color-border: #E2E8F0;
+    --color-border-strong: #CBD5E1;
+  }
+
   body {
-    @apply bg-gray-50 text-gray-900;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    color: var(--color-text);
+    background-color: var(--color-bg);
+    accent-color: #0A7D5F;
+  }
+}
+
+@layer utilities {
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .animate-slideDown {
+    animation: slideDown 0.3s ease-out;
+  }
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  
+  .animate-fadeIn {
+    animation: fadeIn 0.3s ease-out;
+  }
+  
+  @keyframes ellipsis {
+    0% { content: '.'; }
+    33% { content: '..'; }
+    66% { content: '...'; }
+  }
+  
+  .animate-ellipsis::before {
+    content: '.';
+    animation: ellipsis 1.5s steps(3, end) infinite;
   }
 }

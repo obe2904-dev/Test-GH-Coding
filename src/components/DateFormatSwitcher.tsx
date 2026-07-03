@@ -69,7 +69,7 @@ export function DateFormatSwitcher() {
               key={format}
               onClick={() => handleFormatChange(format)}
               className={`w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between ${
-                currentFormat === format ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700'
+                currentFormat === format ? 'bg-cta-surface text-cta-text' : 'text-slate-700'
               }`}
             >
               <div>
@@ -80,7 +80,7 @@ export function DateFormatSwitcher() {
                 </div>
               </div>
               {currentFormat === format && (
-                <span className="text-indigo-600">✓</span>
+                <span className="text-cta">✓</span>
               )}
             </button>
           ))}

@@ -1,0 +1,603 @@
+{
+  "timestamp": "2026-02-02T18:25:38.101Z",
+  "summary": {
+    "total": 50,
+    "used": 41,
+    "unused": 9
+  },
+  "tables": {
+    "profiles": {
+      "found": true,
+      "locations": [
+        "components/ProtectedRoute.tsx",
+        "components/post-creation/design/PlatformPreview.tsx",
+        "hooks/usePostCreationAI.ts",
+        "lib/supabase.ts",
+        "lib/test-connection.ts",
+        "pages/dashboard/businessProfile/FreeBusinessProfile.tsx",
+        "stores/connectionsStore.ts",
+        "_shared/post-helpers/media-format-selector.ts",
+        "delete-account/index.ts",
+        "verify-layer1-comprehensive.ts"
+      ],
+      "usageCount": 15
+    },
+    "businesses": {
+      "found": true,
+      "locations": [
+        "app/api/business/location/route.ts",
+        "components/tier/PlanSwitcher.tsx",
+        "components/weekly-plan/PostDetailModal.tsx",
+        "features/contextBuilder.ts",
+        "hooks/useBusinessData.ts",
+        "hooks/useBusinessTier.ts",
+        "hooks/usePostCreationAI.ts",
+        "lib/brandStrategy/generator.ts",
+        "pages/dashboard/BrandPage.tsx",
+        "pages/dashboard/BrandProfilePage.tsx",
+        "pages/dashboard/BrandProfilePageNew.tsx",
+        "pages/dashboard/BrandProfilePageV5.tsx",
+        "pages/dashboard/BusinessProfilePage.tsx",
+        "pages/dashboard/ConceptFitPage.tsx",
+        "pages/dashboard/ContentStylePage.tsx",
+        "pages/dashboard/GoalsPage.tsx",
+        "pages/dashboard/LocationIntelligencePage.tsx",
+        "pages/dashboard/MenuPage.tsx",
+        "pages/dashboard/MyProfilePage.tsx",
+        "pages/dashboard/OperationsPage.tsx",
+        "pages/dashboard/PostIdeasPage.tsx",
+        "pages/dashboard/TestConceptFitPage.tsx",
+        "pages/dashboard/TestLocationIntelligenceFullPage.tsx",
+        "pages/dashboard/businessProfile/FreeBusinessProfile.tsx",
+        "pages/dashboard/businessProfile/services/profileService.ts",
+        "pages/test/TestBusinessGoals.tsx",
+        "services/brandProfileService.ts",
+        "_shared/brand-profile/data-gatherer.ts",
+        "_shared/post-helpers/opportunity-selector.ts",
+        "_shared/post-helpers/post-slot-optimizer.ts",
+        "_shared/post-helpers/weekly-plan-generator.ts",
+        "_shared/quota-utils.ts",
+        "ai-generate-v2/data-sources/business-profile.ts",
+        "ai-generate-v2/data-sources/menu.ts",
+        "ai-generate-v2/data-sources/visual-identity.ts",
+        "ai-generate-v3/index.ts",
+        "analyze-menu-metadata/index.ts",
+        "brand-profile-generator/index.original.ts",
+        "brand-profile-generator-v5/services/data-gatherer.ts",
+        "generate-post-ideas/services/knowledge-gatherer.ts",
+        "generate-weekly-plan/index.ts",
+        "menu-extract-v2/index.ts",
+        "populate-location-intelligence/index.ts",
+        "queue-menu-upload-v2/index.ts",
+        "queue-website-analysis/index.ts",
+        "test-ai-caption/index.ts",
+        "test-full-system/index.ts",
+        "test-layer-9/index.ts",
+        "check-database-state.ts",
+        "debug-database-access.ts",
+        "find-all-businesses.ts",
+        "find_cafe_faust_data.js",
+        "test-layer5-step3-score.ts",
+        "verify-cafe-faust.ts",
+        "verify-layer1-comprehensive.ts",
+        "verify-layer1.ts"
+      ],
+      "usageCount": 82
+    },
+    "business_team_members": {
+      "found": true,
+      "locations": [
+        "components/tier/PlanSwitcher.tsx",
+        "hooks/useBusinessTier.ts",
+        "pages/dashboard/MyProfilePage.tsx",
+        "_shared/quota-utils.ts",
+        "menu-extract-v2/index.ts",
+        "queue-menu-upload-v2/index.ts"
+      ],
+      "usageCount": 6
+    },
+    "business_profile": {
+      "found": true,
+      "locations": [
+        "features/contextBuilder.ts",
+        "hooks/useBusinessData.ts",
+        "hooks/usePostCreationAI.ts",
+        "pages/dashboard/BrandProfilePage.tsx",
+        "pages/dashboard/BusinessProfilePage.tsx",
+        "pages/dashboard/ConceptFitPage.tsx",
+        "pages/dashboard/LocationIntelligencePage.tsx",
+        "pages/dashboard/businessProfile/services/profileService.ts",
+        "services/brandProfileService.ts",
+        "_shared/brand-profile/data-gatherer.ts",
+        "_shared/post-helpers/media-format-selector.ts",
+        "_shared/post-helpers/post-slot-optimizer.ts",
+        "analyze-concept-fit/index.ts",
+        "analyze-website/index.ts",
+        "brand-profile-generator/index.original.ts",
+        "generate-weekly-plan/index.ts",
+        "populate-location-intelligence/index.ts",
+        "find-all-businesses.ts",
+        "verify-cafe-faust.ts",
+        "verify-layer1-comprehensive.ts",
+        "verify-layer1.ts",
+        "verify-layer2.ts"
+      ],
+      "usageCount": 37
+    },
+    "business_brand_profile": {
+      "found": true,
+      "locations": [
+        "components/weekly-plan/PostDetailModal.tsx",
+        "lib/brandStrategy/generator.ts",
+        "pages/dashboard/BrandPage.tsx",
+        "pages/dashboard/BrandProfilePage.tsx",
+        "pages/dashboard/BrandProfilePageNew.tsx",
+        "pages/dashboard/BrandProfilePageV5.tsx",
+        "pages/dashboard/BusinessProfilePage.tsx",
+        "pages/dashboard/ContentStylePage.tsx",
+        "pages/dashboard/businessProfile/services/profileService.ts",
+        "pages/dashboard/smart/SmartBrandProfileView.tsx",
+        "services/brandProfileService.ts",
+        "services/enhancedAIContext.ts",
+        "_shared/brand-profile/database.ts",
+        "_shared/post-helpers/weekly-plan-generator.ts",
+        "ai-enhance/index.ts",
+        "ai-generate-v3/index.ts",
+        "analyze-concept-fit/index.ts",
+        "brand-profile-generator/index.original.ts",
+        "brand-profile-generator/index.ts",
+        "brand-profile-generator-v5/services/saver.ts",
+        "generate-post-ideas/services/knowledge-gatherer.ts",
+        "generate-weekly-plan/index.ts",
+        "post-idea-generator/index.ts",
+        "test-ai-caption/index.ts",
+        "test-full-system/index.ts"
+      ],
+      "usageCount": 43
+    },
+    "business_locations": {
+      "found": true,
+      "locations": [
+        "features/contextBuilder.ts",
+        "hooks/useBusinessData.ts",
+        "hooks/usePostCreationAI.ts",
+        "pages/dashboard/BrandProfilePage.tsx",
+        "pages/dashboard/BusinessProfilePage.tsx",
+        "pages/dashboard/LocationIntelligencePage.tsx",
+        "pages/dashboard/businessProfile/FreeBusinessProfile.tsx",
+        "pages/dashboard/businessProfile/services/profileService.ts",
+        "_shared/brand-profile/data-gatherer.ts",
+        "_shared/post-helpers/weekly-plan-generator.ts",
+        "analyze-menu-metadata/index.ts",
+        "analyze-website/index.ts",
+        "brand-profile-generator-v5/services/data-gatherer.ts",
+        "populate-location-intelligence/index.ts",
+        "verify-layer1-comprehensive.ts"
+      ],
+      "usageCount": 29
+    },
+    "business_operations": {
+      "found": true,
+      "locations": [
+        "hooks/useBusinessKnowledge.ts",
+        "pages/dashboard/BusinessProfilePage.tsx",
+        "pages/dashboard/ContentStylePage.tsx",
+        "pages/dashboard/LocationIntelligencePage.tsx",
+        "pages/dashboard/MenuPage.tsx",
+        "pages/dashboard/OperationsPage.tsx",
+        "_shared/post-helpers/post-slot-optimizer.ts",
+        "analyze-concept-fit/index.ts",
+        "analyze-website/index.ts",
+        "brand-profile-generator-v5/services/data-gatherer.ts",
+        "generate-post-ideas/services/knowledge-gatherer.ts",
+        "generate-weekly-plan/index.ts",
+        "menu-extract-v2/index.ts",
+        "populate-location-intelligence/index.ts",
+        "verify-layer1-comprehensive.ts",
+        "verify-layer1.ts"
+      ],
+      "usageCount": 22
+    },
+    "business_visual_identity": {
+      "found": true,
+      "locations": [
+        "hooks/useBusinessKnowledge.ts",
+        "ai-generate-v2/data-sources/visual-identity.ts",
+        "analyze-visual-identity/services/database-saver.ts",
+        "generate-post-ideas/services/knowledge-gatherer.ts"
+      ],
+      "usageCount": 8
+    },
+    "business_audience_profile": {
+      "found": true,
+      "locations": [
+        "hooks/useBusinessKnowledge.ts"
+      ],
+      "usageCount": 3
+    },
+    "business_goals": {
+      "found": true,
+      "locations": [
+        "hooks/useBusinessGoals.ts",
+        "generate-post-ideas/services/knowledge-gatherer.ts"
+      ],
+      "usageCount": 5
+    },
+    "business_location_intelligence": {
+      "found": true,
+      "locations": [
+        "app/api/business/location/route.ts",
+        "hooks/useBusinessKnowledge.ts",
+        "lib/brandStrategy/generator.ts",
+        "pages/dashboard/ConceptFitPage.tsx",
+        "pages/dashboard/LocationIntelligencePage.tsx",
+        "analyze-concept-fit/index.ts",
+        "brand-profile-generator-v5/services/data-gatherer.ts",
+        "generate-post-ideas/services/knowledge-gatherer.ts",
+        "generate-weekly-plan/index.ts",
+        "populate-location-intelligence/services/database-saver.ts",
+        "verify-layer1-comprehensive.ts",
+        "verify-layer1.ts"
+      ],
+      "usageCount": 16
+    },
+    "opening_hours": {
+      "found": true,
+      "locations": [
+        "hooks/usePostCreationAI.ts",
+        "lib/brandStrategy/generator.ts",
+        "pages/dashboard/BrandProfilePage.tsx",
+        "pages/dashboard/LocationIntelligencePage.tsx",
+        "pages/dashboard/OperationsPage.tsx",
+        "pages/dashboard/businessProfile/services/profileService.ts",
+        "analyze-website/index.ts",
+        "generate-weekly-plan/index.ts"
+      ],
+      "usageCount": 16
+    },
+    "social_accounts": {
+      "found": true,
+      "locations": [
+        "_shared/brand-profile/data-gatherer.ts",
+        "brand-profile-generator/index.original.ts"
+      ],
+      "usageCount": 4
+    },
+    "platform_intelligence": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "menu_sources": {
+      "found": true,
+      "locations": [
+        "pages/dashboard/MenuPage.tsx",
+        "pages/dashboard/businessProfile/components/MenuOfferingsPanel.tsx",
+        "pages/dashboard/businessProfile/components/hooks/useMenuSources.ts",
+        "pages/dashboard/businessProfile/services/profileService.ts",
+        "check_schema_data.js",
+        "find_cafe_faust_data.js",
+        "verify-cafe-faust.ts",
+        "verify-layer1-comprehensive.ts",
+        "verify-layer1.ts"
+      ],
+      "usageCount": 30
+    },
+    "menu_extractions": {
+      "found": true,
+      "locations": [
+        "hooks/usePostCreationAI.ts",
+        "pages/dashboard/businessProfile/components/hooks/useMenuExtractions.ts",
+        "pages/dashboard/businessProfile/components/hooks/useMenuHandlers.ts",
+        "pages/dashboard/businessProfile/components/hooks/useMenuSources.ts",
+        "_shared/brand-profile/data-gatherer.ts",
+        "ai-generate-v2/data-sources/menu.ts",
+        "parse-menu-text/index-backup.ts",
+        "populate-location-intelligence/index.ts",
+        "verify-cafe-faust.ts",
+        "verify-layer1-comprehensive.ts",
+        "verify-layer1.ts"
+      ],
+      "usageCount": 21
+    },
+    "menu_results_v2": {
+      "found": true,
+      "locations": [
+        "lib/brandStrategy/generator.ts",
+        "pages/dashboard/LocationIntelligencePage.tsx",
+        "pages/dashboard/MenuPage.tsx",
+        "pages/dashboard/businessProfile/components/hooks/useMenuHandlers.ts",
+        "_shared/post-helpers/menu-scorer.ts",
+        "ai-generate-v2/data-sources/menu.ts",
+        "ai-generate-v3/index.ts",
+        "analyze-concept-fit/index.ts",
+        "generate-weekly-plan/index.ts",
+        "menu-extract-v2/index.ts",
+        "queue-menu-upload-v2/index.ts",
+        "check-database-state.ts",
+        "check_menu_timing.js",
+        "check_schema_data.js",
+        "check_timing.js",
+        "find-all-businesses.ts",
+        "find_cafe_faust_data.js",
+        "investigate-menu-data.ts",
+        "test-layer5-cafe-faust.ts",
+        "test_source_id.js",
+        "verify-cafe-faust.ts",
+        "verify-layer1.ts"
+      ],
+      "usageCount": 40
+    },
+    "menu_results": {
+      "found": true,
+      "locations": [
+        "extract-menu-pdf/index.ts",
+        "menu-extract-v2/index.ts",
+        "queue-menu-upload/index.ts"
+      ],
+      "usageCount": 3
+    },
+    "business_menu_metadata": {
+      "found": true,
+      "locations": [
+        "hooks/useBusinessKnowledge.ts",
+        "lib/brandStrategy/generator.ts",
+        "analyze-menu-metadata/services/database-saver.ts",
+        "brand-profile-generator-v5/services/data-gatherer.ts",
+        "generate-post-ideas/services/knowledge-gatherer.ts"
+      ],
+      "usageCount": 7
+    },
+    "menu_item_metadata": {
+      "found": true,
+      "locations": [
+        "_shared/post-helpers/menu-scorer.ts",
+        "check-database-state.ts",
+        "find-all-businesses.ts",
+        "verify-cafe-faust.ts",
+        "verify-layer1-comprehensive.ts",
+        "verify-layer1.ts",
+        "verify-layer2-production.ts",
+        "verify-layer2.ts"
+      ],
+      "usageCount": 10
+    },
+    "seasonal_ingredients": {
+      "found": true,
+      "locations": [
+        "_shared/post-helpers/menu-scorer.ts",
+        "verify-layer1-comprehensive.ts",
+        "verify-layer1.ts",
+        "verify-layer2-production.ts",
+        "verify-layer2.ts",
+        "verify-layer3-temporal.ts"
+      ],
+      "usageCount": 6
+    },
+    "post_ideas": {
+      "found": true,
+      "locations": [
+        "hooks/usePostIdeas.ts",
+        "services/enhancedAIContext.ts",
+        "generate-post-ideas/index.ts"
+      ],
+      "usageCount": 5
+    },
+    "post_drafts": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "suggested_posts": {
+      "found": true,
+      "locations": [
+        "ai-generate-v2/data-sources/previous-posts.ts"
+      ],
+      "usageCount": 1
+    },
+    "published_posts": {
+      "found": true,
+      "locations": [
+        "_shared/post-helpers/opportunity-selector.ts"
+      ],
+      "usageCount": 1
+    },
+    "media_assets": {
+      "found": true,
+      "locations": [
+        "_shared/brand-profile/data-gatherer.ts",
+        "brand-profile-generator/index.original.ts",
+        "verify-layer1.ts"
+      ],
+      "usageCount": 5
+    },
+    "offerings": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "specials": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "business_services": {
+      "found": true,
+      "locations": [
+        "features/contextBuilder.ts"
+      ],
+      "usageCount": 1
+    },
+    "business_staff": {
+      "found": true,
+      "locations": [
+        "features/contextBuilder.ts"
+      ],
+      "usageCount": 1
+    },
+    "business_products": {
+      "found": true,
+      "locations": [
+        "features/contextBuilder.ts"
+      ],
+      "usageCount": 1
+    },
+    "business_classes": {
+      "found": true,
+      "locations": [
+        "features/contextBuilder.ts"
+      ],
+      "usageCount": 1
+    },
+    "website_analyses": {
+      "found": true,
+      "locations": [
+        "hooks/useBusinessData.ts",
+        "_shared/brand-profile/data-gatherer.ts",
+        "analyze-website/index.ts",
+        "brand-profile-generator/index.original.ts"
+      ],
+      "usageCount": 8
+    },
+    "website_analysis_jobs": {
+      "found": true,
+      "locations": [
+        "pages/dashboard/businessProfile/hooks/useWebsiteAnalysis.ts",
+        "queue-website-analysis/index.ts"
+      ],
+      "usageCount": 4
+    },
+    "brand_profile_sources_state": {
+      "found": true,
+      "locations": [
+        "_shared/brand-profile/hashing.ts"
+      ],
+      "usageCount": 2
+    },
+    "brand_profile_generation_locks": {
+      "found": true,
+      "locations": [
+        "brand-profile-generator/index.ts"
+      ],
+      "usageCount": 4
+    },
+    "third_party_evidence": {
+      "found": true,
+      "locations": [
+        "_shared/brand-profile/data-gatherer.ts"
+      ],
+      "usageCount": 2
+    },
+    "business_concept_fit": {
+      "found": true,
+      "locations": [
+        "pages/dashboard/TestConceptFitPage.tsx",
+        "analyze-concept-fit/index.ts"
+      ],
+      "usageCount": 3
+    },
+    "business_concept_fit_multi": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "weather_cache": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "contextual_calendar": {
+      "found": true,
+      "locations": [
+        "_shared/post-helpers/compound-opportunities.ts"
+      ],
+      "usageCount": 1
+    },
+    "business_documents": {
+      "found": true,
+      "locations": [
+        "features/contextBuilder.ts",
+        "queue-menu-upload/index.ts",
+        "queue-menu-upload-v2/index.ts",
+        "upload-pdf/index.ts"
+      ],
+      "usageCount": 4
+    },
+    "business_type_defaults": {
+      "found": true,
+      "locations": [
+        "find-all-businesses.ts",
+        "test-layer5-cafe-faust.ts",
+        "verify-cafe-faust.ts",
+        "verify-layer2-production.ts",
+        "verify-layer2.ts",
+        "verify-layer4-performance.ts"
+      ],
+      "usageCount": 6
+    },
+    "content_types": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "content_distribution_rules": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "platform_assignment_rules": {
+      "found": false,
+      "locations": [],
+      "usageCount": 0
+    },
+    "content_performance_log": {
+      "found": true,
+      "locations": [
+        "_shared/post-helpers/media-format-selector.ts",
+        "_shared/post-helpers/performance-tracking.ts",
+        "verify-cafe-faust.ts",
+        "verify-layer2-production.ts",
+        "verify-layer2.ts",
+        "verify-layer4-performance.ts"
+      ],
+      "usageCount": 6
+    },
+    "content_type_baselines": {
+      "found": true,
+      "locations": [
+        "_shared/post-helpers/compound-opportunities.ts",
+        "_shared/post-helpers/media-format-selector.ts",
+        "_shared/post-helpers/performance-tracking.ts",
+        "_shared/post-helpers/post-slot-optimizer.ts",
+        "verify-layer2-production.ts",
+        "verify-layer2.ts",
+        "verify-layer4-performance.ts"
+      ],
+      "usageCount": 8
+    },
+    "opportunity_tracking": {
+      "found": true,
+      "locations": [
+        "_shared/post-helpers/compound-opportunities.ts",
+        "verify-cafe-faust.ts",
+        "verify-layer1.ts",
+        "verify-layer2-production.ts",
+        "verify-layer2.ts",
+        "verify-layer4-performance.ts"
+      ],
+      "usageCount": 8
+    },
+    "weekly_content_plans": {
+      "found": true,
+      "locations": [
+        "app/content/ai-weekly-plan/page.tsx",
+        "_shared/post-helpers/weekly-plan-generator.ts",
+        "generate-weekly-plan/index.ts",
+        "test-full-system/index.ts",
+        "test-layer-9/index.ts",
+        "test-phase1-fixes.ts"
+      ],
+      "usageCount": 10
+    }
+  }
+}

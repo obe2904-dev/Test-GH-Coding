@@ -1,0 +1,42 @@
+{
+  "name": "hybrid-brunch-wine",
+  "dataSources": {
+    "business": {
+      "id": "fixture-6",
+      "business_name": "Brunch & Vin",
+      "name": "Brunch & Vin",
+      "city": "København",
+      "country": "DK",
+      "vertical": "cafe_bar",
+      "website_url": "https://brunchogvin.dk"
+    },
+    "location": {
+      "enrichment": {
+        "macro": { "country": "DK", "city": "København", "city_tier": "TIER_1" },
+        "micro": {
+          "area_type": "neighborhood",
+          "nearby_signals": ["Nørrebro", "Elmegade"],
+          "confidence": 0.88
+        }
+      }
+    },
+    "profile": {
+      "short_description": "Hybrid café på Nørrebro: brunch om dagen, vin og snacks om aftenen.",
+      "business_category": "cafe_bar"
+    },
+    "menu": [
+      { "name": "Weekend Brunch", "description": "Stort bord med æg, smørrebrød og juice" },
+      { "name": "Avocado Toast", "description": "På surdej med pocheret æg" },
+      { "name": "Naturvin", "description": "Skiftende udvalg af naturvine" },
+      { "name": "Ostebræt", "description": "Til glasset om aftenen" },
+      { "name": "Kaffe", "description": "Specialkaffe hele dagen" }
+    ],
+    "images": [],
+    "websiteAnalysis": {
+      "headers": ["Brunch om dagen, vin om aftenen", "Åbent fra kl. 9 til sent"],
+      "cta_texts": ["Book brunch", "Se vinkort"],
+      "hero_texts": ["Fra morgenkaffe til aftensglas"]
+    },
+    "socialAccounts": []
+  }
+}

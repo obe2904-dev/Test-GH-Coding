@@ -1,5 +1,84 @@
 // Shared TypeScript interfaces and types
 
+// =====================================================
+// DATABASE SCHEMA TYPES (Phase 1B)
+// =====================================================
+
+// Shared types
+export * from './database/shared';
+
+// Domain-specific types
+export * from './database/location';
+export * from './database/operations';
+// export * from './database/menu';  // DROPPED TABLE — file removed April 2026
+export * from './database/brand';
+// export * from './database/goals';  // DROPPED TABLE — file removed April 2026
+// export * from './database/audience';  // DROPPED TABLE — file removed April 2026
+export * from './database/platform';
+
+// Re-export main interfaces for convenience
+export type {
+  BusinessLocationIntelligence,
+  CreateLocationIntelligence,
+  UpdateLocationIntelligence,
+} from './database/location';
+
+export type {
+  BusinessOperations,
+  CreateBusinessOperations,
+  UpdateBusinessOperations,
+} from './database/operations';
+
+// ⚠️ DROPPED TABLE — business_menu_metadata removed April 2026. Do NOT use in new code.
+// Type exports removed - file deleted
+// export type {
+//   BusinessMenuMetadata,
+//   CreateMenuMetadata,
+//   UpdateMenuMetadata,
+// } from './database/menu';
+
+export type {
+  BusinessVisualIdentity,
+  CreateVisualIdentity,
+  UpdateVisualIdentity,
+} from './database/brand';
+
+// ⚠️ DROPPED TABLE — business_goals removed April 2026. Do NOT use in new code.
+// Type exports removed - file deleted
+// export type {
+//   BusinessGoal,
+//   CreateBusinessGoal,
+//   UpdateBusinessGoal,
+// } from './database/goals';
+
+// ⚠️ DROPPED TABLE — business_audience_profile removed April 2026. Do NOT use in new code.
+// Type exports removed - file deleted
+// export type {
+//   BusinessAudienceProfile,
+//   CreateAudienceProfile,
+//   UpdateAudienceProfile,
+// } from './database/audience';
+
+export type {
+  PlatformIntelligence,
+} from './database/platform';
+
+// Complete business knowledge aggregate type.
+// LIVE TABLES ONLY — fields for dropped tables have been removed.
+export interface BusinessKnowledge {
+  business_id: string;
+  location?: import('./database/location').BusinessLocationIntelligence;
+  operations?: import('./database/operations').BusinessOperations;
+  visual_identity?: import('./database/brand').BusinessVisualIdentity;
+  // menu_metadata: REMOVED — business_menu_metadata table dropped April 2026
+  // goals: REMOVED — business_goals table dropped April 2026
+  // audience_profile: REMOVED — business_audience_profile table dropped April 2026
+}
+
+// =====================================================
+// LEGACY TYPES (Keep for backward compatibility)
+// =====================================================
+
 export interface User {
   id: string
   email: string

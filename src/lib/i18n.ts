@@ -8,8 +8,6 @@ import daTranslations from './locales/da.json'
 
 console.log('EN translations loaded:', enTranslations)
 console.log('DA translations loaded:', daTranslations)
-console.log('EN generate.title:', (enTranslations as any).generate?.title)
-console.log('DA generate.title:', (daTranslations as any).generate?.title)
 
 const resources = {
   en: { translation: enTranslations },
@@ -23,11 +21,12 @@ i18n
   .use(initReactI18next) // Passes i18n down to react-i18next
   .init({
     resources,
-    fallbackLng: 'en', // Use English if detected language is not available
+    fallbackLng: 'da', // Denmark-first: Use Danish if detected language is not available
     defaultNS: 'translation',
-    debug: true, // Set to true for development
+    debug: import.meta.env.DEV, // Only debug in development
     
     keySeparator: '.', // Use dots to separate keys
+    nsSeparator: false, // Disable ':' as namespace separator — time keys like "10:00" would otherwise be split at ':' during returnObjects recursion, causing "00" to appear as the resolved value
     returnEmptyString: false, // Don't return empty strings
     returnNull: false, // Don't return null
 
@@ -40,17 +39,17 @@ i18n
       order: ['localStorage', 'navigator', 'htmlTag'],
       // Cache user language preference
       caches: ['localStorage']
-    }
+    },
+    
+    // Supported languages (Denmark first, then international expansion)
+    supportedLngs: ['da', 'en'],
+    nonExplicitSupportedLngs: true
   }).then(() => {
     console.log('=== i18n initialized ===')
     console.log('Language:', i18n.language)
     console.log('Has EN?', i18n.hasResourceBundle('en', 'translation'))
     const bundle = i18n.getResourceBundle('en', 'translation')
     console.log('EN bundle:', bundle)
-    if (bundle) {
-      console.log('Has generate?', 'generate' in bundle)
-      console.log('generate object:', bundle.generate)
-    }
   })
 
 export default i18n

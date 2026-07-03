@@ -19,9 +19,14 @@ export function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    await handleSignIn()
-    // Redirect to dashboard after successful login
-    navigate('/dashboard')
+    console.log('📝 Form submitted')
+    try {
+      await handleSignIn()
+      console.log('🎯 handleSignIn completed, navigating to dashboard...')
+      navigate('/dashboard')
+    } catch (err) {
+      console.error('🚨 handleSubmit error:', err)
+    }
   }
 
   return (
@@ -38,7 +43,7 @@ export function LoginPage() {
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             {t('auth.orText')}{' '}
-            <Link to="/signup" className="font-medium text-primary-600 hover:text-primary-500">
+            <Link to="/signup" className="font-medium text-cta hover:text-cta-text">
               {t('auth.createNew')}
             </Link>
           </p>

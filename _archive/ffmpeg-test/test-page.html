@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo to Reel Converter - Test Page</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            font-size: 32px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8f9ff;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8eaff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            color: #667eea;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .upload-hint {
+            color: #999;
+            font-size: 14px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .preview-container {
+            margin-bottom: 30px;
+            display: none;
+        }
+
+        .preview-image {
+            width: 100%;
+            max-height: 400px;
+            object-fit: contain;
+            border-radius: 10px;
+            margin-bottom: 15px;
+        }
+
+        .controls {
+            display: grid;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        label {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        select, input[type="range"] {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            cursor: pointer;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border: none;
+            padding: 0;
+        }
+
+        .duration-display {
+            text-align: right;
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .effect-description {
+            font-size: 13px;
+            color: #666;
+            font-style: italic;
+            margin-top: 5px;
+        }
+
+        .convert-button {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .convert-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        .convert-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+            animation: progress-animation 2s infinite;
+        }
+
+        @keyframes progress-animation {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .progress-text {
+            text-align: center;
+            color: #667eea;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .result-container {
+            margin-top: 30px;
+            display: none;
+            padding: 30px;
+            background: #f8f9ff;
+            border-radius: 15px;
+        }
+
+        .result-video {
+            width: 100%;
+            max-height: 600px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .result-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .action-button {
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .download-button {
+            background: #667eea;
+            color: white;
+        }
+
+        .download-button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .reset-button {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .reset-button:hover {
+            background: #d0d0d0;
+        }
+
+        .error-message {
+            background: #ffe0e0;
+            color: #d00;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .info-box {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #2e7d32;
+        }
+
+        .specs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .spec-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .spec-label {
+            font-size: 12px;
+            color: #999;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .spec-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Photo to Reel Converter</h1>
+        <p class="subtitle">Convert your photos into engaging 5-8 second video reels</p>
+
+        <div class="info-box">
+            <strong>✨ Using FFmpeg</strong> - Fast, free, and runs locally on your machine. No uploads to external services!
+        </div>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📸</div>
+            <div class="upload-text">Click or drag a photo here</div>
+            <div class="upload-hint">JPG, PNG, or any image format • Recommended: 1920px or higher</div>
+            <input type="file" id="fileInput" accept="image/*">
+        </div>
+
+        <div class="preview-container" id="previewContainer">
+            <img id="previewImage" class="preview-image" alt="Preview">
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label>Effect Style</label>
+                    <select id="effectSelect">
+                        <option value="fade" selected>Fade + Zoom (Recommended)</option>
+                        <option value="zoom-in">Zoom In (Ken Burns)</option>
+                        <option value="zoom-out">Zoom Out</option>
+                        <option value="pan">Pan (Left to Right)</option>
+                        <option value="static">Static (No Animation)</option>
+                    </select>
+                    <div class="effect-description" id="effectDescription">
+                        Smooth fade in/out with subtle zoom - professional look for any image
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label>Duration</label>
+                    <input type="range" id="durationSlider" min="5" max="8" value="6" step="1">
+                    <div class="duration-display"><span id="durationValue">6</span> seconds</div>
+                </div>
+            </div>
+
+            <button class="convert-button" id="convertButton">
+                🎥 Convert to Reel
+            </button>
+
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div class="progress-text" id="progressText">Processing...</div>
+            </div>
+
+            <div class="error-message" id="errorMessage"></div>
+        </div>
+
+        <div class="result-container" id="resultContainer">
+            <video id="resultVideo" class="result-video" controls autoplay loop></video>
+            
+            <div class="specs">
+                <div class="spec-item">
+                    <div class="spec-label">Resolution</div>
+                    <div class="spec-value">1080x1920</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Format</div>
+                    <div class="spec-value">MP4</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Frame Rate</div>
+                    <div class="spec-value">30 FPS</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">File Size</div>
+                    <div class="spec-value" id="fileSize">~40KB</div>
+                </div>
+            </div>
+
+            <div class="result-actions">
+                <button class="action-button download-button" id="downloadButton">
+                    ⬇️ Download Reel
+                </button>
+                <button class="action-button reset-button" id="resetButton">
+                    🔄 Convert Another
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewImage = document.getElementById('previewImage');
+        const effectSelect = document.getElementById('effectSelect');
+        const effectDescription = document.getElementById('effectDescription');
+        const durationSlider = document.getElementById('durationSlider');
+        const durationValue = document.getElementById('durationValue');
+        const convertButton = document.getElementById('convertButton');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const errorMessage = document.getElementById('errorMessage');
+        const resultContainer = document.getElementById('resultContainer');
+        const resultVideo = document.getElementById('resultVideo');
+        const fileSize = document.getElementById('fileSize');
+        const downloadButton = document.getElementById('downloadButton');
+        const resetButton = document.getElementById('resetButton');
+
+        let selectedFile = null;
+        let videoBlob = null;
+
+        const effectDescriptions = {
+            'fade': 'Smooth fade in/out with subtle zoom - professional look for any image',
+            'zoom-in': 'Ken Burns style slow zoom in - perfect for highlighting details',
+            'zoom-out': 'Start zoomed, slowly zoom out - reveals the full image',
+            'pan': 'Horizontal left-to-right pan - works best with wide images',
+            'static': 'No animation - clean and simple presentation'
+        };
+
+        // Upload area interactions
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        // Effect selection
+        effectSelect.addEventListener('change', () => {
+            effectDescription.textContent = effectDescriptions[effectSelect.value];
+        });
+
+        // Duration slider
+        durationSlider.addEventListener('input', () => {
+            durationValue.textContent = durationSlider.value;
+        });
+
+        // Convert button
+        convertButton.addEventListener('click', convertToReel);
+
+        // Download button
+        downloadButton.addEventListener('click', downloadReel);
+
+        // Reset button
+        resetButton.addEventListener('click', reset);
+
+        function handleFileSelect(file) {
+            if (!file.type.startsWith('image/')) {
+                showError('Please select an image file');
+                return;
+            }
+
+            selectedFile = file;
+            const reader = new FileReader();
+            
+            reader.onload = (e) => {
+                previewImage.src = e.target.result;
+                previewContainer.style.display = 'block';
+                resultContainer.style.display = 'none';
+                errorMessage.style.display = 'none';
+            };
+
+            reader.readAsDataURL(file);
+        }
+
+        async function convertToReel() {
+            if (!selectedFile) return;
+
+            convertButton.disabled = true;
+            progressContainer.style.display = 'block';
+            errorMessage.style.display = 'none';
+            progressText.textContent = 'Processing with FFmpeg...';
+            progressFill.style.width = '50%';
+
+            try {
+                // Create output filename
+                const effect = effectSelect.value;
+                const duration = durationSlider.value;
+                const timestamp = Date.now();
+                const outputName = `reel-${effect}-${duration}s-${timestamp}.mp4`;
+
+                // For local testing, we'll use a shell script execution
+                // In production, this would call a Supabase edge function
+                const result = await executeFFmpegConversion(selectedFile, effect, duration, outputName);
+                
+                if (result.success) {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = 'Complete! ✅';
+                    
+                    // Display result
+                    setTimeout(() => {
+                        displayResult(result.videoPath, result.fileSize);
+                    }, 500);
+                } else {
+                    throw new Error(result.error || 'Conversion failed');
+                }
+
+            } catch (error) {
+                console.error('Conversion error:', error);
+                showError(error.message || 'Failed to convert image. Make sure ffmpeg is installed and the script is executable.');
+                convertButton.disabled = false;
+                progressContainer.style.display = 'none';
+            }
+        }
+
+        async function executeFFmpegConversion(file, effect, duration, outputName) {
+            // Save the image temporarily
+            const formData = new FormData();
+            formData.append('image', file);
+            formData.append('effect', effect);
+            formData.append('duration', duration);
+            formData.append('output', outputName);
+
+            // This would be replaced with actual API call or command execution
+            // For now, simulate the conversion
+            return new Promise((resolve) => {
+                setTimeout(() => {
+                    // In real implementation, this would execute the shell script
+                    // For demo purposes, we'll show how it would work
+                    showError('This is a frontend-only demo. To convert images, run: ./photo-to-reel.sh your-image.jpg output.mp4 ' + duration);
+                    resolve({ success: false, error: 'Backend conversion not implemented in static HTML' });
+                }, 1500);
+            });
+        }
+
+        function displayResult(videoPath, size) {
+            resultContainer.style.display = 'block';
+            progressContainer.style.display = 'none';
+            convertButton.disabled = false;
+            
+            // In real implementation, load the video
+            // resultVideo.src = videoPath;
+            fileSize.textContent = formatFileSize(size);
+        }
+
+        function downloadReel() {
+            if (videoBlob) {
+                const url = URL.createObjectURL(videoBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `reel-${Date.now()}.mp4`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+        }
+
+        function reset() {
+            selectedFile = null;
+            videoBlob = null;
+            previewContainer.style.display = 'none';
+            resultContainer.style.display = 'none';
+            progressContainer.style.display = 'none';
+            errorMessage.style.display = 'none';
+            fileInput.value = '';
+            convertButton.disabled = false;
+            effectSelect.value = 'fade';
+            durationSlider.value = 6;
+            durationValue.textContent = '6';
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+    </script>
+</body>
+</html>

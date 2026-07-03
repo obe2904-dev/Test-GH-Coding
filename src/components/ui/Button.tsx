@@ -23,8 +23,8 @@ export function Button({
   const baseStyles = 'inline-flex items-center justify-center font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors'
   
   const variants = {
-    primary: 'text-white bg-primary-600 hover:bg-primary-700 focus:ring-primary-500 disabled:bg-primary-400',
-    secondary: 'text-primary-700 bg-primary-100 hover:bg-primary-200 focus:ring-primary-500',
+    primary: 'text-text-inverse bg-cta hover:bg-cta-hover focus:ring-cta disabled:bg-surface-alt disabled:text-text-muted',
+    secondary: 'text-cta-text bg-cta-surface hover:bg-cta-surface focus:ring-cta',
     ghost: 'text-gray-700 bg-transparent hover:bg-gray-100 focus:ring-gray-500'
   }
   

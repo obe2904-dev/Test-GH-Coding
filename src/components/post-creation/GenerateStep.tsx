@@ -1,96 +1,92 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '../../lib/supabase'
 import { usePostCreationStore } from '../../stores/postCreationStore'
+import type { PostContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useTierStore } from '../../stores/tierStore'
-import { ProgressStepper } from '../ui/ProgressStepper'
+import { useBusinessData } from '../../hooks/useBusinessData'
+import { useTextHelpers } from '../../hooks/useTextHelpers'
+import { usePostCreationAI } from '../../hooks/usePostCreationAI'
+import { useWriteDraft } from '../../hooks/useWriteDraft'
+import { BusinessSetupModal } from './BusinessSetupModal'
+import { BusinessInfoPromptModal } from './BusinessInfoPromptModal'
+import { canonicalizePlatformList, normalizeHashtagKey, sanitizeTagValue, type CanonicalPlatform } from '../../lib/hashtags'
+import { useHashtagManager } from './hooks/useHashtagManager'
+import { useHashtagInteractions } from './hooks/useHashtagInteractions'
+import { useDraftPersistence } from './hooks/useDraftPersistence'
+import { usePlatformManager } from './hooks/usePlatformManager'
+import { useIdeaWorkflow } from './hooks/useIdeaWorkflow'
+import { useGenerateValidation } from './hooks/useGenerateValidation'
+import { useHashtagInsight } from './hooks/useHashtagInsight'
+import { useGenerateState } from './hooks/useGenerateState'
+import { useClarificationFlow } from './hooks/useClarificationFlow'
+import { usePostCreationFooter } from './hooks/usePostCreationFooter'
+import { EditorPane } from './EditorPane'
+import { ValidationBanner } from './ValidationBanner'
+import { StrategyGeneratedDisplay } from '../StrategyGeneratedDisplay'
+import { AiSuggestionsCard } from './AiSuggestionsCard'
+
+interface GeneratedPost {
+  ideaId: number
+  text: string // Default/shared (Instagram for backward compatibility)
+  hashtags: string[] // All hashtags
+  emojis: string[]
+  platforms: string[]
+  ctaIntent: string
+  // Platform-specific content (Option A: Dual Generation)
+  platformText?: {
+    facebook?: string
+    instagram?: string
+  }
+  platformHashtags?: {
+    facebook?: string[]
+    instagram?: string[]
+  }
+  suggestedMedia?: {
+    type: string
+    direction?: string
+    why?: string
+    photo_count?: number
+  }
+  suggestedDay?: string
+  suggestedTime?: string
+  fromTemplate?: boolean
+}
 
 interface GenerateStepProps {
   onNext: () => void
-  onStepClick?: (step: number) => void
+  onDirectTransfer?: () => void
+  markAsChanged?: () => void
+  markAsSaved?: () => void
+  hasUnsavedChanges?: boolean
+  generatedPost?: GeneratedPost
+  isStrategyMode?: boolean
+  isGenerating?: boolean
+  /** suggestion_ids committed (published/scheduled) today — used to lock cards */
+  committedSuggestionIds?: Set<number>
+  /** Override activePath from parent (for URL-derived path to prevent flash) */
+  activePath?: 'write' | 'ai-ideas' | 'weekly-plan'
+  isReadOnly?: boolean
 }
 
-// Icon Components (compact sizes)
-const Lightbulb = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M9 18h6M10 22h4M15 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
-    <path d="M8.5 14C7 13 6 11.5 6 10a6 6 0 1 1 12 0c0 1.5-1 3-2.5 4"/>
-  </svg>
-)
-
-const Wand = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5"/>
-  </svg>
-)
-
-const Sparkles = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M12 3v18m0-18l-3 3m3-3l3 3m-3 15l-3-3m3 3l3-3m6-9H3m18 0l-3-3m3 3l-3 3M3 12l3-3m-3 3l3 3"/>
-  </svg>
-)
-
-const Check = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <polyline points="20 6 9 17 4 12"/>
-  </svg>
-)
-
-const ChevronRight = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <polyline points="9 18 15 12 9 6"/>
-  </svg>
-)
-
-const Globe = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <circle cx="12" cy="12" r="10"/>
-    <line x1="2" y1="12" x2="22" y2="12"/>
-    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-  </svg>
-)
-
-const Camera = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-    <circle cx="12" cy="13" r="4"/>
-  </svg>
-)
-
-const Type = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <polyline points="4 7 4 4 20 4 20 7"/>
-    <line x1="9" y1="20" x2="15" y2="20"/>
-    <line x1="12" y1="4" x2="12" y2="20"/>
-  </svg>
-)
-
-const Hash = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <line x1="4" y1="9" x2="20" y2="9"/>
-    <line x1="4" y1="15" x2="20" y2="15"/>
-    <line x1="10" y1="3" x2="8" y2="21"/>
-    <line x1="16" y1="3" x2="14" y2="21"/>
-  </svg>
-)
-
-const Facebook = ({ className }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-  </svg>
-)
-
-const Instagram = ({ className }: { className?: string }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069L12 2.163zm0-2.163C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/>
-  </svg>
-)
-
-export function GenerateStep({ onNext, onStepClick }: GenerateStepProps) {
-  const { t } = useTranslation(undefined, { keyPrefix: 'createPost' })
+export function GenerateStep({ 
+  onNext,
+  onDirectTransfer,
+  markAsChanged, 
+  markAsSaved, 
+  hasUnsavedChanges,
+  generatedPost,
+  isStrategyMode = false,
+  isGenerating = false,
+  committedSuggestionIds,
+  activePath: activePathProp,
+  isReadOnly = false,
+}: GenerateStepProps) {
+  const { t, i18n } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const navigate = useNavigate()
-  const { isEnabled, isConnected } = useConnectionsStore()
+
   const {
     selectedPlatforms,
     setSelectedPlatforms,
@@ -99,1227 +95,1042 @@ export function GenerateStep({ onNext, onStepClick }: GenerateStepProps) {
     selectedIdea,
     setSelectedIdea,
     postContent,
-    setPostContent
+    setPostContent,
+    photoIdea,
+    setPhotoIdea,
+    photoContent,
+    setPhotoContent,
+    selectedSuggestionData,
+    setSelectedSuggestionData,
+    activePath: storeActivePath,
+    setActivePath
   } = usePostCreationStore()
-  
+
+  // Use prop if provided, otherwise fall back to store
+  const activePath = activePathProp ?? storeActivePath
+
+  const { isEnabled, loadPlatformsFromDatabase } = useConnectionsStore()
   const {
     currentTier,
     getTierLimits,
     canUseAiIdeas,
     canUseCaptionGeneration,
     incrementAiIdeas,
-    incrementCaptionGeneration,
-    quotaUsage
+    incrementCaptionGeneration
   } = useTierStore()
 
-  const [activeTab, setActiveTab] = useState<'ai' | 'custom'>(currentTier === 'free' ? 'custom' : 'ai')
-  const [topicInput, setTopicInput] = useState('')
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [customIdea, setCustomIdea] = useState<any>(null)
-  
-  // Text editor state
-  const [headline, setHeadline] = useState('')
-  const [text, setText] = useState('')
-  const [includeEmojis, setIncludeEmojis] = useState(true)
-  const [includeHashtags, setIncludeHashtags] = useState(true)
-  const [includeCTA, setIncludeCTA] = useState(true)
-  const [isEdited, setIsEdited] = useState(false)
-  const [isSpellingChecked, setIsSpellingChecked] = useState(false) // Track spelling check completion separately
-  const [hashtags, setHashtags] = useState<string[]>([]) // Store all hashtags separately
-  const [selectedHashtags, setSelectedHashtags] = useState<Set<string>>(new Set()) // Track which are selected
-  const [originalTextWithCTA, setOriginalTextWithCTA] = useState<string>('') // Store original text with CTA
-  const [originalTextWithoutCTA, setOriginalTextWithoutCTA] = useState<string>('') // Store text without CTA
+  const businessData = useBusinessData()
+  const { extractHashtags, removeHashtags } = useTextHelpers()
 
-  // Platform-specific editing state
-  const [customizePerPlatform, setCustomizePerPlatform] = useState(false)
-  const [activePlatform, setActivePlatform] = useState<string>('facebook')
-  const [platformTexts, setPlatformTexts] = useState<Record<string, { headline: string; text: string }>>({
-    facebook: { headline: '', text: '' },
-    instagram: { headline: '', text: '' }
+  const initialHashtags = postContent?.hashtags
+    ? postContent.hashtags
+        .map((item) => sanitizeTagValue(item.tag))
+        .filter((tag) => tag.length > 0)
+    : []
+
+  const initialSelectedHashtags = postContent?.hashtags
+    ? postContent.hashtags
+        .filter((item) => item.enabled)
+        .map((item) => sanitizeTagValue(item.tag))
+        .filter((tag) => tag.length > 0)
+    : []
+
+  const {
+    canonicalSelectedPlatforms,
+    activePlatform,
+    setActivePlatform,
+    customizePerPlatform,
+    platformTexts,
+    setPlatformTexts,
+    availablePlatforms,
+    getOnboardingPlatforms
+  } = usePlatformManager({
+    selectedPlatforms,
+    setSelectedPlatforms,
+    postContent,
+    currentTier,
+    isEnabled,
+    loadPlatformsFromDatabase
   })
 
-  // Helper: Strip emojis from text
-  const stripEmojis = (text: string) => {
-    return text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim()
-  }
+  const initialAiGeneratedHashtags = useMemo(
+    () =>
+      (postContent?.aiGeneratedHashtags ?? [])
+        .map((tag) => sanitizeTagValue(tag))
+        .filter((tag) => tag.length > 0),
+    [postContent?.aiGeneratedHashtags]
+  )
 
-  // Helper: Extract hashtags from text
-  const extractHashtags = (text: string): string[] => {
-    const matches = text.match(/#[\wæøåÆØÅ]+/g)
-    return matches || []
-  }
-
-  // Helper: Remove hashtags from text
-  const removeHashtags = (text: string): string => {
-    return text.replace(/#[\wæøåÆØÅ]+/g, '').trim()
-  }
-
-  // Helper: Extract CTA (improved detection - last 1-2 sentences with action words or links)
-  const extractCTA = (text: string): string => {
-    // Split into sentences
-    const sentences = text.split(/(?<=[.!?])\s+/)
-    if (sentences.length === 0) return ''
-    
-    // Check last 2 sentences for CTA patterns
-    const lastTwo = sentences.slice(-2).join(' ')
-    const lastOne = sentences[sentences.length - 1]
-    
-    // Patterns that indicate a CTA:
-    // 1. Action verbs (Danish + English)
-    // 2. URLs or "link in bio"
-    // 3. Contact info patterns
-    const ctaPattern = /kom|besøg|prøv|oplev|se|kik|følg|book|ring|kontakt|visit|try|check|click|call|shop|order|learn|discover|find|get|join|sign|start|link in bio|http|www\./i
-    
-    // Check if last sentence is a CTA
-    if (ctaPattern.test(lastOne)) {
-      return lastOne
+  const initialHashtagPlatforms = useMemo(() => {
+    if (!postContent?.hashtags) {
+      return {}
     }
-    
-    // Check if last two sentences together form a CTA
-    if (sentences.length > 1 && ctaPattern.test(lastTwo) && lastTwo.length < 100) {
-      return sentences.slice(-2).join(' ')
-    }
-    
-    return ''
-  }
 
-  // Helper: Remove CTA from text
-  const removeCTA = (text: string): string => {
-    const cta = extractCTA(text)
-    if (cta) {
-      // Remove the CTA and clean up extra whitespace/newlines
-      return text.replace(cta, '').replace(/\s+$/, '').trim()
-    }
-    return text
-  }
-
-  // Get current text based on customization mode
-  const getCurrentText = () => {
-    if (customizePerPlatform) {
-      return platformTexts[activePlatform] || { headline: '', text: '' }
-    }
-    return { headline, text }
-  }
-
-  // Update text based on customization mode
-  const updateCurrentText = (field: 'headline' | 'text', value: string) => {
-    setIsEdited(true) // Track manual edits
-    setIsSpellingChecked(false) // Remove spelling check checkmark when text is edited
-    
-    // If updating text field, extract any new hashtags and remove them from text
-    if (field === 'text') {
-      const extractedHashtags = extractHashtags(value)
-      const cleanValue = removeHashtags(value)
-      
-      // Add any new hashtags to the list
-      if (extractedHashtags.length > 0) {
-        const newHashtags = [...hashtags]
-        const newSelected = new Set(selectedHashtags)
-        
-        extractedHashtags.forEach(tag => {
-          if (!hashtags.includes(tag)) {
-            newHashtags.push(tag)
-            newSelected.add(tag) // Auto-select new hashtags
-          }
-        })
-        
-        setHashtags(newHashtags)
-        setSelectedHashtags(newSelected)
-      }
-      
-      // Use clean text without hashtags
-      value = cleanValue
-    }
-    
-    if (customizePerPlatform) {
-      setPlatformTexts(prev => ({
-        ...prev,
-        [activePlatform]: {
-          ...prev[activePlatform],
-          [field]: value
-        }
-      }))
-    } else {
-      if (field === 'headline') setHeadline(value)
-      else setText(value)
-    }
-  }
-
-  // Sync unified text to all platforms when toggling customization
-  const handleCustomizeToggle = (checked: boolean) => {
-    if (checked) {
-      // Copy current unified text to all selected platforms
-      const updatedPlatforms = { ...platformTexts }
-      selectedPlatforms.forEach(platform => {
-        updatedPlatforms[platform] = { headline, text }
-      })
-      setPlatformTexts(updatedPlatforms)
-    }
-    setCustomizePerPlatform(checked)
-  }
-
-  // Initialize selected platforms with all enabled platforms
-  useEffect(() => {
-    const availablePlatforms = ['facebook', 'instagram'].filter(platform =>
-      isEnabled(platform)
-    )
-    if (selectedPlatforms.length === 0) {
-      setSelectedPlatforms(availablePlatforms)
-    }
-  }, [isEnabled, selectedPlatforms.length, setSelectedPlatforms])
-
-  // Restore data from store when navigating back
-  useEffect(() => {
-    if (postContent) {
-      // Restore headline and text
-      setHeadline(postContent.headline || '')
-      setText(postContent.text || '')
-      
-      // Restore adjustments
-      setIncludeEmojis(postContent.adjustments?.includeEmojis ?? true)
-      setIncludeHashtags(postContent.adjustments?.includeHashtags ?? true)
-      
-      // Restore hashtags if present
-      if (postContent.hashtags && postContent.hashtags.length > 0) {
-        const tags = postContent.hashtags.map(h => h.tag)
-        const selectedTags = new Set(postContent.hashtags.filter(h => h.enabled).map(h => h.tag))
-        setHashtags(tags)
-        setSelectedHashtags(selectedTags)
-      }
-      
-      // Restore platform-specific content if present
-      if (postContent.platformSpecific && postContent.platformContent) {
-        setCustomizePerPlatform(true)
-        setPlatformTexts(
-          Object.fromEntries(
-            Object.entries(postContent.platformContent).map(([platform, content]) => [
-              platform,
-              { headline: content.headline, text: content.text }
-            ])
-          )
-        )
-      }
-      
-      // Also restore the selectedIdea state if we have content
-      if (postContent.headline || postContent.text) {
-        // Create a custom idea from the stored content
-        const restoredIdea = {
-          id: `restored-${Date.now()}`,
-          title: 'Restored Content',
-          headline: postContent.headline,
-          text: postContent.text,
-          type: 'custom'
-        }
-        setCustomIdea(restoredIdea)
-        setSelectedIdea(restoredIdea.id)
-      }
-    }
-  }, [postContent])
-
-  const availablePlatforms = [
-    { id: 'facebook', name: 'Facebook', icon: Facebook, color: 'blue' },
-    { id: 'instagram', name: 'Instagram', icon: Instagram, color: 'pink' }
-  ]
-
-  const togglePlatform = (platformId: string) => {
-    if (selectedPlatforms.includes(platformId)) {
-      setSelectedPlatforms(selectedPlatforms.filter(p => p !== platformId))
-    } else {
-      setSelectedPlatforms([...selectedPlatforms, platformId])
-    }
-  }
-
-  const generateAiIdeas = async () => {
-    if (!canUseAiIdeas()) {
-      const limits = getTierLimits(currentTier)
-      alert(t('generate.quotaExceeded', `You've reached your daily limit of ${limits.aiIdeasPerDay} AI ideas. ${currentTier === 'free' ? 'Upgrade to StandardPlus for unlimited ideas!' : 'Try again tomorrow.'}`))
-      return
-    }
-    
-    setIsGenerating(true)
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    const mockIdeas = [
-      {
-        id: `ai-${Date.now()}-1`,
-        title: t('generate.aiIdea1Title', 'Weekend Special Offer'),
-        headline: t('generate.aiIdea1Headline', '🔥 Weekend Special: 20% Off Everything!'),
-        text: t('generate.aiIdea1Text', 'This weekend only! Get 20% off all our products. Perfect time to treat yourself or find that special gift. Visit us in-store or shop online. Limited time offer!') + '\n\n#WeekendSale #Shopping #Discount #SpecialOffer #LimitedTime',
-        description: t('generate.aiIdea1Photo', 'Bright photo showing popular products with "20% OFF" overlay'),
-        expectedEngagement: 'high',
-        bestTime: '10:00 AM'
-      },
-      {
-        id: `ai-${Date.now()}-2`,
-        title: t('generate.aiIdea2Title', 'Customer Success Story'),
-        headline: t('generate.aiIdea2Headline', '💬 What Our Customers Are Saying'),
-        text: t('generate.aiIdea2Text', '"Absolutely love this place! The quality is outstanding and the service is exceptional. Highly recommend!" - Maria K. Thank you for your amazing support!') + '\n\n#CustomerReview #Testimonial #HappyCustomers #FiveStars',
-        description: t('generate.aiIdea2Photo', 'Happy customer testimonial photo with quote overlay'),
-        expectedEngagement: 'medium',
-        bestTime: '2:00 PM'
-      },
-      {
-        id: `ai-${Date.now()}-3`,
-        title: t('generate.aiIdea3Title', 'Behind the Scenes'),
-        headline: t('generate.aiIdea3Headline', '👀 Behind the Scenes at [Your Business]'),
-        text: t('generate.aiIdea3Text', 'Ever wondered how we create our products? Take a peek behind the curtain! Our team works hard every day to bring you the best quality. Check out our process!') + '\n\n#BehindTheScenes #TeamWork #Quality #Process #MadeWithLove',
-        description: t('generate.aiIdea3Photo', 'Authentic workspace photo showing team or production process'),
-        expectedEngagement: 'medium',
-        bestTime: '11:00 AM'
-      }
-    ]
-    
-    setAiIdeas(mockIdeas)
-    incrementAiIdeas()
-    setIsGenerating(false)
-  }
-
-  const generateCustomIdea = async () => {
-    if (!canUseCaptionGeneration()) {
-      const limits = getTierLimits(currentTier)
-      alert(t('generate.quotaExceeded', `You've reached your daily limit of ${limits.captionGenerationsPerDay} caption generations.`))
-      return
-    }
-    
-    if (!topicInput.trim()) {
-      alert(t('generate.enterTopic', 'Please enter a topic first'))
-      return
-    }
-    
-    setIsGenerating(true)
-    
-    try {
-      // ✅ NEW: Call Supabase Edge Function (Direct OpenAI - 98.5% cheaper!)
-      const apiUrl = import.meta.env.VITE_SUPABASE_FUNCTION_AI_GENERATE
-      console.log('🔍 API URL:', apiUrl)
-
-      if (!apiUrl) {
-        alert('ERROR: VITE_SUPABASE_FUNCTION_AI_GENERATE not set in .env!')
-        setIsGenerating(false)
+    const assignments: Record<string, string[]> = {}
+    postContent.hashtags.forEach((item) => {
+      const clean = sanitizeTagValue(item.tag)
+      const key = normalizeHashtagKey(clean)
+      if (!key) {
         return
       }
 
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({
-     topic: topicInput,
-     businessType: 'cafe',
-     platforms: selectedPlatforms,
-     // ✅ NEW: Send user preferences
-     includeEmojis: includeEmojis,
-     includeHashtags: includeHashtags,
-     includeCTA: includeCTA,
-     tone: 'objective',
-     length: 'medium'
-   })
+      const platforms = Array.isArray(item.platforms) && item.platforms.length > 0
+        ? Array.from(new Set(item.platforms))
+        : []
+
+      if (platforms.length > 0) {
+        assignments[key] = platforms
+      }
+    })
+
+    return assignments
+  }, [postContent?.hashtags])
+
+  const {
+    hashtags,
+    setHashtags,
+    selectedHashtags,
+    setSelectedHashtags,
+    aiGeneratedHashtags,
+    setAiGeneratedHashtags,
+    hashtagPlatforms,
+    setHashtagPlatforms,
+    appendSelectedHashtags,
+    buildPlatformHashtags,
+    buildPlatformHashtagViews
+  } = useHashtagManager({
+    initialHashtags,
+    initialSelectedHashtags,
+    initialAiGeneratedHashtags,
+    initialHashtagPlatforms,
+    canonicalSelectedPlatforms
+  })
+
+  const resetClarificationStateRef = useRef<() => void>(() => {})
+  const resetClarificationStateProxy = useCallback(() => {
+    resetClarificationStateRef.current?.()
+  }, [])
+
+  // Track loaded content to avoid resetting isEdited on every postContent reference change
+  const loadedPostContentRef = useRef<typeof postContent>(null)
+
+  const [isHeadlineEditorVisible, setIsHeadlineEditorVisible] = useState(false)
+  const [hasHeadlineFromAI, setHasHeadlineFromAI] = useState(
+    Boolean(postContent?.headline && postContent.headline.trim().length > 0)
+  )
+
+  // Strategy mode state
+  const [isEditingGenerated, setIsEditingGenerated] = useState(false)
+  const { strategicIdea, setStrategicIdea, weeklyPlanPost, setWeeklyPlanPost } = usePostCreationStore()
+
+  const {
+    headline,
+    setHeadline,
+    text,
+    setText,
+    includeEmojis,
+    setIncludeEmojis,
+    includeHashtags,
+    setIncludeHashtags,
+    isEdited,
+    setIsEdited,
+    getCurrentText,
+    updateCurrentText: baseUpdateCurrentText,
+    handleClearContent: baseHandleClearContent
+  } = useGenerateState({
+    initialHeadline: postContent?.headline ?? '',
+    initialText: postContent?.text ?? '',
+    initialIncludeEmojis: postContent?.adjustments?.includeEmojis ?? true,
+    initialIncludeHashtags: postContent?.adjustments?.includeHashtags ?? true,
+    canonicalSelectedPlatforms,
+    customizePerPlatform,
+    activePlatform,
+    platformTexts,
+    setPlatformTexts,
+    setHashtags,
+    setSelectedHashtags,
+    setAiGeneratedHashtags,
+    setHashtagPlatforms,
+    setSelectedIdea,
+    resetClarificationState: resetClarificationStateProxy,
+    setPhotoIdea,
+    setHasHeadlineFromAI,
+    setIsHeadlineEditorVisible,
+    markAsChanged
+  })
+
+  useEffect(() => {
+    setPlatformTexts((prev) => {
+      const template = getCurrentText()
+      let changed = false
+      const next = { ...prev }
+
+      selectedPlatforms.forEach((platform) => {
+        if (!next[platform]) {
+          next[platform] = {
+            headline: template.headline,
+            text: template.text
+          }
+          changed = true
+        }
       })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to generate AI content')
-      }
+      return changed ? next : prev
+    })
+  }, [selectedPlatforms, getCurrentText, setPlatformTexts])
 
-      const data = await response.json()
-      
-      console.log('✅ Direct OpenAI success! Cost: ~$0.001 (was $0.0645)')
-      console.log('Variations:', data.variations)
-      
-      if (!data.variations || data.variations.length === 0) {
-        throw new Error('No variations returned')
-      }
-      
-      const firstVariation = data.variations[0]
-      
-      // Extract hashtags and remove from text
-      const allText = `${firstVariation.text}\n\n${firstVariation.hashtags}`
-      const extractedHashtags = extractHashtags(allText)
-      
-      // Remove duplicates from hashtags (AI sometimes generates duplicates)
-      const uniqueHashtags = Array.from(new Set(extractedHashtags))
-      
-      // Clean text: remove hashtags and trim any weird trailing text
-      let cleanText = removeHashtags(allText)
-      
-      // Remove any trailing weird fragments (like "éoplevelse")
-      // Keep only text that ends with proper punctuation or emojis
-      cleanText = cleanText.replace(/\s+[^\s.!?]+\s*$/, '').trim()
-      
-      // Store both versions for CTA toggle
-      const textWithCTA = cleanText
-      const textWithoutCTA = removeCTA(cleanText)
-      
-      const newIdea = {
-        id: `custom-${Date.now()}`,
-        title: topicInput,
-        headline: firstVariation.headline,
-        text: cleanText,
-        description: `AI-generated post for ${firstVariation.platform || 'social media'}`,
-        type: 'custom',
-        allVariations: data.variations, // All platform versions
-        originalContent: firstVariation // Store original for restoring
-      }
-      
-      setCustomIdea(newIdea)
-      setSelectedIdea(newIdea.id)
-      setHeadline(firstVariation.headline)
-      setText(includeCTA ? textWithCTA : textWithoutCTA) // Respect initial toggle state
-      setOriginalTextWithCTA(textWithCTA) // Store for toggling
-      setOriginalTextWithoutCTA(textWithoutCTA) // Store for toggling
-      setHashtags(uniqueHashtags)
-      setSelectedHashtags(new Set(uniqueHashtags)) // All selected by default
-      setIsEdited(false) // Reset edit tracking when AI generates
-      setIsSpellingChecked(true) // New AI content is considered spell-checked
-      incrementCaptionGeneration()
-    } catch (error: any) {
-      console.error('Error generating AI content:', error)
-      alert(t('generate.aiError', `Failed to generate AI content: ${error.message}`))
-    } finally {
-      setIsGenerating(false)
+  // Strategy mode handlers (moved after useGenerateState to access setText)
+  const handleEditGenerated = useCallback(() => {
+    if (generatedPost) {
+      // Load generated content into editor
+      setText(generatedPost.text)
+      setHashtags(generatedPost.hashtags)
+      setSelectedHashtags(new Set(generatedPost.hashtags))
+      setIsEditingGenerated(true)
+      setIsEdited(false)
     }
-  }
+  }, [generatedPost, setText, setHashtags, setSelectedHashtags, setIsEditingGenerated, setIsEdited])
 
-  // Handle emoji toggle - instant text manipulation
-  const handleEmojiToggle = (checked: boolean) => {
-    setIncludeEmojis(checked)
+  const handleRegenerateGenerated = useCallback((instructions?: string) => {
+    // This will be called from the RegenerateWithInstructionsModal
+    // The regeneration logic is handled by StrategicPostCreationPage
+    console.log('[GenerateStep] Regenerate requested with instructions:', instructions)
+    // TODO: Implement regeneration trigger to parent
+  }, [])
+
+  const handleGoToDesignFromGenerated = useCallback(() => {
+    if (generatedPost) {
+      // Save the generated content to postCreationStore before proceeding
+      setPostContent({
+        headline: '',
+        text: generatedPost.text,
+        hashtags: generatedPost.hashtags.map(tag => ({
+          tag,
+          enabled: true,
+          platforms: generatedPost.platforms,
+        })),
+        aiGeneratedHashtags: generatedPost.hashtags,
+        adjustments: {
+          length: 'current',
+          tone: 'brand',
+          includeEmojis: true,
+          includeHashtags: true,
+          includeBookingLink: false,
+        },
+      })
+    }
+    onNext()
+  }, [generatedPost, setPostContent, onNext])
+
+  const textAreaRef = useRef<HTMLTextAreaElement>(null)
+  const [showBusinessSetup, setShowBusinessSetup] = useState(false)
+  const [showBusinessInfoPrompt, setShowBusinessInfoPrompt] = useState(false)
+
+  // Track the authenticated business only. Do not trust stale onboarding state.
+  const [businessId, setBusinessId] = useState<string | null>(null)
+
+  // DB-only draft persistence for write mode (single source of truth)
+  const isWriteMode = activePath === 'write'
+  const writeDraft = useWriteDraft({ 
+    businessId: businessData?.business?.id || null,
+    enabled: isWriteMode 
+  })
+
+  // Update businessId when businessData loads
+  useEffect(() => {
+    const resolvedBusinessId = businessData?.business?.id || null
+
+    if (resolvedBusinessId) {
+      setBusinessId(prevBusinessId => {
+        if (prevBusinessId === resolvedBusinessId) {
+          return prevBusinessId
+        }
+
+        console.log('[GenerateStep] Setting businessId from authenticated businessData:', resolvedBusinessId)
+        return resolvedBusinessId
+      })
+
+      if (typeof window !== 'undefined') {
+        const storedBusinessId = localStorage.getItem('onboarding:businessId')
+        if (storedBusinessId !== resolvedBusinessId) {
+          localStorage.setItem('onboarding:businessId', resolvedBusinessId)
+        }
+      }
+    }
+  }, [businessData?.business?.id, businessId])
+
+  // Load draft on mount (write mode only)
+  useEffect(() => {
+    if (!isWriteMode || !businessData?.business?.id) return
+
+    const loadWriteDraft = async () => {
+      const draft = await writeDraft.loadDraft()
+      if (draft?.content) {
+        console.log('[GenerateStep] Loaded write draft from DB')
+        setPostContent(draft.content)
+        
+        if (draft.photo_content) {
+          setPhotoContent(draft.photo_content)
+        }
+        
+        if (draft.selected_platforms && draft.selected_platforms.length > 0) {
+          setSelectedPlatforms(draft.selected_platforms)
+        }
+      }
+    }
+
+    loadWriteDraft()
+  }, [isWriteMode, businessData?.business?.id]) // Only run on mount when business loads
+
+  // Auto-save draft on content change (write mode only)
+  // This provides crash recovery - user can close browser and return to their work.
+  useEffect(() => {
+    if (!isWriteMode || !businessData?.business?.id) return
+    if (!postContent) return
+
+    // Only save if there's actual content (don't save empty drafts)
+    const hasContent = postContent.text?.trim() || postContent.headline?.trim()
+    if (!hasContent) return
+
+    writeDraft.saveDraft({
+      content: postContent,
+      photo_content: photoContent,
+      selected_platforms: selectedPlatforms
+    })
+  }, [isWriteMode, businessData?.business?.id, postContent, photoContent, selectedPlatforms, writeDraft])
+  
+  // Show tabs if: user has a business and not in strategy mode
+  // Tabs should always be visible (not dependent on dismissal)
+  // Hide when a full Weekly Plan post is loaded (direct transfer available)
+  const showAiSuggestions = Boolean(
+    businessId && 
+    !isStrategyMode &&
+    !weeklyPlanPost
+  )
+
+  // Debug logging
+  console.log('[GenerateStep] AI Suggestions Debug:', {
+    businessId,
+    businessFromData: businessData?.business?.id,
+    isStrategyMode,
+    showAiSuggestions,
+    activePath
+  })
+
+  const hasBusinessProfile = Boolean(businessData.profile || businessData.business)
+
+  // Handler for when user selects an AI suggestion
+  const handleSelectSuggestion = useCallback((suggestion: any) => {
+    console.log('[GenerateStep] handleSelectSuggestion called with:', suggestion)
     
-    if (!checked) {
-      // Remove emojis
-      updateCurrentText('headline', stripEmojis(getCurrentText().headline))
-      updateCurrentText('text', stripEmojis(getCurrentText().text))
-    } else {
-      // Restore from original AI content (without hashtags)
-      if (customIdea?.originalContent) {
-        updateCurrentText('headline', customIdea.originalContent.headline)
-        const cleanText = removeHashtags(customIdea.originalContent.text)
-        updateCurrentText('text', cleanText)
-      }
+    if (suggestion.id === 0) {
+      setSelectedSuggestionData(null)
+      return
     }
-  }
 
-  // Handle CTA toggle - instant text manipulation
-  const handleCTAToggle = (checked: boolean) => {
-    setIncludeCTA(checked)
+    // Store the full suggestion for text generation when user clicks "Next"
+    setSelectedIdea(suggestion.id.toString())
+    setSelectedSuggestionData(suggestion)
+    setActivePath('ai-ideas')
     
-    // Use stored versions if available (from AI generation)
-    if (originalTextWithCTA && originalTextWithoutCTA) {
-      if (checked) {
-        updateCurrentText('text', originalTextWithCTA)
-      } else {
-        updateCurrentText('text', originalTextWithoutCTA)
-      }
-    } else {
-      // Fallback: try to detect and remove CTA dynamically
-      const currentText = getCurrentText().text
-      if (!checked) {
-        updateCurrentText('text', removeCTA(currentText))
-      } else {
-        // Can't restore CTA if we don't have the original
-        // Just keep current text
-      }
-    }
-  }
+    // Photos will be saved/restored automatically by CreatePostPage's draft system
+    // No need to manually clear - each suggestion's draft includes its photos
 
-  // Handle spelling check for manual edits
-  const handleSpellingCheck = async () => {
-    if (!canUseCaptionGeneration()) {
-      const limits = getTierLimits(currentTier)
-      alert(t('generate.quotaExceeded', `You've reached your daily limit of ${limits.captionGenerationsPerDay} caption improvements.`))
+    // Write selection signal to DB for future bias learning (1D)
+    if (suggestion.id && businessData.business?.id) {
+      void (async () => {
+        try {
+          const { error } = await (supabase as any)
+            .from('daily_suggestions')
+            .update({
+              status: 'selected',
+              selected: true,
+              is_active: false,
+              selected_at: new Date().toISOString(),
+            })
+            .eq('id', suggestion.id)
+            .eq('business_id', businessData.business!.id)
+
+          if (error) {
+            throw error
+          }
+
+          console.log(`📊 Suggestion ${suggestion.id} marked as selected`)
+        } catch (e: unknown) {
+          console.warn('⚠️ Could not mark suggestion as selected:', e)
+        }
+      })()
+    } else if (suggestion.id) {
+      console.warn('⚠️ Could not mark suggestion as selected: missing business id context')
+    }
+
+    // Clear any previously generated text so the editor never shows stale content
+    // from a different idea (e.g. switching from idea 2 to idea 3).
+    setPostContent(null)
+
+    // Clear photo state so a photo uploaded for idea A never bleeds into idea B.
+    // The draft restore in CreatePostPage will re-populate photos if idea B had
+    // its own uploaded photos saved to its draft.
+    setPhotoContent({
+      uploadedMedia: [],
+      selectedMedia: null,
+      isOriginal: true,
+      photoAdjustments: null,
+      carouselMode: false,
+    })
+    
+    console.log('[GenerateStep] Stored suggestion in selectedSuggestionData')
+    
+    // Store headline but DON'T switch tabs - let user click Next to generate
+    // Phase 3: Use whyExplanation if title is not available (quick suggestions)
+    setHeadline(suggestion.title || suggestion.whyExplanation?.split(/[.!?]\s+/)[0] || '')
+    
+    // Mark as changed
+    markAsChanged?.()
+  }, [setHeadline, setSelectedIdea, setSelectedSuggestionData, setActivePath, setPostContent, markAsChanged, businessData.business?.id])
+
+  useEffect(() => {
+    if (!postContent) {
+      return
+    }
+
+    // Only load content once on mount or when content significantly changes
+    // Don't reset state on every postContent reference change (e.g., auto-save updates)
+    const isInitialLoad = loadedPostContentRef.current === null
+    const hasContentChanged = 
+      loadedPostContentRef.current?.headline !== postContent.headline ||
+      loadedPostContentRef.current?.text !== postContent.text
+    
+    // Skip if this is just a reference change with same content
+    if (!isInitialLoad && !hasContentChanged) {
+      return
+    }
+
+    // Only reset isEdited on INITIAL load, not on subsequent content changes
+    // (subsequent changes might be user edits being synced back)
+    const shouldResetEditState = isInitialLoad
+
+    loadedPostContentRef.current = postContent
+
+    const recoveredHeadline = postContent.headline ?? ''
+    const recoveredText = postContent.text ?? ''
+
+    setHeadline(recoveredHeadline)
+    setText(recoveredText)
+
+    const recoveredHashtags = postContent.hashtags ?? []
+    const platformAssignments: Record<string, string[]> = {}
+    const normalizedTags = recoveredHashtags.map((item) => {
+      const clean = sanitizeTagValue(item.tag)
+      const key = normalizeHashtagKey(clean)
+      const platforms = canonicalizePlatformList(item.platforms)
+      if (key && platforms.length > 0) {
+        platformAssignments[key] = platforms
+      }
+      return clean
+    })
+    const enabledTags = recoveredHashtags
+      .filter((item) => item.enabled)
+      .map((item) => sanitizeTagValue(item.tag))
+
+    setHashtags(normalizedTags)
+    setSelectedHashtags(new Set(enabledTags))
+    setAiGeneratedHashtags(new Set((postContent.aiGeneratedHashtags ?? []).map((tag) => sanitizeTagValue(tag))))
+    setHashtagPlatforms(platformAssignments)
+
+    const adjustments = postContent.adjustments
+    setIncludeHashtags(adjustments?.includeHashtags ?? true)
+    setIncludeEmojis(adjustments?.includeEmojis ?? true)
+
+    if (shouldResetEditState) {
+      setIsEdited(false)
+      setIsSpellingChecked(false)
+    }
+  }, [postContent])
+
+  const {
+    isAIEnhancing,
+    isSpellingChecking,
+    isSpellingChecked,
+    clarificationQuestion,
+    clarificationInput,
+    errorMessage,
+    handleAIUpdate,
+    handleSpellingCheck,
+    generateHashtagsOnly,
+    handleClarificationDismiss,
+    handleClarificationSubmit,
+    resetClarificationState,
+    clearClarificationPrompt,
+    setClarificationInput,
+    setIsSpellingChecked
+  } = usePostCreationAI({
+    t,
+    language: i18n.language,
+    currentTier,
+    getTierLimits,
+    canUseAiIdeas,
+    canUseCaptionGeneration,
+    incrementAiIdeas,
+    incrementCaptionGeneration,
+    businessData,
+    getOnboardingPlatforms,
+    selectedPlatforms,
+    setAiIdeas,
+    setShowBusinessInfoPrompt,
+    isEnabled,
+    photoContent,
+    setPhotoIdea,
+    includeEmojis,
+    includeHashtags,
+    setIncludeHashtags,
+    customizePerPlatform,
+    activePlatform,
+    setPlatformTexts,
+    setHeadline,
+    setText,
+    setHashtags,
+    setSelectedHashtags,
+    setAiGeneratedHashtags,
+    hashtagPlatforms,
+    setHashtagPlatforms,
+    setIsEdited,
+    appendSelectedHashtags,
+    setPostContent,
+    headline,
+    hashtags,
+    selectedHashtags,
+    aiGeneratedHashtags,
+    getCurrentText,
+    isEdited,
+    markAsChanged
+  })
+
+  useEffect(() => {
+    resetClarificationStateRef.current = resetClarificationState
+  }, [resetClarificationState])
+
+  const updateCurrentText = useCallback(
+    (field: 'headline' | 'text', value: string) => {
+      console.log('[GenerateStep] updateCurrentText wrapper called:', { field, valueLength: value.length })
+      baseUpdateCurrentText(field, value)
+      setIsSpellingChecked(false)
+    },
+    [baseUpdateCurrentText, setIsSpellingChecked]
+  )
+
+  const createClearedContent = useCallback((): PostContent => {
+    const platformContent = customizePerPlatform && selectedPlatforms.length > 1
+      ? selectedPlatforms.reduce<Record<string, any>>((acc, platform) => {
+          acc[platform] = {
+            headline: '',
+            text: '',
+            adjustments: {
+              length: 'current',
+              tone: 'professional',
+              includeHashtags,
+              includeEmojis,
+              includeBookingLink: false,
+            },
+            hashtags: [],
+          }
+          return acc
+        }, {})
+      : undefined
+
+    return {
+      headline: '',
+      text: '',
+      textWithHashtags: '',
+      adjustments: {
+        length: 'current',
+        tone: 'professional',
+        includeHashtags,
+        includeEmojis,
+        includeBookingLink: false,
+      },
+      platformSpecific: Boolean(platformContent),
+      platformContent,
+      hashtags: [],
+      platformHashtagViews: {},
+      aiGeneratedHashtags: [],
+    }
+  }, [customizePerPlatform, selectedPlatforms, includeHashtags, includeEmojis])
+
+  const handleClearContent = useCallback(async () => {
+    baseHandleClearContent()
+    setPostContent(createClearedContent())
+    setIsSpellingChecked(false)
+    
+    // Delete DB draft for write mode
+    if (isWriteMode) {
+      await writeDraft.deleteDraft()
+    }
+  }, [baseHandleClearContent, createClearedContent, setIsSpellingChecked, setPostContent, isWriteMode, writeDraft])
+
+  const { toggleHashtagSelection, handleAddCustomHashtag } = useHashtagInteractions({
+    hashtags,
+    setHashtags,
+    setSelectedHashtags,
+    setHashtagPlatforms,
+    selectedPlatforms: canonicalSelectedPlatforms,
+    setIsEdited,
+    setIsSpellingChecked,
+    markAsChanged,
+    t
+  })
+
+  // base implementations now encapsulated by useGenerateState
+
+  const handleSelectPlatforms = useCallback(
+    (platforms: string[]) => {
+      console.log('[GenerateStep] 📱 handleSelectPlatforms called:', {
+        newPlatforms: platforms,
+        currentPlatforms: selectedPlatforms,
+        customizePerPlatform,
+        activePlatform
+      });
+
+      setSelectedPlatforms(platforms)
+
+      if (customizePerPlatform) {
+        setPlatformTexts((prev) => {
+          const template = getCurrentText()
+          const next = { ...prev }
+          platforms.forEach((platform) => {
+            if (!next[platform]) {
+              next[platform] = { ...template }
+            }
+          })
+          return next
+        })
+      }
+
+      if (platforms.length > 0 && !platforms.includes(activePlatform)) {
+        console.log('[GenerateStep] 🔄 Switching active platform from', activePlatform, 'to', platforms[0]);
+        setActivePlatform(platforms[0])
+      }
+
+      console.log('[GenerateStep] ✅ Platform selection complete:', platforms);
+      markAsChanged?.()
+    },
+    [
+      setSelectedPlatforms,
+      customizePerPlatform,
+      setPlatformTexts,
+      getCurrentText,
+      activePlatform,
+      markAsChanged
+    ]
+  )
+
+  const handleActivePlatformChange = useCallback((platform: string) => {
+    setActivePlatform(platform)
+  }, [])
+
+  const handleUpgradeNavigate = useCallback(() => {
+    navigate('/dashboard/plans')
+  }, [navigate])
+
+  const handleEnhanceClick = useCallback(async () => {
+    console.log('[GenerateStep] handleEnhanceClick called')
+    await handleAIUpdate()
+    console.log('[GenerateStep] Setting hasHeadlineFromAI to true')
+    setHasHeadlineFromAI(true)
+  }, [handleAIUpdate, setHasHeadlineFromAI])
+
+  const handleToggleHeadlineEditor = useCallback(() => {
+    setIsHeadlineEditorVisible((prev) => !prev)
+  }, [])
+
+  const clarificationProps = useClarificationFlow({
+    clarificationQuestion,
+    clarificationInput,
+    handleClarificationSubmit,
+    handleClarificationDismiss,
+    setClarificationInput
+  })
+
+  const { handleSaveDraft, hasPersistedDraft } = useDraftPersistence({
+    getCurrentText,
+    hashtags,
+    buildPlatformHashtags,
+    buildPlatformHashtagViews,
+    customizePerPlatform,
+    canonicalSelectedPlatforms,
+    selectedPlatforms,
+    platformTexts,
+    appendSelectedHashtags,
+    includeHashtags,
+    includeEmojis,
+    aiGeneratedHashtags,
+    photoContent,
+    photoIdea,
+    postContent,
+    setPostContent,
+    headline,
+    text,
+    activePlatform,
+    onResetEditedState: () => setIsEdited(false),
+    markAsSaved
+  })
+
+  const { handleNext: proceedToDesign } = useIdeaWorkflow({
+    aiIdeas,
+    selectedIdea,
+    setSelectedIdea,
+    selectedPlatforms,
+    canonicalSelectedPlatforms,
+    platformTexts,
+    setPlatformTexts,
+    includeHashtags,
+    includeEmojis,
+    appendSelectedHashtags,
+    buildPlatformHashtags,
+    buildPlatformHashtagViews,
+    setPostContent,
+    aiGeneratedHashtags,
+    extractHashtags,
+    removeHashtags,
+    setHeadline,
+    setText,
+    setHashtags,
+    setSelectedHashtags,
+    setAiGeneratedHashtags,
+    setHashtagPlatforms,
+    setIncludeHashtags,
+    setIncludeEmojis,
+    setIsEdited,
+    setIsSpellingChecked,
+    setHasHeadlineFromAI,
+    getCurrentText,
+    customizePerPlatform,
+    markAsChanged,
+    clearClarificationPrompt,
+    activeTab: 'manual' as const,
+    t,
+    onNext,
+    generateHashtagsOnly
+  })
+
+  const { validationIssues, showValidation, validateBeforeNext } = useGenerateValidation({
+    selectedPlatforms,
+    customizePerPlatform,
+    platformTexts,
+    text,
+    photoContent,
+    t,
+    activePath,
+    selectedSuggestionData
+  })
+
+  const selectedSuggestionIsCommitted = Boolean(
+    selectedSuggestionData?.id != null &&
+    committedSuggestionIds?.has(selectedSuggestionData.id)
+  )
+
+  useEffect(() => {
+    if (!selectedSuggestionIsCommitted) return
+
+    // A committed AI idea must not re-enter the Create/Design step from the AI flow.
+    // Clear the stale selection so the user has to choose a fresh idea.
+    setSelectedIdea(null)
+    setSelectedSuggestionData(null)
+    setPostContent(null)
+    setPhotoContent({
+      uploadedMedia: [],
+      selectedMedia: null,
+      isOriginal: true,
+      photoAdjustments: null,
+      carouselMode: false,
+    })
+  }, [
+    selectedSuggestionIsCommitted,
+    setSelectedIdea,
+    setSelectedSuggestionData,
+    setPostContent,
+    setPhotoContent,
+  ])
+
+  const handleValidatedNext = useCallback(() => {
+    if (!validateBeforeNext()) {
       return
     }
     
-    setIsGenerating(true)
-    
-    try {
-      const currentContent = getCurrentText()
-      
-      const response = await fetch(import.meta.env.VITE_SUPABASE_FUNCTION_AI_GENERATE, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-        },
-        body: JSON.stringify({
-          topic: `Fix spelling and grammar ONLY. Keep all content, emojis, and hashtags exactly as written: "${currentContent.headline}" - ${currentContent.text}`,
-          businessType: 'cafe',
-          platforms: customizePerPlatform ? [activePlatform] : selectedPlatforms,
-          includeEmojis: true, // Keep whatever is there
-          includeHashtags: true, // Keep whatever is there
-          includeCTA: true, // Keep whatever is there
-          tone: 'objective',
-          length: 'medium'
-        })
-      })
-
-      if (!response.ok) throw new Error('Failed to check spelling')
-
-      const data = await response.json()
-      
-      if (data.variations && data.variations.length > 0) {
-        const fixed = data.variations[0]
-        // Remove hashtags from fixed text
-        const allText = `${fixed.text}\n\n${fixed.hashtags}`
-        const cleanText = removeHashtags(allText)
-        
-        // Update text without triggering isEdited flag
-        if (customizePerPlatform) {
-          setPlatformTexts(prev => ({
-            ...prev,
-            [activePlatform]: {
-              headline: fixed.headline,
-              text: cleanText
-            }
-          }))
-        } else {
-          setHeadline(fixed.headline)
-          setText(cleanText)
-        }
-        
-        setIsSpellingChecked(true) // Mark spelling as checked
+    // If an AI suggestion is selected, skip the normal flow and let CreatePostPage handle generation
+    if (selectedSuggestionData && selectedSuggestionData.id !== 0) {
+      if (selectedSuggestionIsCommitted) {
+        console.warn('[GenerateStep] Blocked navigation for committed AI suggestion:', selectedSuggestionData.id)
+        return
       }
-      
-      incrementCaptionGeneration()
-    } catch (error) {
-      console.error('Error checking spelling:', error)
-      alert(t('generate.aiError', 'Failed to check spelling.'))
-    } finally {
-      setIsGenerating(false)
-    }
-  }
-
-  const handleNext = () => {
-    if (selectedPlatforms.length === 0 || !selectedIdea) return
-    
-    const currentIdea = [...aiIdeas, customIdea].find(i => i?.id === selectedIdea)
-    
-    // Convert hashtags to PlatformHashtag format
-    const platformHashtags = hashtags.map(tag => ({
-      tag,
-      enabled: selectedHashtags.has(tag)
-    }))
-    
-    if (customizePerPlatform && selectedPlatforms.length > 1) {
-      // Save platform-specific content
-      const platformContent: Record<string, any> = {}
-      selectedPlatforms.forEach(platform => {
-        const platformText = platformTexts[platform] || { headline: '', text: '' }
-        platformContent[platform] = {
-          headline: platformText.headline || (currentIdea?.headline ?? ''),
-          text: platformText.text || (currentIdea?.text ?? ''),
-          adjustments: {
-            length: 'current',
-            tone: 'professional',
-            includeHashtags,
-            includeEmojis,
-            includeBookingLink: false
-          },
-          hashtags: platformHashtags
-        }
-      })
-      
-      setPostContent({
-        headline: headline || (currentIdea?.headline ?? ''),
-        text: text || (currentIdea?.text ?? ''),
-        platformSpecific: true,
-        platformContent,
-        adjustments: {
-          length: 'current',
-          tone: 'professional',
-          includeHashtags,
-          includeEmojis,
-          includeBookingLink: false
-        }
-      })
-    } else {
-      // Save unified content
-      setPostContent({
-        headline: headline || (currentIdea?.headline ?? ''),
-        text: text || (currentIdea?.text ?? ''),
-        platformSpecific: false,
-        adjustments: {
-          length: 'current',
-          tone: 'professional',
-          includeHashtags,
-          includeEmojis,
-          includeBookingLink: false
-        },
-        hashtags: platformHashtags
-      })
+      console.log('[GenerateStep] AI suggestion selected, calling onNext directly for generation')
+      onNext()  // Call CreatePostPage's handleGenerateNext which will do the AI generation
+      return
     }
     
-    onNext()
+    // Normal flow: save current editor content and proceed to Design
+    // Note: We keep the DB draft so content carries forward to Design stage
+    // Draft is only deleted when user clicks "Slet alt" or publishes
+    proceedToDesign()
+  }, [validateBeforeNext, proceedToDesign, selectedSuggestionData, selectedSuggestionIsCommitted, onNext])
+
+  const supportedSelectedPlatforms: CanonicalPlatform[] = canonicalSelectedPlatforms
+
+  const platformHashtagViews = useMemo(() => buildPlatformHashtagViews(), [buildPlatformHashtagViews])
+
+  const currentContent = getCurrentText()
+
+  const headlinePlaceholder = t(
+    'generate.headlinePlaceholder',
+    "You don't need to write a headline – I'll suggest one based on your text."
+  )
+
+  const textPlaceholder = t(
+    'generate.textPlaceholder',
+    'Write your idea or draft here...'
+  )
+
+  const canEditHeadline = customizePerPlatform ? activePlatform === 'facebook' : selectedPlatforms.includes('facebook')
+
+  useEffect(() => {
+    if (postContent?.headline && postContent.headline.trim().length > 0) {
+      setHasHeadlineFromAI(true)
+    }
+  }, [postContent?.headline])
+
+  useEffect(() => {
+    if (!canEditHeadline && isHeadlineEditorVisible) {
+      setIsHeadlineEditorVisible(false)
+    }
+  }, [canEditHeadline, isHeadlineEditorVisible])
+
+  const hashtagInsight = useHashtagInsight({
+    includeHashtags,
+    hashtags,
+    selectedPlatforms: supportedSelectedPlatforms
+  })
+
+  console.log('[GenerateStep] State for ActionButtons:', { isEdited, hasHeadlineFromAI })
+
+  const writeContentProps = {
+    headline: currentContent.headline,
+    text: currentContent.text,
+    headlinePlaceholder,
+    textPlaceholder,
+    onHeadlineChange: (value: string) => updateCurrentText('headline', value),
+    onTextChange: (value: string) => updateCurrentText('text', value),
+    textAreaRef,
+    errorMessage,
+    onClear: handleClearContent,
+    includeHashtags,
+    hashtags,
+    selectedHashtags,
+    onToggleHashtag: toggleHashtagSelection,
+    onAddHashtag: handleAddCustomHashtag,
+    selectedPlatforms,
+    supportedSelectedPlatforms,
+    currentTier,
+    availablePlatforms,
+    activePlatform,
+    onSelectPlatforms: handleSelectPlatforms,
+    onActivePlatformChange: handleActivePlatformChange,
+    ...clarificationProps,
+    hasBusinessProfile,
+    onToggleHashtags: (enabled: boolean) => {
+      setIncludeHashtags(enabled)
+      setIsEdited(true)
+      setIsSpellingChecked(false)
+      markAsChanged?.()
+    },
+    onUpgrade: handleUpgradeNavigate,
+    onEnhance: handleEnhanceClick,
+    onSpellingCheck: handleSpellingCheck,
+    isEnhancing: isAIEnhancing,
+    isSpellChecking: isSpellingChecking,
+    isSpellingChecked,
+    isEdited,
+    hasAISuggestion: hasHeadlineFromAI,
+    canEditHeadline,
+    isHeadlineEditorVisible,
+    onToggleHeadlineEditor: handleToggleHeadlineEditor,
+    showHeadlinePrompt: hasHeadlineFromAI,
+    hasHashtags: hashtags.length > 0,
+    insight: hashtagInsight,
+    platformHashtagViews,
+    showClearAll: activePath === 'write'
   }
 
-  const selectIdea = (idea: any) => {
-    setSelectedIdea(idea.id)
-    
-    // Extract hashtags and clean text
-    const extractedHashtags = extractHashtags(idea.text)
-    
-    // Remove duplicates from hashtags
-    const uniqueHashtags = Array.from(new Set(extractedHashtags))
-    
-    // Clean text: remove hashtags and trim weird trailing text
-    let cleanText = removeHashtags(idea.text)
-    cleanText = cleanText.replace(/\s+[^\s.!?]+\s*$/, '').trim()
-    
-    // Store both versions for CTA toggle
-    const textWithCTA = cleanText
-    const textWithoutCTA = removeCTA(cleanText)
-    
-    setHeadline(idea.headline)
-    setText(includeCTA ? textWithCTA : textWithoutCTA) // Respect current toggle state
-    setOriginalTextWithCTA(textWithCTA) // Store for toggling
-    setOriginalTextWithoutCTA(textWithoutCTA) // Store for toggling
-    setHashtags(uniqueHashtags)
-    setSelectedHashtags(new Set(uniqueHashtags)) // All selected by default
-    setIsEdited(false) // AI-generated content is not considered edited
-    setIsSpellingChecked(true) // AI-generated content is pre-checked
-    
-    // Also populate platform-specific texts with the same content initially
-    const initialPlatformTexts: Record<string, { headline: string; text: string }> = {}
-    selectedPlatforms.forEach(platform => {
-      initialPlatformTexts[platform] = {
-        headline: idea.headline,
-        text: includeCTA ? textWithCTA : textWithoutCTA
-      }
-    })
-    setPlatformTexts(initialPlatformTexts)
-  }
+  const footerProps = usePostCreationFooter({
+    hasUnsavedChanges: hasUnsavedChanges ?? false,
+    isEdited,
+    hasPersistedDraft,
+    onSaveDraft: handleSaveDraft,
+    onNext: handleValidatedNext,
+    disabled: validationIssues.length > 0
+  })
 
-  const limits = getTierLimits(currentTier)
-  // AI Ideas tab always shows AI ideas quota (0/3 for free tier)
-  const aiIdeasQuota = `${quotaUsage.aiIdeasToday}/${limits.aiIdeasPerDay === -1 ? '∞' : limits.aiIdeasPerDay}`
+  const validationBanner = (
+    <ValidationBanner visible={showValidation} issues={validationIssues} />
+  )
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="text-center mb-3">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">
-          {t('generate.title')}
-        </h1>
-        <p className="text-sm text-slate-600">
-          {t('generate.subtitle')}
-        </p>
-      </div>
-
-      {/* Progress Stepper */}
-      <ProgressStepper currentStep={1} totalSteps={3} onStepClick={onStepClick} />
-
-      {/* Platform Selection - COMPACT */}
-      <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <div className="bg-indigo-100 p-1.5 rounded-lg">
-              <Globe className="w-4 h-4 text-indigo-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-sm font-bold text-slate-800">
-                {t('generate.selectPlatforms', 'Where do you want to post?')}
-              </h3>
-              <div className="flex items-center gap-2">
-                <p className="text-xs text-slate-600">
-                  {t('generate.platformHint', 'Choose one or more platforms')}
-                </p>
-                <button 
-                  onClick={() => navigate('/dashboard/profile')}
-                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
+      {/* Weekly Plan — Action Card (when a full plan post is loaded) */}
+      {activePath === 'weekly-plan' && strategicIdea && weeklyPlanPost && !isStrategyMode && (
+        <div className="bg-cta-surface border border-cta-surface rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <div className="text-2xl flex-shrink-0">📅</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-cta uppercase tracking-wide mb-0.5">Fra ugeplanen</div>
+              <div className="text-sm font-bold text-slate-900 mb-1 leading-snug">{strategicIdea.title}</div>
+              {/* Rationale hidden - shown in popup instead */}
+              {/* {strategicIdea.rationale && (
+                <div className="text-xs text-cta-text leading-relaxed mb-2">💡 {strategicIdea.rationale}</div>
+              )} */}
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {strategicIdea.contentType && (
+                  <span className="inline-flex text-[10px] font-medium bg-cta-surface text-cta-text px-2 py-0.5 rounded-full capitalize">
+                    {strategicIdea.contentType.replace(/_/g, ' ')}
+                  </span>
+                )}
+                {strategicIdea.suggestedDay && (
+                  <span className="inline-flex text-[10px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+                    📆 {strategicIdea.suggestedDay}
+                  </span>
+                )}
+                {strategicIdea.suggestedMedia?.type && (
+                  <span className="inline-flex text-[10px] font-medium bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                    📷 {strategicIdea.suggestedMedia.type}
+                  </span>
+                )}
+              </div>
+              {/* Visual direction hidden - shown in popup instead */}
+              {/* {strategicIdea.suggestedMedia?.direction && (
+                <div className="mb-3 text-[11px] text-slate-500 italic">
+                  Visuel retning: {strategicIdea.suggestedMedia.direction}
+                </div>
+              )} */}
+              <div className="flex gap-2">
+                <button
+                  onClick={onDirectTransfer}
+                  className="flex-1 sm:flex-none px-4 py-2 bg-cta hover:bg-cta-hover text-white text-sm font-semibold rounded-lg transition-colors"
                 >
-                  {t('generate.updatePlatforms', 'Update platforms')}
+                  Brug dette opslag →
+                </button>
+                <button
+                  onClick={() => {
+                    setStrategicIdea(null)
+                    setWeeklyPlanPost(null)
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 bg-white border border-slate-200 hover:border-slate-300 rounded-lg transition-colors"
+                >
+                  Skriv selv
                 </button>
               </div>
             </div>
           </div>
-          
-          {/* Platform icons moved to right corner */}
-          <div className="flex gap-2">
-            {availablePlatforms.map((platform) => {
-              const platformEnabled = isEnabled(platform.id)
-              const platformConnected = isConnected(platform.id)
-              const isSelected = selectedPlatforms.includes(platform.id)
-              const Icon = platform.icon
-              
-              // Determine status: connected (green), not connected (red), not used (gray)
-              const statusDotColor = platformEnabled && platformConnected 
-                ? 'bg-green-500' 
-                : platformEnabled 
-                  ? 'bg-red-500' 
-                  : 'bg-gray-400'
-              
-              // Tooltip text for status
-              const statusTooltip = !platformEnabled
-                ? t('generate.notUsed', 'Not used')
-                : platformConnected
-                  ? t('generate.connected', 'Connected')
-                  : t('generate.notConnected', 'Not connected')
+        </div>
+      )}
 
-              return (
-                <button
-                  key={platform.id}
-                  onClick={() => platformEnabled && togglePlatform(platform.id)}
-                  disabled={!platformEnabled}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all
-                    ${isSelected
-                      ? 'border-indigo-500 bg-indigo-50'
-                      : 'border-slate-200 bg-white hover:bg-slate-50'
-                    }
-                    ${!platformEnabled && 'opacity-50 cursor-not-allowed'}
-                  `}
-                >
-                  <Icon className={`w-4 h-4 ${platform.color === 'blue' ? 'text-blue-600' : 'text-pink-600'}`} />
-                  <span className="text-xs font-medium text-slate-800">{platform.name}</span>
-                  <div 
-                    className={`w-2 h-2 rounded-full ${statusDotColor}`}
-                    title={statusTooltip}
-                  />
-                </button>
-              )
-            })}
+      {/* Strategy Mode: Show generated post display if not editing */}
+      {isStrategyMode && generatedPost && !isEditingGenerated ? (
+        <StrategyGeneratedDisplay
+          generatedPost={generatedPost}
+          strategicIdea={strategicIdea ? {
+            title: strategicIdea.title,
+            rationale: strategicIdea.rationale,
+            contentType: strategicIdea.contentType ?? '',
+            ctaIntent: strategicIdea.ctaIntent,
+          } : undefined}
+          onEdit={handleEditGenerated}
+          onRegenerate={handleRegenerateGenerated}
+          onGoToDesign={handleGoToDesignFromGenerated}
+          selectedPlatforms={selectedPlatforms}
+          onSelectPlatforms={handleSelectPlatforms}
+          activePlatform={activePlatform as 'facebook' | 'instagram'}
+          onActivePlatformChange={(platform: 'facebook' | 'instagram') => {
+            // console.log('[GenerateStep] Platform toggle clicked:', platform);
+            setActivePlatform(platform);
+          }}
+          isGenerating={isGenerating}
+        />
+      ) : activePath === 'ai-ideas' ? (
+        /* AI Forslag mode - show loading until businessId is ready */
+        !businessId ? (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center text-gray-500">
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-5 h-5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+              <span>Loading suggestions...</span>
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* AI/Custom Toggle - COMPACT */}
-      <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
-        <div className="flex gap-2 mb-3">
-          <button
-            onClick={() => setActiveTab('ai')}
-            className={`flex-1 px-3 py-1.5 rounded-lg transition-all text-sm font-medium flex items-center justify-center gap-1.5
-              ${activeTab === 'ai'
-                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{t('generate.aiIdeas', 'AI Ideas')}</span>
-            <span className="text-xs px-1.5 py-0.5 rounded-full bg-white/20">
-              {aiIdeasQuota}
-            </span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('custom')}
-            className={`flex-1 px-3 py-1.5 rounded-lg transition-all text-sm font-medium flex items-center justify-center gap-1.5
-              ${activeTab === 'custom'
-                ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-          >
-            <Lightbulb className="w-3.5 h-3.5" />
-            <span>{t('generate.customIdea', 'Custom Idea')}</span>
-          </button>
-        </div>
-
-        {/* AI Ideas Tab - COMPACT */}
-        {activeTab === 'ai' && (
-          <div className="space-y-3">
-            {aiIdeas.length === 0 ? (
-              <div className="text-center py-6">
-                <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-full p-3 w-12 h-12 mx-auto mb-2 flex items-center justify-center">
-                  <Wand className="w-6 h-6 text-purple-600" />
-                </div>
-                <p className="text-sm text-slate-600 mb-3">
-                  {t('generate.noIdeasYet', 'Click below to generate AI ideas')}
-                </p>
-                <button
-                  onClick={generateAiIdeas}
-                  disabled={isGenerating}
-                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 transition-all text-sm font-bold shadow-md flex items-center gap-1.5 mx-auto"
-                >
-                  {isGenerating ? (
-                    <>
-                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>{t('generate.generating', 'Generating...')}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>{t('generate.generateIdeas', 'Generate 3 AI Ideas')}</span>
-                    </>
-                  )}
-                </button>
+        ) : (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <AiSuggestionsCard
+              onSelectSuggestion={handleSelectSuggestion}
+              onGenerate={handleValidatedNext}
+              businessId={businessId}
+              selectedIdea={selectedIdea}
+              committedSuggestionIds={committedSuggestionIds}
+            />
+          </div>
+        )
+      ) : showAiSuggestions ? (
+        /* Show content locked to the active path — no tab switching */
+        <div className="space-y-4">
+          {/* AI Forslag path */}
+          <div className={activePath === 'ai-ideas' ? 'block' : 'hidden'}>
+            {businessId ? (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <AiSuggestionsCard
+                  onSelectSuggestion={handleSelectSuggestion}
+                  onGenerate={handleValidatedNext}
+                  businessId={businessId}
+                  selectedIdea={selectedIdea}
+                  committedSuggestionIds={committedSuggestionIds}
+                />
               </div>
             ) : (
-              <div className="space-y-3">
-                {/* Grid layout for ideas - 3 columns side by side */}
-                <div className="grid grid-cols-3 gap-3">
-                  {aiIdeas.map((idea) => (
-                    <IdeaCard
-                      key={idea.id}
-                      idea={idea}
-                      isSelected={selectedIdea === idea.id}
-                      onSelect={() => selectIdea(idea)}
-                      type="ai"
-                    />
-                  ))}
-                </div>
-                <button
-                  onClick={generateAiIdeas}
-                  disabled={isGenerating}
-                  className="w-full px-3 py-1.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-all text-sm font-medium"
-                >
-                  {t('generate.generateMore', '🔄 Generer flere ideer')}
-                </button>
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center text-gray-500">
+                Loading...
               </div>
             )}
           </div>
-        )}
 
-        {/* Custom Tab - COMPACT */}
-        {activeTab === 'custom' && (
-          <div className="space-y-3">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={topicInput}
-                onChange={(e) => setTopicInput(e.target.value)}
-                placeholder={t('generate.topicPlaceholder', 'What is your post about?')}
-                className="flex-1 px-2 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-base"
-                onKeyPress={(e) => e.key === 'Enter' && generateCustomIdea()}
-              />
-              <button
-                onClick={generateCustomIdea}
-                disabled={isGenerating || !topicInput.trim()}
-                className="px-4 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 transition-all text-sm font-medium shadow-md flex items-center gap-1.5"
-              >
-                {isGenerating ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  </>
-                ) : (
-                  <>
-                    <Wand className="w-3.5 h-3.5" />
-                    <span>{t('generate.generate', 'Generate')}</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {customIdea && (
-              <IdeaCard
-                idea={customIdea}
-                isSelected={true}
-                onSelect={() => {}}
-                type="custom"
-              />
-            )}
-
-            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200 p-2">
-              <p className="text-xs text-indigo-800 flex items-start gap-1.5">
-                <Lightbulb className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span>
-                  {t('generate.customTip', 'Tip: Be specific about your topic. AI will help you create engaging content.')}
-                </span>
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Text Editor Section - COMPACT with Platform Tabs */}
-      {/* Only show if: AI Ideas tab + AI idea selected, OR Custom tab + custom idea exists */}
-      {((activeTab === 'ai' && selectedIdea && selectedIdea.startsWith('ai-')) || 
-        (activeTab === 'custom' && customIdea && selectedIdea === customIdea.id)) && (
-        <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="bg-indigo-100 p-1.5 rounded-lg">
-              <Type className="w-4 h-4 text-indigo-600" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-800">
-                {t('generate.writeYourPost', 'Write Your Post')}
-              </h3>
-              <p className="text-xs text-slate-600">
-                {t('generate.editAndImprove', 'Edit the generated text or write your own')}
-              </p>
-            </div>
-          </div>
-
-          {/* Platform Tabs - Only show if multiple platforms selected */}
-          {selectedPlatforms.length > 1 && (
-            <div className="flex items-center gap-2 mb-3 border-b border-slate-200 pb-2">
-              {availablePlatforms
-                .filter(p => selectedPlatforms.includes(p.id))
-                .map(platformInfo => {
-                const platform = platformInfo.id
-                const Icon = platformInfo.icon
-                const isActive = activePlatform === platform
-                
-                return (
-                  <button
-                    key={platform}
-                    onClick={() => setActivePlatform(platform)}
-                    disabled={!customizePerPlatform}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-sm font-medium transition-all ${
-                      customizePerPlatform
-                        ? isActive
-                          ? 'bg-white border-b-2 border-indigo-600 text-indigo-600'
-                          : 'text-slate-600 hover:text-slate-800 cursor-pointer'
-                        : 'text-slate-400 cursor-not-allowed'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    <span>{platformInfo.name}</span>
-                    {isConnected(platform) && (
-                      <Check className="w-3 h-3 text-emerald-600" />
-                    )}
-                  </button>
-                )
-              })}
-              
-              <div className="ml-auto flex items-center gap-1.5 bg-gradient-to-r from-indigo-50 to-purple-50 px-3 py-1.5 rounded-lg border border-indigo-200">
-                <input
-                  type="checkbox"
-                  id="customizePerPlatform"
-                  checked={customizePerPlatform}
-                  onChange={(e) => handleCustomizeToggle(e.target.checked)}
-                  className="w-3 h-3 text-indigo-600 rounded focus:ring-indigo-500"
-                />
-                <label htmlFor="customizePerPlatform" className="text-xs font-bold text-indigo-700 cursor-pointer">
-                  {t('generate.customizePerPlatform', 'Customize per platform')}
-                </label>
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {/* Platform indicator when customizing */}
-            {customizePerPlatform && selectedPlatforms.length > 1 && (
-              <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-2 py-1.5 rounded-lg">
-                {(() => {
-                  const platformInfo = availablePlatforms.find(p => p.id === activePlatform)
-                  if (!platformInfo) return null
-                  const Icon = platformInfo.icon
-                  return (
-                    <>
-                      <Icon className="w-4 h-4" />
-                      <span className="font-medium">{platformInfo.name} {t('generate.version', 'version')}</span>
-                    </>
-                  )
-                })()}
-              </div>
-            )}
-
-            {/* Headline Input - COMPACT */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                {t('generate.headline', 'Headline')}
-              </label>
-              <input
-                type="text"
-                value={getCurrentText().headline}
-                onChange={(e) => updateCurrentText('headline', e.target.value)}
-                placeholder={t('generate.headlinePlaceholder', 'e.g., "Weekend Special 🔥"')}
-                className="w-full px-2 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-base font-semibold"
-              />
-            </div>
-
-            {/* Text Textarea - COMPACT */}
-            <div>
-              <div className="flex justify-between items-center mb-1">
-                <label className="block text-xs font-semibold text-slate-700">
-                  {t('generate.postText', 'Post Text')}
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500">
-                    {getCurrentText().text.length} {t('generate.characters', 'characters')}
-                  </span>
-                  {customizePerPlatform && (
-                    <>
-                      {activePlatform === 'instagram' && getCurrentText().text.length > 125 && (
-                        <span className="text-xs text-amber-600 flex items-center gap-1">
-                          ⚠️ {t('generate.longForInstagram', 'Long for Instagram')}
-                        </span>
-                      )}
-                      {activePlatform === 'facebook' && getCurrentText().text.length > 300 && (
-                        <span className="text-xs text-amber-600 flex items-center gap-1">
-                          ⚠️ {t('generate.veryLong', 'Very long')}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-              <textarea
-                value={getCurrentText().text}
-                onChange={(e) => updateCurrentText('text', e.target.value)}
-                placeholder={t('generate.textPlaceholder', 'Write your post here...')}
-                rows={4}
-                className="w-full px-2 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-base resize-none"
-              />
-            </div>
-
-            {/* Edit Controls Section */}
-            <div className="space-y-3">
-              {/* Hashtag Chips - Moved to top */}
-              {hashtags.length > 0 && (
-              <div className="bg-slate-50 rounded-lg p-2 border border-slate-200">
-                <div className="flex items-center gap-1 mb-1.5">
-                  <Hash className="w-3 h-3 text-indigo-600" />
-                  <span className="text-xs font-semibold text-slate-700">{t('generate.hashtags', 'Hashtags')}</span>
-                  <span className="text-xs text-slate-500">
-                    ({includeHashtags ? Array.from(selectedHashtags).length : 0}/{hashtags.length} selected)
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {hashtags.map((tag, idx) => {
-                    // If includeHashtags is false, show all as deselected
-                    const isSelected = includeHashtags && selectedHashtags.has(tag)
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          // Only allow individual toggling if includeHashtags is true
-                          if (includeHashtags) {
-                            const newSelected = new Set(selectedHashtags)
-                            if (isSelected) {
-                              newSelected.delete(tag)
-                            } else {
-                              newSelected.add(tag)
-                            }
-                            setSelectedHashtags(newSelected)
-                          }
-                        }}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 border rounded text-xs transition-colors ${
-                          isSelected
-                            ? 'bg-green-50 border-green-300 text-green-700'
-                            : 'bg-red-50 border-red-300 text-red-700'
-                        } ${!includeHashtags ? 'opacity-75' : 'cursor-pointer'}`}
-                      >
-                        {isSelected ? '✓' : '×'}
-                        <span>{tag}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Edit Controls: Toggles and Spelling Check */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 text-xs text-slate-700">
-                <button 
-                  onClick={() => handleEmojiToggle(!includeEmojis)}
-                  className="flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
-                >
-                  {includeEmojis ? '✅' : '⬜'} {t('generate.emojisIncluded', 'Emojis included')}
-                </button>
-                <button 
-                  onClick={() => setIncludeHashtags(!includeHashtags)}
-                  className="flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
-                >
-                  {includeHashtags ? '✅' : '⬜'} {t('generate.hashtagsIncluded', 'Hashtags included')}
-                </button>
-                <button 
-                  onClick={() => handleCTAToggle(!includeCTA)}
-                  className="flex items-center gap-1 hover:text-indigo-600 transition-colors cursor-pointer"
-                >
-                  {includeCTA ? '✅' : '⬜'} {t('generate.ctaIncluded', 'CTA: Call to action')}
-                </button>
-              </div>
-
-              {/* Right: Spelling Check - Always visible with frame */}
-              <button
-                onClick={handleSpellingCheck}
-                disabled={isGenerating || !isEdited}
-                className={`px-3 py-1.5 rounded-lg border-2 font-semibold text-xs flex items-center gap-1.5 transition-all ${
-                  isSpellingChecked && !isEdited
-                    ? 'bg-emerald-50 border-emerald-500 text-emerald-700 cursor-default'
-                    : isGenerating
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-600 cursor-wait'
-                      : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50 cursor-pointer'
-                }`}
-              >
-                {isGenerating ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                    <span>{t('generate.checking', 'Checking...')}</span>
-                  </>
-                ) : isSpellingChecked && !isEdited ? (
-                  <>
-                    <span className="text-base">✓</span>
-                    <span>{t('generate.spellingChecked', 'Spelling checked')}</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-base">✓</span>
-                    <span>{t('generate.checkSpelling', 'Check spelling')}</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Bottom Row: Tone & Length (Locked for Free) */}
-              <div className="flex items-center gap-3">
-                {/* Tone Dropdown */}
-                <div className="relative flex-1">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {t('generate.tone', 'Tone')}
-                  </label>
-                  <div className="relative">
-                    <select
-                      disabled={currentTier === 'free'}
-                      defaultValue="objective"
-                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed appearance-none pr-8"
-                    >
-                      <option value="objective">{t('generate.toneObjective', 'Objective & Neutral')}</option>
-                      <option value="warm">{t('generate.toneWarm', 'Warm & Welcoming')}</option>
-                      <option value="passionate">{t('generate.tonePassionate', 'Passionate & Enthusiastic')}</option>
-                    </select>
-                    {currentTier === 'free' && (
-                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-500">
-                        🔒
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Length Dropdown */}
-                <div className="relative flex-1">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {t('generate.length', 'Length')}
-                  </label>
-                  <div className="relative">
-                    <select
-                      disabled={currentTier === 'free'}
-                      defaultValue="medium"
-                      className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-sm disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed appearance-none pr-8"
-                    >
-                      <option value="short">{t('generate.lengthShort', 'Short')}</option>
-                      <option value="medium">{t('generate.lengthMedium', 'Medium')}</option>
-                      <option value="long">{t('generate.lengthLong', 'Long')}</option>
-                    </select>
-                    {currentTier === 'free' && (
-                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-500">
-                        🔒
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Platform-specific tips */}
-              {customizePerPlatform && selectedPlatforms.length > 1 && (
-                <div className="p-2 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-xs text-blue-800 flex items-start gap-1.5">
-                    <Lightbulb className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                    <span>
-                      {activePlatform === 'facebook' 
-                        ? t('generate.facebookTip', 'Facebook tip: Longer posts with links work well. Use 2-3 hashtags.')
-                        : t('generate.instagramTip', 'Instagram tip: Shorter captions with 10-15 hashtags. Focus on visual storytelling.')
-                      }
-                    </span>
-                  </p>
-                </div>
-              )}
-
-              {/* Upgrade Message for Free Users */}
-              {currentTier === 'free' && (
-                <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-lg p-2">
-                  <p className="text-xs text-amber-800 flex items-center gap-1.5">
-                    ⭐ <span className="font-semibold">{t('generate.upgradeToStandardPlus', 'Upgrade to StandardPlus')}</span> {t('generate.upgradeMessage', 'to choose tone and length for your posts')}
-                  </p>
-                </div>
-              )}
-            </div>
+          {/* Skriv Selv path */}
+          <div className={activePath !== 'ai-ideas' ? 'block' : 'hidden'}>
+            <EditorPane
+              writeContentProps={writeContentProps}
+              validationBanner={validationBanner}
+              footerProps={footerProps}
+            />
           </div>
         </div>
-      )}
+      ) : activePath !== 'weekly-plan' || !weeklyPlanPost ? (
+        /* Normal Mode or Editing Mode: Show EditorPane */
+        <EditorPane
+          writeContentProps={writeContentProps}
+          validationBanner={validationBanner}
+          footerProps={footerProps}
+        />
+      ) : null}
 
-      {/* Photo Suggestion Section - Only for custom ideas */}
-      {selectedIdea && activeTab === 'custom' && customIdea?.description && (
-        <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
-          <div className="flex items-start gap-2">
-            <div className="bg-indigo-100 p-1.5 rounded-lg">
-              <Camera className="w-4 h-4 text-indigo-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-sm font-bold text-slate-800 mb-1">
-                {t('generate.photoSuggestion', 'Foto ide')}
-              </h3>
-              <p className="text-sm text-slate-600">{customIdea.description}</p>
-            </div>
-          </div>
-        </div>
-      )}
+      <BusinessSetupModal
+        isOpen={showBusinessSetup}
+        onClose={() => setShowBusinessSetup(false)}
+      />
 
-      {/* Continue Button - COMPACT */}
-      <div className="flex justify-between items-center pt-2 pb-4">
-        <div className="text-xs text-slate-600">
-          ⏱️ {t('generate.timeEstimate', 'Estimated time')}: <span className="font-semibold text-indigo-600">3 {t('generate.minutes', 'min')}</span>
-        </div>
-        
-        <button
-          onClick={handleNext}
-          disabled={selectedPlatforms.length === 0 || !selectedIdea}
-          className="px-6 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-bold text-base shadow-md flex items-center gap-1.5"
-        >
-          <span>{t('generate.continue', 'Continue to Create')}</span>
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// Idea Card Component - COMPACT
-interface IdeaCardProps {
-  idea: any
-  isSelected: boolean
-  onSelect: () => void
-  type: 'ai' | 'custom'
-}
-
-function IdeaCard({ idea, isSelected, onSelect, type }: IdeaCardProps) {
-  const { t } = useTranslation()
-  
-  // For custom ideas, don't render the card at all (photo suggestion moved to bottom)
-  if (type === 'custom') {
-    return null
-  }
-  
-  const borderColor = type === 'ai' 
-    ? (isSelected ? 'border-purple-500' : 'border-slate-200')
-    : (isSelected ? 'border-indigo-500' : 'border-slate-200')
-  
-  const bgColor = type === 'ai'
-    ? (isSelected ? 'bg-purple-50' : 'bg-white')
-    : (isSelected ? 'bg-indigo-50' : 'bg-white')
-
-  return (
-    <div
-      onClick={onSelect}
-      className={`cursor-pointer rounded-lg border p-3 transition-all hover:shadow-md ${borderColor} ${bgColor}`}
-    >
-      <div className="flex justify-between items-start mb-2">
-        <div className="flex-1">
-          <h4 className="text-sm font-bold text-slate-800 mb-0.5">{idea.title}</h4>
-          <p className="text-sm text-slate-600">{idea.headline}</p>
-        </div>
-        
-        {isSelected && (
-          <div className="bg-purple-600 text-white rounded-full p-1">
-            <Check className="w-3 h-3" />
-          </div>
-        )}
-      </div>
-
-      <p className="text-sm text-slate-700 mb-2 line-clamp-2">{idea.text}</p>
-
-      {idea.description && (
-        <div className="flex items-start gap-1.5 p-2 bg-white rounded-lg border border-slate-200">
-          <Camera className="w-3 h-3 text-indigo-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-xs font-semibold text-slate-700 mb-0.5">
-              {t('generate.photoSuggestion', 'Foto ide')}:
-            </p>
-            <p className="text-xs text-slate-600">{idea.description}</p>
-          </div>
-        </div>
-      )}
+      <BusinessInfoPromptModal
+        isOpen={showBusinessInfoPrompt}
+        onClose={() => setShowBusinessInfoPrompt(false)}
+        onManualInput={() => {
+          setShowBusinessInfoPrompt(false)
+          window.location.href = '/dashboard/profile?mode=manual'
+        }}
+        onWebsiteLink={() => {
+          setShowBusinessInfoPrompt(false)
+          window.location.href = '/dashboard/profile?highlight=website'
+        }}
+      />
     </div>
   )
 }

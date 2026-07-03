@@ -1,0 +1,26 @@
+{
+  "identity": {
+    "title": "Visual Identity",
+    "subtitle": "AI-generated from your photos",
+    "lastUpdated": "Last updated",
+    "never": "Never",
+    "reanalyze": "Re-analyze",
+    "analyzeButton": "Analyze photos automatically",
+    "analyzing": "Analyzing photos...",
+    "uploadPhotos": "Upload photos",
+    "uploadHint": "Upload 1–2 photos of your space + 1–2 showing guests or activity — the more life in the photos, the better the AI analysis.",
+    "noPhotos": "Upload photos of your business, and AI will extract your visual style, color palette, and photography guidelines.",
+    "photosUploaded": "{{count}} photos uploaded",
+    "aesthetic": "Aesthetic",
+    "lighting": "Lighting",
+    "composition": "Composition",
+    "colorGrading": "Color Grading",
+    "dominantColors": "Dominant Colors",
+    "interiorIdentity": "Recognizable Interior",
+    "visualElements": "Visual Elements",
+    "photographyTips": "Photography Tips",
+    "mood": "Mood",
+    "loading": "Loading visual identity...",
+    "errorNoPhotos": "Please upload at least 1 photo first."
+  }
+}

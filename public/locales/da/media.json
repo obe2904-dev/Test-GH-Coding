@@ -1,0 +1,131 @@
+{
+  "mediaGallery": {
+    "title": "Mediebibliotek",
+    "uploadTab": "Upload",
+    "browseTab": "Gennemse",
+    
+    "filter": {
+      "search": "Søg medie...",
+      "mediaType": "Medietype",
+      "all": "Alle",
+      "images": "Billeder",
+      "videos": "Videoer",
+      "postType": "Indholdstype",
+      "sortBy": "Sorter efter",
+      "uploadDate": "Uploaddato",
+      "usageCount": "Mest brugte",
+      "fileSize": "Filstørrelse",
+      "clearFilters": "Ryd filtre"
+    },
+    
+    "postTypes": {
+      "all": "Alle kategorier",
+      "food": "Mad",
+      "drinks": "Drikkevarer",
+      "atmosphere": "Atmosfære",
+      "other": "Andet"
+    },
+    
+    "categories": {
+      "food": "Mad",
+      "drinks": "Drikkevarer",
+      "atmosphere": "Atmosfære",
+      "other": "Andet"
+    },
+    
+    "allCategories": "Alle kategorier",
+    
+    "quota": {
+      "storage": "Lagerplads",
+      "used": "{{used}}MB / {{limit}}MB",
+      "percentUsed": "{{percent}}% brugt",
+      "remaining": "{{remaining}}MB tilbage",
+      "storageFull": "Lagerplads Fyldt",
+      "storageAlmostFull": "Lagerplads Næsten Fyldt",
+      "uploadsBlocked": "Uploads blokeret",
+      "almostFull": "{{percent}}% brugt - overvej opgradering eller slet gamle medier",
+      "fullDescription": "Du har brugt alle {{limitMB}}MB lagerplads. Slet gamle medier eller opgrader for at fortsætte med at uploade.",
+      "almostFullDescription": "Du har brugt {{percent}}% af dine {{limitMB}}MB lagerplads. Overvej at slette gamle medier eller opgradere.",
+      "upgradeButton": "Opgrader til {{size}} Lagerplads →",
+      "upgradeFor1GB": "Opgrader til 1GB",
+      "tier": {
+        "free": "Gratis",
+        "standardplus": "Standard Plus",
+        "premium": "Premium"
+      }
+    },
+    
+    "upload": {
+      "dragDrop": "Træk & slip filer her",
+      "or": "eller",
+      "clickBrowse": "Klik for at gennemse",
+      "acceptedFormats": "JPG, PNG, WebP, MP4, WebM",
+      "maxSize": "Maks {{size}}MB",
+      "uploading": "Uploader...",
+      "uploadSuccess": "Upload succesfuldt!",
+      "uploadError": "Upload fejlede: {{error}}",
+      "selectFromGallery": "Vælg fra Mediebibliotek",
+      "quotaExceeded": "Lagerplads fyldt! Slet gamle medier eller opgrader din plan.",
+      "quotaWarning": "Advarsel: Du bruger {{percent}}% af din lagerplads ({{usedMB}}MB / {{limitMB}}MB). Fortsæt med at uploade?"
+    },
+    
+    "grid": {
+      "loading": "Indlæser medier...",
+      "empty": "Ingen medier endnu",
+      "emptyDescription": "Upload dit første foto eller video for at komme i gang",
+      "error": "Fejl ved indlæsning af medier",
+      "select": "Vælg",
+      "edit": "Rediger",
+      "delete": "Slet",
+      "used": "Brugt {{count}}x",
+      "video": "Video"
+    },
+    
+    "metadata": {
+      "edit": "Rediger Metadata",
+      "postType": "Indholdstype",
+      "dishName": "Retnavn (valgfrit)",
+      "dishNamePlaceholder": "f.eks. Margherita Pizza",
+      "tags": "Tags",
+      "tagsPlaceholder": "Tilføj et tag...",
+      "altText": "Alt-tekst (Tilgængelighed)",
+      "altTextPlaceholder": "Beskriv dette billede for skærmlæsere",
+      "save": "Gem ændringer",
+      "cancel": "Annuller",
+      "hasChanges": "Du har ugemte ændringer"
+    },
+    
+    "actions": {
+      "useSelected": "Brug Valgt",
+      "cancel": "Annuller",
+      "delete": "Slet",
+      "confirmDelete": "Er du sikker på, at du vil slette dette medie? Denne handling kan ikke fortrydes.",
+      "viewAll": "Se Alle",
+      "upload": "Upload",
+      "browse": "Gennemse"
+    },
+    
+    "sidebar": {
+      "title": "Seneste Medier",
+      "empty": "Ingen medier uploadet endnu",
+      "uploadFirst": "Upload Første Foto"
+    },
+    
+    "selection": {
+      "itemSelected": "1 element valgt",
+      "selectPrompt": "Vælg et foto eller video til dit indlæg",
+      "limitReached": "Fotogrænse nået for din plan",
+      "limitDescription": "Du kan tilføje op til {{max}} fotos pr. indlæg på din plan"
+    },
+    
+    "errors": {
+      "loadFailed": "Kunne ikke indlæse medier. Prøv igen.",
+      "uploadFailed": "Upload fejlede. Prøv igen.",
+      "deleteFailed": "Kunne ikke slette medie. Prøv igen.",
+      "updateFailed": "Kunne ikke opdatere metadata. Prøv igen.",
+      "quotaFailed": "Kunne ikke indlæse lagerkvote.",
+      "invalidFile": "Ugyldig filtype. Upload venligst JPG, PNG, WebP, MP4 eller WebM filer.",
+      "fileTooLarge": "Filstørrelse ({{size}}MB) overstiger {{max}}MB grænse"
+    }
+  }
+}

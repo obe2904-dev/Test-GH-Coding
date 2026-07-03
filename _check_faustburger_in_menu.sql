@@ -1,0 +1,12 @@
+-- 1. Is FAUSTBURGER in any menu?
+SELECT 
+  menu.service_period_name,
+  cat.value->>'name' AS category,
+  item.value->>'name' AS dish_name,
+  item.value->>'description' AS description
+FROM menu_results_v2 AS menu,
+     jsonb_array_elements(menu.structured_data->'categories') AS cat,
+     jsonb_array_elements(cat->'items') AS item
+WHERE menu.business_id = 'f4679fa9-3120-4a59-9506-d059b010c34a'
+  AND menu.status = 'done'
+  AND UPPER(item.value->>'name') LIKE '%FAUSTBURGER%';

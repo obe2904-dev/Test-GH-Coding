@@ -1,284 +1,391 @@
-import { useState } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { usePostCreationStore } from '../../stores/postCreationStore'
+import { supabase } from '../../lib/supabase'
+import { usePostCreationStore, type PlatformContent } from '../../stores/postCreationStore'
+import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useTierStore } from '../../stores/tierStore'
-import { ProgressStepper } from '../ui/ProgressStepper'
+import { TIER_QUOTAS } from '../../config/quotas'
+import { ManualPostModal } from './publish/ManualPostModal'
+import { ScheduledPostModal } from './ScheduledPostModal'
+import { savePublishedPost, updatePublishedPost, deletePublishedPost } from '../../hooks/usePosts'
+import { useBusinessData } from '../../hooks/useBusinessData'
+import { uploadToMediaLibrary, type PostType } from '../../api/mediaLibrary'
+import { usePosts } from '../../hooks/usePosts'
+import type { LoadedPost } from '../../hooks/usePosts'
+
+import { ScheduleCalendarPicker } from './publish/ScheduleCalendarPicker'
+import { ScheduleTimeline } from './publish/ScheduleTimeline'
+import { PostActionModal } from './publish/PostActionModal'
+import { usePublishTimeline } from './publish/usePublishTimeline'
+import { useScheduleData } from './publish/useScheduleData'
+import { Calendar, Send, TrendingUp, ChevronLeft, ChevronRight, Sun, Users, Link2, Sparkles } from './publish/icons'
+import {
+  formatPlatformList,
+  getPlatformLabel,
+  buildPlatformPreviewContent
+} from './publish/utils'
+import { PostCreationFooter } from './shared/PostCreationFooter'
+import { PostFrame } from './PostFrame'
+import { PostModal } from './PostModal'
+import type { PostStatus, Platform } from './PostFrame'
+
+const DEFAULT_MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December'
+]
+
+const DEFAULT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 interface PublishStepProps {
   onNext: () => void
   onBack: () => void
   onStepClick?: (step: number) => void
+  markAsSaved?: () => void
+  hasUnsavedChanges?: boolean
+  onViewCalendar?: () => void
+  /** Navigate back to the weekly plan page after publish (weekly-plan path only) */
+  onBackToPlan?: () => void
+  /** Called after a successful publish — lifts success state to parent without clearing store */
+  onPublishSuccess?: (info: SuccessInfo) => void
+  /** Pre-existing success info — restores the success screen when navigating back to Udgiv */
+  publishedInfo?: SuccessInfo | null
+  /** Called after the user cancels/deletes the scheduled post — parent should clear publishedInfo + refresh badges */
+  onPublishDeleted?: () => void
+  /** Called when user deletes draft to unlock editing */
+  onDraftDeleted?: () => void
+  /** Draft metadata restored from posts table for the current publish flow */
+  restoredDbDraft?: { suggestedPostDatetime: string | null } | null
 }
 
-interface PlatformConnection {
-  platform: string
-  isConnected: boolean
-  canAutoPost: boolean
-  canTrackPerformance: boolean
+export interface SuccessInfo {
+  mode: 'now' | 'schedule'
+  scheduledAt: Date | null
+  platforms: string[]
+  /** DB row IDs of the saved published_posts rows — used to delete/cancel the post */
+  publishedPostIds: string[]
 }
 
-// Icon Components
-const Clock = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <circle cx="12" cy="12" r="10"/>
-    <polyline points="12 6 12 12 16 14"/>
-  </svg>
-)
-
-const Calendar = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-    <line x1="16" y1="2" x2="16" y2="6"/>
-    <line x1="8" y1="2" x2="8" y2="6"/>
-    <line x1="3" y1="10" x2="21" y2="10"/>
-  </svg>
-)
-
-const Send = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <line x1="22" y1="2" x2="11" y2="13"/>
-    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-  </svg>
-)
-
-const Sparkles = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
-    <path d="M19 3l.5 1.5L21 5l-1.5.5L19 7l-.5-1.5L17 5l1.5-.5L19 3z"/>
-  </svg>
-)
-
-const TrendingUp = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-    <polyline points="17 6 23 6 23 12"/>
-  </svg>
-)
-
-const Check = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <polyline points="20 6 9 17 4 12"/>
-  </svg>
-)
-
-const ChevronLeft = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <polyline points="15 18 9 12 15 6"/>
-  </svg>
-)
-
-const ChevronRight = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <polyline points="9 18 15 12 9 6"/>
-  </svg>
-)
-
-const Sun = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <circle cx="12" cy="12" r="5"/>
-    <line x1="12" y1="1" x2="12" y2="3"/>
-    <line x1="12" y1="21" x2="12" y2="23"/>
-    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-    <line x1="1" y1="12" x2="3" y2="12"/>
-    <line x1="21" y1="12" x2="23" y2="12"/>
-    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-  </svg>
-)
-
-const Users = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-    <circle cx="9" cy="7" r="4"/>
-    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-  </svg>
-)
-
-// const AlertTriangle = ({ className }: { className?: string }) => (
-//   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-//     <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-//     <line x1="12" y1="9" x2="12" y2="13"/>
-//     <line x1="12" y1="17" x2="12.01" y2="17"/>
-//   </svg>
-// )
-
-const Copy = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-  </svg>
-)
-
-const ExternalLink = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-    <polyline points="15 3 21 3 21 9"/>
-    <line x1="10" y1="14" x2="21" y2="3"/>
-  </svg>
-)
-
-const Link2 = ({ className }: { className?: string }) => (
-  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-  </svg>
-)
-
-// Mock data with connection status
-const mockRecentPosts = [
-  { 
-    id: 1, 
-    date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-    time: '2 hours ago', 
-    title: 'Summer sale announcement', 
-    platform: 'Facebook',
-    snippet: 'Check out our amazing summer deals...',
-    engagement: { views: 1540, likes: 127, comments: 23, shares: 8 },
-    thumbnail: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=100&h=100&fit=crop'
-  },
-  { 
-    id: 2, 
-    date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-    time: '5 hours ago', 
-    title: 'New menu items', 
-    platform: 'Instagram',
-    snippet: 'Introducing our fresh seasonal menu...',
-    engagement: { views: 2840, likes: 342, comments: 45, shares: 12 },
-    thumbnail: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&h=100&fit=crop'
-  }
-]
-
-const mockFuturePosts = [
-  { 
-    id: 3, 
-    date: new Date(Date.now() + 18 * 60 * 60 * 1000),
-    time: 'Tomorrow, 16:00', 
-    title: 'Weekend special offer', 
-    platform: 'Facebook',
-    snippet: 'Limited time weekend promo...',
-    timeUntil: 'in 18 hours',
-    thumbnail: 'https://images.unsplash.com/photo-1607082349566-187342175e2f?w=100&h=100&fit=crop'
-  },
-  { 
-    id: 4, 
-    date: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000),
-    time: 'Friday, 12:00', 
-    title: 'Weekly highlights', 
-    platform: 'Instagram',
-    snippet: 'This week\'s best moments...',
-    timeUntil: 'in 4 days',
-    thumbnail: 'https://images.unsplash.com/photo-1611095790444-1dfa35e37b52?w=100&h=100&fit=crop'
-  }
-]
-
-// Simple platform indicator with connection status
-const PlatformIndicator = ({ 
-  platform, 
-  isConnected 
-}: { 
-  platform: string
-  isConnected: boolean
-}) => {
-  const config = {
-    Facebook: { dot: 'bg-blue-600', symbol: 'f' },
-    Instagram: { dot: 'bg-pink-600', symbol: 'i' }
-  }
-  
-  const style = config[platform as keyof typeof config] || config.Facebook
-  
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className={`w-2 h-2 rounded-full ${style.dot}`} />
-      <span className="text-xs font-medium text-slate-700">{platform}</span>
-      {isConnected ? (
-        <span className="text-[10px]" title="Connected">✓</span>
-      ) : (
-        <span className="text-[10px] text-amber-600" title="Not connected">⚠</span>
-      )}
-    </div>
-  )
-}
-
-export function PublishStep({ onNext, onBack, onStepClick }: PublishStepProps) {
-  const { t: tPublish, i18n } = useTranslation(undefined, { keyPrefix: 'publish' })
-  const { postContent, selectedPlatforms, photoContent } = usePostCreationStore()
+export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, onViewCalendar, onBackToPlan, onPublishSuccess, publishedInfo, onPublishDeleted, onDraftDeleted, restoredDbDraft }: PublishStepProps) {
+  const { t: tPublish, i18n } = useTranslation(undefined, { keyPrefix: 'createPost.publish' })
+  const { postContent, selectedPlatforms, photoContent, photoIdea, selectedIdea, aiIdeas, weeklyPlanPost, postCta, activePath, weeklyPlanPostIndex, addWeeklyPlanSessionDone, selectedSuggestionData } = usePostCreationStore()
+  const { isConnected } = useConnectionsStore()
+  const { business } = useBusinessData()
   const { 
     canSchedulePost, 
-    incrementScheduledPost
+    incrementScheduledPost,
+    currentTier,
+    quotaUsage
   } = useTierStore()
 
-  // Helper function to get post title (headline or first words of text)
-  const getPostTitle = (): string => {
-    if (postContent?.headline && postContent.headline.trim()) {
-      return postContent.headline
-    }
-    if (postContent?.text && postContent.text.trim()) {
-      // Get first 50 characters of text
-      const firstWords = postContent.text.trim().substring(0, 50)
-      return firstWords.length < postContent.text.trim().length ? `${firstWords}...` : firstWords
-    }
-    return 'Your New Post'
-  }
+  // TODO: Replace placeholder schedule data hook once backend timeline API is wired up.
+  const { recentPosts, futurePosts, refresh: refreshTimeline } = useScheduleData()
+  const calendarDayPosts = useMemo(() => [...recentPosts, ...futurePosts], [recentPosts, futurePosts])
 
-  const [publishMode, setPublishMode] = useState<'now' | 'schedule'>('now')
-  const [selectedSuggestion, setSelectedSuggestion] = useState<number | null>(null)
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null)
-  const [selectedHour, setSelectedHour] = useState<string>('14')
-  const [selectedMinute, setSelectedMinute] = useState<string>('00')
-  const [currentMonth, setCurrentMonth] = useState(new Date())
+  const [selectedDate, setSelectedDate] = useState<Date | null>(() => {
+    const now = new Date()
+    return now
+  })
+  const [selectedHour, setSelectedHour] = useState<string>(() =>
+    String(new Date().getHours()).padStart(2, '0')
+  )
+  const [selectedMinute, setSelectedMinute] = useState<string>(() => {
+    const mins = new Date().getMinutes()
+    // Round up to next 15-min boundary for a clean default
+    const rounded = Math.ceil(mins / 15) * 15
+    return String(rounded >= 60 ? 0 : rounded).padStart(2, '0')
+  })
+  const [scheduleFromPlan, setScheduleFromPlan] = useState(false)
+  const [successInfo, setSuccessInfo] = useState<SuccessInfo | null>(publishedInfo ?? null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmDraftDelete, setConfirmDraftDelete] = useState(false)
+  const [isDeletingPost, setIsDeletingPost] = useState(false)
+
+  // Pre-populate schedule from Weekly Plan timing (runs once on mount)
+  useEffect(() => {
+    if (!weeklyPlanPost?.timing?.date) return
+    try {
+      const [y, m, d] = weeklyPlanPost.timing.date.split('-').map(Number)
+      // Parse time: handle "18:00", "18:00-21:00", "6 PM" formats
+      let hour = 12
+      let minute = 0
+      const rawTime = weeklyPlanPost.timing.time || ''
+      const timeMatch = rawTime.match(/(\d{1,2}):(\d{2})/)
+      if (timeMatch) {
+        hour = parseInt(timeMatch[1], 10)
+        minute = parseInt(timeMatch[2], 10)
+      } else {
+        const hourOnlyMatch = rawTime.match(/(\d{1,2})\s*(am|pm)?/i)
+        if (hourOnlyMatch) {
+          hour = parseInt(hourOnlyMatch[1], 10)
+          if (hourOnlyMatch[2]?.toLowerCase() === 'pm' && hour < 12) hour += 12
+        }
+      }
+      const date = new Date(y, m - 1, d, hour, minute)
+      if (!isNaN(date.getTime())) {
+        setSelectedDate(date)
+        setSelectedHour(String(hour).padStart(2, '0'))
+        setSelectedMinute(String(minute).padStart(2, '0'))
+        setScheduleFromPlan(true)
+      }
+    } catch {
+      // Silently ignore parse errors — user can pick manually
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-populate time from Quick Suggestions suggestedTime (runs once on mount)
+  useEffect(() => {
+    if (!selectedSuggestionData?.suggestedTime || scheduleFromPlan) return
+    try {
+      const timeMatch = selectedSuggestionData.suggestedTime.match(/(\d{1,2}):(\d{2})/)
+      if (timeMatch) {
+        const hour = parseInt(timeMatch[1], 10)
+        const minute = parseInt(timeMatch[2], 10)
+        setSelectedHour(String(hour).padStart(2, '0'))
+        setSelectedMinute(String(minute).padStart(2, '0'))
+        console.log('[PublishStep] Pre-filled time from Quick Suggestion:', selectedSuggestionData.suggestedTime)
+      }
+    } catch {
+      // Silently ignore parse errors
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [isPublishing, setIsPublishing] = useState(false)
+  const isSavingRef = useRef(false) // ref-based guard — prevents double-save from rapid/double clicks
+  // platform -> saved row id, so re-saves UPDATE instead of INSERT
+  const savedPostIds = useRef<Record<string, string>>({})
+
+  // Per-platform publish toggles — user can deselect a platform before committing
+  // Initialised from selectedPlatforms; resets whenever the outer selection changes
+  const [publishPlatforms, setPublishPlatforms] = useState<string[]>(selectedPlatforms)
+  useEffect(() => { setPublishPlatforms(selectedPlatforms) }, [selectedPlatforms])
   // const [schedulingConflicts, setSchedulingConflicts] = useState<string[]>([])
   const [showManualPostModal, setShowManualPostModal] = useState(false)
   const [copiedPlatform, setCopiedPlatform] = useState<string | null>(null)
   
-  // Platform connection state (mock - would come from API in real app)
-  const [platformConnections] = useState<PlatformConnection[]>([
-    { 
-      platform: 'Facebook', 
-      isConnected: false, // Set to true if user has connected
-      canAutoPost: false, 
-      canTrackPerformance: false 
-    },
-    { 
-      platform: 'Instagram', 
-      isConnected: false, // Set to true if user has connected
-      canAutoPost: false, 
-      canTrackPerformance: false 
-    }
-  ])
+  // Post action modal state (for draft/scheduled posts)
+  const [showPostActionModal, setShowPostActionModal] = useState(false)
   
-  // Combine hour and minute into time string
-  const selectedTime = `${selectedHour}:${selectedMinute}`
-  const timeInterval = 15 // minutes
+  // Scheduled post modal state
+  const [showScheduledPostModal, setShowScheduledPostModal] = useState(false)
+  const [selectedScheduledPostId, setSelectedScheduledPostId] = useState<string | null>(null)
 
-  // Check if platform is connected
-  const isPlatformConnected = (platform: string) => {
-    const conn = platformConnections.find(p => p.platform === platform)
-    return conn?.isConnected || false
-  }
+  // Find the selected AI idea to access CTA data
+  const selectedAiIdea = useMemo(() => {
+    if (selectedIdea && aiIdeas && aiIdeas.length > 0) {
+      return aiIdeas.find(idea => idea.id === selectedIdea)
+    }
+    return null
+  }, [selectedIdea, aiIdeas])
 
-  // Get unconnected platforms from selected
-  const getUnconnectedPlatforms = () => {
-    return selectedPlatforms.filter(platform => {
-      const platformName = platform.charAt(0).toUpperCase() + platform.slice(1)
-      return !isPlatformConnected(platformName)
-    })
-  }
+  const unconnectedPlatforms = useMemo(
+    () => publishPlatforms.filter((platform) => !isConnected(platform)),
+    [selectedPlatforms, isConnected]
+  )
 
-  const monthNamesRaw = tPublish('monthNames', { returnObjects: true })
-  const monthNames = Array.isArray(monthNamesRaw)
-    ? monthNamesRaw
-    : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const isPlatformConnected = useCallback((platform: string) => isConnected(platform), [isConnected])
 
-  const dayNamesRaw = tPublish('dayNames', { returnObjects: true })
-  const dayNames = Array.isArray(dayNamesRaw)
-    ? dayNamesRaw
-    : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const selectedDateTime = useMemo(() => {
+    if (!selectedDate) return null
+    const date = new Date(selectedDate)
+    date.setHours(Number(selectedHour), Number(selectedMinute), 0, 0)
+    return date
+  }, [selectedDate, selectedHour, selectedMinute])
+
+  const selectedTimeIsTooOldForSchedule = useMemo(() => {
+    if (!selectedDateTime) return true
+    return (selectedDateTime.getTime() - Date.now()) <= 2 * 60 * 1000
+  }, [selectedDateTime])
+
+  // ── New Timeline State: Unified view of all posts ──
+  const posts = usePosts()
+  const [allPosts, setAllPosts] = useState<LoadedPost[]>([])
+  const [selectedPost, setSelectedPost] = useState<any | null>(null)
+  const [isLoadingTimeline, setIsLoadingTimeline] = useState(true)
+
+  // Load all posts for the timeline (drafts + scheduled + published)
+  const loadTimelineData = useCallback(async () => {
+    if (!business?.id) return
+    setIsLoadingTimeline(true)
+    try {
+      // Load all posts in one query
+      const allPostsData = await posts.loadAllPosts(business.id, ['draft', 'scheduled', 'published'])
+      setAllPosts(allPostsData)
+    } catch (error) {
+      console.error('[PublishStep] Error loading posts:', error)
+    } finally {
+      setIsLoadingTimeline(false)
+    }
+  }, [business?.id]) // Removed 'posts' from deps - it's a stable hook reference
+
+  // Load timeline on mount
+  useEffect(() => {
+    loadTimelineData()
+  }, [loadTimelineData])
+
+  // Determine sibling post (other platform) for "Apply to both" checkbox
+  const getSiblingPost = useCallback((post: any) => {
+    if (!post) return null
+    const otherPlatform = post.platform === 'facebook' ? 'instagram' : 'facebook'
+    
+    // Find sibling post in unified allPosts array
+    const sibling = allPosts.find(
+      p => p.platform === otherPlatform && 
+           p.ideaSource === post.ideaSource &&
+           p.suggestionId === post.suggestionId &&
+           p.weeklyPlanSlotDate === post.weeklyPlanSlotDate
+    )
+    
+    return sibling ? { id: sibling.id, platform: otherPlatform } : null
+  }, [allPosts])
+
+  // Modal action handlers
+  const handleTimelinePostNow = useCallback(async (postId: string, applyToBoth: boolean) => {
+    // TODO: Implement post now logic
+    console.log('[PublishStep] Post now:', postId, 'applyToBoth:', applyToBoth)
+    await loadTimelineData()
+  }, [loadTimelineData])
+
+  const handleReschedule = useCallback(async (postId: string, newTime: string, applyToBoth: boolean) => {
+    // TODO: Implement reschedule logic
+    console.log('[PublishStep] Reschedule:', postId, 'newTime:', newTime, 'applyToBoth:', applyToBoth)
+    await loadTimelineData()
+  }, [loadTimelineData])
+
+  const handleDeletePost = useCallback(async (postId: string, applyToBoth: boolean) => {
+    // TODO: Implement delete logic
+    console.log('[PublishStep] Delete:', postId, 'applyToBoth:', applyToBoth)
+    await loadTimelineData()
+  }, [loadTimelineData])
+
+  const handleUpdateText = useCallback(async (postId: string, newText: string, applyToBoth: boolean) => {
+    // TODO: Implement update text logic
+    console.log('[PublishStep] Update text:', postId, 'newText:', newText, 'applyToBoth:', applyToBoth)
+    await loadTimelineData()
+  }, [loadTimelineData])
+
+  const selectedPublishMode: 'now' | 'schedule' = selectedTimeIsTooOldForSchedule ? 'now' : 'schedule'
+  const scheduleDisabledReason = selectedTimeIsTooOldForSchedule
+    ? 'Vælg en ny tid før du kan planlægge'
+    : undefined
+
+  const hasPersistedDraft = useMemo(() => {
+    if (postContent) {
+      const trimmedHeadline = (postContent.headline ?? '').trim()
+      const trimmedText = (postContent.text ?? '').trim()
+
+      if (trimmedHeadline.length > 0 || trimmedText.length > 0) {
+        return true
+      }
+
+      if (postContent.platformSpecific && postContent.platformContent) {
+        const hasPlatformContent = Object.values(postContent.platformContent as Record<string, PlatformContent>).some((content) => {
+          const platformHeadline = (content.headline ?? '').trim()
+          const platformText = (content.text ?? '').trim()
+          return platformHeadline.length > 0 || platformText.length > 0
+        })
+
+        if (hasPlatformContent) {
+          return true
+        }
+      }
+
+      if (postContent.hashtags && postContent.hashtags.length > 0) {
+        return true
+      }
+    }
+
+    if (photoContent?.uploadedMedia && photoContent.uploadedMedia.length > 0) {
+      return true
+    }
+
+    if (photoIdea && photoIdea.trim().length > 0) {
+      return true
+    }
+
+    return false
+  }, [postContent, photoContent, photoIdea])
+
+  const monthNames = useMemo(() => {
+    const resource = i18n.getResource(i18n.language, 'translation', 'publish.monthNames') as unknown
+
+    if (Array.isArray(resource)) {
+      const normalized = resource.filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+      if (normalized.length === 12) {
+        return normalized
+      }
+    }
+
+    if (typeof resource === 'string') {
+      const parts = resource.split(',').map((part) => part.trim()).filter(Boolean)
+      if (parts.length === 12) {
+        return parts
+      }
+    }
+
+    return DEFAULT_MONTH_NAMES
+  }, [i18n, i18n.language])
+
+  const dayNames = useMemo(() => {
+    const resource = i18n.getResource(i18n.language, 'translation', 'publish.dayNames') as unknown
+
+    if (Array.isArray(resource)) {
+      const normalized = resource.filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+      if (normalized.length === 7) {
+        return normalized
+      }
+    }
+
+    if (typeof resource === 'string') {
+      const parts = resource.split(',').map((part) => part.trim()).filter(Boolean)
+      if (parts.length === 7) {
+        return parts
+      }
+    }
+
+    return DEFAULT_DAY_NAMES
+  }, [i18n, i18n.language])
+
+  const timeInterval = useMemo(() => {
+    const resource = i18n.getResource(i18n.language, 'translation', 'publish.timeIntervalMinutes')
+    const parsed = Number(resource)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30
+  }, [i18n, i18n.language])
+
+  const updateSelectedSuggestionStatus = useCallback(async (status: 'selected' | 'consumed' | 'published') => {
+    if (!selectedSuggestionData?.id || !business?.id) return
+
+    const nowIso = new Date().toISOString()
+    const updates: Record<string, unknown> = {
+      status,
+    }
+
+    if (status === 'selected') updates.selected_at = nowIso
+    if (status === 'consumed') updates.consumed_at = nowIso
+    if (status === 'published') updates.published_at = nowIso
+
+    const { error } = await (supabase as any)
+      .from('daily_suggestions')
+      .update(updates)
+      .eq('id', selectedSuggestionData.id)
+      .eq('business_id', business.id)
+
+    if (error) {
+      console.warn('[PublishStep] Failed to update suggestion status:', error)
+    }
+  }, [business?.id, selectedSuggestionData?.id])
 
   // Helper function to format relative date/time
-  const formatRelativeDateTime = (date: Date): string => {
+  const formatRelativeDateTime = useCallback((date: Date): string => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const tomorrow = new Date(today)
@@ -290,288 +397,63 @@ export function PublishStep({ onNext, onBack, onStepClick }: PublishStepProps) {
     
     if (targetDate.getTime() === today.getTime()) {
       return `${tPublish('today', 'Today')}, ${timeStr}`
-    } else if (targetDate.getTime() === tomorrow.getTime()) {
+    }
+
+    if (targetDate.getTime() === tomorrow.getTime()) {
       return `${tPublish('tomorrow', 'Tomorrow')}, ${timeStr}`
-    } else {
-      // Use day name from translations
-      const dayName = dayNames[date.getDay()]
-      return `${dayName}, ${timeStr}`
-    }
-  }
-
-  // AI-suggested times (dynamically generated to use current translations)
-  const createAiSuggestions = () => {
-    const today6pm = new Date()
-    today6pm.setHours(18, 0, 0, 0)
-    
-    const tomorrow10am = new Date()
-    tomorrow10am.setDate(tomorrow10am.getDate() + 1)
-    tomorrow10am.setHours(10, 0, 0, 0)
-    
-    // Find next Friday at noon
-    const nextFriday = new Date()
-    const daysUntilFriday = (5 - nextFriday.getDay() + 7) % 7 || 7 // 5 = Friday
-    nextFriday.setDate(nextFriday.getDate() + daysUntilFriday)
-    nextFriday.setHours(12, 0, 0, 0)
-    
-    return [
-      {
-        id: 1,
-        time: formatRelativeDateTime(today6pm),
-        date: today6pm,
-        reason: tPublish('suggestion1', 'Peak evening engagement'),
-        expectedReach: 'High',
-        icon: Sun,
-        color: 'emerald'
-      },
-      {
-        id: 2,
-        time: formatRelativeDateTime(tomorrow10am),
-        date: tomorrow10am,
-        reason: tPublish('suggestion2', 'Morning coffee scroll time'),
-        expectedReach: 'Medium',
-        icon: Users,
-        color: 'amber'
-      },
-      {
-        id: 3,
-        time: formatRelativeDateTime(nextFriday),
-        date: nextFriday,
-        reason: tPublish('suggestion3', 'Lunch break browsing'),
-        expectedReach: 'High',
-        icon: TrendingUp,
-        color: 'emerald'
-      }
-    ]
-  }
-  
-  const aiSuggestions = createAiSuggestions()
-
-  // Detect scheduling conflicts
-  // useEffect(() => {
-  //   if (!selectedDate) {
-  //     setSchedulingConflicts([])
-  //     return
-  //   }
-
-  //   const selectedDateTime = new Date(selectedDate)
-  //   selectedDateTime.setHours(parseInt(selectedHour), parseInt(selectedMinute))
-
-  //   const conflicts: string[] = []
-  //   const hourInMs = 60 * 60 * 1000
-  //   const conflictWindow = 2 * hourInMs
-
-  //   mockFuturePosts.forEach(post => {
-  //     const timeDiff = Math.abs(selectedDateTime.getTime() - post.date.getTime())
-  //     if (timeDiff < conflictWindow) {
-  //       const hoursDiff = Math.round(timeDiff / hourInMs * 10) / 10
-  //       if (selectedDateTime.getTime() > post.date.getTime()) {
-  //         conflicts.push(`Scheduled ${hoursDiff}h after "${post.title}"`)
-  //       } else {
-  //         conflicts.push(`Scheduled ${hoursDiff}h before "${post.title}"`)
-  //       }
-  //     }
-  //   })
-
-  //   setSchedulingConflicts(conflicts)
-  // }, [selectedDate, selectedHour, selectedMinute])
-
-  // Get sorted posts chronologically
-  const getSortedPosts = () => {
-    const allPosts: Array<{
-      id: string | number
-      date: Date
-      type: 'recent' | 'selected' | 'future'
-      data?: any
-    }> = []
-
-    mockRecentPosts.forEach(post => {
-      allPosts.push({
-        id: post.id,
-        date: post.date,
-        type: 'recent',
-        data: post
-      })
-    })
-
-    if (selectedDate) {
-      const selectedDateTime = new Date(selectedDate)
-      selectedDateTime.setHours(parseInt(selectedHour), parseInt(selectedMinute))
-      
-      allPosts.push({
-        id: 'selected',
-        date: selectedDateTime,
-        type: 'selected'
-      })
     }
 
-    mockFuturePosts.forEach(post => {
-      allPosts.push({
-        id: post.id,
-        date: post.date,
-        type: 'future',
-        data: post
-      })
-    })
-
-    return allPosts.sort((a, b) => a.date.getTime() - b.date.getTime())
-  }
-
-  // Calendar helpers
-  const getDaysInMonth = (date: Date) => {
-    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
-  }
-
-  const getFirstDayOfMonth = (date: Date) => {
-    return new Date(date.getFullYear(), date.getMonth(), 1).getDay()
-  }
-
-  const generateCalendarDays = () => {
-    const daysInMonth = getDaysInMonth(currentMonth)
-    const firstDay = getFirstDayOfMonth(currentMonth)
-    const days: Array<{ day: number; isCurrentMonth: boolean; date: Date }> = []
-
-    // Get previous month's last days
-    const prevMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1)
-    const daysInPrevMonth = getDaysInMonth(prevMonth)
-    
-    for (let i = firstDay - 1; i >= 0; i--) {
-      const day = daysInPrevMonth - i
-      days.push({
-        day,
-        isCurrentMonth: false,
-        date: new Date(prevMonth.getFullYear(), prevMonth.getMonth(), day)
-      })
-    }
-
-    // Current month days
-    for (let i = 1; i <= daysInMonth; i++) {
-      days.push({
-        day: i,
-        isCurrentMonth: true,
-        date: new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i)
-      })
-    }
-
-    // Next month days to fill the grid (up to 42 cells = 6 rows)
-    const remainingCells = 42 - days.length
-    const nextMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1)
-    
-    for (let i = 1; i <= remainingCells; i++) {
-      days.push({
-        day: i,
-        isCurrentMonth: false,
-        date: new Date(nextMonth.getFullYear(), nextMonth.getMonth(), i)
-      })
-    }
-
-    return days
-  }
-
-  const isSelectedDay = (date: Date) => {
-    if (!selectedDate) return false
-    return (
-      selectedDate.getDate() === date.getDate() &&
-      selectedDate.getMonth() === date.getMonth() &&
-      selectedDate.getFullYear() === date.getFullYear()
-    )
-  }
-
-  const isToday = (date: Date) => {
-    const today = new Date()
-    return (
-      today.getDate() === date.getDate() &&
-      today.getMonth() === date.getMonth() &&
-      today.getFullYear() === date.getFullYear()
-    )
-  }
-
-  const isPastDate = (date: Date) => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const compareDate = new Date(date)
-    compareDate.setHours(0, 0, 0, 0)
-    return compareDate < today
-  }
-
-  const isPastDateTime = (date: Date, hour: string, minute: string) => {
-    const dateTime = new Date(date)
-    dateTime.setHours(parseInt(hour), parseInt(minute), 0, 0)
-    return dateTime < new Date()
-  }
-
-  const isDateTimeInPast = (date: Date) => {
-    // If it's not today, just check if the date is in the past
-    if (!isToday(date)) {
-      return isPastDate(date)
-    }
-    
-    // If it's today, check the selected time
-    return isPastDateTime(date, selectedHour, selectedMinute)
-  }
-
-  const handleDayClick = (date: Date) => {
-    // Don't allow selecting past dates
-    if (isPastDate(date)) return
-    
-    // Check if the clicked date is in a different month than currently displayed
-    if (date.getMonth() !== currentMonth.getMonth() || date.getFullYear() !== currentMonth.getFullYear()) {
-      // Navigate to the month of the clicked date
-      setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1))
-    }
-    
-    // If it's today, check if the selected time is not in the past
-    if (isToday(date) && isPastDateTime(date, selectedHour, selectedMinute)) {
-      // Set time to next available time (current time + 15 minutes rounded up)
-      const now = new Date()
-      const currentMinutes = now.getMinutes()
-      const nextInterval = Math.ceil(currentMinutes / timeInterval) * timeInterval
-      
-      if (nextInterval >= 60) {
-        setSelectedHour((now.getHours() + 1).toString().padStart(2, '0'))
-        setSelectedMinute('00')
-      } else {
-        setSelectedHour(now.getHours().toString().padStart(2, '0'))
-        setSelectedMinute(nextInterval.toString().padStart(2, '0'))
-      }
-    }
-    
-    setSelectedDate(date)
-    setSelectedSuggestion(null)
-  }
-
-  const handleSuggestionClick = (suggestion: typeof aiSuggestions[0]) => {
-    setSelectedSuggestion(suggestion.id)
-    setSelectedDate(suggestion.date)
-    const timeParts = suggestion.time.split(', ')[1].split(':')
-    setSelectedHour(timeParts[0])
-    setSelectedMinute(timeParts[1])
-  }
-
-  const handlePreviousMonth = () => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))
-  }
-
-  const handleNextMonth = () => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))
-  }
+    const dayName = dayNames[date.getDay()]
+    return `${dayName}, ${timeStr}`
+  }, [dayNames, tPublish])
 
   // Get formatted content for platform
-  const getFormattedContent = (platform: string) => {
-    // This would format content specifically for each platform
-    // For now, return post content with platform-specific hashtags
-    const baseContent = postContent?.headline || 'Your post content here'
-    
-    if (platform === 'Facebook') {
-      return `${baseContent}\n\n#YourBrand #Facebook`
-    } else if (platform === 'Instagram') {
-      return `${baseContent}\n\n#YourBrand #Instagram #InstaGood`
-    }
-    return baseContent
-  }
+  const getFormattedContent = useCallback(
+    (platform: string) => {
+      const preview = buildPlatformPreviewContent(postContent, platform, selectedPlatforms)
+
+      if (!preview) {
+        return ''
+      }
+
+      const { headline, textWithHashtags } = preview
+      
+      // Build the base content
+      let content = ''
+      if (headline && textWithHashtags) {
+        content = `${headline}\n\n${textWithHashtags}`
+      } else if (headline) {
+        content = headline
+      } else {
+        content = textWithHashtags
+      }
+
+      // For Facebook: Add CTA and booking URL from V2 API if available
+      if (platform.toLowerCase() === 'facebook' && selectedAiIdea?._cta) {
+        const cta = selectedAiIdea._cta
+        
+        // Add CTA text
+        if (cta.text) {
+          content += `\n\n${cta.text}`
+        }
+        
+        // Add booking URL for Facebook (from V2 API response)
+        if (cta.url) {
+          content += `\n${cta.url}`
+        }
+      } else if (platform.toLowerCase() === 'facebook' && postCta?.url) {
+        // Weekly-plan / generate-text-from-idea path: CTA text is already baked into the GPT
+        // output, so only append the booking URL on a new line.
+        content += `\n${postCta.url}`
+      }
+
+      return content
+    },
+    [postContent, selectedPlatforms, selectedAiIdea, postCta]
+  )
 
   // Copy to clipboard
-  const copyToClipboard = async (platform: string) => {
+  const copyToClipboard = useCallback(async (platform: string) => {
     const content = getFormattedContent(platform)
     try {
       await navigator.clipboard.writeText(content)
@@ -579,6 +461,72 @@ export function PublishStep({ onNext, onBack, onStepClick }: PublishStepProps) {
       setTimeout(() => setCopiedPlatform(null), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
+    }
+  }, [getFormattedContent])
+
+  const handleSaveDraft = useCallback(async () => {
+    const snapshot = postContent
+
+    if (!snapshot && (!photoContent || photoContent.uploadedMedia.length === 0) && (!photoIdea || photoIdea.trim().length === 0)) {
+      return false
+    }
+
+    let serializablePhotoContent = null
+    if (photoContent && photoContent.uploadedMedia.length > 0) {
+      serializablePhotoContent = {
+        ...photoContent,
+        uploadedMedia: photoContent.uploadedMedia.map((media) => ({
+          id: media.id,
+          url: media.originalUrl || media.url,
+          originalUrl: media.originalUrl,
+          type: media.type,
+          adjustedUrl: media.adjustedUrl,
+          adjustments: media.adjustments,
+          selectedVersionForPost: media.selectedVersionForPost,
+          platformVariants: media.platformVariants,
+          slideCaption: media.slideCaption,
+          aiSkipSuggested: media.aiSkipSuggested,
+        })),
+      }
+    }
+
+    const draftLocal = {
+      timestamp: Date.now(),
+      selectedPlatforms,
+      postContent: snapshot,
+      photoContent: serializablePhotoContent || photoContent,
+      photoIdea,
+    }
+
+    try {
+      localStorage.setItem('post2grow_draft_recovery', JSON.stringify(draftLocal))
+      markAsSaved?.()
+    } catch (error) {
+      console.error('Failed to persist draft to localStorage:', error)
+      return false
+    }
+
+    return true
+  }, [postContent, photoContent, photoIdea, selectedPlatforms, markAsSaved])
+
+  // Download photo
+  const downloadPhoto = async () => {
+    if (!photoContent?.uploadedMedia?.[0]?.url) return
+    
+    try {
+      const imageUrl = photoContent.uploadedMedia[0].url
+      const response = await fetch(imageUrl)
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `post-photo-${Date.now()}.jpg`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Failed to download photo:', err)
     }
   }
 
@@ -599,669 +547,881 @@ export function PublishStep({ onNext, onBack, onStepClick }: PublishStepProps) {
     setShowManualPostModal(true)
   }
 
-  const handlePublish = async () => {
-    const unconnected = getUnconnectedPlatforms()
-    
-    if (unconnected.length > 0) {
-      // Show manual post modal
-      setShowManualPostModal(true)
-    } else {
-      // Auto-post to connected platforms
-      if (publishMode === 'schedule' && !canSchedulePost()) {
-        alert(tPublish('scheduleQuotaExceeded', 'Reached monthly limit'))
-        return
-      }
-      
-      setIsPublishing(true)
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      console.log('Auto-posting to:', selectedPlatforms)
-      if (publishMode === 'schedule') {
-        incrementScheduledPost()
-      }
-      
-      setIsPublishing(false)
-      onNext()
+  // Called when the user confirms they have posted on a platform manually
+  const handleConfirmPosted = useCallback(async (platform: string, postedAt: Date) => {
+    if (!business?.id) {
+      console.warn('[handleConfirmPosted] business.id not available — post not saved')
+      return
     }
-  }
 
-  const canPublish = publishMode === 'now' || (publishMode === 'schedule' && selectedDate && selectedTime)
+    const postText = getFormattedContent(platform)
+    const media = photoContent?.uploadedMedia?.[0]
+    const photoFile = media?.file ?? null
+    const photoUrl = media?.adjustedUrl ?? media?.url ?? null
+
+    const { photoUploadFailed } = await savePublishedPost({
+      businessId: business.id,
+      platform: platform.toLowerCase(),
+      postText,
+      ideaSource: publishIdeaSource,
+      suggestionId: selectedSuggestionData?.id ?? null,
+      photoFile,
+      photoUrl,
+      contentType: (weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType)?.toLowerCase() ?? null,
+      menuItemId: weeklyPlanPost?.contentSubject?.menuItemId ?? selectedSuggestionData?.menuItemId ?? null,
+      menuItemName: weeklyPlanPost?.contentSubject?.menuItemName ?? selectedSuggestionData?.menuItemName ?? null,
+      weeklyPlanId: weeklyPlanPost?.id ?? null,
+      weeklyPlanIdeaId: weeklyPlanPost?.idea_id ?? null,
+      weeklyPlanSlotDate: weeklyPlanPost?.timing?.date ?? null,
+      postedAt,
+      captionData: buildCaptionData(platform, postText, postedAt),
+      mediaMetadata: media ? {
+        thumbnail_url: photoUrl ?? null,
+        original_url: media.originalUrl ?? null,
+        adjusted_url: media.adjustedUrl ?? null,
+        selected_version_for_post: media.selectedVersionForPost ?? null,
+        media_type: media.type,
+      } : null,
+    })
+
+    if (photoUploadFailed) {
+      console.error(
+        '[handleConfirmPosted] Photo upload failed — post saved without photo. ' +
+        'Make sure the "post-media" Supabase Storage bucket exists and is public.',
+      )
+      alert(
+        'Opslaget blev gemt, men billedet kunne ikke uploades og gemmes ikke i oversigten.\n\n' +
+        'Opret venligst "post-media" bucket i Supabase Storage (offentlig) og kør migreringen.',
+      )
+    }
+
+    // Refresh the timeline so the new post appears immediately
+    refreshTimeline()
+
+    // Mark the current weekly plan slot as done so the context strip updates
+    if (activePath === 'weekly-plan') {
+      addWeeklyPlanSessionDone(weeklyPlanPostIndex)
+    }
+  }, [business?.id, getFormattedContent, photoContent, weeklyPlanPost, selectedSuggestionData, activePath, weeklyPlanPostIndex, addWeeklyPlanSessionDone, refreshTimeline])
+
+  const selectedTime = useMemo(() => `${selectedHour}:${selectedMinute}`, [selectedHour, selectedMinute])
+
+  // Suggested time after the grace window means the user must pick a new time.
+  const publishMode = selectedPublishMode
+
+  const canPublish = !!selectedDate && publishPlatforms.length > 0
+
+  const handleScheduledPostClick = useCallback((postId: string | number) => {
+    setSelectedScheduledPostId(String(postId))
+    setShowScheduledPostModal(true)
+  }, [])
+
+  const handleScheduledPostDeleted = useCallback(() => {
+    console.log('[PublishStep] handleScheduledPostDeleted called, refreshing timeline...')
+    refreshTimeline()
+    setShowScheduledPostModal(false)
+    console.log('[PublishStep] Timeline refresh triggered, modal closing')
+  }, [refreshTimeline])
+
+  const handleScheduledPostUpdated = useCallback(() => {
+    refreshTimeline()
+  }, [refreshTimeline])
+
+  const handleSelectedPostClick = useCallback(() => {
+    setShowPostActionModal(true)
+  }, [])
+
+  /**
+   * Save published media to the media gallery for reuse.
+   * Runs in background after successful publish/schedule - non-blocking.
+   * Only saves media with actual files (not URLs from gallery reuse).
+   */
+  const saveMediaToGallery = useCallback(async () => {
+    if (!photoContent?.uploadedMedia || photoContent.uploadedMedia.length === 0) {
+      return
+    }
+
+    if (!business?.id) {
+      console.warn('[saveMediaToGallery] No business ID available')
+      return
+    }
+
+    // Determine content type from weekly plan or suggestion
+    const contentType = weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType ?? null
+    
+    // Map content_type to PostType for media library
+    const postTypeMap: Record<string, PostType> = {
+      'menu_item': 'menu_item',
+      'atmosphere': 'atmosphere',
+      'behind_the_scenes': 'behind_the_scenes',
+      'event': 'event',
+      'announcement': 'announcement',
+      'customer_moment': 'customer_moment',
+      'team': 'team',
+      'seasonal': 'seasonal',
+      'branding': 'branding'
+    }
+    
+    const postType: PostType | undefined = contentType && contentType in postTypeMap 
+      ? postTypeMap[contentType as keyof typeof postTypeMap] 
+      : undefined
+
+    // Get dish name if this is a menu item post
+    const dishName = weeklyPlanPost?.contentSubject?.menuItemName 
+      ?? selectedSuggestionData?.menuItemName 
+      ?? null
+
+    // Get menu item ID for linking to normalized menu data
+    const menuItemId = weeklyPlanPost?.contentSubject?.menuItemId 
+      ?? selectedSuggestionData?.menuItemId 
+      ?? null
+
+    // Save each media item to the gallery (non-blocking)
+    for (const media of photoContent.uploadedMedia) {
+      // Only save if this is an actual file upload (not a gallery reuse)
+      // Gallery items don't have .file property
+      if (!media.file || media.file.size === 0) {
+        continue
+      }
+
+      try {
+        await uploadToMediaLibrary({
+          file: media.file,
+          businessId: business.id,
+          postType: postType,
+          dishName: dishName ?? undefined,
+          menuItemId: menuItemId ?? undefined,
+          tags: contentType ? [contentType] : [],
+          altText: dishName ?? undefined,
+        })
+        
+        console.log('[saveMediaToGallery] Saved media to gallery:', media.file.name)
+      } catch (error) {
+        // Log error but don't block publish flow
+        console.warn('[saveMediaToGallery] Failed to save media to gallery:', error)
+      }
+    }
+  }, [photoContent, business?.id, weeklyPlanPost, selectedSuggestionData])
+
+  const handlePublish = useCallback(async (modeOverride?: 'now' | 'schedule') => {
+    // Prevent double-save from rapid clicks (ref is synchronous, unlike setState)
+    if (isSavingRef.current) return
+    isSavingRef.current = true
+
+    const publishMode = modeOverride ?? selectedPublishMode
+
+    // Manual post modal only applies to "post now" — scheduled posts skip it
+    if (unconnectedPlatforms.length > 0 && publishMode === 'now') {
+      void updateSelectedSuggestionStatus('consumed')
+      setShowManualPostModal(true)
+      isSavingRef.current = false
+      return
+    }
+
+    if (publishMode === 'schedule' && selectedTimeIsTooOldForSchedule) {
+      alert(scheduleDisabledReason)
+      isSavingRef.current = false
+      return
+    }
+
+    if (publishMode === 'schedule' && !canSchedulePost()) {
+      alert(tPublish('scheduleQuotaExceeded', 'Reached monthly limit'))
+      isSavingRef.current = false
+      return
+    }
+
+    if (!business?.id) {
+      console.warn('[handlePublish] business.id not available')
+      isSavingRef.current = false
+      return
+    }
+
+    setIsPublishing(true)
+
+    // Build the scheduled datetime from the selected date + hour + minute.
+    // For "now", use the current moment so the draft can be posted immediately.
+    const scheduledAt = publishMode === 'now'
+      ? new Date()
+      : (selectedDateTime ? new Date(selectedDateTime) : new Date())
+
+    console.log('[handlePublish] mode:', publishMode, 'scheduledAt:', scheduledAt.toISOString(), 'platforms:', selectedPlatforms, 'businessId:', business.id, 'postContent:', postContent, 'photoContent:', photoContent)
+
+    await updateSelectedSuggestionStatus('consumed')
+
+    // Save to DB for every platform the user has kept enabled
+    for (const platform of publishPlatforms) {
+      const platformKey = platform.toLowerCase()
+      const existingId = savedPostIds.current[platformKey]
+
+      if (existingId) {
+        // Already saved — just update the time/status
+        const { error: updateError } = await updatePublishedPost(existingId, {
+          postedAt: scheduledAt,
+          status: publishMode === 'schedule' ? 'scheduled' : 'published',
+          scheduledFor: publishMode === 'schedule' ? scheduledAt : null,
+        })
+        if (updateError) {
+          alert(`Fejl ved opdatering: ${updateError}`)
+          setIsPublishing(false)
+          isSavingRef.current = false
+          return
+        }
+      } else {
+        // First save — INSERT
+        const postText = getFormattedContent(platform)
+        const media = photoContent?.uploadedMedia?.[0]
+        // Only use the file if it's a valid File object with actual data (not a dummy/null)
+        const photoFile = (media?.file && media.file.size > 0) ? media.file : null
+        const photoUrl = media?.adjustedUrl ?? media?.url ?? null
+
+        console.log('[handlePublish] Photo debug:', {
+          hasPhotoContent: !!photoContent,
+          hasUploadedMedia: !!photoContent?.uploadedMedia,
+          mediaCount: photoContent?.uploadedMedia?.length ?? 0,
+          hasMedia: !!media,
+          hasFile: !!photoFile,
+          hasUrl: !!photoUrl,
+          url: photoUrl,
+          fileType: photoFile?.type,
+          fileName: photoFile?.name,
+          fileSize: photoFile?.size,
+        })
+
+        const { id: newId, photoUploadFailed, error: saveError } = await savePublishedPost({
+          businessId: business.id,
+          platform: platformKey,
+          postText,
+          ideaSource: publishIdeaSource,
+          suggestionId: selectedSuggestionData?.id ?? null,
+          photoFile,
+          photoUrl,
+          contentType: (weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType)?.toLowerCase() ?? null,
+          menuItemId: weeklyPlanPost?.contentSubject?.menuItemId ?? selectedSuggestionData?.menuItemId ?? null,
+          menuItemName: weeklyPlanPost?.contentSubject?.menuItemName ?? selectedSuggestionData?.menuItemName ?? null,
+          weeklyPlanId: weeklyPlanPost?.id ?? null,
+          weeklyPlanIdeaId: weeklyPlanPost?.idea_id ?? null,
+          weeklyPlanSlotDate: weeklyPlanPost?.timing?.date ?? null,
+          postedAt: scheduledAt,
+          status: publishMode === 'schedule' ? 'scheduled' : 'published',
+          scheduledFor: publishMode === 'schedule' ? scheduledAt : null,
+          suggestedPostTime: selectedSuggestionData?.suggestedTime ?? null,
+          captionData: buildCaptionData(platform, postText, scheduledAt),
+          mediaMetadata: media ? {
+            thumbnail_url: photoUrl ?? null,
+            original_url: media.originalUrl ?? null,
+            adjusted_url: media.adjustedUrl ?? null,
+            selected_version_for_post: media.selectedVersionForPost ?? null,
+            media_type: media.type,
+          } : null,
+        })
+
+        if (saveError) {
+          alert(`Fejl ved gem: ${saveError}`)
+          setIsPublishing(false)
+          isSavingRef.current = false
+          return
+        }
+        if (newId) savedPostIds.current[platformKey] = newId
+        if (photoUploadFailed) console.error('[handlePublish] Photo upload failed for platform:', platform)
+      }
+    }
+
+    // Save media to gallery for reuse (only on successful publish/schedule)
+    await saveMediaToGallery()
+
+    refreshTimeline()
+
+    if (publishMode === 'schedule') {
+      incrementScheduledPost()
+    }
+
+    if (activePath === 'weekly-plan') {
+      addWeeklyPlanSessionDone(weeklyPlanPostIndex)
+    }
+
+    await updateSelectedSuggestionStatus('published')
+
+    setIsPublishing(false)
+    isSavingRef.current = false
+    // Build result — notify parent (deletes DB draft, refreshes badges) without clearing store
+    const publishedResult: SuccessInfo = {
+      mode: publishMode,
+      scheduledAt: publishMode === 'schedule' ? scheduledAt : null,
+      platforms: [...publishPlatforms],
+      publishedPostIds: Object.values(savedPostIds.current),
+    }
+    onPublishSuccess?.(publishedResult)
+    setSuccessInfo(publishedResult)
+  }, [
+    unconnectedPlatforms,
+    selectedPublishMode,
+    canSchedulePost,
+    tPublish,
+    business?.id,
+    selectedDateTime,
+    publishPlatforms,
+    getFormattedContent,
+    postContent,
+    photoContent,
+    weeklyPlanPost,
+    selectedSuggestionData,
+    refreshTimeline,
+    incrementScheduledPost,
+    activePath,
+    weeklyPlanPostIndex,
+    addWeeklyPlanSessionDone,
+    onNext,
+    onPublishSuccess,
+    selectedTimeIsTooOldForSchedule,
+    scheduleDisabledReason,
+  ])
+
+  const handlePublishNow = useCallback(() => {
+    void handlePublish('now')
+  }, [handlePublish])
+
+  // "Post nu" shortcut — reset date/time to right now
+  const handlePostNow = useCallback(() => {
+    const now = new Date()
+    setSelectedDate(now)
+    setSelectedHour(String(now.getHours()).padStart(2, '0'))
+    setSelectedMinute(String(now.getMinutes()).padStart(2, '0'))
+    setSelectedSuggestion(null)
+  }, [])
 
   // Get locale for displaying dates - use current language (da-DK or en-GB) combined with date format preference
-  const locale = (() => {
-    const currentLang = i18n.language // 'en' or 'da'
-    
-    // Get user's date format preference (US or EU)
+  const locale = useMemo(() => {
+    const currentLang = i18n.language
+
     try {
       const prefs = localStorage.getItem('userPreferences')
       if (prefs) {
         const parsed = JSON.parse(prefs)
-        const dateFormat = parsed.dateFormat // 'en-US' or 'en-GB'
-        
-        // If user wants US format, use en-US regardless of language
-        // Otherwise use language-specific locale (da-DK or en-GB)
+        const dateFormat = parsed?.dateFormat
         if (dateFormat === 'en-US') {
           return 'en-US'
         }
       }
-    } catch (e) {
-      console.error('Error reading date format preference:', e)
+    } catch (error) {
+      console.error('Error reading date format preference:', error)
     }
-    
-    // Default to language-specific locale with EU format
+
     return currentLang === 'da' ? 'da-DK' : 'en-GB'
-  })()
+  }, [i18n.language])
 
-  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'))
-  const minutes = Array.from({ length: 60 / timeInterval }, (_, i) => (i * timeInterval).toString().padStart(2, '0'))
+  const restoredDraftTimeLabel = useMemo(() => {
+    if (!restoredDbDraft) {
+      return null
+    }
 
-  const unconnectedPlatforms = getUnconnectedPlatforms()
+    if (!restoredDbDraft.suggestedPostDatetime) {
+      return 'Intet tidspunkt valgt'
+    }
+
+    const parsedDate = new Date(restoredDbDraft.suggestedPostDatetime)
+    if (Number.isNaN(parsedDate.getTime())) {
+      return 'Intet tidspunkt valgt'
+    }
+
+    return parsedDate.toLocaleTimeString(locale, {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }, [locale, restoredDbDraft])
+
+  const { timelineItems, postPreview, selectedPlatformPreviews } = usePublishTimeline({
+    recentPosts,
+    futurePosts,
+    selectedDate,
+    selectedHour,
+    selectedMinute,
+    selectedDraftTitle: weeklyPlanPost?.contentSubject?.menuItemName ?? selectedSuggestionData?.menuItemName ?? postContent?.headline ?? null,
+    postContent,
+    selectedPlatforms
+  })
+
+  const selectedMediaUrl = useMemo(() => {
+    const media = photoContent?.uploadedMedia?.[0]
+    if (!media) return null
+    return media.adjustedUrl || media.url || media.originalUrl || null
+  }, [photoContent])
+
+  const unconnectedPlatformLabels = useMemo<string[]>(
+    () => unconnectedPlatforms.map((platform) => getPlatformLabel(platform)),
+    [unconnectedPlatforms]
+  )
+
+  const manualPostingRequiredLabel = useMemo(
+    () => tPublish('manualPostingRequired', 'Manual post required'),
+    [tPublish]
+  )
+
+  // ── Success state helpers (rendered inline in the ternary below) ─────────────
+  const successIsSchedule = successInfo?.mode === 'schedule'
+  const successDateLabel = successInfo?.scheduledAt
+    ? successInfo.scheduledAt.toLocaleString(locale, {
+        weekday: 'long', day: 'numeric', month: 'long',
+        hour: '2-digit', minute: '2-digit',
+      })
+    : null
+  const successPlatformEmojis = successInfo?.platforms.map(p =>
+    p === 'facebook' ? '🔵 Facebook' : p === 'instagram' ? '🟣 Instagram' : p
+  ).join(' & ') ?? ''
+
+  const publishIdeaSource: 'manual' | 'quick_suggestions' | 'weekly_plan' =
+    activePath === 'weekly-plan' ? 'weekly_plan'
+    : activePath === 'ai-ideas' ? 'quick_suggestions'
+    : 'manual'
+
+  const buildCaptionData = useCallback((platform: string, postText: string, scheduledAt: Date) => ({
+    activePath,
+    ideaSource: publishIdeaSource,
+    suggestionId: selectedSuggestionData?.id ?? null,
+    weeklyPlanId: weeklyPlanPost?.id ?? null,
+    weeklyPlanIdeaId: weeklyPlanPost?.idea_id ?? null,
+    weeklyPlanSlotDate: weeklyPlanPost?.timing?.date ?? null,
+    selectedPlatforms,
+    platform,
+    postText,
+    scheduledAt: scheduledAt.toISOString(),
+    postContent: postContent ? { ...postContent } : null,
+    postCta,
+    selectedSuggestionData: selectedSuggestionData ? {
+      id: selectedSuggestionData.id ?? null,
+      title: selectedSuggestionData.title ?? null,
+      contentType: selectedSuggestionData.contentType ?? null,
+      menuItemId: selectedSuggestionData.menuItemId ?? null,
+      menuItemName: selectedSuggestionData.menuItemName ?? null,
+      suggestedTime: selectedSuggestionData.suggestedTime ?? null,
+      ctaIntent: selectedSuggestionData.ctaIntent ?? null,
+      occasionContext: selectedSuggestionData.occasionContext ?? null,
+      photoIdea: selectedSuggestionData.photoIdea ?? null,
+      whyExplanation: selectedSuggestionData.whyExplanation ?? null,
+    } : null,
+    weeklyPlanPost: weeklyPlanPost ? {
+      id: weeklyPlanPost.id ?? null,
+      timing: weeklyPlanPost.timing,
+      contentSubject: weeklyPlanPost.contentSubject,
+      postType: weeklyPlanPost.postType,
+      selectionRationale: weeklyPlanPost.selectionRationale ?? null,
+      caption: weeklyPlanPost.caption,
+      strategicContext: weeklyPlanPost.strategicContext ?? null,
+    } : null,
+  }), [activePath, postCta, postContent, publishIdeaSource, selectedPlatforms, selectedSuggestionData, weeklyPlanPost])
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="text-center mb-3">
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">
-          {tPublish('title', 'Schedule & Publish')}
-        </h1>
-        <p className="text-base text-slate-600">
-          {tPublish('subtitle', 'Choose when to publish your post')}
-        </p>
+      {/* No Platforms Selected - Show gentle prompt */}
+      {selectedPlatforms.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 px-6">
+          <div className="max-w-md text-center">
+            <div className="mb-4 text-6xl">📱</div>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">
+              Vælg dine sociale medier
+            </h3>
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">
+              Vælg dine sociale medier, så jeg kan vise den rigtige forhåndsvisning af dit opslag.
+            </p>
+            <button
+              onClick={() => {
+                // Navigate to business profile social media section
+                window.location.href = '/dashboard/profile#social-media'
+              }}
+              className="px-6 py-3 bg-cta text-white rounded-lg text-sm font-semibold hover:bg-cta-hover transition-colors flex items-center gap-2 mx-auto"
+            >
+              <span>Vælg sociale medier</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Connection Notice (Compact) */}
+          {unconnectedPlatforms.length > 0 && (
+        <div className="px-3 py-2 bg-[#FEFCE8] rounded-lg border border-[#F6EBA5] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Link2 className="w-4 h-4 text-[#8C6D1F] flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-[#8C6D1F]">
+                Kopiér manuelt til {formatPlatformList(unconnectedPlatforms)}
+              </p>
+              <p className="text-xs text-[#8C6D1F]">
+                Vi forbereder dit indhold. Klik 'Udgiv' for at få tekst.
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => handleConnectPlatform(unconnectedPlatforms[0])}
+            className="flex-shrink-0 px-3 py-1.5 bg-white border border-[#E5BF4A] text-[#8C6D1F] rounded-md text-xs font-semibold hover:bg-[#8C6D1F] hover:text-white transition-colors whitespace-nowrap"
+          >
+            Kopiér Indhold →
+          </button>
+        </div>
+      )}
+
+      {/* Calendar — always visible */}
+      <div className="space-y-3">
+
+        {/* Calendar with Timeline */}
+        <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
+          <div className="flex items-center gap-1.5 mb-3">
+            <Calendar className="w-4 h-4 text-cta" />
+            <h3 className="text-sm font-bold text-slate-800">
+              {tPublish('calendar', 'Kalender & Tidslinje')}
+            </h3>
+            {scheduleFromPlan && !successInfo && (
+              <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold bg-cta-surface text-cta-text px-2 py-0.5 rounded-full">
+                📅 Fra ugeplanen
+              </span>
+            )}
+            {/* Green success badge — shown after publish in place of the plan badge */}
+            {successInfo && (
+              <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] font-semibold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                ✓ {successIsSchedule ? 'Planlagt' : 'Udgivet'}{successDateLabel ? ` · ${successDateLabel}` : ''}
+              </span>
+            )}
+            {/* "Post nu" shortcut — only shown when a future time is selected and not yet published */}
+            {selectedPublishMode === 'schedule' && !successInfo && (
+              <button
+                onClick={handlePostNow}
+                className="ml-auto text-[10px] font-semibold text-cta hover:underline"
+              >
+                ↩ Post nu
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+            {/* LEFT: Calendar & Time Selection */}
+            <div>
+              {/* AI-Recommended Time Indicator */}
+              {selectedSuggestionData?.suggestedTime && (
+                <div className="mb-3 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-600 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-purple-900">
+                        AI anbefaler kl. {selectedSuggestionData.suggestedTime}
+                      </p>
+                      <p className="text-xs text-purple-700">
+                        Optimalt tidspunkt for engagement
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Quick-select AI Time Chip */}
+              {selectedSuggestionData?.suggestedTime && (() => {
+                const [aiHours, aiMinutes] = selectedSuggestionData.suggestedTime.split(':')
+                const isUsingAiTime = selectedHour === aiHours && selectedMinute === aiMinutes
+                
+                if (isUsingAiTime) {
+                  return (
+                    <div className="mb-3 flex items-center gap-1.5 text-xs text-purple-600">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span className="font-medium">Bruger AI anbefaling</span>
+                    </div>
+                  )
+                }
+                
+                return (
+                  <button
+                    onClick={() => {
+                      setSelectedHour(aiHours)
+                      setSelectedMinute(aiMinutes)
+                    }}
+                    className="mb-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 border border-purple-300 rounded-lg text-xs font-semibold text-purple-700 hover:bg-purple-100 active:bg-purple-200 transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Brug AI anbefaling: kl. {selectedSuggestionData.suggestedTime}</span>
+                  </button>
+                )
+              })()}
+
+              {restoredDbDraft && (
+                <div className="mb-3 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-slate-600 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-slate-900">
+                        {restoredDraftTimeLabel}
+                      </p>
+                      <p className="text-xs text-slate-700">
+                        Kladde tidspunkt
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <ScheduleCalendarPicker
+                selectedDate={selectedDate}
+                selectedHour={selectedHour}
+                selectedMinute={selectedMinute}
+                selectedTime={selectedTime}
+                timeInterval={timeInterval}
+                monthNames={monthNames}
+                dayNames={dayNames}
+                locale={locale}
+                selectTimeLabel={tPublish('selectTime', 'Time')}
+                hourLabel={tPublish('hour', 'Hour')}
+                minuteLabel={tPublish('minute', 'Min')}
+                timeInPastLabel={tPublish('timeInPast', 'Time is in the past')}
+                dayPosts={calendarDayPosts}
+                onSelectDate={(date) => setSelectedDate(date)}
+                onSelectHour={(hour) => setSelectedHour(hour)}
+                onSelectMinute={(minute) => setSelectedMinute(minute)}
+              />
+            </div>
+
+            {/* RIGHT: Posts Timeline */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-slate-700">
+                  {tPublish('postsTimeline', 'Opslags Tidslinje')}
+                </p>
+                <p className="text-xs text-slate-500">
+                  ⏰ {tPublish('chronological', 'Kronologisk')}
+                </p>
+              </div>
+
+              <ScheduleTimeline
+                items={successInfo ? timelineItems.filter(i => i.type !== 'selected') : timelineItems}
+                selectedPlatforms={selectedPlatforms}
+                postPreview={successInfo ? null : postPreview}
+                selectedPlatformPreviews={successInfo ? undefined : selectedPlatformPreviews}
+                locale={locale}
+                isPlatformConnected={isPlatformConnected}
+                unconnectedPlatforms={unconnectedPlatformLabels}
+                manualPostingRequiredLabel={manualPostingRequiredLabel}
+                selectedMediaUrl={selectedMediaUrl ?? undefined}
+                onPublishNow={successInfo ? undefined : handlePublishNow}
+                onSave={successInfo ? undefined : handlePublish}
+                isPublishing={isPublishing}
+                canSave={selectedPublishMode === 'schedule' ? canPublish && !selectedTimeIsTooOldForSchedule : canPublish}
+                saveDisabledReason={scheduleDisabledReason}
+                saveLabel={tPublish('scheduleCta', 'Planlæg')}
+                publishNowLabel={tPublish('publishNowCta', 'Udgiv nu')}
+                onScheduledPostClick={handleScheduledPostClick}
+                onSelectedPostClick={successInfo ? undefined : handleSelectedPostClick}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Progress Stepper */}
-      <ProgressStepper currentStep={3} totalSteps={3} onStepClick={onStepClick} />
+      {/* Separator line */}
+      <div className="border-t border-[#D1D5DB] mt-4"></div>
 
-      {/* Connection Notice (Gentle, at top) */}
-      {unconnectedPlatforms.length > 0 && (
-        <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-          <div className="flex items-start gap-2">
-            <Link2 className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-xs font-semibold text-amber-900 mb-1">
-                {tPublish('manualPosting', 'Manual Posting')}
-              </p>
-              <p className="text-xs text-amber-800 leading-relaxed mb-2">
-                {tPublish('manualPostingDesc', "We'll prepare your content for copy-paste to {platforms}. Connect accounts anytime for automatic posting (it's free!).", {
-                  platforms: unconnectedPlatforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' & ')
-                })}
-              </p>
-              <button 
-                onClick={() => handleConnectPlatform(unconnectedPlatforms[0])}
-                className="text-xs text-amber-900 font-bold hover:text-amber-950 flex items-center gap-1"
+      {/* Navigation — swaps to CTA pair after successful publish */}
+      {successInfo ? (
+        <div className="flex flex-col gap-2 pb-4 pt-2">
+          <button
+            onClick={() => onBackToPlan ? onBackToPlan() : onViewCalendar?.()}
+            className="w-full px-5 py-2.5 bg-cta text-white rounded-lg text-sm font-semibold hover:bg-cta-hover transition-colors"
+          >
+            {onBackToPlan ? '📋 Tilbage til ugeplanen' : '📅 Se i kalender'}
+          </button>
+          <button
+            onClick={() => onNext()}
+            className="w-full px-5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+          >
+            ✏️ Opret nyt opslag
+          </button>
+
+          {/* Cancel scheduled post — only shown for scheduled (future) posts */}
+          {successInfo.mode === 'schedule' && successInfo.publishedPostIds.length > 0 && (
+            <div className="pt-1">
+              {!confirmDelete ? (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="w-full text-xs text-slate-400 hover:text-red-500 transition-colors py-1"
+                >
+                  🗑 Fortryd planlagt opslag
+                </button>
+              ) : (
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-xs text-slate-500">Er du sikker?</span>
+                  <button
+                    disabled={isDeletingPost}
+                    onClick={async () => {
+                      setIsDeletingPost(true)
+                      await Promise.all(successInfo.publishedPostIds.map(id => deletePublishedPost(id)))
+                      setIsDeletingPost(false)
+                      setConfirmDelete(false)
+                      setSuccessInfo(null)
+                      savedPostIds.current = {}
+                      onPublishDeleted?.()
+                    }}
+                    className="text-xs font-semibold text-red-600 hover:text-red-700 disabled:opacity-50"
+                  >
+                    {isDeletingPost ? 'Sletter...' : 'Ja, slet'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    Annuller
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2 pt-2 pb-4">
+          {/* Delete draft button - allows editing after entering Udgiv */}
+          {!confirmDraftDelete ? (
+            <button
+              onClick={() => setConfirmDraftDelete(true)}
+              className="text-xs text-slate-400 hover:text-amber-600 transition-colors py-1 text-center"
+            >
+              🗑 Slet kladde og redigér
+            </button>
+          ) : (
+            <div className="flex items-center justify-center gap-2 py-1">
+              <span className="text-xs text-slate-500">Slet kladde og vend tilbage til design?</span>
+              <button
+                disabled={isDeletingPost}
+                onClick={async () => {
+                  setIsDeletingPost(true)
+                  await onDraftDeleted?.()
+                  setIsDeletingPost(false)
+                  setConfirmDraftDelete(false)
+                }}
+                className="text-xs font-semibold text-amber-600 hover:text-amber-700 disabled:opacity-50"
               >
-                {tPublish('continueToConnect', 'Continue to Copy Content')} →
+                {isDeletingPost ? 'Sletter...' : 'Ja, slet'}
+              </button>
+              <button
+                onClick={() => setConfirmDraftDelete(false)}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >
+                Annuller
               </button>
             </div>
+          )}
+          
+          <div className="flex items-center justify-between gap-3">
+          <button
+            onClick={onBack}
+            className="px-4 py-2 text-xs font-medium text-[#374151] bg-white border border-[#D1D5DB] rounded-lg hover:bg-[#F9FAFB] transition-colors flex items-center gap-1.5"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            <span>{tPublish('back', 'Tilbage')}</span>
+          </button>
+
+          <PostCreationFooter
+            hasUnsavedChanges={Boolean(hasUnsavedChanges)}
+            hasPersistedDraft={hasPersistedDraft}
+            onSaveDraft={handleSaveDraft}
+            onNext={handlePublish}
+            renderNextButton={({ onNext }) => (
+              <button
+                onClick={onNext}
+                disabled={!canPublish || isPublishing}
+                className="px-6 py-2 bg-cta text-text-inverse rounded-lg hover:bg-cta-hover transition-all font-medium text-xs shadow-md flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isPublishing ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>{unconnectedPlatforms.length > 0 ? tPublish('preparing', 'Forbereder...') : selectedPublishMode === 'now' ? tPublish('publishing', 'Udgiver...') : tPublish('scheduling', 'Planlægger...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>
+                      {unconnectedPlatforms.length > 0
+                        ? tPublish('prepareManualPost', 'Forbered manual post')
+                          : selectedPublishMode === 'now'
+                          ? tPublish('publishNowCta', 'Udgiv opslag nu')
+                          : tPublish('schedulePost', 'Planlæg opslag')}
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
+          />
           </div>
         </div>
       )}
 
-      {/* Schedule Controls */}
-      <div className="space-y-3">
-        
-        {/* Quick Action Buttons */}
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => setPublishMode('now')}
-            className={`relative p-3 rounded-lg border transition-all ${
-              publishMode === 'now'
-                ? 'border-indigo-500 bg-indigo-50 shadow-md'
-                : 'border-slate-200 bg-white hover:border-slate-300'
-            }`}
-          >
-            <div className="flex flex-col items-center gap-2">
-              <div className={`p-2 rounded-full ${publishMode === 'now' ? 'bg-indigo-100' : 'bg-slate-100'}`}>
-                <Send className={`w-5 h-5 ${publishMode === 'now' ? 'text-indigo-600' : 'text-slate-600'}`} />
-              </div>
-              <div>
-                <h3 className="text-xs font-bold text-slate-800 mb-0.5">
-                  {tPublish('publishNow', 'Publish Now')}
-                </h3>
-                <p className="text-xs text-slate-600">
-                  {unconnectedPlatforms.length > 0 ? 'Manual post' : 'Post immediately'}
-                </p>
-              </div>
-              {publishMode === 'now' && (
-                <div className="absolute top-2 right-2 w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center">
-                  <Check className="w-3 h-3 text-white" />
-                </div>
-              )}
-            </div>
-          </button>
+      <ManualPostModal
+        isOpen={showManualPostModal && unconnectedPlatforms.length > 0}
+        platforms={unconnectedPlatforms}
+        photoContent={photoContent}
+        copiedPlatform={copiedPlatform}
+        t={tPublish}
+        onClose={() => setShowManualPostModal(false)}
+        onComplete={async () => {
+          setShowManualPostModal(false)
+          
+          // Save media to gallery for manual posts too
+          await saveMediaToGallery()
+          await updateSelectedSuggestionStatus('published')
+          
+          const publishedResult: SuccessInfo = {
+            mode: 'now',
+            scheduledAt: null,
+            platforms: [...publishPlatforms],
+            publishedPostIds: [],  // manual posts: IDs not surfaced; delete not offered for 'now' mode
+          }
+          onPublishSuccess?.(publishedResult)
+          setSuccessInfo(publishedResult)
+        }}
+        onConnectPlatform={handleConnectPlatform}
+        downloadPhoto={downloadPhoto}
+        copyToClipboard={copyToClipboard}
+        openPlatform={openPlatform}
+        getFormattedContent={getFormattedContent}
+        onConfirmPosted={handleConfirmPosted}
+      />
 
-          <button
-            onClick={() => setPublishMode('schedule')}
-            className={`relative p-3 rounded-lg border transition-all ${
-              publishMode === 'schedule'
-                ? 'border-purple-500 bg-purple-50 shadow-md'
-                : 'border-slate-200 bg-white hover:border-slate-300'
-            }`}
-          >
-            <div className="flex flex-col items-center gap-2">
-              <div className={`p-2 rounded-full ${publishMode === 'schedule' ? 'bg-purple-100' : 'bg-slate-100'}`}>
-                <Calendar className={`w-5 h-5 ${publishMode === 'schedule' ? 'text-purple-600' : 'text-slate-600'}`} />
-              </div>
-              <div>
-                <h3 className="text-xs font-bold text-slate-800 mb-0.5">
-                  {tPublish('schedule', 'Schedule')}
-                </h3>
-                <p className="text-xs text-slate-600">
-                  {unconnectedPlatforms.length > 0 ? 'Schedule manual' : 'Best time'}
-                </p>
-              </div>
-              {publishMode === 'schedule' && (
-                <div className="absolute top-2 right-2 w-5 h-5 bg-purple-600 rounded-full flex items-center justify-center">
-                  <Check className="w-3 h-3 text-white" />
-                </div>
-              )}
-            </div>
-          </button>
-        </div>
+      {selectedScheduledPostId && (
+        <ScheduledPostModal
+          postId={selectedScheduledPostId}
+          isOpen={showScheduledPostModal}
+          onClose={() => setShowScheduledPostModal(false)}
+          onDeleted={handleScheduledPostDeleted}
+          onUpdated={handleScheduledPostUpdated}
+        />
+      )}
 
-        {/* Schedule Options */}
-        {publishMode === 'schedule' && (
-          <div className="space-y-3">
-            
-            {/* AI Suggestions */}
-            <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
-              <div className="flex items-center gap-1.5 mb-2">
-                <Sparkles className="w-4 h-4 text-purple-600" />
-                <h3 className="text-sm font-bold text-slate-800">
-                  {tPublish('aiSuggestions', 'AI-Suggested Times')}
-                </h3>
-              </div>
+      {/* Post Action Modal for draft/scheduled posts */}
+      <PostActionModal
+        isOpen={showPostActionModal}
+        onClose={() => setShowPostActionModal(false)}
+        onPublishNow={handlePublishNow}
+        onSchedule={handlePublish}
+        isPublishing={isPublishing}
+        canSave={selectedPublishMode === 'schedule' ? canPublish && !selectedTimeIsTooOldForSchedule : canPublish}
+        saveDisabledReason={scheduleDisabledReason}
+        publishNowLabel={tPublish('publishNowCta', 'Udgiv nu')}
+        scheduleLabel={tPublish('scheduleCta', 'Planlæg')}
+        hasUnconnectedPlatforms={unconnectedPlatformLabels.length > 0}
+        manualPostingRequiredLabel={manualPostingRequiredLabel}
+        postPreview={postPreview ? {
+          headline: postPreview.headline,
+          text: postPreview.textWithHashtags || postPreview.text
+        } : undefined}
+      />
 
-              <div className="grid grid-cols-3 gap-2">
-                {aiSuggestions.map((suggestion) => {
-                  const Icon = suggestion.icon
-                  return (
-                    <button
-                      key={suggestion.id}
-                      onClick={() => handleSuggestionClick(suggestion)}
-                      className={`p-2 rounded-lg border transition-all ${
-                        selectedSuggestion === suggestion.id
-                          ? 'border-purple-500 bg-purple-50 shadow-md'
-                          : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex flex-col items-center gap-1.5 text-center">
-                        <Icon className={`w-5 h-5 ${selectedSuggestion === suggestion.id ? 'text-purple-600' : 'text-slate-600'}`} />
-                        <div>
-                          <p className="text-xs font-bold text-slate-800">{suggestion.time}</p>
-                          <p className="text-xs text-slate-600 leading-tight">{suggestion.reason}</p>
-                        </div>
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                          suggestion.expectedReach === 'High' 
-                            ? 'bg-emerald-100 text-emerald-700' 
-                            : 'bg-amber-100 text-amber-700'
-                        }`}>
-                          {suggestion.expectedReach}
-                        </span>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Calendar with Timeline */}
-            <div className="bg-white rounded-lg shadow-md border border-slate-200 p-3">
-              <div className="flex items-center gap-1.5 mb-3">
-                <Calendar className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-sm font-bold text-slate-800">
-                  {tPublish('calendar', 'Calendar & Timeline')}
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                
-                {/* LEFT: Calendar & Time Selection */}
-                <div>
-                  {/* Calendar and Time Side by Side */}
-                  <div className="grid grid-cols-3 gap-3">
-                    {/* Calendar Grid - 2/3 width */}
-                    <div className="col-span-2 space-y-2">
-                      {/* Calendar Month Navigator */}
-                      <div className="flex items-center justify-between">
-                        <button
-                          onClick={handlePreviousMonth}
-                          className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
-                        >
-                          <ChevronLeft className="w-4 h-4 text-slate-600" />
-                        </button>
-                        <h4 className="text-sm font-bold text-slate-800">
-                          {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
-                        </h4>
-                        <button
-                          onClick={handleNextMonth}
-                          className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
-                        >
-                          <ChevronRight className="w-4 h-4 text-slate-600" />
-                        </button>
-                      </div>
-
-                      {/* Day headers */}
-                      <div className="grid grid-cols-7 gap-0.5 mb-1">
-                        {dayNames.map(day => (
-                          <div key={day} className="text-center text-[10px] font-semibold text-slate-600">
-                            {day}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Calendar days */}
-                      <div className="grid grid-cols-7 gap-0.5">
-                        {generateCalendarDays().map((dayObj, index) => {
-                          const isPast = isPastDate(dayObj.date)
-                          const isTodayDate = isToday(dayObj.date)
-                          const isSelectedDate = isSelectedDay(dayObj.date)
-                          const isTimeInPast = isTodayDate && isPastDateTime(dayObj.date, selectedHour, selectedMinute)
-                          
-                          return (
-                            <button
-                              key={index}
-                              onClick={() => handleDayClick(dayObj.date)}
-                              disabled={isPast}
-                              className={`aspect-square flex items-center justify-center text-[10px] font-medium rounded transition-all ${
-                                isPast
-                                  ? 'bg-transparent text-slate-300 cursor-not-allowed'
-                                  : isSelectedDate
-                                  ? isTimeInPast
-                                    ? 'bg-amber-500 text-white shadow-md'
-                                    : 'bg-purple-600 text-white shadow-md'
-                                  : isTodayDate
-                                  ? 'bg-indigo-100 text-indigo-700 font-bold'
-                                  : dayObj.isCurrentMonth
-                                  ? 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                                  : 'bg-transparent text-slate-400 hover:bg-slate-50 hover:text-slate-500'
-                              }`}
-                            >
-                              {dayObj.day}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Time Selection - 1/3 width */}
-                    <div className="col-span-1 space-y-2">
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-indigo-600" />
-                        <p className="text-[10px] font-semibold text-slate-700">
-                          {tPublish('selectTime', 'Time')}
-                        </p>
-                      </div>
-
-                      {/* Hour Dropdown */}
-                      <div>
-                        <label className="block text-[10px] font-semibold text-slate-700 mb-1">
-                          {tPublish('hour', 'Hour')}
-                        </label>
-                        <select
-                          value={selectedHour}
-                          onChange={(e) => setSelectedHour(e.target.value)}
-                          className="w-full px-2 py-1 border border-slate-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-transparent text-[10px] bg-white"
-                        >
-                          {hours.map(hour => (
-                            <option key={hour} value={hour}>
-                              {hour}:00
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Minute Dropdown */}
-                      <div>
-                        <label className="block text-[10px] font-semibold text-slate-700 mb-1">
-                          {tPublish('minute', 'Min')}
-                        </label>
-                        <select
-                          value={selectedMinute}
-                          onChange={(e) => setSelectedMinute(e.target.value)}
-                          className="w-full px-2 py-1 border border-slate-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-transparent text-[10px] bg-white"
-                        >
-                          {minutes.map(minute => (
-                            <option key={minute} value={minute}>
-                              :{minute}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Selected Time Display */}
-                      {selectedDate && (
-                        <>
-                          <div className={`p-1.5 rounded border ${
-                            isDateTimeInPast(selectedDate)
-                              ? 'bg-amber-50 border-amber-300'
-                              : 'bg-purple-50 border-purple-200'
-                          }`}>
-                            <p className={`text-[10px] font-bold leading-tight ${
-                              isDateTimeInPast(selectedDate) ? 'text-amber-900' : 'text-purple-900'
-                            }`}>
-                              📅 {selectedDate.toLocaleDateString(locale, { 
-                                weekday: 'short', 
-                                month: 'short', 
-                                day: 'numeric' 
-                              })}
-                            </p>
-                            <p className={`text-[10px] ${
-                              isDateTimeInPast(selectedDate) ? 'text-amber-800' : 'text-purple-800'
-                            }`}>
-                              🕐 {selectedTime}
-                            </p>
-                          </div>
-                          {isDateTimeInPast(selectedDate) && (
-                            <div className="p-1.5 bg-red-50 border border-red-200 rounded">
-                              <p className="text-[9px] text-red-700 font-semibold">
-                                ⚠️ {tPublish('timeInPast', 'Time is in the past')}
-                              </p>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* RIGHT: Posts Timeline */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-semibold text-slate-700">
-                      {tPublish('postsTimeline', 'Posts Timeline')}
-                    </p>
-                    <p className="text-[10px] text-slate-500">
-                      ⏰ {tPublish('chronological', 'Chronological')}
-                    </p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    {getSortedPosts().map(item => {
-                      if (item.type === 'recent' && item.data) {
-                        const post = item.data
-                        return (
-                          <div key={post.id} className="p-2 bg-white rounded-lg border border-slate-200">
-                            <div className="flex gap-2">
-                              <div className="w-12 h-12 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0">
-                                {post.thumbnail ? (
-                                  <img src={post.thumbnail} alt="" className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs">
-                                    📷
-                                  </div>
-                                )}
-                              </div>
-                              
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <PlatformIndicator platform={post.platform} isConnected={isPlatformConnected(post.platform)} />
-                                  <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-medium">
-                                    published
-                                  </span>
-                                </div>
-                                <p className="text-xs font-medium text-slate-900 mb-0.5 line-clamp-1">{post.title}</p>
-                                <p className="text-[10px] text-slate-500 mb-1">{post.time}</p>
-                                
-                                <div className="flex gap-3 text-[10px] text-slate-600">
-                                  <span>👁 {post.engagement.views}</span>
-                                  <span>❤️ {post.engagement.likes}</span>
-                                  <span>💬 {post.engagement.comments}</span>
-                                  <span>↗️ {post.engagement.shares}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      }
-                      
-                      if (item.type === 'selected') {
-                        const hasUnconnected = unconnectedPlatforms.length > 0
-                        return (
-                          <div key="selected" className="p-2 bg-purple-50 rounded-lg border-2 border-purple-400">
-                            <div className="flex gap-2">
-                              <div className="w-12 h-12 rounded-lg overflow-hidden bg-purple-100 flex items-center justify-center flex-shrink-0">
-                                {photoContent?.uploadedMedia?.[0]?.url ? (
-                                  <img 
-                                    src={photoContent.uploadedMedia[0].url} 
-                                    alt="" 
-                                    className="w-full h-full object-cover"
-                                  />
-                                ) : (
-                                  <span className="text-purple-500 text-lg">📍</span>
-                                )}
-                              </div>
-                              
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                  {selectedPlatforms.map(platform => {
-                                    const platformName = platform.charAt(0).toUpperCase() + platform.slice(1)
-                                    return (
-                                      <PlatformIndicator 
-                                        key={platform} 
-                                        platform={platformName}
-                                        isConnected={isPlatformConnected(platformName)}
-                                      />
-                                    )
-                                  })}
-                                  <span className="text-[10px] bg-purple-600 text-white px-1.5 py-0.5 rounded font-bold">
-                                    selected
-                                  </span>
-                                </div>
-                                
-                                <p className="text-xs font-bold text-purple-900 mb-0.5">{getPostTitle()}</p>
-                                <p className="text-[10px] text-purple-700 mb-1">
-                                  {selectedDate && `${selectedDate.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric' })} at ${selectedTime}`}
-                                </p>
-                                
-                                {postContent?.text && (
-                                  <p className="text-[10px] text-slate-700 line-clamp-1">
-                                    {postContent.text}
-                                  </p>
-                                )}
-                                
-                                {hasUnconnected && (
-                                  <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
-                                    <span>⚠️</span> {tPublish('manualPostingRequired', 'Manual post required')}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      }
-                      
-                      if (item.type === 'future' && item.data) {
-                        const post = item.data
-                        return (
-                          <div key={post.id} className="p-2 bg-white rounded-lg border border-slate-200">
-                            <div className="flex gap-2">
-                              <div className="w-12 h-12 rounded-lg overflow-hidden bg-slate-100 flex-shrink-0">
-                                {post.thumbnail ? (
-                                  <img src={post.thumbnail} alt="" className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs">
-                                    📷
-                                  </div>
-                                )}
-                              </div>
-                              
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <PlatformIndicator platform={post.platform} isConnected={isPlatformConnected(post.platform)} />
-                                  <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">
-                                    scheduled
-                                  </span>
-                                </div>
-                                <p className="text-xs font-medium text-slate-900 mb-0.5 line-clamp-1">{post.title}</p>
-                                <p className="text-[10px] text-slate-500">{post.time}</p>
-                                
-                                <div className="flex items-center gap-1 mt-1">
-                                  <Clock className="w-2.5 h-2.5 text-slate-500" />
-                                  <span className="text-[10px] text-slate-600">{post.timeUntil}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      }
-                      
-                      return null
-                    })}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Navigation */}
-      <div className="flex justify-between items-center pt-2 pb-4">
-        <button
-          onClick={onBack}
-          className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 transition-colors flex items-center gap-1.5"
-        >
-          <ChevronLeft className="w-4 h-4" />
-          <span>{tPublish('back', 'Back')}</span>
-        </button>
-        
-        <button
-          onClick={handlePublish}
-          disabled={!canPublish || isPublishing}
-          className="px-6 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-bold text-xs shadow-md flex items-center gap-1.5"
-        >
-          {isPublishing ? (
-            <>
-              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              <span>{unconnectedPlatforms.length > 0 ? 'Preparing...' : (publishMode === 'now' ? 'Publishing...' : 'Scheduling...')}</span>
-            </>
-          ) : (
-            <>
-              <span>{unconnectedPlatforms.length > 0 ? 'Continue' : (publishMode === 'now' ? 'Publish Now' : 'Schedule Post')}</span>
-              <Send className="w-3.5 h-3.5" />
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Manual Post Modal */}
-      {showManualPostModal && unconnectedPlatforms.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal content continues in next message due to length */}
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-bold text-slate-900">📋 Ready to Post</h2>
-                <button 
-                  onClick={() => setShowManualPostModal(false)}
-                  className="text-slate-400 hover:text-slate-600 text-xl leading-none"
-                >
-                  ×
-                </button>
-              </div>
-
-              <p className="text-sm text-slate-600 mb-4">
-                Your post is ready! Copy and paste to {unconnectedPlatforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' & ')}.
-              </p>
-
-              {/* Platform-specific content */}
-              {unconnectedPlatforms.map(platform => {
-                const platformName = platform.charAt(0).toUpperCase() + platform.slice(1)
-                return (
-                  <div key={platform} className="mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <PlatformIndicator platform={platformName} isConnected={false} />
-                      <span className="text-[10px] text-slate-500">{tPublish('manualPostingRequired', 'Manual post required')}</span>
-                    </div>
-                    
-                    <div className="p-2 bg-white rounded border border-slate-200 mb-2 max-h-32 overflow-y-auto">
-                      <p className="text-xs text-slate-700 whitespace-pre-wrap">
-                        {getFormattedContent(platformName)}
-                      </p>
-                    </div>
-                    
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => copyToClipboard(platformName)}
-                        className="flex-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 flex items-center justify-center gap-1.5"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        {copiedPlatform === platformName ? 'Copied!' : 'Copy Post'}
-                      </button>
-                      <button 
-                        onClick={() => openPlatform(platformName)}
-                        className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium hover:bg-slate-50 flex items-center gap-1.5"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Open {platformName}
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-
-              {/* Gentle upsell */}
-              <div className="mt-4 p-4 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg border-2 border-indigo-200">
-                <div className="flex items-start gap-3">
-                  <div className="text-2xl">💡</div>
-                  <div className="flex-1">
-                    <h3 className="text-sm font-bold text-slate-900 mb-1">
-                      Want to save time?
-                    </h3>
-                    <p className="text-xs text-slate-700 mb-2 leading-relaxed">
-                      Connect your platforms to post automatically and track performance.
-                    </p>
-                    
-                    <div className="space-y-1 mb-3">
-                      <div className="flex items-center gap-2 text-xs text-slate-700">
-                        <span className="text-emerald-600">✓</span>
-                        <span>One-click posting (no copy-paste)</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-700">
-                        <span className="text-emerald-600">✓</span>
-                        <span>Automatic performance tracking</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-700">
-                        <span className="text-emerald-600">✓</span>
-                        <span>AI learns what works for YOUR audience</span>
-                      </div>
-                    </div>
-                    
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => handleConnectPlatform(unconnectedPlatforms[0])}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 flex items-center gap-1.5"
-                      >
-                        <Link2 className="w-3.5 h-3.5" />
-                        Connect Platforms
-                      </button>
-                      <button 
-                        onClick={() => setShowManualPostModal(false)}
-                        className="px-3 py-2 text-xs text-slate-600 hover:text-slate-800"
-                      >
-                        Maybe later
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="mt-4 text-center">
-                <button 
-                  onClick={() => {
-                    setShowManualPostModal(false)
-                    onNext()
-                  }}
-                  className="text-xs text-slate-500 hover:text-slate-700"
-                >
-                  I've posted manually →
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* NEW: Post Edit/Preview Modal */}
+      {selectedPost && (
+        <PostModal
+          isOpen={!!selectedPost}
+          onClose={() => setSelectedPost(null)}
+          post={selectedPost}
+          siblingPost={getSiblingPost(selectedPost)}
+          onPostNow={handleTimelinePostNow}
+          onReschedule={handleReschedule}
+          onDelete={handleDeletePost}
+          onUpdateText={handleUpdateText}
+        />
+      )}
+        </>
       )}
     </div>
   )
