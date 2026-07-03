@@ -36,30 +36,30 @@
     "nav": {
       "login": "Log in"
     },
-    "heroBadge": "All-in-one social media platform",
-    "heroTitle": "Plan, write, and publish content — faster than ever",
-    "heroSubtitle": "AI-powered social media planning, content creation, and publishing in one place. Grow your business while saving time.",
+    "heroBadge": "Social media for restaurants, cafes & bars",
+    "heroTitle": "Turn your menu into engaging social media posts",
+    "heroSubtitle": "AI-powered content creation for food & beverage businesses. Showcase your dishes, drinks, and atmosphere — automatically.",
     "callToAction": "Create free account",
     "secondaryAction": "Log in to your account",
     "noCreditCard": "No credit card required — get started in minutes",
-    "featuresTitle": "Why marketing teams choose SoMePilot",
+    "featuresTitle": "Why restaurants choose post2grow",
     "features": {
       "automation": {
-        "title": "Automate your planning",
-        "description": "Schedule campaigns across channels in a few clicks and keep a complete overview."
+        "title": "Menu-driven content",
+        "description": "Upload your menu and get daily post suggestions featuring your dishes, drinks, and seasonal specials."
       },
       "ai": {
-        "title": "AI that understands your business",
-        "description": "Receive content ideas, copy, and visuals tailored to your audiences and goals."
+        "title": "AI that knows hospitality",
+        "description": "Get copy and visuals tailored to your restaurant's vibe, cuisine, and local audience."
       },
       "collaboration": {
-        "title": "Strengthen collaboration",
-        "description": "Invite your team, approve content, and follow performance in real time."
+        "title": "Save time, fill tables",
+        "description": "Less time posting, more time cooking. Keep guests engaged and coming back."
       }
     },
     "ctaSection": {
-      "title": "Ready to take control of your social media?",
-      "subtitle": "Create a free account in minutes and see how SoMePilot scales with your needs."
+      "title": "Ready to grow your restaurant's social presence?",
+      "subtitle": "Create a free account in minutes and see how post2grow helps you fill more tables."
     },
     "footer": {
       "privacy": "Privacy policy",

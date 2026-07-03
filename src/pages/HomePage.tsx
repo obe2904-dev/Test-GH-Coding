@@ -23,7 +23,7 @@ export function HomePage() {
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 text-white">
       <header className="px-6 sm:px-10 py-6 flex items-center justify-between">
         <Link to="/" className="text-xl font-semibold tracking-tight">
-          SoMePilot
+          post2grow
         </Link>
         <div className="flex items-center gap-4">
           <LanguageSwitcher />
@@ -124,7 +124,7 @@ export function HomePage() {
 
       <footer className="px-6 sm:px-10 py-8 border-t border-white/10 text-sm text-slate-400">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <p>© {new Date().getFullYear()} SoMePilot</p>
+          <p>© {new Date().getFullYear()} post2grow</p>
           <div className="flex gap-4">
             <Link to="/privacy" className="hover:text-white transition">
               {t('home.footer.privacy')}

@@ -36,30 +36,30 @@
     "nav": {
       "login": "Log ind"
     },
-    "heroBadge": "Alt-i-en social media platform",
-    "heroTitle": "Planlæg, skriv og udgiv indhold hurtigere end nogensinde før",
-    "heroSubtitle": "AI-drevet social media planlægning, indholdsproduktion og publicering samlet ét sted. Få flere kunder og spar tid.",
+    "heroBadge": "Sociale medier til restauranter, caféer & barer",
+    "heroTitle": "Fra café til restaurant — opslag der bygger forretning og brand",
+    "heroSubtitle": "AI-drevet indhold til caféer, barer og restauranter. Vis dine retter, drinks og stemning — automatisk.",
     "callToAction": "Opret gratis konto",
     "secondaryAction": "Log ind på din konto",
     "noCreditCard": "Ingen kreditkort nødvendigt for at komme i gang på få minutter",
-    "featuresTitle": "Derfor vælger marketingteams SoMePilot",
+    "featuresTitle": "Derfor vælger restauranter, caféer og barer post2grow",
     "features": {
       "automation": {
-        "title": "Automatisér planlægningen",
-        "description": "Planlæg kampagner på tværs af kanaler med få klik og bevar overblikket."
+        "title": "Menu-drevet indhold",
+        "description": "Upload dit menukort og få daglige forslag til opslag med dine retter, drinks og sæsonvarer."
       },
       "ai": {
-        "title": "AI der forstår din virksomhed",
-        "description": "Få indholdsidéer, tekster og billeder tilpasset dine målgrupper og mål."
+        "title": "AI der kender restaurationsbranchen",
+        "description": "Få tekster og billeder tilpasset din restaurants vibe, køkken og lokale gæster."
       },
       "collaboration": {
-        "title": "Skab stærkere samarbejde",
-        "description": "Inviter teamet, godkend indhold og følg performance i realtid."
+        "title": "Spar tid, fyld bordene",
+        "description": "Mindre tid på sociale medier, mere tid i køkkenet. Hold gæsterne engagerede."
       }
     },
     "ctaSection": {
-      "title": "Klar til at få styr på sociale medier?",
-      "subtitle": "Opret en gratis konto på få minutter og se hvordan SoMePilot kan skaleres med jeres behov."
+      "title": "Klar til at vokse din restaurants tilstedeværelse på sociale medier?",
+      "subtitle": "Opret en gratis konto på få minutter og se hvordan post2grow hjælper dig med at fylde flere borde."
     },
     "footer": {
       "privacy": "Privatlivspolitik",
