@@ -90,15 +90,16 @@ export function ToneOfVoiceEditor({ businessId, currentProfile, onSave }: ToneOf
       
       if (fetchError) throw fetchError;
       
+      const currentData = current as any;
       const updatedProfile = {
-        ...(current?.brand_profile_v5 || {}),
+        ...(currentData?.brand_profile_v5 || {}),
         version: '5.1',
         voice: {
-          ...(current?.brand_profile_v5?.voice || {}),
+          ...(currentData?.brand_profile_v5?.voice || {}),
           structural_rules: structuralRules
         },
         guardrails: {
-          ...(current?.brand_profile_v5?.guardrails || {}),
+          ...(currentData?.brand_profile_v5?.guardrails || {}),
           avoid_patterns: {
             brochure_language: brochureLanguage,
             superlatives: superlatives,

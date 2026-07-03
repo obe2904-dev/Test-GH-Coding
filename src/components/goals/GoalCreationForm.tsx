@@ -1,5 +1,27 @@
 import { useState } from 'react';
-import type { CreateBusinessGoal, GoalType, Priority, DayOfWeek, ServicePeriod } from '@/types';
+
+// Temporary type definitions (business_goals table was dropped but components still exist)
+type GoalType = 'revenue' | 'footfall' | 'retention' | 'avg_check' | 'conversion';
+type Priority = 'critical' | 'high' | 'medium' | 'low';
+type DayOfWeek = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
+type ServicePeriod = 'breakfast' | 'lunch' | 'dinner' | 'evening';
+
+interface CreateBusinessGoal {
+  business_id: string;
+  goal_type: GoalType;
+  description: string;
+  priority: Priority;
+  target_metric: {
+    metric: string;
+    current_value: number;
+    target_value: number;
+    target_date?: string;
+  };
+  time_constraints?: {
+    target_days?: DayOfWeek[];
+    target_periods?: ServicePeriod[];
+  };
+}
 
 interface GoalCreationFormProps {
   businessId: string;

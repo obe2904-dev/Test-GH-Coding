@@ -1,5 +1,25 @@
 import { useState } from 'react';
-import type { BusinessGoal } from '@/types';
+
+// Temporary type definition (business_goals table was dropped but components still exist)
+interface BusinessGoal {
+  id: string;
+  business_id: string;
+  goal_type: string;
+  description: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  target_metric: {
+    metric: string;
+    current_value: number;
+    target_value: number;
+    target_date?: string;
+  };
+  time_constraints: {
+    target_days?: string[];
+    target_periods?: string[];
+  };
+  progress_pct: number;
+  status: string;
+}
 
 interface GoalCardProps {
   goal: BusinessGoal;
@@ -37,7 +57,7 @@ export function GoalCard({ goal, onUpdate, onDelete }: GoalCardProps) {
     }
   };
 
-  const priorityColor = PRIORITY_COLORS[goal.priority];
+  const priorityColor = PRIORITY_COLORS[goal.priority as keyof typeof PRIORITY_COLORS];
 
   return (
     <div className={`rounded-lg border-2 p-6 ${priorityColor}`}>
@@ -81,12 +101,12 @@ export function GoalCard({ goal, onUpdate, onDelete }: GoalCardProps) {
         <div className="mb-4">
           <div className="text-sm text-gray-600 mb-1">Fokus:</div>
           <div className="flex flex-wrap gap-2">
-            {goal.time_constraints.target_days.map(day => (
+            {goal.time_constraints.target_days.map((day: string) => (
               <span key={day} className="px-2 py-1 bg-white/70 rounded text-xs font-medium">
                 {day}
               </span>
             ))}
-            {goal.time_constraints.target_periods && goal.time_constraints.target_periods.map(period => (
+            {goal.time_constraints.target_periods && goal.time_constraints.target_periods.map((period: string) => (
               <span key={period} className="px-2 py-1 bg-white/70 rounded text-xs font-medium">
                 {period}
               </span>
