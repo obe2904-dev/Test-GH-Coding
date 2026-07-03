@@ -559,7 +559,7 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
                           initialWeights={profile.programme_revenue_weights}
                           onWeightsChanged={() => {
                             if (onArchetypeChanged) {
-                              onArchetypeChanged(profile.voice_archetype ?? '');
+                              onArchetypeChanged(profile.business_archetype ?? '');
                             }
                           }}
                         />

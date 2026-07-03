@@ -52,7 +52,7 @@ export function RevenueDriversDisplay({ businessId }: RevenueDriversDisplayProps
 
         if (fetchError) throw fetchError;
 
-        setRevenueDrivers(data?.revenue_drivers || null);
+        setRevenueDrivers((data as any)?.revenue_drivers || null);
       } catch (err) {
         console.error('[RevenueDriversDisplay] Fetch error:', err);
         setError('Kunne ikke hente revenue drivers');

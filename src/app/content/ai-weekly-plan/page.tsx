@@ -970,8 +970,18 @@ export default function AIWeeklyPlanPage() {
     
     const dummyPlan: WeeklyContentPlan = {
       id: 'preview',
+      userId: 'preview-user',
+      businessId: 'preview-business',
       weekStart: toISO(nextMonday),
+      weekEnd: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate() + 6)),
       weekNumber: Math.ceil(((nextMonday.getTime() - new Date(nextMonday.getFullYear(), 0, 1).getTime()) / 86400000 + 1) / 7),
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalPosts: 3,
+        totalProductionTime: '20-30 min',
+        postsByPlatform: { instagram: 3 },
+        postsByFormat: { single_image: 3 }
+      },
       strategyNarrative: {
         headline: 'Forårsstemning og friske retter',
         overview: 'Fokus på sæsonens bedste råvarer og venlige atmosfære.\nVejret inviterer til udeservering.\nIdeal uge til at fremhæve brunch og frokost.',

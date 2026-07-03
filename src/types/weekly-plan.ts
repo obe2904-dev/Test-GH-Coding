@@ -226,6 +226,8 @@ export interface WeeklyContentPlan {
     weatherOpportunity?: string
     economicSignal?: string
     topPriority?: string
+    ctaMode?: string
+    bookingNudgeWarranted?: boolean
   }
 
   // Learning data

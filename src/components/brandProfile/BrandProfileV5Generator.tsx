@@ -14,7 +14,6 @@ export function BrandProfileV5Generator({
   onSuccess,
   mode = 'generate',
 }: BrandProfileV5GeneratorProps) {
-  const { t } = useTranslation();
   const { generating, error, generate } = useBrandProfileV5Generation();
 
   const handleGenerate = async () => {
@@ -28,7 +27,6 @@ export function BrandProfileV5Generator({
     return (
       <GenerationProgress
         message="Generating V5 Brand Profile (Layers 1-4)..."
-        subtitle="This may take 20-30 seconds"
       />
     );
   }
