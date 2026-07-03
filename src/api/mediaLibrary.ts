@@ -381,7 +381,7 @@ export async function uploadToMediaLibrary({
 
     // Create database record
     const { data: mediaItem, error: dbError } = await supabase
-      .from('media_library')
+      .from('media_library' as any)
       .insert({
         user_id: user.id,
         business_id: businessId,
@@ -420,7 +420,7 @@ export async function uploadToMediaLibrary({
       throw dbError
     }
 
-    return mediaItem as MediaItem
+    return mediaItem as any as MediaItem
 
   } catch (error) {
     console.error('Upload to media library failed:', error)
@@ -442,7 +442,7 @@ export async function getMediaLibrary(
   }
 
   let query = supabase
-    .from('media_library_with_category')
+    .from('media_library_with_category' as any)
     .select('*')
     .eq('business_id', businessId)
 
@@ -477,7 +477,7 @@ export async function getMediaLibrary(
     throw error
   }
 
-  return data as MediaItem[]
+  return data as any as MediaItem[]
 }
 
 /**
@@ -485,7 +485,7 @@ export async function getMediaLibrary(
  */
 export async function getMediaItem(mediaId: string): Promise<MediaItem | null> {
   const { data, error } = await supabase
-    .from('media_library_with_category')
+    .from('media_library_with_category' as any)
     .select('*')
     .eq('id', mediaId)
     .maybeSingle()
@@ -495,7 +495,7 @@ export async function getMediaItem(mediaId: string): Promise<MediaItem | null> {
     throw error
   }
 
-  return data as MediaItem | null
+  return data as any as MediaItem | null
 }
 
 /**
@@ -538,7 +538,7 @@ export async function updateMediaMetadata(
   if (metadata.altText !== undefined) dbUpdate.alt_text = metadata.altText
 
   const { data, error } = await supabase
-    .from('media_library')
+    .from('media_library' as any)
     .update(dbUpdate)
     .eq('id', mediaId)
     .select()
@@ -558,7 +558,7 @@ export async function updateMediaMetadata(
  */
 export async function deleteMediaItem(mediaId: string): Promise<void> {
   const { error } = await supabase
-    .from('media_library')
+    .from('media_library' as any)
     .update({
       deleted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -599,7 +599,7 @@ export async function permanentlyDeleteMediaItem(mediaId: string): Promise<void>
 
   // Delete from database
   const { error: dbError } = await supabase
-    .from('media_library')
+    .from('media_library' as any)
     .delete()
     .eq('id', mediaId)
 
@@ -614,7 +614,7 @@ export async function permanentlyDeleteMediaItem(mediaId: string): Promise<void>
  * Increments usage_count and updates last_used_date
  */
 export async function recordMediaUsage(mediaId: string): Promise<void> {
-  const { error } = await supabase.rpc('increment_media_usage', {
+  const { error } = await supabase.rpc('increment_media_usage' as any, {
     media_id: mediaId,
   })
 
