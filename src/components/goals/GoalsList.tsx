@@ -31,8 +31,8 @@ interface GoalsListProps {
 export function GoalsList({ goals, onUpdate, onDelete }: GoalsListProps) {
   // Sort by priority and created date
   const sortedGoals = [...goals].sort((a, b) => {
-    const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-    const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+    const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+    const priorityDiff = (priorityOrder[a.priority] ?? 4) - (priorityOrder[b.priority] ?? 4);
     if (priorityDiff !== 0) return priorityDiff;
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });

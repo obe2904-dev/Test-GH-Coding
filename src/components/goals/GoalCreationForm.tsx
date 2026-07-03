@@ -99,7 +99,6 @@ export function GoalCreationForm({ businessId, onSubmit, onCancel }: GoalCreatio
         business_id: businessId,
         goal_type: goalType,
         priority,
-        title: description.substring(0, 100), // Use first 100 chars as title
         description,
         target_metric: {
           metric: metric as any,
