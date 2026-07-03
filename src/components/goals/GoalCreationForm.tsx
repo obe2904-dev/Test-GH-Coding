@@ -1,10 +1,10 @@
 import { useState } from 'react';
 
 // Temporary type definitions (business_goals table was dropped but components still exist)
-type GoalType = 'revenue' | 'footfall' | 'retention' | 'avg_check' | 'conversion';
+type GoalType = 'fill_timeslot' | 'promote_offering' | 'build_awareness' | 'drive_reservations' | 'revenue' | 'footfall' | 'retention' | 'avg_check' | 'conversion';
 type Priority = 'critical' | 'high' | 'medium' | 'low';
-type DayOfWeek = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
-type ServicePeriod = 'breakfast' | 'lunch' | 'dinner' | 'evening';
+type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+type ServicePeriod = 'breakfast' | 'brunch' | 'lunch' | 'dinner' | 'evening';
 
 interface CreateBusinessGoal {
   business_id: string;

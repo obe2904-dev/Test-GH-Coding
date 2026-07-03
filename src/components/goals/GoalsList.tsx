@@ -19,6 +19,7 @@ interface BusinessGoal {
   };
   progress_pct: number;
   status: string;
+  created_at: string;
 }
 
 interface GoalsListProps {
