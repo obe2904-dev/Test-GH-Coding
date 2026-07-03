@@ -14,7 +14,7 @@ export function BrandProfileV5Generator({
   onSuccess,
   mode = 'generate',
 }: BrandProfileV5GeneratorProps) {
-  const { t } = useTranslation();
+  // const { t } = useTranslation(); // Unused for now
   const { generating, error, generate } = useBrandProfileV5Generation();
 
   const handleGenerate = async () => {
