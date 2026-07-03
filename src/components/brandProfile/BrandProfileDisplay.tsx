@@ -25,11 +25,10 @@ interface ContentPillar {
 }
 
 interface ContentStrategy {
-  primary_goal: 'drive_footfall' | 'build_brand' | 'retain_loyalty';
-  goal_blend: { drive_footfall: number; build_brand: number; retain_loyalty: number };
+  primary_goal: 'drive_footfall' | 'build_brand';
+  goal_blend: { drive_footfall: number; build_brand: number };
   footfall_signals: string[];
   brand_anchors: string[];
-  loyalty_hooks: string[];
   content_category_weights: { product_menu: number; craving_visual: number; behind_scenes: number; team_people: number };
   anchors?: string[]; // Natural moments (Slot B/C content anchors)
 }
@@ -559,7 +558,7 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
                           initialWeights={profile.programme_revenue_weights}
                           onWeightsChanged={() => {
                             if (onArchetypeChanged) {
-                              onArchetypeChanged(profile.voice_archetype ?? '');
+                              onArchetypeChanged('');
                             }
                           }}
                         />
@@ -793,17 +792,28 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
 
       {/* ── POST STRATEGI ───────────────────────────────────── */}
       {profile.content_strategy && (() => {
-        const cs = profile.content_strategy!;
+        // Migrate legacy 3-goal structure to 2-goal framework
+        const rawCs = profile.content_strategy!;
+        const cs = { ...rawCs };
+        
+        // If legacy retain_loyalty exists, merge it into build_brand
+        if (cs.goal_blend && 'retain_loyalty' in cs.goal_blend) {
+          const legacy = cs.goal_blend as any;
+          cs.goal_blend = {
+            drive_footfall: legacy.drive_footfall || 0,
+            build_brand: (legacy.build_brand || 0) + (legacy.retain_loyalty || 0)
+          };
+        }
+        
+        // TWO-DIMENSIONAL FRAMEWORK: Only drive_footfall and build_brand
         const GOAL_LABELS: Record<string, { label: string; color: string; bg: string; border: string }> = {
           drive_footfall: { label: t('brand.display.strategy.goals.drive_footfall'), color: 'text-success', bg: 'bg-success-surface', border: 'border-success' },
           build_brand:    { label: t('brand.display.strategy.goals.build_brand'),    color: 'text-info',  bg: 'bg-info-surface',  border: 'border-info' },
-          retain_loyalty: { label: t('brand.display.strategy.goals.retain_loyalty'), color: 'text-accent-text',bg: 'bg-accent-surface',border: 'border-accent' },
         };
         const primaryMeta = GOAL_LABELS[cs.primary_goal] ?? GOAL_LABELS.drive_footfall;
         const allSignals = [
           ...(cs.footfall_signals ?? []).map(s => ({ label: s, icon: '🏃', tip: t('brand.display.strategy.tips.footfall') })),
           ...(cs.brand_anchors ?? []).map(s => ({ label: s, icon: '⚓', tip: t('brand.display.strategy.tips.brand') })),
-          ...(cs.loyalty_hooks ?? []).map(s => ({ label: s, icon: '🔁', tip: t('brand.display.strategy.tips.loyalty') })),
         ];
 
         // Build a prose rationale from the strategy signals using locale templates
@@ -811,7 +821,6 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
           const goalLabels: Record<string, string> = {
             drive_footfall: t('brand.display.strategy.goals.drive_footfall'),
             build_brand:    t('brand.display.strategy.goals.build_brand'),
-            retain_loyalty: t('brand.display.strategy.goals.retain_loyalty'),
           };
           const blend = cs.goal_blend ?? {} as Record<string, number>;
           const sorted = (Object.entries(blend) as [string, number][]).sort((a, b) => b[1] - a[1]);
@@ -833,13 +842,6 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
               } else {
                 parts.push(t('brand.display.strategy.rationale.brand_no_anchors', { label, pct }));
               }
-            } else if (key === 'retain_loyalty') {
-              const hooks = cs.loyalty_hooks ?? [];
-              if (hooks.length > 0) {
-                parts.push(t('brand.display.strategy.rationale.loyalty_with_hooks', { label, pct, hooks: hooks.join(', ') }));
-              } else {
-                parts.push(t('brand.display.strategy.rationale.loyalty_no_hooks', { label, pct }));
-              }
             }
           });
 
@@ -857,7 +859,7 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
             <div className="mb-5">
               <p className="text-xs font-medium text-text-muted mb-2">{t('brand.display.strategy.primaryGoal')}</p>
               <span className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-semibold border ${primaryMeta.bg} ${primaryMeta.color} ${primaryMeta.border}`}>
-                {cs.primary_goal === 'drive_footfall' ? '🏃' : cs.primary_goal === 'build_brand' ? '⚓' : '🔁'}
+                {cs.primary_goal === 'drive_footfall' ? '🏃' : '⚓'}
                 {primaryMeta.label}
               </span>
             </div>
