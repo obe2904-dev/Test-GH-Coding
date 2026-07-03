@@ -25,7 +25,7 @@ export interface PostSpecification {
   postType: {
     type: string
     category: string
-    goal_mode?: 'drive_footfall' | 'build_brand' | 'retain_loyalty'
+    goal_mode?: 'drive_footfall' | 'build_brand'
     priority: 'High' | 'Medium' | 'Low'
     priorityReasons: string[]
   }
@@ -130,7 +130,7 @@ export interface PostSpecification {
     weather_dependent?: boolean
     weather_flag?: string
     estimated_performance?: 'high' | 'medium' | 'low'
-    goal_mode?: 'drive_footfall' | 'build_brand' | 'retain_loyalty'
+    goal_mode?: 'drive_footfall' | 'build_brand'
     content_category?: 'product_menu' | 'craving_visual' | 'behind_scenes' | 'team_people'
     slot_id?: string
     rationale?: string
@@ -226,6 +226,8 @@ export interface WeeklyContentPlan {
     weatherOpportunity?: string
     economicSignal?: string
     topPriority?: string
+    ctaMode?: string
+    bookingNudgeWarranted?: boolean
   }
 
   // Learning data
