@@ -10,12 +10,11 @@
  */
 
 import { useState, useEffect } from 'react'
-import type { MediaItem, MediaType, PostType } from '../../../api/mediaLibrary'
+import type { MediaItem, PostType } from '../../../api/mediaLibrary'
 import {
   getMediaLibrary,
   deleteMediaItem,
   getStorageQuota,
-  uploadToMediaLibrary,
   type StorageQuota,
 } from '../../../api/mediaLibrary'
 import { MediaGalleryGrid } from './MediaGalleryGrid'

@@ -18,6 +18,7 @@ interface BusinessGoal {
     target_days?: string[];
     target_periods?: string[];
   };
+  created_at: string;
 }
 
 interface GoalCardProps {

@@ -1,5 +1,25 @@
 import { GoalCard } from './GoalCard';
-import type { BusinessGoal } from '@/types';
+
+// BusinessGoal type (table was dropped April 2026, defined inline for legacy component)
+interface BusinessGoal {
+  id: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  goal_type: string;
+  description: string;
+  progress_pct: number;
+  status: 'not_started' | 'in_progress' | 'achieved' | 'paused';
+  target_metric: {
+    metric: string;
+    current_value: number;
+    target_value: number;
+    target_date?: string;
+  };
+  time_constraints: {
+    target_days?: string[];
+    target_periods?: string[];
+  };
+  created_at: string;
+}
 
 interface GoalsListProps {
   goals: BusinessGoal[];
@@ -10,7 +30,7 @@ interface GoalsListProps {
 export function GoalsList({ goals, onUpdate, onDelete }: GoalsListProps) {
   // Sort by priority and created date
   const sortedGoals = [...goals].sort((a, b) => {
-    const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
     const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
     if (priorityDiff !== 0) return priorityDiff;
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
