@@ -551,7 +551,8 @@ export default function AIWeeklyPlanPage() {
               setGenerating(false)
               setShowRegenerateWarning(false)
               // Refresh the page data to show cached strategy (user might not see it yet)
-              fetchWeeklyPlan()
+              // TODO: Fix fetchWeeklyPlan - function doesn't exist
+              // fetchWeeklyPlan()
               // Show informational message (not an error - this is expected behavior)
               setError('Planen er ikke ændret. Vejret har ikke ændret sig væsentligt siden sidste generering, så den eksisterende plan gælder stadig.')
               return
@@ -992,21 +993,21 @@ export default function AIWeeklyPlanPage() {
       }),
       posts: [
         {
-          timing: { date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate())), time: '09:00' },
-          postType: { category: 'menu_item', format: 'single_image' },
-          contentSubject: { dish: 'Morgenmad med friske croissanter' },
-          caption: { text: '', ctaType: 'awareness', isAIGenerated: true },
-          approval: { status: 'draft' },
-          productionNotes: { estimatedTime: '5-10 min' },
+          timing: { day: 'Monday', date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate())), time: '09:00', rationale: 'Morning post' },
+          postType: { type: 'menu_item', category: 'menu_item', priority: 'Medium' as const, priorityReasons: [] },
+          contentSubject: { dish: 'Morgenmad med friske croissanter', whyThisDish: [] },
+          caption: { text: '', characterCount: 0, tone: 'friendly', emojiCount: 0, ctaType: 'awareness', firstLine: '', isAIGenerated: true },
+          approval: { status: 'draft' as const, editHistory: [] },
+          productionNotes: { estimatedTime: '5-10 min', logistics: [] },
           strategicContext: {},
         },
         {
-          timing: { date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate() + 2)), time: '12:00' },
-          postType: { category: 'menu_item', format: 'single_image' },
-          contentSubject: { dish: 'Frokostspecial: Laksesalat' },
-          caption: { text: '', ctaType: 'booking', isAIGenerated: true },
-          approval: { status: 'draft' },
-          productionNotes: { estimatedTime: '10-15 min' },
+          timing: { day: 'Wednesday', date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate() + 2)), time: '12:00', rationale: 'Lunch post' },
+          postType: { type: 'menu_item', category: 'menu_item', priority: 'Medium' as const, priorityReasons: [] },
+          contentSubject: { dish: 'Frokostspecial: Laksesalat', whyThisDish: [] },
+          caption: { text: '', characterCount: 0, tone: 'friendly', emojiCount: 0, ctaType: 'booking', firstLine: '', isAIGenerated: true },
+          approval: { status: 'draft' as const, editHistory: [] },
+          productionNotes: { estimatedTime: '10-15 min', logistics: [] },
           strategicContext: { drink_pairing: 'Hvidvin' },
         },
         {
