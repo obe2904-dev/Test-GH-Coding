@@ -25,11 +25,10 @@
       ]
     }
   ],
-  "redirects": [
+  "rewrites": [
     {
-      "source": "/",
-      "destination": "/login",
-      "permanent": false
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
