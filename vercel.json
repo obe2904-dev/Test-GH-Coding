@@ -1,0 +1,50 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "vite",
+  "outputDirectory": "dist",
+  "regions": ["fra1"],
+  "env": {
+    "VITE_SUPABASE_URL": "@supabase-url",
+    "VITE_SUPABASE_ANON_KEY": "@supabase-anon-key"
+  },
+  "build": {
+    "env": {
+      "VITE_SUPABASE_URL": "@supabase-url",
+      "VITE_SUPABASE_ANON_KEY": "@supabase-anon-key",
+      "VITE_SUPABASE_FUNCTION_SPELLING": "@supabase-function-spelling",
+      "VITE_SUPABASE_FUNCTION_ANALYZE_WEBSITE": "@supabase-function-analyze-website",
+      "VITE_SUPABASE_FUNCTION_MENU_EXTRACT": "@supabase-function-menu-extract",
+      "VITE_SUPABASE_FUNCTION_AI_ENHANCE": "@supabase-function-ai-enhance",
+      "VITE_SUPABASE_FUNCTION_ADJUST_TEXT": "@supabase-function-adjust-text"
+    }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/login",
+      "permanent": false
+    }
+  ]
+}
