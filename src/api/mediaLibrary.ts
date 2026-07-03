@@ -549,7 +549,7 @@ export async function updateMediaMetadata(
     throw error
   }
 
-  return data as MediaItem
+  return data as any as MediaItem
 }
 
 /**
@@ -639,7 +639,7 @@ export async function getStorageQuota(businessId: string): Promise<StorageQuota>
 
   // Calculate total storage used
   const { data, error } = await supabase
-    .from('media_library')
+    .from('media_library' as any)
     .select('file_size')
     .eq('business_id', businessId)
     .is('deleted_at', null)
@@ -649,7 +649,7 @@ export async function getStorageQuota(businessId: string): Promise<StorageQuota>
     throw error
   }
 
-  const usedBytes = data.reduce((total, item) => total + (item.file_size || 0), 0)
+  const usedBytes = (data as any[]).reduce((total, item) => total + (item.file_size || 0), 0)
   const usedMB = parseFloat((usedBytes / (1024 * 1024)).toFixed(2))
   const limitMB = parseFloat((limitBytes / (1024 * 1024)).toFixed(2))
   const percentUsed = limitBytes > 0 ? (usedBytes / limitBytes) * 100 : 0
@@ -673,7 +673,7 @@ export async function getStorageQuota(businessId: string): Promise<StorageQuota>
  */
 export async function getStorageStats(businessId: string) {
   const { data, error } = await supabase
-    .from('media_library')
+    .from('media_library' as any)
     .select('media_type, file_size, post_type')
     .eq('business_id', businessId)
     .is('deleted_at', null)
@@ -683,16 +683,17 @@ export async function getStorageStats(businessId: string) {
     throw error
   }
 
+  const items = data as any[]
   const stats = {
-    totalFiles: data.length,
-    totalImages: data.filter(item => item.media_type === 'image').length,
-    totalVideos: data.filter(item => item.media_type === 'video').length,
-    totalSize: data.reduce((sum, item) => sum + (item.file_size || 0), 0),
+    totalFiles: items.length,
+    totalImages: items.filter(item => item.media_type === 'image').length,
+    totalVideos: items.filter(item => item.media_type === 'video').length,
+    totalSize: items.reduce((sum, item) => sum + (item.file_size || 0), 0),
     byPostType: {} as Record<string, number>,
   }
 
   // Count by post_type
-  data.forEach(item => {
+  items.forEach(item => {
     const type = item.post_type || 'uncategorized'
     stats.byPostType[type] = (stats.byPostType[type] || 0) + 1
   })
@@ -712,7 +713,7 @@ export async function regenerateThumbnail(mediaId: string): Promise<void> {
 
   // Get media item
   const { data: mediaItem, error: fetchError } = await supabase
-    .from('media_library')
+    .from('media_library' as any)
     .select('*')
     .eq('id', mediaId)
     .single()
@@ -722,7 +723,7 @@ export async function regenerateThumbnail(mediaId: string): Promise<void> {
   }
 
   // Only process images
-  if (mediaItem.media_type !== 'image') {
+  if ((mediaItem as any).media_type !== 'image') {
     throw new Error('Can only regenerate thumbnails for images')
   }
 
