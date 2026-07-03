@@ -6,6 +6,6 @@ export { PublishStep } from './PublishStep'
 // Old 5-step flow (deprecated - kept for reference)
 export { IdeasStep } from './IdeasStepOld'
 export { TextStep } from './TextStepOld'
-export { PhotoStep } from './PhotoStepOld'
+// export { PhotoStep } from './PhotoStepOld' // File deleted
 export { DraftStep } from './DraftStepOld'
 export { PlanPublishStep } from './PlanPublishStepOld'
