@@ -1,4 +1,3 @@
-import { useTranslation } from 'react-i18next';
 import { useBrandProfileV5Generation } from '@/hooks/useBrandProfileV5Generation';
 import { BrandSectionIcon } from './BrandSectionIcon';
 import { GenerationProgress } from './GenerationProgress';

@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { supabase } from '@/lib/supabase';
 
 import { BrandProfileSection } from './BrandProfileSection';
 import { BrandSectionIcon } from './BrandSectionIcon';

@@ -124,20 +124,6 @@ export function ProgrammeCard({ programme }: ProgrammeCardProps) {
                         </div>
                       </div>
                     )}
-                    {programme.baseline_goal_split.retain_regulars !== undefined && (
-                      <div>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span>Retain Regulars</span>
-                          <span className="font-medium">{programme.baseline_goal_split.retain_regulars}%</span>
-                        </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-purple-500 h-2 rounded-full" 
-                            style={{ width: `${programme.baseline_goal_split.retain_regulars}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               )}
