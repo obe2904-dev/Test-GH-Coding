@@ -729,22 +729,23 @@ export async function regenerateThumbnail(mediaId: string): Promise<void> {
 
   try {
     // Download original image from storage
+    const item = mediaItem as any
     const { data: fileData, error: downloadError } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .download(mediaItem.storage_path)
+      .download(item.storage_path)
 
     if (downloadError || !fileData) {
       throw new Error('Failed to download original image')
     }
 
     // Convert blob to File
-    const file = new File([fileData], mediaItem.filename, { type: mediaItem.mime_type })
+    const file = new File([fileData], item.filename, { type: item.mime_type })
 
     // Generate new thumbnail with current settings (400px)
     const thumbnailFile = await generateThumbnail(file)
 
     // Generate new thumbnail path
-    const newThumbnailPath = `${mediaItem.business_id}/thumbnails/${generateFilename(mediaItem.filename, 'thumb_')}`
+    const newThumbnailPath = `${item.business_id}/thumbnails/${generateFilename(item.filename, 'thumb_')}`
 
     // Upload new thumbnail
     const { error: uploadError } = await supabase.storage
@@ -760,15 +761,15 @@ export async function regenerateThumbnail(mediaId: string): Promise<void> {
     }
 
     // Delete old thumbnail if it exists
-    if (mediaItem.thumbnail_path) {
+    if (item.thumbnail_path) {
       await supabase.storage
         .from(STORAGE_BUCKET)
-        .remove([mediaItem.thumbnail_path])
+        .remove([item.thumbnail_path])
     }
 
     // Update database with new thumbnail path
     const { error: updateError } = await supabase
-      .from('media_library')
+      .from('media_library' as any)
       .update({ thumbnail_path: newThumbnailPath })
       .eq('id', mediaId)
 
@@ -776,7 +777,7 @@ export async function regenerateThumbnail(mediaId: string): Promise<void> {
       throw updateError
     }
 
-    console.log(`✅ Regenerated thumbnail for ${mediaItem.filename}`)
+    console.log(`✅ Regenerated thumbnail for ${item.filename}`)
 
   } catch (error) {
     console.error('Failed to regenerate thumbnail:', error)
