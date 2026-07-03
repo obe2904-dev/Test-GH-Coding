@@ -138,12 +138,9 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
   const togglePhotoIdea = (id: number) => setOpenPhotoIdeas(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
 
   const hasMinimumProfileData = Boolean(
-    profile?.website_url ||
     business?.website_url ||
     profile?.user_about_text?.trim() ||
-    profile?.business_name?.trim() ||
-    profile?.business_offerings ||
-    profile?.opening_hours ||
+    business?.name?.trim() ||
     (Array.isArray(profile?.keywords) && profile.keywords.length > 0)
   )
   const shouldPromptForProfileDetails = !isBusinessDataLoading && !hasMinimumProfileData
@@ -167,9 +164,10 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
     if (thumbsUp.has(suggestionId)) return // already liked, no-op
     setThumbsUp(prev => new Set(prev).add(suggestionId))
     try {
+      // thumbs_up column removed - track engagement differently
       const { data, error } = await supabase
         .from('daily_suggestions')
-        .update({ thumbs_up: true })
+        .update({ consumed_at: new Date().toISOString() })
         .eq('id', suggestionId)
         .eq('business_id', businessId)
         .select('id')

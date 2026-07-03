@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Database } from '../types/database'
+import { Database } from '../types/supabase'
 
 type Business = Database['public']['Tables']['businesses']['Row']
 type BusinessProfile = Database['public']['Tables']['business_profile']['Row']

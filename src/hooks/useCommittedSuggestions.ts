@@ -14,6 +14,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
+export interface WeeklyPlanPostInfo {
+  postId: string
+  scheduledFor?: Date
+  postedAt?: Date
+}
+
 export interface CommittedState {
   /** suggestion_ids that already have a published/scheduled row today */
   committedSuggestionIds: Set<number>
@@ -23,6 +29,8 @@ export interface CommittedState {
   committedWeeklyPlanIdeaIds: Set<number>
   /** weekly_plan_slot_date values (YYYY-MM-DD) that are already committed */
   committedWeeklyPlanDates: Set<string>
+  /** Map of weekly_plan_idea_id -> post details for created posts */
+  weeklyPlanPostMap: Map<number, WeeklyPlanPostInfo>
   /** true while loading */
   isLoading: boolean
   /** Re-fetch — call after a publish to update state without a full remount */
@@ -34,6 +42,7 @@ export function useCommittedSuggestions(businessId: string | null): CommittedSta
   const [isCommittedForWrite, setIsCommittedForWrite] = useState(false)
   const [committedWeeklyPlanIdeaIds, setCommittedWeeklyPlanIdeaIds] = useState<Set<number>>(new Set())
   const [committedWeeklyPlanDates, setCommittedWeeklyPlanDates] = useState<Set<string>>(new Set())
+  const [weeklyPlanPostMap, setWeeklyPlanPostMap] = useState<Map<number, WeeklyPlanPostInfo>>(new Map())
   const [isLoading, setIsLoading] = useState(false)
 
   const load = useCallback(async () => {
@@ -52,7 +61,7 @@ export function useCommittedSuggestions(businessId: string | null): CommittedSta
     // Using PostgREST .or() so a single round-trip covers both cases.
     const { data, error } = await supabase
       .from('posts')
-      .select('suggestion_id, weekly_plan_idea_id, weekly_plan_slot_date, posted_at')
+      .select('id, suggestion_id, weekly_plan_idea_id, weekly_plan_slot_date, posted_at, scheduled_for')
       .eq('business_id', businessId)
       .in('status', ['published', 'scheduled'])
       .or(`posted_at.gte.${todayStart.toISOString()},weekly_plan_slot_date.gte.${todayDateStr}`)
@@ -66,11 +75,20 @@ export function useCommittedSuggestions(businessId: string | null): CommittedSta
     const ids = new Set<number>()
     const ideaIds = new Set<number>()
     const planDates = new Set<string>()
+    const postMap = new Map<number, WeeklyPlanPostInfo>()
     let writeCommitted = false
 
     for (const row of data) {
       if (row.weekly_plan_idea_id != null) {
-        ideaIds.add(Number(row.weekly_plan_idea_id))
+        const ideaId = Number(row.weekly_plan_idea_id)
+        ideaIds.add(ideaId)
+        
+        // Store post details for this idea
+        postMap.set(ideaId, {
+          postId: row.id as string,
+          scheduledFor: row.scheduled_for ? new Date(row.scheduled_for) : undefined,
+          postedAt: row.posted_at ? new Date(row.posted_at) : undefined,
+        })
       }
 
       // Weekly plan slot — date-keyed lock (survives refresh)
@@ -95,10 +113,11 @@ export function useCommittedSuggestions(businessId: string | null): CommittedSta
     setIsCommittedForWrite(writeCommitted)
     setCommittedWeeklyPlanIdeaIds(ideaIds)
     setCommittedWeeklyPlanDates(planDates)
+    setWeeklyPlanPostMap(postMap)
     setIsLoading(false)
   }, [businessId])
 
   useEffect(() => { load() }, [load])
 
-  return { committedSuggestionIds, isCommittedForWrite, committedWeeklyPlanIdeaIds, committedWeeklyPlanDates, isLoading, refresh: load }
+  return { committedSuggestionIds, isCommittedForWrite, committedWeeklyPlanIdeaIds, committedWeeklyPlanDates, weeklyPlanPostMap, isLoading, refresh: load }
 }

@@ -104,11 +104,9 @@ export function PostModal({
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {post.platform === 'facebook' ? (
-              <Facebook className="w-6 h-6" style={{ color: colors.primary }} />
-            ) : (
-              <Instagram className="w-6 h-6" style={{ color: colors.primary }} />
-            )}
+            <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ backgroundColor: colors.primary }}>
+              <span className="text-white text-xs font-bold">{post.platform === 'facebook' ? 'F' : 'I'}</span>
+            </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900 capitalize">{post.platform}</h2>
               <p className="text-sm text-slate-500">

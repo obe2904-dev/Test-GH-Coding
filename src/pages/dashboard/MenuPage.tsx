@@ -1132,17 +1132,14 @@ function MenuPage() {
       is_social_lead: c.id === cardId ? newVal : (newVal ? false : c.is_social_lead)
     })))
     if (newVal) {
-      // Clear all others in DB
-      await supabase.from('menu_sources').update({ is_social_lead: false }).eq('business_id', businessId!)
+      // NOTE: is_social_lead column removed from menu_sources table
+      // Social lead selection is now tracked in local state only
     }
-    const { error: updateErr } = await supabase
-      .from('menu_sources')
-      .update({ is_social_lead: newVal })
-      .eq('id', cardId)
-    if (updateErr) {
+    // NOTE: is_social_lead column removed - no DB update needed
+    if (false) {
       // Revert
       await loadMenuCards(businessId!)
-      console.error('Failed to toggle is_social_lead:', updateErr)
+      console.error('Failed to toggle is_social_lead (column removed)')
     }
   }
 

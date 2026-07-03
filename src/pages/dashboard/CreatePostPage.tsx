@@ -1817,9 +1817,7 @@ export function CreatePostPage() {
           )}
           <Suspense fallback={<StepLoader />}>
             {currentStep === 'generate' && activePath !== 'weekly-plan' && (() => {
-              const generateLocked = isReadOnlyMode || activePath === 'weekly-plan'
-                ? isCommittedWeeklyPlanIdea || committedWeeklyPlanDates.has(weeklyPlanPost?.timing?.date ?? '')
-                : !!publishedInfo
+              const generateLocked = isReadOnlyMode ? false : !!publishedInfo
               return (
                 <div key="generate" className="relative">
                   {generateLocked && !isReadOnlyMode && (
@@ -1827,9 +1825,7 @@ export function CreatePostPage() {
                       <div className="mb-3 p-3 bg-green-50 border border-green-300 rounded-lg flex items-center gap-2 text-sm text-green-800">
                         <span>✓</span>
                         <span>
-                          {activePath === 'weekly-plan'
-                            ? 'Dette opslag er planlagt — låst. Vælg et andet opslag i ugeplanen.'
-                            : 'Opslaget er planlagt — forslagene er låst. Tryk <strong>Opret nyt opslag</strong> for at starte forfra.'}
+                          Opslaget er planlagt — forslagene er låst. Tryk <strong>Opret nyt opslag</strong> for at starte forfra.
                         </span>
                       </div>
                       <div className="absolute inset-0 z-10 cursor-not-allowed" style={{top: '48px'}} />

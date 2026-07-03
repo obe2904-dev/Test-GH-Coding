@@ -68,7 +68,8 @@ export function getCurrentTimingContext(
 
   // Try to match against segments
   for (const segment of segments) {
-    for (const window of segment.timing_windows) {
+    const timingWindows = (segment as any).timing_windows || []
+    for (const window of timingWindows) {
       // Simple pattern: "Lør-Søn 17:00-20:00" or "Fre 18:00-22:00"
       const match = window.match(/^([a-zæøåA-ZÆØÅ]+)(?:-([a-zæøåA-ZÆØÅ]+))?\s+(\d{2}):(\d{2})-(\d{2}):(\d{2})$/)
       if (!match) continue

@@ -192,13 +192,13 @@ export function PostDetailModal({ post, onClose, onUpdate: _onUpdate, planId: _p
                   <div className="text-sm font-semibold text-slate-900">{post.timing.time}</div>
                 </div>
               </div>
-              {post.timing.timingRationale && (
+              {post.timing.rationale && (
                 <div className="mt-3 pt-3 border-t border-slate-200">
                   <div className="flex items-start gap-2">
                     <span className="text-purple-600 mt-0.5">🧠</span>
                     <div className="flex-1">
                       <div className="text-xs font-semibold text-purple-900 mb-1">AI Timing Intelligence</div>
-                      <p className="text-sm text-slate-700 leading-relaxed">{post.timing.timingRationale}</p>
+                      <p className="text-sm text-slate-700 leading-relaxed">{post.timing.rationale}</p>
                     </div>
                   </div>
                 </div>

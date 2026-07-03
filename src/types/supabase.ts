@@ -10,35 +10,37 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "13.0.5"
-  }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
+      approved_testers: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          email: string
+          id: string
+          name: string | null
+          role: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          created_at?: string | null
+          email: string
+          id?: string
+          name?: string | null
+          role?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          created_at?: string | null
+          email?: string
+          id?: string
+          name?: string | null
+          role?: string | null
+        }
+        Relationships: []
+      }
       brand_profile_sources_state: {
         Row: {
           business_id: string
@@ -425,11 +427,13 @@ export type Database = {
           raw_competitive_venues: Json | null
           schema_version: number | null
           street_visibility: string | null
+          traffic_rhythm: Json | null
           updated_at: string | null
           user_confirmed_at: string | null
           view_type: string[] | null
           when_analysis: Json | null
           when_analysis_internal: Json | null
+          who: Json | null
           who_analysis: Json | null
           who_analysis_internal: Json | null
           why_analysis: Json | null
@@ -463,11 +467,13 @@ export type Database = {
           raw_competitive_venues?: Json | null
           schema_version?: number | null
           street_visibility?: string | null
+          traffic_rhythm?: Json | null
           updated_at?: string | null
           user_confirmed_at?: string | null
           view_type?: string[] | null
           when_analysis?: Json | null
           when_analysis_internal?: Json | null
+          who?: Json | null
           who_analysis?: Json | null
           who_analysis_internal?: Json | null
           why_analysis?: Json | null
@@ -501,11 +507,13 @@ export type Database = {
           raw_competitive_venues?: Json | null
           schema_version?: number | null
           street_visibility?: string | null
+          traffic_rhythm?: Json | null
           updated_at?: string | null
           user_confirmed_at?: string | null
           view_type?: string[] | null
           when_analysis?: Json | null
           when_analysis_internal?: Json | null
+          who?: Json | null
           who_analysis?: Json | null
           who_analysis_internal?: Json | null
           why_analysis?: Json | null
@@ -520,6 +528,129 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      business_location_intelligence_backup_20260701: {
+        Row: {
+          area_type: string | null
+          business_id: string | null
+          category_modifiers: Json | null
+          category_scores: Json | null
+          concept_fit_analyzed_at: string | null
+          concept_fit_by_category: Json | null
+          created_at: string | null
+          demographic_proximity: Json | null
+          has_view: boolean | null
+          is_hidden_gem: boolean | null
+          landmarks_nearby: Json | null
+          last_updated_by_ai: string | null
+          latitude: number | null
+          local_location_reference: string | null
+          location_architecture_version: number | null
+          location_marketing_hooks: string[] | null
+          location_type_matches: Json | null
+          longitude: number | null
+          nearby_hospitality: Json | null
+          neighborhood: string | null
+          neighborhood_character: string | null
+          outdoor_space_type: string | null
+          physical_context: Json | null
+          public_transport: Json | null
+          raw_competitive_venues: Json | null
+          schema_version: number | null
+          street_visibility: string | null
+          traffic_rhythm: Json | null
+          updated_at: string | null
+          user_confirmed_at: string | null
+          view_type: string[] | null
+          when_analysis: Json | null
+          when_analysis_internal: Json | null
+          who: Json | null
+          who_analysis: Json | null
+          who_analysis_internal: Json | null
+          why_analysis: Json | null
+          why_analysis_internal: Json | null
+        }
+        Insert: {
+          area_type?: string | null
+          business_id?: string | null
+          category_modifiers?: Json | null
+          category_scores?: Json | null
+          concept_fit_analyzed_at?: string | null
+          concept_fit_by_category?: Json | null
+          created_at?: string | null
+          demographic_proximity?: Json | null
+          has_view?: boolean | null
+          is_hidden_gem?: boolean | null
+          landmarks_nearby?: Json | null
+          last_updated_by_ai?: string | null
+          latitude?: number | null
+          local_location_reference?: string | null
+          location_architecture_version?: number | null
+          location_marketing_hooks?: string[] | null
+          location_type_matches?: Json | null
+          longitude?: number | null
+          nearby_hospitality?: Json | null
+          neighborhood?: string | null
+          neighborhood_character?: string | null
+          outdoor_space_type?: string | null
+          physical_context?: Json | null
+          public_transport?: Json | null
+          raw_competitive_venues?: Json | null
+          schema_version?: number | null
+          street_visibility?: string | null
+          traffic_rhythm?: Json | null
+          updated_at?: string | null
+          user_confirmed_at?: string | null
+          view_type?: string[] | null
+          when_analysis?: Json | null
+          when_analysis_internal?: Json | null
+          who?: Json | null
+          who_analysis?: Json | null
+          who_analysis_internal?: Json | null
+          why_analysis?: Json | null
+          why_analysis_internal?: Json | null
+        }
+        Update: {
+          area_type?: string | null
+          business_id?: string | null
+          category_modifiers?: Json | null
+          category_scores?: Json | null
+          concept_fit_analyzed_at?: string | null
+          concept_fit_by_category?: Json | null
+          created_at?: string | null
+          demographic_proximity?: Json | null
+          has_view?: boolean | null
+          is_hidden_gem?: boolean | null
+          landmarks_nearby?: Json | null
+          last_updated_by_ai?: string | null
+          latitude?: number | null
+          local_location_reference?: string | null
+          location_architecture_version?: number | null
+          location_marketing_hooks?: string[] | null
+          location_type_matches?: Json | null
+          longitude?: number | null
+          nearby_hospitality?: Json | null
+          neighborhood?: string | null
+          neighborhood_character?: string | null
+          outdoor_space_type?: string | null
+          physical_context?: Json | null
+          public_transport?: Json | null
+          raw_competitive_venues?: Json | null
+          schema_version?: number | null
+          street_visibility?: string | null
+          traffic_rhythm?: Json | null
+          updated_at?: string | null
+          user_confirmed_at?: string | null
+          view_type?: string[] | null
+          when_analysis?: Json | null
+          when_analysis_internal?: Json | null
+          who?: Json | null
+          who_analysis?: Json | null
+          who_analysis_internal?: Json | null
+          why_analysis?: Json | null
+          why_analysis_internal?: Json | null
+        }
+        Relationships: []
       }
       business_locations: {
         Row: {
@@ -755,15 +886,19 @@ export type Database = {
           created_at: string
           day_pattern: string | null
           decision_timing: string | null
+          draw_type: string | null
           generation_errors: Json | null
           id: string
           is_active: boolean | null
           meal_periods: string[] | null
           menu_evidence: string[]
+          menu_results_v2_id: string | null
           operating_days: string[]
+          permitted_who_types: Json | null
           price_positioning: Json | null
           programme_name: string
           programme_type: string
+          reachable_guest_profile: string | null
           segment_confidence: number | null
           segment_reasoning: string | null
           time_windows: string[]
@@ -781,15 +916,19 @@ export type Database = {
           created_at?: string
           day_pattern?: string | null
           decision_timing?: string | null
+          draw_type?: string | null
           generation_errors?: Json | null
           id?: string
           is_active?: boolean | null
           meal_periods?: string[] | null
           menu_evidence?: string[]
+          menu_results_v2_id?: string | null
           operating_days?: string[]
+          permitted_who_types?: Json | null
           price_positioning?: Json | null
           programme_name: string
           programme_type: string
+          reachable_guest_profile?: string | null
           segment_confidence?: number | null
           segment_reasoning?: string | null
           time_windows?: string[]
@@ -807,15 +946,19 @@ export type Database = {
           created_at?: string
           day_pattern?: string | null
           decision_timing?: string | null
+          draw_type?: string | null
           generation_errors?: Json | null
           id?: string
           is_active?: boolean | null
           meal_periods?: string[] | null
           menu_evidence?: string[]
+          menu_results_v2_id?: string | null
           operating_days?: string[]
+          permitted_who_types?: Json | null
           price_positioning?: Json | null
           programme_name?: string
           programme_type?: string
+          reachable_guest_profile?: string | null
           segment_confidence?: number | null
           segment_reasoning?: string | null
           time_windows?: string[]
@@ -828,6 +971,13 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: false
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "business_programme_profiles_menu_results_v2_id_fkey"
+            columns: ["menu_results_v2_id"]
+            isOneToOne: false
+            referencedRelation: "menu_results_v2"
             referencedColumns: ["id"]
           },
         ]
@@ -1542,6 +1692,7 @@ export type Database = {
           id: string
           is_signature: boolean | null
           language_code: string | null
+          menu_type: string | null
           raw_text: string | null
           representative_dishes: Json | null
           service_period_name: string | null
@@ -1555,6 +1706,10 @@ export type Database = {
           storage_bucket: string | null
           storage_path: string | null
           structured_data: Json | null
+          time_confirmed: boolean | null
+          time_end: string | null
+          time_source: string | null
+          time_start: string | null
           updated_at: string | null
         }
         Insert: {
@@ -1569,6 +1724,7 @@ export type Database = {
           id?: string
           is_signature?: boolean | null
           language_code?: string | null
+          menu_type?: string | null
           raw_text?: string | null
           representative_dishes?: Json | null
           service_period_name?: string | null
@@ -1582,6 +1738,10 @@ export type Database = {
           storage_bucket?: string | null
           storage_path?: string | null
           structured_data?: Json | null
+          time_confirmed?: boolean | null
+          time_end?: string | null
+          time_source?: string | null
+          time_start?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -1596,6 +1756,7 @@ export type Database = {
           id?: string
           is_signature?: boolean | null
           language_code?: string | null
+          menu_type?: string | null
           raw_text?: string | null
           representative_dishes?: Json | null
           service_period_name?: string | null
@@ -1609,6 +1770,10 @@ export type Database = {
           storage_bucket?: string | null
           storage_path?: string | null
           structured_data?: Json | null
+          time_confirmed?: boolean | null
+          time_end?: string | null
+          time_source?: string | null
+          time_start?: string | null
           updated_at?: string | null
         }
         Relationships: [
@@ -1763,6 +1928,7 @@ export type Database = {
           consumed_at: string | null
           content_angle: string | null
           content_json: Json | null
+          content_style: string | null
           content_type: string | null
           created_at: string
           cta_intent: string | null
@@ -1832,6 +1998,7 @@ export type Database = {
           consumed_at?: string | null
           content_angle?: string | null
           content_json?: Json | null
+          content_style?: string | null
           content_type?: string | null
           created_at?: string
           cta_intent?: string | null
@@ -1901,6 +2068,7 @@ export type Database = {
           consumed_at?: string | null
           content_angle?: string | null
           content_json?: Json | null
+          content_style?: string | null
           content_type?: string | null
           created_at?: string
           cta_intent?: string | null
@@ -2690,6 +2858,7 @@ export type Database = {
           id: string
           is_signature: boolean | null
           language_code: string | null
+          menu_type: string | null
           raw_text: string | null
           representative_dishes: Json | null
           service_period_name: string | null
@@ -2703,6 +2872,10 @@ export type Database = {
           storage_bucket: string | null
           storage_path: string | null
           structured_data: Json | null
+          time_confirmed: boolean | null
+          time_end: string | null
+          time_source: string | null
+          time_start: string | null
           updated_at: string | null
         }
         SetofOptions: {
@@ -2962,9 +3135,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       business_archetype_enum: [

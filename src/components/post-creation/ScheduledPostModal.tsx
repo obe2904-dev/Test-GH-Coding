@@ -64,7 +64,8 @@ export function ScheduledPostModal({ postId, isOpen, onClose, onDeleted, onUpdat
     // Update post status to published
     const { error } = await updatePublishedPost(postId, {
       status: 'published',
-      postedAt: postedAt
+      postedAt: postedAt,
+      scheduledFor: null
     })
     
     if (!error) {
@@ -410,7 +411,16 @@ export function ScheduledPostModal({ postId, isOpen, onClose, onDeleted, onUpdat
           isOpen={showManualPostModal}
           platforms={[post.platform.toLowerCase()]}
           photoContent={post.photoUrl ? {
-            uploadedMedia: [{ url: post.photoUrl, type: 'image' }]
+            uploadedMedia: [{ 
+              id: 'scheduled-preview',
+              url: post.photoUrl, 
+              type: 'image' as const,
+              file: null as any
+            }],
+            selectedMedia: post.photoUrl,
+            isOriginal: true,
+            photoAdjustments: null,
+            carouselMode: false
           } : null}
           copiedPlatform={copiedPlatform}
           t={t}

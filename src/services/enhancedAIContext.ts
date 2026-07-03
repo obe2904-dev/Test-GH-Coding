@@ -8,7 +8,7 @@
 import { supabase } from '../lib/supabase'
 import { getUpcomingHolidays, getCurrentSeason } from '../config/danish-holidays'
 import { getWeather } from '../services/weatherService'
-import type { Database } from '../types/database'
+import type { Database } from '../types/supabase'
 import type { BrandProfileForAI } from '../features/aiPromptBuilder'
 
 type BusinessBrandProfile = Database['public']['Tables']['business_brand_profile']['Row']
@@ -104,9 +104,9 @@ export function mapToBrandProfileForAI(dbProfile: BusinessBrandProfile | null): 
   return {
     // DEPRECATED: brandEssence removed - use signature_themes from menu intelligence
     brandEssence: undefined,
-    identityKeywords: dbProfile.identity_keywords ?? null,
+    identityKeywords: (typeof dbProfile.identity_keywords === 'string' ? dbProfile.identity_keywords.split(',').map(k => k.trim()) : null),
     voiceConstraints: dbProfile.voice_constraints ?? null,
-    toneOfVoice: (typeof dbProfile.tone_of_voice === 'string' ? dbProfile.tone_of_voice : undefined),
+    toneOfVoice: (Array.isArray(dbProfile.tone_of_voice) ? (dbProfile.tone_of_voice as string[]).join(', ') : (typeof dbProfile.tone_of_voice === 'string' ? dbProfile.tone_of_voice : undefined)),
     thingsToAvoid: (typeof dbProfile.things_to_avoid === 'string' ? dbProfile.things_to_avoid : undefined),
     targetAudience: (typeof dbProfile.target_audience === 'string' ? dbProfile.target_audience : undefined),
     coreOfferings: (typeof dbProfile.core_offerings === 'string' || Array.isArray(dbProfile.core_offerings) ? dbProfile.core_offerings : undefined),

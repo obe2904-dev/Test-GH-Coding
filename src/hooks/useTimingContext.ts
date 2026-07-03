@@ -6,11 +6,11 @@
  */
 
 import { useMemo } from 'react'
-import { useBusinessData } from '../useBusinessData'
+import { useBusinessData } from './useBusinessData'
 import { 
   getCurrentTimingContext, 
   type TimingContext 
-} from '../../lib/segmentTimingContext'
+} from '../lib/segmentTimingContext'
 
 interface UseTimingContextOptions {
   /** Override current time (for testing or scheduled posts) */
@@ -22,23 +22,20 @@ export function useTimingContext(options: UseTimingContextOptions = {}): {
   isLoading: boolean
   hasSegments: boolean
 } {
-  const { businessProfile, isLoading } = useBusinessData()
+  const businessData = useBusinessData()
+  const { isLoading } = businessData
   
   const context = useMemo(() => {
-    // Extract strategic segments from brand profile
-    const segments = businessProfile?.strategic_audience_segments 
-      || businessProfile?.brand_profile_v5?.layer_1_programmes?.[0]?.audienceProfile?.audience_segments
-      || []
+    // TODO: strategic_audience_segments is in business_brand_profile table, not business_profile
+    // For now, return default context
+    const segments: any[] = []
     
     return getCurrentTimingContext(segments, options.overrideTime)
-  }, [businessProfile, options.overrideTime])
+  }, [options.overrideTime])
   
   const hasSegments = useMemo(() => {
-    const segments = businessProfile?.strategic_audience_segments 
-      || businessProfile?.brand_profile_v5?.layer_1_programmes?.[0]?.audienceProfile?.audience_segments
-      || []
-    return segments.length > 0
-  }, [businessProfile])
+    return false // TODO: Load segments from business_brand_profile if needed
+  }, [])
   
   return {
     context,

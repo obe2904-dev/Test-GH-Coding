@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import IconButton from '../../ui/IconButton'
 import { supabase } from '../../../lib/supabase'
 import { MediaItem } from '../../../stores/postCreationStore'
-import type { Database } from '../../../types/database'
+import type { Database } from '../../../types/supabase'
 
 // Icon Components
 const ChevronLeft = ({ className }: { className?: string }) => (

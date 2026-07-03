@@ -10,7 +10,7 @@ import { TimingBadge, getTooltipText } from '@/components/timing'
  * OPTION 1: Badge in Card Header
  * Shows timing badge prominently at top of card
  */
-export function PostCardWithHeaderBadge({ post }) {
+export function PostCardWithHeaderBadge({ post }: { post: any }) {
   const { mode, displayText } = post.segmentCoverage || {
     mode: 'gap_capacity',
     displayText: 'Åbent for alle'
@@ -49,7 +49,7 @@ export function PostCardWithHeaderBadge({ post }) {
  * OPTION 2: Badge in Footer
  * Shows timing badge at bottom of card, less prominent
  */
-export function PostCardWithFooterBadge({ post }) {
+export function PostCardWithFooterBadge({ post }: { post: any }) {
   const { mode, displayText } = post.segmentCoverage || {
     mode: 'gap_capacity',
     displayText: 'Åbent for alle'
@@ -82,7 +82,7 @@ export function PostCardWithFooterBadge({ post }) {
  * OPTION 3: Badge with Tooltip (Recommended)
  * Badge on hover shows detailed explanation
  */
-export function PostCardWithTooltipBadge({ post }) {
+export function PostCardWithTooltipBadge({ post }: { post: any }) {
   const { mode, displayText } = post.segmentCoverage || {
     mode: 'gap_capacity',
     displayText: 'Åbent for alle'
@@ -113,7 +113,7 @@ export function PostCardWithTooltipBadge({ post }) {
  * OPTION 4: Inline Time Label with Icon
  * Very subtle - just adds icon to existing time display
  */
-export function PostCardWithInlineIcon({ post }) {
+export function PostCardWithInlineIcon({ post }: { post: any }) {
   const icon = post.segmentCoverage?.mode === 'strategic_segment' ? '🎯' : '⚡'
   const label = post.segmentCoverage?.displayText || 'Åbent for alle'
   
@@ -138,9 +138,9 @@ export function PostCardWithInlineIcon({ post }) {
  * OPTION 5: Weekly Plan Grid with Summary
  * Shows all 7 posts in a grid with timing badges + summary at top
  */
-export function WeeklyPlanGridWithSummary({ posts }) {
+export function WeeklyPlanGridWithSummary({ posts }: { posts: any[] }) {
   const targetedCount = posts.filter(
-    p => p.segmentCoverage?.mode === 'strategic_segment'
+    (p: any) => p.segmentCoverage?.mode === 'strategic_segment'
   ).length
   const broadAppealCount = posts.length - targetedCount
   
@@ -172,7 +172,7 @@ export function WeeklyPlanGridWithSummary({ posts }) {
       
       {/* Post grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {posts.map(post => (
+        {posts.map((post: any) => (
           <PostCardWithTooltipBadge key={post.id} post={post} />
         ))}
       </div>
@@ -184,10 +184,10 @@ export function WeeklyPlanGridWithSummary({ posts }) {
  * OPTION 6: Compact List View
  * Shows posts in a list with minimal badges
  */
-export function WeeklyPlanListView({ posts }) {
+export function WeeklyPlanListView({ posts }: { posts: any[] }) {
   return (
     <div className="space-y-2">
-      {posts.map(post => {
+      {posts.map((post: any) => {
         const { mode, displayText } = post.segmentCoverage || {
           mode: 'gap_capacity',
           displayText: 'Åbent for alle'
@@ -226,7 +226,7 @@ export function WeeklyPlanListView({ posts }) {
  * RECOMMENDED: Card with Header Badge + Tooltip
  * Balance between visibility and information
  */
-export function RecommendedPostCard({ post }) {
+export function RecommendedPostCard({ post }: { post: any }) {
   const { mode, displayText, reassurance } = post.segmentCoverage || {
     mode: 'gap_capacity',
     displayText: 'Åbent for alle',

@@ -145,7 +145,7 @@ export function DashboardOverviewPage() {
 
   const brandHasData = Boolean(
     profile?.ai_brand_context?.trim() ||
-    profile?.short_description?.trim() ||
+    profile?.user_about_text?.trim() ||
     profile?.long_description?.trim() ||
     latestAnalysis
   )
@@ -168,12 +168,12 @@ export function DashboardOverviewPage() {
           title: t('navigation.whatWeOffer'),
           description: t('navigation.offeringsDescription'),
           icon: MenuIcon,
-          action: currentTier === 'free'
+          action: isFreeTier
             ? { kind: 'route' as const, to: '/dashboard/plans' }
             : { kind: 'route' as const, to: '/dashboard/menu' },
-          locked: currentTier === 'free' || (currentTier !== 'free' && setupCompletion.profileState !== 'complete'),
-          isSequentialLock: currentTier !== 'free' && setupCompletion.profileState !== 'complete',
-          lockedReason: currentTier === 'free' 
+          locked: isFreeTier || (!isFreeTier && setupCompletion.profileState !== 'complete'),
+          isSequentialLock: !isFreeTier && setupCompletion.profileState !== 'complete',
+          lockedReason: isFreeTier 
             ? undefined 
             : setupCompletion.profileState !== 'complete'
               ? 'Udfyld først virksomhedsprofil for at låse menuen op'
@@ -186,12 +186,12 @@ export function DashboardOverviewPage() {
           title: t('navigation.location'),
           description: t('navigation.locationDescription'),
           icon: MapPinIcon,
-          action: currentTier === 'free'
+          action: isFreeTier
             ? { kind: 'route' as const, to: '/dashboard/plans' }
             : { kind: 'route' as const, to: '/dashboard/location' },
-          locked: currentTier === 'free' || (currentTier !== 'free' && setupCompletion.menuState === 'none'),
-          isSequentialLock: currentTier !== 'free' && setupCompletion.menuState === 'none',
-          lockedReason: currentTier === 'free' 
+          locked: isFreeTier || (!isFreeTier && setupCompletion.menuState === 'none'),
+          isSequentialLock: !isFreeTier && setupCompletion.menuState === 'none',
+          lockedReason: isFreeTier 
             ? undefined 
             : setupCompletion.menuState === 'none'
               ? 'Tilføj først menu data for at låse lokation op'
@@ -204,12 +204,12 @@ export function DashboardOverviewPage() {
           title: t('navigation.brandProfile'),
           description: t('navigation.brandProfileDescription'),
           icon: SparklesIcon,
-          action: currentTier === 'free'
+          action: isFreeTier
             ? { kind: 'route' as const, to: '/dashboard/plans' }
             : { kind: 'route' as const, to: '/dashboard/brand' },
-          locked: currentTier === 'free' || (currentTier !== 'free' && setupCompletion.locationState === 'none'),
-          isSequentialLock: currentTier !== 'free' && setupCompletion.locationState === 'none',
-          lockedReason: currentTier === 'free' 
+          locked: isFreeTier || (!isFreeTier && setupCompletion.locationState === 'none'),
+          isSequentialLock: !isFreeTier && setupCompletion.locationState === 'none',
+          lockedReason: isFreeTier 
             ? undefined 
             : setupCompletion.locationState === 'none'
               ? 'Tilføj først lokation data for at låse brand profil op'

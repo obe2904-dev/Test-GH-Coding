@@ -2,7 +2,7 @@ import { createEmptyWeekSchedule } from '../../../types/businessProfile'
 import type { WeekSchedule } from '../../../types/businessProfile'
 import type { BusinessSector } from '../../../types/businessSector'
 import type { BusinessOfferingsProfile } from '../../../types/businessOfferings'
-import type { Database } from '../../../types/database'
+import type { Database } from '../../../types/supabase'
 
 export type ProfileRow = Database['public']['Tables']['profiles']['Row']
 
@@ -10,7 +10,7 @@ export const isBusinessSectorValue = (value: string | null): value is BusinessSe
   value === 'hospitality' || value === 'beauty' || value === 'wellness' || value === 'retail'
 
 export const parseBusinessOfferings = (
-  value: ProfileRow['business_offerings']
+  value: any
 ): BusinessOfferingsProfile | null => {
   if (!value) {
     return null

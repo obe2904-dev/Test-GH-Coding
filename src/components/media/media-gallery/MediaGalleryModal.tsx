@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import type { MediaItem } from '../../../api/mediaLibrary'
+import type { MediaItem, PostType } from '../../../api/mediaLibrary'
 import {
   getMediaLibrary,
   deleteMediaItem,

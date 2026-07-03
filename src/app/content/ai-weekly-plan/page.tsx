@@ -29,7 +29,7 @@ export default function AIWeeklyPlanPage() {
   const [existingPlanFound, setExistingPlanFound] = useState(false)
   const [showRegenerateWarning, setShowRegenerateWarning] = useState(false)
   const [ownerNote, setOwnerNote] = useState('')
-  const { committedWeeklyPlanIdeaIds } = useCommittedSuggestions(weeklyPlan?.businessId ?? null)
+  const { committedWeeklyPlanIdeaIds, weeklyPlanPostMap } = useCommittedSuggestions(weeklyPlan?.businessId ?? null)
 
   // Weather snapshot TTL configuration (matches backend WEATHER_THRESHOLDS)
   const WEATHER_TTL_MS = {
@@ -932,7 +932,7 @@ export default function AIWeeklyPlanPage() {
       const { error } = await supabase
         .from('weekly_content_plans')
         .update({
-          posts: updatedPosts as unknown as import('@/types/database').Json,
+          posts: updatedPosts as unknown as import('@/types/supabase').Json,
           updated_at: new Date().toISOString(),
         })
         .eq('id', weeklyPlan.id)
@@ -1483,6 +1483,7 @@ export default function AIWeeklyPlanPage() {
             sessionDoneIndices={weeklyPlanSessionDone}
             onCreatePost={handleCreatePost}
             lockedIdeaIds={committedWeeklyPlanIdeaIds}
+            weeklyPlanPostMap={weeklyPlanPostMap}
             showGenerateButton={!existingPlanFound}
             onRefreshWeather={handleRefreshWeather}
             refreshingWeather={refreshingWeather}

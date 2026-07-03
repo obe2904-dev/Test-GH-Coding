@@ -1078,7 +1078,7 @@ export function GenerateStep({
         /* Show content locked to the active path — no tab switching */
         <div className="space-y-4">
           {/* AI Forslag path */}
-          <div className={activePath === 'ai-ideas' ? 'block' : 'hidden'}>
+          <div className={(activePathProp ?? storeActivePath) === 'ai-ideas' ? 'block' : 'hidden'}>
             {businessId ? (
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <AiSuggestionsCard
@@ -1097,7 +1097,7 @@ export function GenerateStep({
           </div>
 
           {/* Skriv Selv path */}
-          <div className={activePath !== 'ai-ideas' ? 'block' : 'hidden'}>
+          <div className={(activePathProp ?? storeActivePath) !== 'ai-ideas' ? 'block' : 'hidden'}>
             <EditorPane
               writeContentProps={writeContentProps}
               validationBanner={validationBanner}

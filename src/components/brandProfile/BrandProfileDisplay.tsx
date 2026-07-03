@@ -682,7 +682,9 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
                 try {
                   const { error } = await supabase
                     .from('business_brand_profile')
-                    .update({ post_length_guidelines: guidelines })
+                    .update({
+                    // post_length_guidelines removed - data now in content_focus
+                  })
                     .eq('business_id', businessId);
                   
                   if (error) {

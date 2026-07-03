@@ -69,7 +69,7 @@ function BrandPage() {
 
         if (brandData && isActive) {
           setToneKeywords(brandData.tone_keywords || [])
-          setBrandValues(brandData.values || [])
+          setBrandValues(brandData.core_values || [])
           setEmojiUsage(((brandData as any).emoji_usage as EmojiUsage) || 'moderate')
           setFormalityLevel((brandData as any).formality_level || 3)
           

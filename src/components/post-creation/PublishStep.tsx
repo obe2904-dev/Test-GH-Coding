@@ -77,7 +77,7 @@ export interface SuccessInfo {
 
 export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, onViewCalendar, onBackToPlan, onPublishSuccess, publishedInfo, onPublishDeleted, onDraftDeleted, restoredDbDraft }: PublishStepProps) {
   const { t: tPublish, i18n } = useTranslation(undefined, { keyPrefix: 'createPost.publish' })
-  const { postContent, selectedPlatforms, photoContent, photoIdea, selectedIdea, aiIdeas, weeklyPlanPost, postCta, activePath, weeklyPlanPostIndex, addWeeklyPlanSessionDone, selectedSuggestionData } = usePostCreationStore()
+  const { postContent, selectedPlatforms, photoContent, photoIdea, selectedIdea, aiIdeas, weeklyPlanPost, postCta, activePath, weeklyPlanPostIndex, addWeeklyPlanSessionDone, selectedSuggestionData, setSelectedSuggestionData } = usePostCreationStore()
   const { isConnected } = useConnectionsStore()
   const { business } = useBusinessData()
   const { 
@@ -235,7 +235,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
   // Determine sibling post (other platform) for "Apply to both" checkbox
   const getSiblingPost = useCallback((post: any) => {
     if (!post) return null
-    const otherPlatform = post.platform === 'facebook' ? 'instagram' : 'facebook'
+    const otherPlatform = (post.platform === 'facebook' ? 'instagram' : 'facebook') as Platform
     
     // Find sibling post in unified allPosts array
     const sibling = allPosts.find(
@@ -650,16 +650,18 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     const contentType = weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType ?? null
     
     // Map content_type to PostType for media library
+    // Media library PostType is simplified: 'food' | 'drinks' | 'atmosphere' | 'other'
     const postTypeMap: Record<string, PostType> = {
-      'menu_item': 'menu_item',
+      'menu_item': 'food',
       'atmosphere': 'atmosphere',
-      'behind_the_scenes': 'behind_the_scenes',
-      'event': 'event',
-      'announcement': 'announcement',
-      'customer_moment': 'customer_moment',
-      'team': 'team',
-      'seasonal': 'seasonal',
-      'branding': 'branding'
+      'behind_the_scenes': 'other',
+      'event': 'other',
+      'announcement': 'other',
+      'customer_moment': 'other',
+      'team': 'other',
+      'seasonal': 'food',
+      'branding': 'atmosphere',
+      'drinks': 'drinks'
     }
     
     const postType: PostType | undefined = contentType && contentType in postTypeMap 
@@ -886,8 +888,8 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     setSelectedDate(now)
     setSelectedHour(String(now.getHours()).padStart(2, '0'))
     setSelectedMinute(String(now.getMinutes()).padStart(2, '0'))
-    setSelectedSuggestion(null)
-  }, [])
+    setSelectedSuggestionData(null)
+  }, [setSelectedSuggestionData])
 
   // Get locale for displaying dates - use current language (da-DK or en-GB) combined with date format preference
   const locale = useMemo(() => {

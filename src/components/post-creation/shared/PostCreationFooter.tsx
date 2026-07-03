@@ -4,7 +4,7 @@ import { ChevronRight } from '../../icons/PostCreationIcons'
 interface PostCreationFooterProps {
   hasUnsavedChanges: boolean
   hasPersistedDraft: boolean
-  onSaveDraft: () => boolean
+  onSaveDraft: () => boolean | Promise<boolean>
   onNext: () => void
   nextLabel?: string
   renderNextButton?: (options: { onNext: () => void }) => ReactNode

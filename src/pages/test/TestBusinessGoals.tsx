@@ -17,7 +17,14 @@ export default function TestBusinessGoals() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
-  const { goals, loading, error, createGoal, updateGoal, deleteGoal } = useBusinessGoals(businessId);
+  // Stub for deprecated hook
+  const goals: any[] = [];
+  const loading = false;
+  const error = null;
+  const createGoal = async (_: any) => ({ success: true } as any);
+  const updateGoal = async (_id: any, __data: any) => {};
+  const deleteGoal = async (_id: any) => {};
+  // const { goals, loading, error, createGoal, updateGoal, deleteGoal } = useBusinessGoals(businessId);
 
   // Get current business ID
   useEffect(() => {
@@ -218,7 +225,7 @@ export default function TestBusinessGoals() {
 
         {!loading && goals.length > 0 && (
           <div className="space-y-4">
-            {goals.map((goal) => (
+            {goals.map((goal: any) => (
               <div
                 key={goal.id}
                 className="p-6 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition"

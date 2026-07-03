@@ -84,10 +84,10 @@ export async function savePublishedPost(
     suggested_time:        data.suggestedPostTime ?? null,
     idea_source:           data.ideaSource ?? 'manual',
     suggestion_id:         data.suggestionId ?? null,
-    caption_data:          data.captionData ?? null,
+    caption_data:          (data.captionData ?? null) as any,
   }
 
-  const { data: inserted, error } = await supabase.from('posts').insert(row).select('id').single()
+  const { data: inserted, error } = await supabase.from('posts').insert(row as any).select('id').single()
   if (error) {
     console.error('[savePublishedPost] Supabase insert failed:', error.message, error)
   }
@@ -209,7 +209,7 @@ export async function getScheduledPostById(id: string): Promise<{ data: Schedule
     data: {
       id: data.id,
       businessId: data.business_id,
-      platform: data.platform,
+      platform: data.platform || 'instagram',
       postText: data.post_text || '',
       photoUrl: data.photo_url || undefined,
       contentType: data.content_type || undefined,
@@ -270,7 +270,7 @@ export function usePublishedPostsTimeline(businessId: string | null) {
       const title = row.menu_item_name
         ?? (row.content_type ? capitalizeFirst(row.content_type.replace(/_/g, ' ')) : null)
         ?? (row.post_text ? row.post_text.slice(0, 50) : null)
-        ?? capitalizeFirst(row.platform)
+        ?? capitalizeFirst(row.platform || 'instagram')
 
       if (row.status === 'scheduled' && row.scheduled_for) {
         const date = new Date(row.scheduled_for)
@@ -284,20 +284,20 @@ export function usePublishedPostsTimeline(businessId: string | null) {
           id: row.id,
           date,
           title,
-          platform: capitalizeFirst(row.platform),
+          platform: capitalizeFirst(row.platform || 'instagram'),
           time: date.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short' })
             + ' ' + date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }),
           snippet: row.post_text ? row.post_text.slice(0, 80) : undefined,
           timeUntil,
           thumbnail: thumbnailUrl,
         })
-      } else {
+      } else if (row.posted_at) {
         const date = new Date(row.posted_at)
         recent.push({
           id: row.id,
           date,
           title: title,
-          platform: capitalizeFirst(row.platform),
+          platform: capitalizeFirst(row.platform || 'instagram'),
           time: date.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short' })
             + ' ' + date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }),
           snippet: row.post_text ? row.post_text.slice(0, 80) : undefined,

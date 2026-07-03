@@ -1,10 +1,13 @@
 /**
  * Custom hook for managing Business Goals
- * Demonstrates type-safe CRUD operations with new schema
+ * Note: business_goals table was dropped April 2026, hook kept for legacy compatibility
  */
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { BusinessGoal, CreateBusinessGoal } from '@/types';
+
+// Local type definitions (table was dropped)
+type BusinessGoal = any;
+type CreateBusinessGoal = any;
 
 interface UseBusinessGoalsReturn {
   goals: BusinessGoal[];

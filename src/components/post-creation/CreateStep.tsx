@@ -624,15 +624,15 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         file: null as any, // No File object when selecting from gallery
         url: galleryMedia.storage_path,
         originalUrl: galleryMedia.storage_path,
-        adjustedUrl: null,
+        adjustedUrl: null as any,
         type: galleryMedia.media_type as 'image' | 'video',
-        adjustments: null,
+        adjustments: null as any,
         selectedVersionForPost: 'original',
         analysisCache: undefined,
         coverCandidates: galleryMedia.media_type === 'video' && galleryMedia.video_thumbnail_path 
           ? [galleryMedia.video_thumbnail_path] 
           : undefined,
-        selectedCoverUrl: galleryMedia.media_type === 'video' ? galleryMedia.video_thumbnail_path : undefined,
+        selectedCoverUrl: galleryMedia.media_type === 'video' ? (galleryMedia.video_thumbnail_path ?? undefined) : undefined,
         duration: galleryMedia.duration || undefined,
       }
 
@@ -641,9 +641,9 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       
       setPhotoContent({
         uploadedMedia: updatedMedia,
-        selectedMedia: null,
+        selectedMedia: photoContent?.selectedMedia || null,
         isOriginal: true,
-        photoAdjustments: null,
+        photoAdjustments: photoContent?.photoAdjustments || null,
         carouselMode: photoContent?.carouselMode ?? false,
         carouselTheme: photoContent?.carouselTheme,
         carouselCoverIndex: photoContent?.carouselCoverIndex,
@@ -1486,10 +1486,10 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
           <PlatformSelector
             currentTier={currentTier}
             selectedPlatforms={selectedPlatforms}
-            onSelectPlatforms={setSelectedPlatforms}
+            onSelectPlatforms={(platforms: string[]) => setSelectedPlatforms(platforms as ('facebook' | 'instagram')[])}
             activePlatform={previewPlatform}
-            onActivePlatformChange={setPreviewPlatform}
-            availablePlatforms={enabledPlatforms}
+            onActivePlatformChange={(platform: string) => setPreviewPlatform(platform as 'facebook' | 'instagram')}
+            availablePlatforms={enabledPlatforms as ('facebook' | 'instagram')[]}
           />
 
             <div className="relative">
@@ -1512,10 +1512,9 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
                 content={{
                   ...platformPreviewContent,
                   hashtags: platformPreviewContent.hashtags || [],
-                  includeHashtags: platformPreviewContent.includeHashtags,
                   adjustments: {
                     ...content.adjustments,
-                    includeHashtags: platformPreviewContent.includeHashtags
+                    includeHashtags: platformPreviewContent.adjustments?.includeHashtags ?? true
                   }
                 }}
                 uploadedMedia={photoContent?.uploadedMedia || []}

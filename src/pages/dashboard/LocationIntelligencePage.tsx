@@ -500,16 +500,21 @@ function LocationIntelligencePage() {
         }));
 
       const analysis: LocationAnalysis = {
-        city: locationData.city || '',
-        locale: 'da-DK',
-        culturalContext: {
-          description: locationData.neighborhood_character || '',
-          knownFor: locationData.location_marketing_hooks || []
-        },
-        matches: matches,
+        address: locationData.local_location_reference || '',
         coordinates: {
           lat: locationData.latitude || 0,
           lng: locationData.longitude || 0
+        },
+        country: 'DK' as const,
+        city: locationData.neighborhood || locationData.local_location_reference || '',
+        locale: 'da-DK',
+        primaryCategory: (matches[0]?.categoryId || 'city_centre') as LocationCategoryId,
+        analyzedAt: new Date().toISOString(),
+        matches: matches as any, // Type cast for Json compatibility
+        culturalContext: {
+          description: locationData.neighborhood_character || '',
+          knownFor: locationData.location_marketing_hooks || [],
+          significance: 'medium' as const
         }
       };
 
@@ -529,7 +534,7 @@ function LocationIntelligencePage() {
         const categories = matches.map(m => ({
           categoryId: m.categoryId,
           score: m.score,
-          displayName: localeConfig.categories[m.categoryId]?.name || m.categoryId
+          displayName: (localeConfig.categories as any)[m.categoryId]?.name || m.categoryId
         }));
         
         // Filter top 3 categories >= 50% AND geographic types only

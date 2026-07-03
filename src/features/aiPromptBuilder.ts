@@ -1,4 +1,4 @@
-import { Database } from '../types/database'
+import { Database } from '../types/supabase'
 import { type UserTier } from '../config/ai-models'
 import { getAIModelForTier as getAIModelFromConfig } from '../config/ai-models'
 import type { EnhancedAIContext } from '../services/enhancedAIContext'
@@ -789,11 +789,11 @@ Style rules:
       analysisData.description ||
       analysisData.summary ||
       profile?.long_description ||
-      profile?.short_description ||
+      profile?.user_about_text ||
       i18n.businessContext.notSpecified
 
     const businessName = analysisData.businessName || analysisData.name || business.name
-    const businessType = analysisData.businessType || analysisData.type || analysisData.category || business.effectiveVertical || business.vertical
+    const businessType = analysisData.businessType || analysisData.type || analysisData.category || 'restaurant'
     const keywords = analysisData.keywords || analysisData.tags || []
     const menuUrls = analysisData.detectedMenuUrls || analysisData.menuUrls || []
 
@@ -844,9 +844,9 @@ ${menuUrls?.length ? `${i18n.businessContext.hasMenuPage}: Ja` : ''}
 
     businessContextSection = `
 ${i18n.businessContext.name}: ${business.name}
-${i18n.businessContext.type}: ${business.effectiveVertical || business.vertical}
+${i18n.businessContext.type}: restaurant
 ${i18n.businessContext.location}: ${location?.city || i18n.businessContext.notSpecified}
-${profile?.short_description ? `${i18n.businessContext.description}: ${profile.short_description}` : ''}
+${profile?.user_about_text ? `${i18n.businessContext.description}: ${profile.user_about_text}` : ''}
 `.trim()
   }
 

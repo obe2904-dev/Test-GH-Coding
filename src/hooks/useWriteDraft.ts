@@ -95,10 +95,10 @@ export function useWriteDraft({ businessId, enabled = true }: UseWriteDraftOptio
             user_id: user.id,
             business_id: businessId,
             content: draft.content,
-            photo_content: draft.photo_content,
+            photo_content: draft.photo_content as any,
             selected_platforms: draft.selected_platforms,
             updated_at: new Date().toISOString()
-          }, {
+          } as any, {
             onConflict: 'user_id,business_id'
           })
 

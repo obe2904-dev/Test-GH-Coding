@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import type { TFunction } from 'i18next'
 import type { WeeklyContentPlan, PostSpecification } from '../../types/weekly-plan'
+import type { WeeklyPlanPostInfo } from '../../hooks/useCommittedSuggestions'
 import { WeatherIcon } from './WeatherIcon'
 import { ContentTypeIcon } from '../post-creation/ContentTypeIcon'
 import { formatNudgeTargetDay } from '../../utils/formatNudgeTargetDay'
@@ -14,6 +16,8 @@ interface WeeklyPlanOverviewProps {
   sessionDoneIndices?: number[]
   // Weekly-plan idea ids that are already committed and therefore locked
   lockedIdeaIds?: Set<number>
+  // Map of weekly_plan_idea_id -> post details for created posts
+  weeklyPlanPostMap?: Map<number, WeeklyPlanPostInfo>
   // Hide 'Generer ny plan' button (e.g. when viewing current in-progress week)
   showGenerateButton?: boolean
   // Weather refresh callback + loading state
@@ -347,6 +351,7 @@ export function WeeklyPlanOverview({
   onCreatePost,
   sessionDoneIndices = [],
   lockedIdeaIds = new Set(),
+  weeklyPlanPostMap = new Map(),
   showGenerateButton = true,
   onRefreshWeather,
   refreshingWeather = false,
@@ -356,6 +361,7 @@ export function WeeklyPlanOverview({
   onGenerateNewPlan,
 }: WeeklyPlanOverviewProps) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   return (
     <div className="space-y-6">
       {/* Header Card */}
@@ -692,7 +698,9 @@ export function WeeklyPlanOverview({
                 p => p.timing.date === post.timing.date && p.timing.time === post.timing.time
               )
               const isSessionDone = rawIndex >= 0 && sessionDoneIndices.includes(rawIndex)
-              const isLocked = post.idea_id != null && lockedIdeaIds.has(Number(post.idea_id))
+              const hasCreatedPost = post.idea_id != null && weeklyPlanPostMap.has(Number(post.idea_id))
+              const createdPostInfo = hasCreatedPost ? weeklyPlanPostMap.get(Number(post.idea_id)) : undefined
+              const isLocked = post.idea_id != null && lockedIdeaIds.has(Number(post.idea_id)) && !hasCreatedPost
 
               return (
                 <div
@@ -704,7 +712,7 @@ export function WeeklyPlanOverview({
                   className={`bg-white rounded-lg border px-4 py-3 hover:shadow-sm transition-all text-left cursor-pointer ${
                     isLocked
                       ? 'border-slate-300 bg-slate-50/70'
-                      : isSessionDone
+                      : hasCreatedPost || isSessionDone
                       ? 'border-green-300 bg-green-50/30'
                       : isPast
                         ? 'border-orange-300 bg-orange-50/30'
@@ -716,8 +724,8 @@ export function WeeklyPlanOverview({
                   <div className="flex-shrink-0 w-16 text-center">
                     <div className="text-[11px] font-semibold text-slate-500 uppercase leading-none">{dayLabel} {dayNum}</div>
                     <div className="text-base font-bold text-slate-900 mt-0.5">{post.timing.time}</div>
-                    {post.timing.timingRationale && (
-                      <div className="text-[9px] text-purple-600 font-medium mt-1 leading-tight" title={post.timing.timingRationale}>
+                    {post.timing.rationale && (
+                      <div className="text-[9px] text-purple-600 font-medium mt-1 leading-tight" title={post.timing.rationale}>
                         🧠 AI
                       </div>
                     )}
@@ -758,13 +766,16 @@ export function WeeklyPlanOverview({
                         #{post.strategicContext.slot_id}
                       </span>
                     )}
+                    {hasCreatedPost && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-600 text-white">✓ {t('weeklyPlan.overview.createdBadge', { defaultValue: 'Lavet' })}</span>
+                    )}
                     {isLocked && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-200 text-slate-700">{t('weeklyPlan.overview.lockedBadge', { defaultValue: 'Låst' })}</span>
                     )}
-                    {!isLocked && isSessionDone && (
+                    {!isLocked && !hasCreatedPost && isSessionDone && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-600 text-white">{t('weeklyPlan.overview.doneBadge')}</span>
                     )}
-                    {isPast && !isSessionDone && !isLocked && (
+                    {isPast && !isSessionDone && !isLocked && !hasCreatedPost && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-500 text-white">{t('weeklyPlan.overview.pastBadge')}</span>
                     )}
                     {post.strategicContext?.owner_note_applied && (
@@ -796,15 +807,30 @@ export function WeeklyPlanOverview({
                   {onCreatePost && (
                     <div className="flex-shrink-0">
                       <button
-                        onClick={(e) => { e.stopPropagation(); if (!isLocked) onCreatePost(post) }}
+                        onClick={(e) => { 
+                          e.stopPropagation()
+                          if (hasCreatedPost) {
+                            // Navigate to calendar when post has been created
+                            navigate('/dashboard/calendar')
+                          } else if (!isLocked) {
+                            onCreatePost(post)
+                          }
+                        }}
                         disabled={isLocked}
                         className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
                           isLocked
                             ? 'text-slate-500 bg-slate-200 cursor-not-allowed'
+                            : hasCreatedPost
+                            ? 'text-white bg-green-600 hover:bg-green-700'
                             : 'text-white bg-cta hover:bg-cta-hover'
                         }`}
                       >
-                        {isLocked ? t('weeklyPlan.overview.lockedButton', { defaultValue: 'Låst' }) : t('weeklyPlan.overview.createPost')}
+                        {isLocked 
+                          ? t('weeklyPlan.overview.lockedButton', { defaultValue: 'Låst' })
+                          : hasCreatedPost
+                          ? t('weeklyPlan.overview.goToPost', { defaultValue: 'Gå til opslag →' })
+                          : t('weeklyPlan.overview.createPost')
+                        }
                       </button>
                     </div>
                   )}

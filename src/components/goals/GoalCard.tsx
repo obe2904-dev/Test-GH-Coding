@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 // Temporary type definition (business_goals table was dropped but components still exist)
-interface BusinessGoal {
+export interface BusinessGoal {
   id: string;
   business_id: string;
   goal_type: string;

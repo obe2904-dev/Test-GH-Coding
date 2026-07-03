@@ -467,8 +467,8 @@ export function BrandProfilePageV5() {
                             <div className="space-y-1 text-sm text-gray-700 leading-relaxed">
                               {profile.menu_overview_summary.cross_menu_summary
                                 .split('\n')
-                                .filter(line => line.trim().length > 0)
-                                .map((line, index) => (
+                                .filter((line: string) => line.trim().length > 0)
+                                .map((line: string, index: number) => (
                                   <p key={index} className="pl-3 -indent-3 whitespace-pre-wrap">
                                     {line}
                                   </p>

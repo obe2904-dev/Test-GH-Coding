@@ -110,11 +110,6 @@ export function GoalCreationForm({ businessId, onSubmit, onCancel }: GoalCreatio
           target_days: selectedDays.length > 0 ? selectedDays : undefined,
           target_periods: selectedPeriods.length > 0 ? selectedPeriods : undefined,
         },
-        target_audience_segment: {},
-        promotional_hook: {},
-        status: 'not_started',
-        progress_pct: 0,
-        notes: null,
       };
 
       await onSubmit(newGoal);

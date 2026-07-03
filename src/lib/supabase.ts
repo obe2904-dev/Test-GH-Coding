@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import type { Database } from '../types/database'
+import type { Database } from '../types/supabase'
 
 // Staging Supabase credentials (safe to hardcode - anon key is public)
 const STAGING_URL = 'https://oadwluspjlsnxhgakral.supabase.co'

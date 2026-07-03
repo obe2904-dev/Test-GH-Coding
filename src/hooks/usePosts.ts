@@ -202,9 +202,9 @@ export function usePosts() {
       // Content
       post_text:                data.postText ?? null,
       photo_url:                data.photoUrl ?? null,
-      content_json:             data.contentJson ?? null,
+      content_json:             (data.contentJson as any) ?? null,
       photo_idea:               data.photoIdea ?? null,
-      caption_data:             data.captionData ?? null,
+      caption_data:             (data.captionData as any) ?? null,
       media_metadata:           data.mediaMetadata ?? null,
       
       // Classification
@@ -235,7 +235,7 @@ export function usePosts() {
       // Update existing post
       const { error } = await supabase
         .from('posts')
-        .update(row)
+        .update(row as any)
         .eq('id', existing.id)
       
       if (error) {
@@ -248,7 +248,7 @@ export function usePosts() {
     // Insert new post
     const { data: inserted, error } = await supabase
       .from('posts')
-      .insert(row)
+      .insert(row as any)
       .select('id')
       .single()
     
@@ -347,8 +347,8 @@ export function usePosts() {
         scheduled_for:         data.scheduledFor ? data.scheduledFor.toISOString() : null,
         posted_at:             postedAt.toISOString(),
         published_at:          postedAt.toISOString(),
-        caption_data:          data.captionData ?? null,
-        media_metadata:        data.mediaMetadata ?? null,
+        caption_data:          (data.captionData ?? null) as any,
+        media_metadata:        (data.mediaMetadata ?? null) as any,
         suggested_time:        data.suggestedPostTime ?? null,
         source:                'manual_copy_paste',
         updated_at:            new Date().toISOString(),
@@ -751,10 +751,10 @@ export async function savePublishedPost(data: {
     suggested_time:        data.suggestedPostTime ?? null,
     idea_source:           data.ideaSource ?? 'manual',
     suggestion_id:         data.suggestionId ?? null,
-    caption_data:          data.captionData ?? null,
+    caption_data:          (data.captionData ?? null) as any,
   }
 
-  const { data: inserted, error } = await supabase.from('posts').insert(row).select('id').single()
+  const { data: inserted, error } = await supabase.from('posts').insert(row as any).select('id').single()
   if (error) {
     console.error('[savePublishedPost] Insert failed:', error.message, error)
   }

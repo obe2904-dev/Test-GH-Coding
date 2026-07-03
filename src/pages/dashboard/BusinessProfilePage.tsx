@@ -746,7 +746,8 @@ function BusinessProfilePage() {
           serviceModelData.reservation_required = Boolean((analysis as any).reservationRequired)
           serviceModelData.accepts_walk_ins = !Boolean((analysis as any).reservationRequired)
           setReservationRequired(Boolean((analysis as any).reservationRequired))
-          setAcceptsWalkIns(!Boolean((analysis as any).reservationRequired))
+          // NOTE: setAcceptsWalkIns not defined in component state
+          // setAcceptsWalkIns(!Boolean((analysis as any).reservationRequired))
           console.log(`✅ Reservation required: ${serviceModelData.reservation_required ? 'Yes' : 'No'}`)
           fieldsUpdated++
         }

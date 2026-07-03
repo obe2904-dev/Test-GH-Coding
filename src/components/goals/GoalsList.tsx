@@ -1,26 +1,4 @@
-import { GoalCard } from './GoalCard';
-
-// Temporary type definition (business_goals table was dropped but components still exist)
-interface BusinessGoal {
-  id: string;
-  business_id: string;
-  goal_type: string;
-  description: string;
-  priority: string;
-  target_metric: {
-    metric: string;
-    current_value: number;
-    target_value: number;
-    target_date?: string;
-  };
-  time_constraints: {
-    target_days?: string[];
-    target_periods?: string[];
-  };
-  progress_pct: number;
-  status: string;
-  created_at: string;
-}
+import { GoalCard, type BusinessGoal } from './GoalCard';
 
 interface GoalsListProps {
   goals: BusinessGoal[];

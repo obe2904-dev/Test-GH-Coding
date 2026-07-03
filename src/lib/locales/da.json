@@ -2035,9 +2035,11 @@
       "generateNew": "Generer ny plan",
       "noPostsPlanned": "Ingen opslag planlagt",
       "doneBadge": "✓ Lavet",
+      "createdBadge": "Lavet",
       "pastBadge": "⏰ Fortid",
       "ownerNoteBadge": "📝 Din note",
       "createPost": "Lav opslag →",
+      "goToPost": "Gå til opslag →",
       "tip": "💡 Tip: Klik på et opslag for at se fuld specifikation, redigere caption, uploade foto/video og godkende til publicering.",
       "focusLabel": "Fokus:",
       "strategicRationale": {

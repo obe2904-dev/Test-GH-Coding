@@ -277,56 +277,10 @@ export class ContextBuilder {
     }
 
     try {
-      // Fetch service list (for salons, gyms, spas, etc.)
-      if (verticalHasCapability(vertical, 'hasServiceList')) {
-        const { data: services } = await supabase
-          .from('business_services')
-          .select('*')
-          .eq('business_id', businessId)
-          .eq('is_active', true)
-          .order('display_order')
-
-        if (services && services.length > 0) {
-          context.business.services = services
-          context.metadata.sources.push('business.services')
-        }
-      }
-
-      // NOTE: business_staff table was DROPPED April 2026 (migration 20260420000007).
-      // Staff data is no longer available. Do NOT restore this query.
-
-      // Fetch product catalog (retail products)
-      if (verticalHasCapability(vertical, 'hasProductCatalog') && (allowedFields === 'all')) {
-        const { data: products } = await supabase
-          .from('business_products')
-          .select('*')
-          .eq('business_id', businessId)
-          .eq('is_active', true)
-          .order('is_featured', { ascending: false })
-          .order('display_order', { ascending: true })
-
-        if (products && products.length > 0) {
-          context.business.products = products
-          context.metadata.sources.push('business.products')
-        }
-      }
-
-      // Fetch class schedule (for gyms, yoga studios, etc.)
-      if (verticalHasCapability(vertical, 'hasClassSchedule')) {
-        const { data: classes } = await supabase
-          .from('business_classes')
-          .select('*')
-          .eq('business_id', businessId)
-          .eq('is_active', true)
-          .order('day_of_week', { ascending: true })
-          .order('start_time', { ascending: true })
-
-        if (classes && classes.length > 0) {
-          context.business.classes = classes
-          context.metadata.sources.push('business.classes')
-        }
-      }
-
+      // NOTE: business_services, business_products, business_classes tables were DROPPED.
+      // Service/product data is now in business_brand_profile.core_offerings and menu data.
+      // If needed in future, use business_brand_profile or menu_items_normalized instead.
+      
     } catch (error) {
       console.error('Error fetching vertical-specific data:', error)
     }

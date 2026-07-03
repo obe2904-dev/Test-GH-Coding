@@ -108,7 +108,7 @@ export function CommercialStrategySection({
         .from('business_brand_profile')
         .update({
           commercial_baseline_mode: baselineMode,
-          trigger_configuration: triggerConfig,
+          trigger_configuration: triggerConfig as any,
           trigger_last_updated: new Date().toISOString(),
           trigger_updated_by: 'manual',
           updated_at: new Date().toISOString()

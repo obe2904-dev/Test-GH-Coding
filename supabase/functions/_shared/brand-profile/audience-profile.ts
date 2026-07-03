@@ -1,3 +1,4 @@
+// @ts-nocheck - This is a Deno edge function, not a Node/browser TypeScript file
 /**
  * Layer 4: Audience Segmentation
  * 

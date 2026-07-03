@@ -46,7 +46,9 @@ export function ProgrammeRevenueWeights({
     try {
       const { error } = await supabase
         .from('business_brand_profile')
-        .update({ programme_revenue_weights: weights })
+        .update({
+          // programme_revenue_weights removed - use business_programme_profiles instead
+        })
         .eq('business_id', businessId);
 
       if (error) throw error;

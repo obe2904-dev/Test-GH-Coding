@@ -54,8 +54,11 @@ async function resolveBusinessCategoryForBusiness(businessId: string): Promise<s
     .eq('business_id', businessId)
     .maybeSingle()
 
+  const brandProfileV5 = brandProfile?.brand_profile_v5 as any
+  const layer0 = brandProfileV5?.layer_0_intelligence as any
+  
   const businessCharacter =
-    brandProfile?.brand_profile_v5?.layer_0_intelligence?.business_identity?.system_persona ||
+    layer0?.business_identity?.system_persona ||
     brandProfile?.business_identity_persona ||
     brandProfile?.business_character ||
     ''
@@ -217,7 +220,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
       if (user) {
         const { data: business } = await supabase
           .from('businesses')
-          .select('id, name, vertical')
+          .select('id, name')
           .eq('owner_id', user.id)
           .maybeSingle()
 
@@ -310,7 +313,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
         // Get business data from businesses table
         const { data: business } = await supabase
           .from('businesses')
-          .select('id, name, vertical')
+          .select('id, name')
           .eq('owner_id', user.id)
           .maybeSingle()
 
@@ -674,7 +677,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
       if (user) {
         const { data: business } = await supabase
           .from('businesses')
-          .select('id, name, vertical')
+          .select('id, name')
           .eq('owner_id', user.id)
           .maybeSingle()
 
