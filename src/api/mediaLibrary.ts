@@ -800,7 +800,7 @@ export async function regenerateAllThumbnails(
 
   // Get all images for this business
   const { data: images, error } = await supabase
-    .from('media_library')
+    .from('media_library' as any)
     .select('id, filename')
     .eq('business_id', businessId)
     .eq('media_type', 'image')
@@ -814,16 +814,17 @@ export async function regenerateAllThumbnails(
     return { succeeded: 0, failed: 0 }
   }
 
+  const items = images as any[]
   let succeeded = 0
   let failed = 0
 
   // Process each image
-  for (let i = 0; i < images.length; i++) {
+  for (let i = 0; i < items.length; i++) {
     try {
-      await regenerateThumbnail(images[i].id)
+      await regenerateThumbnail(items[i].id)
       succeeded++
     } catch (error) {
-      console.error(`Failed to regenerate thumbnail for ${images[i].filename}:`, error)
+      console.error(`Failed to regenerate thumbnail for ${items[i].filename}:`, error)
       failed++
     }
 

@@ -550,8 +550,6 @@ export default function AIWeeklyPlanPage() {
               console.log('[regeneration blocked] Weather unchanged - returning cached strategy')
               setGenerating(false)
               setShowRegenerateWarning(false)
-              // Refresh the page data to show cached strategy (user might not see it yet)
-              fetchWeeklyPlan()
               // Show informational message (not an error - this is expected behavior)
               setError('Planen er ikke ændret. Vejret har ikke ændret sig væsentligt siden sidste generering, så den eksisterende plan gælder stadig.')
               return
@@ -992,17 +990,17 @@ export default function AIWeeklyPlanPage() {
       }),
       posts: [
         {
-          timing: { date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate())), time: '09:00' },
-          postType: { category: 'menu_item', format: 'single_image' },
-          contentSubject: { dish: 'Morgenmad med friske croissanter' },
-          caption: { text: '', ctaType: 'awareness', isAIGenerated: true },
-          approval: { status: 'draft' },
-          productionNotes: { estimatedTime: '5-10 min' },
+          timing: { day: 'Monday', date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate())), time: '09:00', rationale: 'Morning post' },
+          postType: { type: 'single_image', category: 'menu_item', goal_mode: 'build_brand', priority: 'Medium', priorityReasons: ['Test post'] },
+          contentSubject: { dish: 'Morgenmad med friske croissanter', whyThisDish: ['Fresh morning option'] },
+          caption: { text: '', characterCount: 0, tone: 'friendly', emojiCount: 0, ctaType: 'awareness', firstLine: '', isAIGenerated: true },
+          approval: { status: 'draft', editHistory: [] },
+          productionNotes: { estimatedTime: '5-10 min', logistics: [] },
           strategicContext: {},
         },
         {
-          timing: { date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate() + 2)), time: '12:00' },
-          postType: { category: 'menu_item', format: 'single_image' },
+          timing: { day: 'Wednesday', date: toISO(new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate() + 2)), time: '12:00', rationale: 'Midday post' },
+          postType: { type: 'single_image', category: 'menu_item', goal_mode: 'drive_footfall', priority: 'High', priorityReasons: ['Test post'] },
           contentSubject: { dish: 'Frokostspecial: Laksesalat' },
           caption: { text: '', ctaType: 'booking', isAIGenerated: true },
           approval: { status: 'draft' },
