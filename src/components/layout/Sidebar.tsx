@@ -206,17 +206,25 @@ export function Sidebar({ className = '' }: SidebarProps) {
         <h1 className="text-2xl font-bold text-brand">
           Post2Grow
         </h1>
-        {isWeeklyPlanLocked && (
+        {/* Tier Badge */}
+        {currentTier === 'free' ? (
           <button
             onClick={() => navigate('/dashboard/plans')}
             className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all"
           >
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
-            </svg>
-            Opgrader
+            <span>Gratis</span>
+            <span className="text-purple-400">•</span>
+            <span>Opgrader</span>
           </button>
-        )}
+        ) : currentTier === 'standardplus' ? (
+          <div className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-[10px] font-semibold text-blue-700">
+            <span>Smart</span>
+          </div>
+        ) : currentTier === 'premium' ? (
+          <div className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-purple-50 border border-purple-200 rounded-md text-[10px] font-semibold text-purple-700">
+            <span>Pro</span>
+          </div>
+        ) : null}
       </div>
 
       {/* Main Navigation */}
