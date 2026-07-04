@@ -163,6 +163,7 @@ export interface BusinessContext {
   businessIdentityPersona: string        // Full persona with strategic segments (paid only) - DEPRECATED in favor of marketingManagerBrief
   marketingManagerBrief: string          // V5.3: Synthesized marketing guidance (~200 words, includes USPs + customer situations)
   identityKeywords: string[]
+  strategicSegments: any                 // V5.9: strategic_audience_segments (primary/secondary targeting to prevent location demographic inference)
   // NEW v5.5: Tone DNA fields from brand_profile_v5
   humorLevel: string                     // v5: voice.humor_style ('playful', 'dry', 'serious', etc.)
   formalityLevel: string                 // v5: voice.formality_level ('casual', 'semi-formal', 'formal')
@@ -249,6 +250,7 @@ export async function fetchBusinessContext(
   let businessCharacter = ''
   let venueCharacter = ''
   let venueScene = ''
+  let strategicSegments: any = null  // NEW: Strategic audience segments (primary/secondary)
   let signatureThemes: string[] = []
   let businessIdentityPersona = ''        // Full persona with strategic segments (paid only) - DEPRECATED
   let marketingManagerBrief = ''          // V5.3: Synthesized marketing guidance (PREFERRED)
@@ -292,7 +294,7 @@ export async function fetchBusinessContext(
     // 2. Brand voice
     const { data: brandProfile } = await supabase
       .from('business_brand_profile')
-      .select('brand_essence, tone_of_voice, tone_model, content_strategy, things_to_avoid, voice_constraints, voice_examples, voice_rationale, recognizable_interior_identity, business_identity_persona, marketing_manager_brief, identity_keywords, voice_guardrails, brand_profile_v5')
+      .select('brand_essence, tone_of_voice, tone_model, content_strategy, things_to_avoid, voice_constraints, voice_examples, voice_rationale, recognizable_interior_identity, business_identity_persona, marketing_manager_brief, identity_keywords, voice_guardrails, brand_profile_v5, strategic_audience_segments')
       .eq('business_id', businessId)
       .single()
 
@@ -415,6 +417,13 @@ export async function fetchBusinessContext(
     if (typeof (brandProfile as any)?.marketing_manager_brief === 'string' && (brandProfile as any).marketing_manager_brief.trim().length > 0) {
       marketingManagerBrief = String((brandProfile as any).marketing_manager_brief).trim()
       console.log('✅ V5.3 marketing_manager_brief loaded (synthesized guidance)')
+    }
+
+    // V5.9 (July 4, 2026): strategic_audience_segments — primary/secondary audience targeting
+    // This prevents AI from inferring audiences from location demographics (student/professional)
+    if ((brandProfile as any)?.strategic_audience_segments) {
+      strategicSegments = (brandProfile as any).strategic_audience_segments
+      console.log('✅ Strategic audience segments loaded:', strategicSegments)
     }
     
     // v5.5: business_identity_persona — full persona with strategic segments (FALLBACK)
@@ -911,6 +920,7 @@ export async function fetchBusinessContext(
     reservationRequired, acceptsWalkIns, hasTableService, hasTakeaway, hasDelivery, hasOutdoorSeating, hasParking,
     keyOfferings, menuDescription, userAboutText, aiPlaceSynopsis,
     voiceRationale, venueIdentity, businessIdentityPersona, marketingManagerBrief, identityKeywords,
+    strategicSegments,  // V5.9: Strategic audience segments
     businessCharacter, venueCharacter, venueScene,
     humorLevel, formalityLevel, tone_dna,
     localLocationReference,

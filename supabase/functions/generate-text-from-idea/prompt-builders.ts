@@ -471,9 +471,9 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     hook, contentBlock, menuItemName, contentType,
     brandTone, brandSignaturePhrases,
     voiceConstraints, emojiInstruction,
-    todayOpenTime, selectedCta, businessName, city, language, ctaStyle, goalMode,
+    todayOpenTime, todayCloseTime, selectedCta, businessName, city, language, ctaStyle, goalMode,
     voiceRationale, venueIdentity, businessCharacter, identityKeywords,
-    isPaid, neighborhoodCharacter, locationMarketingHooks, signatureThemes,
+    isPaid, neighborhoodCharacter, locationMarketingHooks, signatureThemes, strategicSegments,
   } = opts
 
   // FIX 05: Apply content-type emoji override before using emojiInstruction in prompts
@@ -531,8 +531,8 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
     isSceneMoodPost, qualityNote,
   } = core
 
-  const hoursBlock = todayOpenTime
-    ? `\n⏰ ÅBNINGSTID I DAG (kun hvis relevant og kun hvis sandt): ${todayOpenTime} — nævn IKKE tidspunkter der antyder åbning tidligere end dette.\n`
+  const hoursBlock = (todayOpenTime || todayCloseTime)
+    ? `\n⏰ ÅBNINGSTIDER I DAG (kun hvis relevant og kun hvis sandt): ${todayOpenTime ? `Åbner ${todayOpenTime}` : ''}${todayOpenTime && todayCloseTime ? ', ' : ''}${todayCloseTime ? `lukker ${todayCloseTime}` : ''} — nævn IKKE tidspunkter uden for disse.\n`
     : ''
 
   // Activation line — makes brand voice an active instrument, not a style layer.
@@ -604,7 +604,35 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
         ? `\nGodkendte stedsformuleringer (ejer-valideret — må bruges direkte):\n${locationMarketingHooks.slice(0, 3).map((h: string) => `• "${h}"`).join('\n')}`
         : ''
 
-      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.`)
+      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.\n• VIGTIGT: Landmarks (domkirker, universiteter, museer) nævnt i stedsbeskrivelsen\n  er GEOGRAFISKE REFERENCEPUNKTER — IKKE målgruppesignaler. Udled IKKE målgrupper\n  (studerende, professionelle, turister) fra disse landmarks. Brug KUN de strategiske\n  målgrupper angivet nedenfor.`)
+    }
+
+    // Part A2: Strategic audience segments (REQUIRED targeting)
+    if (strategicSegments && typeof strategicSegments === 'object') {
+      const primarySegment = strategicSegments.primary
+      const secondarySegments = Array.isArray(strategicSegments.secondary) ? strategicSegments.secondary : []
+      
+      if (primarySegment || secondarySegments.length > 0) {
+        const segmentLines: string[] = []
+        
+        if (primarySegment && primarySegment.name) {
+          segmentLines.push(`• Primær målgruppe: ${primarySegment.name} (hovedfokus)`)
+        }
+        
+        if (secondarySegments.length > 0) {
+          const secondaryNames = secondarySegments
+            .filter((s: any) => s && s.name)
+            .map((s: any) => s.name)
+            .filter((name: string, index: number, arr: string[]) => arr.indexOf(name) === index) // deduplicate
+          if (secondaryNames.length > 0) {
+            segmentLines.push(`• Sekundære målgrupper: ${secondaryNames.join(', ')}`)
+          }
+        }
+        
+        if (segmentLines.length > 0) {
+          anchoringLines.push(`STRATEGISKE MÅLGRUPPER (PÅKRÆVET):\nDisse er virksomhedens definerede målgrupper — brug KUN disse i teksten:\n${segmentLines.join('\n')}\n\nVIGTIGT:\n• Skriv IKKE til studerende, professionelle eller andre grupper MEDMINDRE de er nævnt ovenfor\n• Målgrupper udledes IKKE fra lokationsdata (universiteter, kontorområder osv.)\n• Brug KUN de strategiske målgrupper angivet her`)
+        }
+      }
     }
 
     // Part B: Concept anchor requirement for non-menu posts
@@ -835,13 +863,13 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     hook, contentBlock,
     brandTone, brandSignaturePhrases,
     voiceConstraints, emojiInstruction,
-    todayOpenTime, selectedCta, businessName, city, language, ctaStyle,
+    todayOpenTime, todayCloseTime, selectedCta, businessName, city, language, ctaStyle,
     weeklyPlanContext, goalMode,
     voiceRationale, venueIdentity, businessCharacter, identityKeywords,
     tone_dna_summary, tone_do_list, tone_dont_list,
     location_natural_vocab, location_avoid_vocab, humor_style,
     locationIntelligenceNarrative, contentType,
-    isPaid, neighborhoodCharacter, locationMarketingHooks, signatureThemes,
+    isPaid, neighborhoodCharacter, locationMarketingHooks, signatureThemes, strategicSegments,
   } = opts
 
   // FIX 05: Apply content-type emoji override before using emojiInstruction in prompts
@@ -899,8 +927,8 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
     isSceneMoodPost, qualityNote,
   } = core
 
-  const hoursBlock = todayOpenTime
-    ? `\n⏰ ÅBNINGSTID I DAG (kun hvis relevant og kun hvis sandt): ${todayOpenTime} — nævn IKKE tidspunkter der antyder åbning tidligere end dette.\n`
+  const hoursBlock = (todayOpenTime || todayCloseTime)
+    ? `\n⏰ ÅBNINGSTIDER I DAG (kun hvis relevant og kun hvis sandt): ${todayOpenTime ? `Åbner ${todayOpenTime}` : ''}${todayOpenTime && todayCloseTime ? ', ' : ''}${todayCloseTime ? `lukker ${todayCloseTime}` : ''} — nævn IKKE tidspunkter uden for disse.\n`
     : ''
 
   const resolvedDirective = goalMode && GOAL_DIRECTIVE_MAP[goalMode]
@@ -1077,7 +1105,35 @@ function buildWeeklyPlanPrompt(opts: PromptOptions): string {
         ? `\nGodkendte stedsformuleringer (ejer-valideret — må bruges direkte):\n${locationMarketingHooks.slice(0, 3).map((h: string) => `• "${h}"`).join('\n')}`
         : ''
 
-      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.`)
+      anchoringLines.push(`VERIFICERET STEDSBESKRIVELSE:\n"${neighborhoodCharacter.trim()}"${locationHooksBlock}\n\nStedreference-regler:\n• Al stedreference skal kunne spores til enten VERIFICERET STEDSBESKRIVELSE\n  eller GODKENDTE STEDSFORMULERINGER ovenfor — ikke til AI-træningsdata\n• Problemet er opfundet stedssprog, ikke poetisk stedssprog.\n  Hvis brand voice tilsiger poetisk tone OG locationMarketingHooks er tom,\n  brug VERIFICERET STEDSBESKRIVELSE uden poetisk omskrivning.\n  Poesi kræver ejer-validering — hvis ikke til stede, brug fakta.\n• Hvis posten naturligt kalder på en stedreference, brug verificeret sprog.\n  Hvis posten ikke kalder på det, udelad det — begge valg er gyldige\n  afhængigt af postens indhold og brand voice.\n• VIGTIGT: Landmarks (domkirker, universiteter, museer) nævnt i stedsbeskrivelsen\n  er GEOGRAFISKE REFERENCEPUNKTER — IKKE målgruppesignaler. Udled IKKE målgrupper\n  (studerende, professionelle, turister) fra disse landmarks. Brug KUN de strategiske\n  målgrupper angivet nedenfor.`)
+    }
+
+    // Part A2: Strategic audience segments (REQUIRED targeting)
+    if (strategicSegments && typeof strategicSegments === 'object') {
+      const primarySegment = strategicSegments.primary
+      const secondarySegments = Array.isArray(strategicSegments.secondary) ? strategicSegments.secondary : []
+      
+      if (primarySegment || secondarySegments.length > 0) {
+        const segmentLines: string[] = []
+        
+        if (primarySegment && primarySegment.name) {
+          segmentLines.push(`• Primær målgruppe: ${primarySegment.name} (hovedfokus)`)
+        }
+        
+        if (secondarySegments.length > 0) {
+          const secondaryNames = secondarySegments
+            .filter((s: any) => s && s.name)
+            .map((s: any) => s.name)
+            .filter((name: string, index: number, arr: string[]) => arr.indexOf(name) === index) // deduplicate
+          if (secondaryNames.length > 0) {
+            segmentLines.push(`• Sekundære målgrupper: ${secondaryNames.join(', ')}`)
+          }
+        }
+        
+        if (segmentLines.length > 0) {
+          anchoringLines.push(`STRATEGISKE MÅLGRUPPER (PÅKRÆVET):\nDisse er virksomhedens definerede målgrupper — brug KUN disse i teksten:\n${segmentLines.join('\n')}\n\nVIGTIGT:\n• Skriv IKKE til studerende, professionelle eller andre grupper MEDMINDRE de er nævnt ovenfor\n• Målgrupper udledes IKKE fra lokationsdata (universiteter, kontorområder osv.)\n• Brug KUN de strategiske målgrupper angivet her`)
+        }
+      }
     }
 
     // Part B: Concept anchor requirement for non-menu posts

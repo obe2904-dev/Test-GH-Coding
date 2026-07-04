@@ -1,5 +1,14 @@
 // generate-text-from-idea/index.ts
-// VERSION: v5.1.8
+// VERSION: v5.1.9
+// 
+// v5.1.9 (2026-07-04): Fix audience targeting + opening hours accuracy
+//   - Added closing time to prompt (prevents AI hallucinating wrong hours like "åbent til midnat")
+//   - Load strategic_audience_segments from business_brand_profile
+//   - Added STRATEGIC MÅLGRUPPER section to prompt as REQUIRED targeting
+//   - Added landmark filtering: landmarks (dom kirker, universiteter) are geographic references, NOT audience signals
+//   - Prevents AI from inferring "studerende" or "professionelle" from location intelligence
+//   - Uses ONLY primary/secondary segments from strategic_audience_segments
+//   - Modified: resolve-context.ts (load strategic_segments), index.ts (pass to prompt), prompt-builders.ts (hours + segments in prompt)
 // 
 // v5.1.8 (2026-07-04): AI-generated hashtags in local language
 //   - Added hashtag generation to AI prompt (platform-specific: FB 0-2, IG 3-5)
@@ -302,6 +311,7 @@ serve(async (req) => {
       localLocationReference: biz.localLocationReference ?? null,
       locationMarketingHooks: biz.locationMarketingHooks ?? null,
       signatureThemes: biz.signatureThemes ?? null,
+      strategicSegments: biz.strategicSegments ?? null,  // V5.9: Strategic audience segments
     })
 
     console.log('📝 Prompt built, calling', model, '...')
