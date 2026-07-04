@@ -144,7 +144,13 @@ function BrandPage() {
 
       setHasUnsavedChanges(false)
       const now = new Date()
-      setLastSaved(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`)
+      // Use Copenhagen timezone for time display
+      const timeStr = now.toLocaleTimeString('da-DK', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        timeZone: 'Europe/Copenhagen'
+      })
+      setLastSaved(timeStr)
     } catch (error) {
       console.error('Error saving brand profile:', error)
     } finally {

@@ -5,11 +5,16 @@
  */
 export function formatDate(date: Date | string, locale: string = 'en'): string {
   const dateObj = typeof date === 'string' ? new Date(date) : date
-  return dateObj.toLocaleDateString(locale, {
+  const options: Intl.DateTimeFormatOptions = {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
-  })
+  }
+  // Use Europe/Copenhagen timezone for Danish locale to handle summer time correctly
+  if (locale === 'da' || locale === 'da-DK') {
+    options.timeZone = 'Europe/Copenhagen'
+  }
+  return dateObj.toLocaleDateString(locale, options)
 }
 
 /**

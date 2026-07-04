@@ -213,7 +213,8 @@ export function BrandContextPanel({
     ? new Date(generatedAt).toLocaleDateString('da-DK', { 
         day: 'numeric', 
         month: 'short', 
-        year: 'numeric' 
+        year: 'numeric',
+        timeZone: 'Europe/Copenhagen'
       })
     : null
 

@@ -91,11 +91,13 @@ export function buildEnhancedSystemInstruction(opts: PromptOptions): string {
   // Free tier: OBSERVER persona - strict boundaries, no hallucination
   if (!isPaid) {
     if (lang === 'da') {
-      let instruction = `DU ER OBSERVATØR — ikke historiefortæller.
+      let instruction = `Du er marketingchef for ${businessName} — du skriver autentiske social media-tekster.
 
 ROLLE: Du beskriver præcist hvad der ER verificerbart for ${businessName}.
 GRÆNSE: Du har KUN rettens navn og evt. brugerens beskrivelse. Du har INGEN detaljeret menudata.
-KONSEKVENS: Hvis du ikke kan verificere det i data, eksisterer det ikke.`
+KONSEKVENS: Hvis du ikke kan verificere det i data, må du IKKE nævne det.
+
+FORBUDT: Opfind ALDRIG ingredienser, tilbehør, tilberedning, teksturer eller detaljer der IKKE står i titel eller brugerbeskrivelse.`
 
       // Add known menu names if available (helps AI verify dish exists)
       if (keyOfferings && keyOfferings.trim()) {
@@ -124,6 +126,7 @@ KONSEKVENS: Hvis du ikke kan verificere det i data, eksisterer det ikke.`
    - Tilberedningsmetoder ❌
    - Brødtyper, sovse, garniturer ❌
    - Tekstur-beskrivelser ("sprød", "saftig") ❌
+   - Menu- eller drikkevarer der ikke nævnes i titel ❌
 
 EKSEMPEL PÅ GRÆNSEN:
 - Titel: "Faustburger med sprød bacon"
@@ -134,11 +137,13 @@ Beskriv hvad der ER, ikke hvad der kunne være.`
 
       return instruction
     }
-    return `YOU ARE AN OBSERVER — not a storyteller.
+    return `You are marketing manager for ${businessName} — you write authentic social media copy.
 
 ROLE: You describe precisely what IS verifiable for ${businessName}.
 BOUNDARY: You have ONLY the dish name and possibly the user's description. You have NO detailed menu data.
-CONSEQUENCE: If you cannot verify it in data, it does not exist.
+CONSEQUENCE: If you cannot verify it in data, you MUST NOT mention it.
+
+FORBIDDEN: NEVER invent ingredients, accompaniments, preparation, textures, or details NOT in the title or user description.
 
 RULES:
 1. Write ONLY what you can verify:
@@ -148,6 +153,7 @@ RULES:
 2. NEVER INVENT:
    - Ingredients not in title ❌
    - Preparation methods ❌
+   - Menu or drink items not mentioned in title ❌
    - Bread types, sauces, garnishes ❌
    - Texture descriptions ("crispy", "juicy") ❌
 

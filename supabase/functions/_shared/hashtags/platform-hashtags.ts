@@ -65,31 +65,19 @@ function pushUnique(target: string[], value: string | undefined | null): void {
 }
 
 function inferVenueCategory(context: PlatformHashtagContext): string {
-  // FIX 04: This classifies the VENUE, not the post content.
-  // Post text and contentType are intentionally excluded — scanning post text causes
-  // food keyword bleed (e.g. "pandekager" in post → Bakery classification on K-BBQ restaurant).
-  // aiPlaceSynopsis and menuDescription are stable business-level signals.
-  const haystack = [
-    context.vertical,
-    context.businessCharacter,
-    context.businessName,
-    context.aiPlaceSynopsis,
-    context.menuDescription,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
+  // FIX 07 (2026-07-04): Category hashtags ONLY if explicitly mentioned in POST TEXT
+  // Rule from paid tier: "Do not infer any dish, menu or drink unless mentioned in the text"
+  // Prevents #Cafe appearing just because business is a cafe when post is about burgers
+  const text = (context.text || '').toLowerCase()
+  
+  // Check POST TEXT for explicit category mentions (word boundaries to avoid false matches)
+  if (/\b(kaffe|coffee|espresso|latte|cappuccino|cafe|café|barista|filterkaffe)\b/.test(text)) return 'Cafe'
+  if (/\b(cocktail|drinks?|øl|beer|bar|vin|wine|spirit)\b/.test(text)) return 'Bar'
+  if (/\b(bread|brød|bager|bakery|croissant|pastry|wienerbrød|konditori)\b/.test(text)) return 'Bakery'
+  if (/\b(restaurant|dining|menu|ret|dish|mad|food)\b/.test(text)) return 'Restaurant'
 
-  // Order matters: more specific signals first
-  if (/(bakery|bageri|bager|wienerbrød|konditori)/i.test(haystack)) return 'Bakery'
-  if (/(bar|cocktail|wine bar|vinbar|drinks?|spirit|øl|beer)/i.test(haystack)) return 'Bar'
-  if (/(coffee|cafe|café|espresso|latte|barista|filterkaffe|kaffebar)/i.test(haystack)) return 'Cafe'
-  if (/(food truck|street food|foodtruck)/i.test(haystack)) return 'FoodTruck'
-  if (/(takeaway|to go|udbring|afhent)/i.test(haystack)) return 'Takeaway'
-  // All restaurant types — aiPlaceSynopsis naturally contains cuisine type
-  if (/(restaurant|spisested|køkken|menu|diner|bbq|sushi|thai|vietnamese|pho|indian|curry|chinese|wok|korean|koreansk|asian|asiatisk|fusion|tapas|bistro)/i.test(haystack)) return 'Restaurant'
-
-  return 'Restaurant'  // Safe default — never Cafe for unknown venues
+  // No category hashtag unless mentioned in text (prevents business-type inference)
+  return ''
 }
 
 function inferProductTag(context: PlatformHashtagContext): string {
@@ -156,11 +144,11 @@ function inferDietaryTag(context: PlatformHashtagContext): string {
 function inferCampaignTag(context: PlatformHashtagContext): string {
   const text = [context.text, context.detectedDishDescription].filter(Boolean).join(' ').toLowerCase()
 
-  if (/(new menu|ny menu|menu launch|launch|introducing|introduktion)/.test(text)) return 'NewMenu'
-  if (/(summer menu|sommermenu)/.test(text)) return 'SummerMenu'
-  if (/(brunch launch|brunchmenu)/.test(text)) return 'BrunchLaunch'
-  if (/(coffee deal|kaffe tilbud|tilbud)/.test(text)) return 'CoffeeDeal'
-  if (/(win|konkurrence|competition|taste and win)/.test(text)) return 'TasteAndWin'
+  if (/\b(new menu|ny menu|menu launch|launch|introducing|introduktion)\b/.test(text)) return 'NewMenu'
+  if (/\b(summer menu|sommermenu)\b/.test(text)) return 'SummerMenu'
+  if (/\b(brunch launch|brunchmenu)\b/.test(text)) return 'BrunchLaunch'
+  if (/\b(coffee deal|kaffe tilbud|tilbud)\b/.test(text)) return 'CoffeeDeal'
+  if (/\b(win|konkurrence|competition|taste and win)\b/.test(text)) return 'TasteAndWin'
 
   return ''
 }
@@ -169,7 +157,9 @@ function inferCommunityTag(context: PlatformHashtagContext): string {
   const category = inferVenueCategory(context)
   if (category === 'Bar') return 'DrinkLocal'
   if (category === 'Cafe' || category === 'Restaurant' || category === 'Bakery') return 'EatLocal'
-  return 'SupportLocal'
+  // FIX 07: Only use SupportLocal if no category was detected from text
+  if (!category) return 'SupportLocal'
+  return ''
 }
 
 function buildLayers(context: PlatformHashtagContext): Record<HashtagLayerName, string[]> {

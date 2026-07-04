@@ -144,9 +144,19 @@ export function formatDanishCurrency(amount: number): string {
  * Format Danish date
  */
 export function formatDanishDate(date: Date): string {
-  const day = date.getDate().toString().padStart(2, '0')
-  const month = (date.getMonth() + 1).toString().padStart(2, '0')
-  const year = date.getFullYear()
+  // Use Copenhagen timezone to get correct date components
+  const formatter = new Intl.DateTimeFormat('da-DK', {
+    timeZone: 'Europe/Copenhagen',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  })
+  
+  const parts = formatter.formatToParts(date)
+  const day = parts.find(p => p.type === 'day')?.value || '01'
+  const month = parts.find(p => p.type === 'month')?.value || '01'
+  const year = parts.find(p => p.type === 'year')?.value || '2026'
+  
   return `${day}-${month}-${year}`
 }
 

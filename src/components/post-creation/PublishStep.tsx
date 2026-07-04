@@ -46,6 +46,24 @@ const DEFAULT_MONTH_NAMES = [
 
 const DEFAULT_DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
+/**
+ * Get current hour and minute in Copenhagen timezone
+ * Used for scheduling to ensure times are in Danish time (CEST/CET)
+ */
+function getCopenhagenTime() {
+  const now = new Date()
+  const formatter = new Intl.DateTimeFormat('da-DK', {
+    timeZone: 'Europe/Copenhagen',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+  const parts = formatter.formatToParts(now)
+  const hour = parts.find(p => p.type === 'hour')?.value || '00'
+  const minute = parts.find(p => p.type === 'minute')?.value || '00'
+  return { hour, minute }
+}
+
 interface PublishStepProps {
   onNext: () => void
   onBack: () => void
@@ -95,11 +113,14 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     const now = new Date()
     return now
   })
-  const [selectedHour, setSelectedHour] = useState<string>(() =>
-    String(new Date().getHours()).padStart(2, '0')
-  )
+  
+  const [selectedHour, setSelectedHour] = useState<string>(() => {
+    const { hour } = getCopenhagenTime()
+    return hour
+  })
   const [selectedMinute, setSelectedMinute] = useState<string>(() => {
-    const mins = new Date().getMinutes()
+    const { minute } = getCopenhagenTime()
+    const mins = parseInt(minute, 10)
     // Round up to next 15-min boundary for a clean default
     const rounded = Math.ceil(mins / 15) * 15
     return String(rounded >= 60 ? 0 : rounded).padStart(2, '0')
@@ -393,7 +414,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     const targetDate = new Date(date)
     targetDate.setHours(0, 0, 0, 0)
     
-    const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Copenhagen' })
     
     if (targetDate.getTime() === today.getTime()) {
       return `${tPublish('today', 'Today')}, ${timeStr}`
@@ -886,8 +907,9 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
   const handlePostNow = useCallback(() => {
     const now = new Date()
     setSelectedDate(now)
-    setSelectedHour(String(now.getHours()).padStart(2, '0'))
-    setSelectedMinute(String(now.getMinutes()).padStart(2, '0'))
+    const { hour, minute } = getCopenhagenTime()
+    setSelectedHour(hour)
+    setSelectedMinute(minute)
     setSelectedSuggestionData(null)
   }, [setSelectedSuggestionData])
 

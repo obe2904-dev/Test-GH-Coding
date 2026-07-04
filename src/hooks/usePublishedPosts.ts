@@ -285,8 +285,8 @@ export function usePublishedPostsTimeline(businessId: string | null) {
           date,
           title,
           platform: capitalizeFirst(row.platform || 'instagram'),
-          time: date.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short' })
-            + ' ' + date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }),
+          time: date.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Copenhagen' })
+            + ' ' + date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Copenhagen' }),
           snippet: row.post_text ? row.post_text.slice(0, 80) : undefined,
           timeUntil,
           thumbnail: thumbnailUrl,
@@ -298,8 +298,8 @@ export function usePublishedPostsTimeline(businessId: string | null) {
           date,
           title: title,
           platform: capitalizeFirst(row.platform || 'instagram'),
-          time: date.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short' })
-            + ' ' + date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' }),
+          time: date.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Copenhagen' })
+            + ' ' + date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Copenhagen' }),
           snippet: row.post_text ? row.post_text.slice(0, 80) : undefined,
           engagement: { views: 0, likes: 0, comments: 0, shares: 0 },
           thumbnail: thumbnailUrl,

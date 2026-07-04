@@ -65,8 +65,17 @@ function isPastDate(date: Date, todayStart: Date) {
 }
 
 function formatDateTime(d: Date) {
-  return d.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short' })
-    + ' · ' + d.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleDateString('da-DK', { 
+      weekday: 'short', 
+      day: 'numeric', 
+      month: 'short',
+      timeZone: 'Europe/Copenhagen'
+    })
+    + ' · ' + d.toLocaleTimeString('da-DK', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      timeZone: 'Europe/Copenhagen'
+    })
 }
 
 function titleFromPost(p: PublishedPost) {
@@ -441,7 +450,8 @@ function ScheduledPanel({
                   day: '2-digit',
                   month: '2-digit',
                   year: 'numeric',
-                }) + ' kl. ' + date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })}
+                  timeZone: 'Europe/Copenhagen'
+                }) + ' kl. ' + date.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Copenhagen' })}
                 thumbnail={p.photoUrl ?? undefined}
                 onClick={() => onPostClick(p)}
               >
@@ -555,7 +565,8 @@ function SelectedDayPanel({
                   day: '2-digit',
                   month: '2-digit',
                   year: 'numeric',
-                }) + ' kl. ' + postDate.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })}
+                  timeZone: 'Europe/Copenhagen'
+                }) + ' kl. ' + postDate.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Copenhagen' })}
                 thumbnail={p.photoUrl ?? undefined}
                 onClick={isScheduled ? () => onPostClick(p) : undefined}
               >

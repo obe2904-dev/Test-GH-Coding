@@ -1,0 +1,27 @@
+{
+  "language": { "instruction": "Write all content in English." },
+  "businessContext": {
+    "name": "Business Name",
+    "type": "Type",
+    "location": "Location",
+    "description": "Description",
+    "website": "Website",
+    "keywords": "Keywords",
+    "hasMenuPage": "Has menu/services page",
+    "targetAudience": "Target Audience",
+    "notSpecified": "Not specified"
+  },
+  "optionalContext": {
+    "sectionTitle": "OPTIONAL CONTEXT (use only if relevant)",
+    "menuContextTitle": "MENU CONTEXT",
+    "menuContextHint": "(for inspiration - use MENU ITEMS list)"
+  },
+  "platforms": { "platformsLabel": "Platforms", "noHashtagsRule": "Do NOT include hashtags." },
+  "operational": { "noMenuItemsProvidedTitle": "NO MENU ITEMS PROVIDED", "noMenuItemsProvidedRules": "- Do NOT mention specific names." },
+  "schedulingImpact": { "title": "SCHEDULING & IMPACT" },
+  "openingHours": { "title": "OPENING HOURS", "rulesTitle": "HOURS RULES", "mustReferenceAtLeastOne": "- At least 1 idea must reference opening hours." },
+  "booking": { "title": "BOOKING", "rulesTitle": "BOOKING RULES", "ctaMustInclude": "- At least 1 idea MUST include a booking CTA.", "urlOnOwnLine": "- Put URL on its own line.", "formatExactly": "- Format exactly:" },
+  "task": { "title": "TASK", "aiIdeasIntro": "Generate 3 post ideas.", "aiIdeasBullets": "Each idea must: ...", "eachIdeaMust": "" },
+  "tier": { "title": "TIER INSTRUCTIONS", "free": "- Keep ideas concise.", "paid": "- Be more specific." },
+  "output": { "title": "OUTPUT FORMAT", "schemaDaHints": { "title": "Brief title", "headline": "Headline", "text": "Full post text", "photoSuggestion": "Photo suggestion" } }
+}

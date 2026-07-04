@@ -125,7 +125,8 @@ export function RevenueDriversDisplay({ businessId }: RevenueDriversDisplayProps
       return new Date(dateString).toLocaleDateString('da-DK', {
         year: 'numeric',
         month: 'short',
-        day: 'numeric'
+        day: 'numeric',
+        timeZone: 'Europe/Copenhagen'
       });
     } catch {
       return '';

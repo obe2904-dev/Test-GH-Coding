@@ -1,5 +1,13 @@
 // generate-text-from-idea/index.ts
-// VERSION: v5.1.6
+// VERSION: v5.1.7
+// 
+// v5.1.7 (2026-07-04): Fix hashtag generation - text-conditional categories + word boundary fixes
+//   - FIX 07: Category hashtags (#Cafe, #Bar, etc.) ONLY appear if mentioned in POST TEXT
+//   - Prevents inference from business type (cafe business → #Cafe even on burger posts)
+//   - Added word boundaries to campaign regex (fixes "til" matching "tilbud" → false #CoffeeDeal)
+//   - Modified: _shared/hashtags/platform-hashtags.ts inferVenueCategory, inferCampaignTag
+//   - Updated Free tier prompt: "Du er marketingchef" (standard persona) + paid tier's non-inference rules
+//   - Modified: prompt-components.ts buildEnhancedSystemInstruction Free tier block
 // 
 // v5.1.6 (2026-06-14): Fix sentence truncation in silentCorrect + comprehensive dash removal
 //   - Added explicit guard: subordinate clauses (når/da/mens/selvom/fordi/eftersom) are NOT incomplete
