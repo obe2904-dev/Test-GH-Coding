@@ -24,6 +24,12 @@ const MapPinIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const ChevronDownIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/>
+  </svg>
+);
+
 // Geographic location types (excludes demographics: student, tourist)
 // Demographics are now stored in demographic_proximity, not displayed as location types
 const GEOGRAPHIC_LOCATION_TYPES = new Set([
@@ -79,6 +85,15 @@ function LocationIntelligencePage() {
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
   // Task 4.5: Force refresh option to bypass 90-day cache
   const [forceRefresh, setForceRefresh] = useState(false);
+  // Track which detail sections are expanded for each category
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+
+  const toggleSection = (categoryId: string) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId]
+    }));
+  };
 
   // Save analysis to sessionStorage whenever it changes
   useEffect(() => {
@@ -942,28 +957,26 @@ function LocationIntelligencePage() {
                         )}
                         {fit.fit_reasons && fit.fit_reasons.length > 0 && (
                           <div className="mb-3">
-                            <p className="text-[11px] font-medium tracking-[0.07em] uppercase text-[#A09A91] mb-1">{t('location.strengths')}</p>
-                            <ul className="text-[13px] text-[#5C5650] space-y-1" style={{lineHeight: '1.7'}}>
-                              {fit.fit_reasons.map((reason: string, i: number) => (
-                                <li key={i} className="flex items-start gap-2">
-                                  <CheckCircleIcon className="w-[14px] h-[14px] text-[#0A7D5F] flex-shrink-0 mt-0.5" />
-                                  <span>{reason}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {fit.marketing_implications && (
-                          <div className="mt-3 bg-[#F0EEFE] border-[0.5px] border-[#C7BAF7] rounded-lg px-[14px] py-3">
-                            <p className="text-[12px] font-medium text-[#3D339A] tracking-[0.05em] uppercase mb-1">{t('location.marketingStrategy')}</p>
-                            {fit.marketing_implications.content_emphasis && fit.marketing_implications.content_emphasis.length > 0 ? (
-                              <ul className="text-[13px] text-[#5547C4] space-y-1">
-                                {fit.marketing_implications.content_emphasis.map((item: string, i: number) => (
-                                  <li key={i}>&rarr; {item}</li>
+                            <button
+                              onClick={() => toggleSection(categoryId)}
+                              className="flex items-center gap-2 w-full text-left group hover:opacity-80 transition-opacity"
+                            >
+                              <p className="text-[11px] font-medium tracking-[0.07em] uppercase text-[#A09A91]">{t('location.strengths')}</p>
+                              <ChevronDownIcon 
+                                className={`w-3 h-3 text-[#A09A91] transition-transform ${
+                                  expandedSections[categoryId] ? 'rotate-180' : ''
+                                }`}
+                              />
+                            </button>
+                            {expandedSections[categoryId] && (
+                              <ul className="text-[13px] text-[#5C5650] space-y-1 mt-1" style={{lineHeight: '1.7'}}>
+                                {fit.fit_reasons.map((reason: string, i: number) => (
+                                  <li key={i} className="flex items-start gap-2">
+                                    <CheckCircleIcon className="w-[14px] h-[14px] text-[#0A7D5F] flex-shrink-0 mt-0.5" />
+                                    <span>{reason}</span>
+                                  </li>
                                 ))}
                               </ul>
-                            ) : (
-                              <p className="text-[13px] text-[#5547C4]">{fit.ui_summary?.best_marketing_angle}</p>
                             )}
                           </div>
                         )}

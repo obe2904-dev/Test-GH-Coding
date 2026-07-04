@@ -20,7 +20,8 @@ cloud-run-workers/menu-ocr-worker/
 ├── extractors/                # Extraction modules
 │   ├── __init__.py
 │   ├── pdf_extractor.py      # PDF text extraction (~150 lines)
-│   └── vision_extractor.py   # GPT-4/5 vision extraction (~130 lines)
+│   ├── vision_extractor.py   # GPT-4/5 vision extraction (~130 lines)
+│   └── browser_extractor.py  # Playwright browser rendering (~115 lines)
 │
 ├── parsers/                   # Parsing modules
 │   ├── __init__.py
@@ -42,7 +43,10 @@ cloud-run-workers/menu-ocr-worker/
 ### Smart Extraction Strategy
 1. **Digital PDFs**: Fast PyMuPDF text extraction
 2. **Scanned PDFs**: GPT-4o/5.2 vision or Document AI OCR
-3. **HTML pages**: Direct text extraction with boilerplate filtering
+3. **HTML pages**: 
+   - Static HTML: Direct text extraction with boilerplate filtering
+   - JavaScript-rendered: Playwright browser fallback for dynamic content (e.g., React apps, Mealo platform)
+4. **Automatic fallback**: Detects empty/minimal HTML and uses headless browser rendering
 
 ### Cost Optimization
 - **Staged extraction**: Try cheap methods first
@@ -113,6 +117,12 @@ gcloud run deploy menu-ocr-worker-v2 \
 - PDF to PNG rendering
 - GPT-4/5 vision API calls
 - Image-based menu extraction
+
+### `extractors/browser_extractor.py`
+- Playwright browser automation
+- JavaScript page rendering
+- Automatic detection of JS-heavy pages
+- Fallback for React apps, SPAs, and dynamic sites (e.g., Mealo platform)
 
 ### `parsers/menu_parser.py`
 - LLM-based menu parsing

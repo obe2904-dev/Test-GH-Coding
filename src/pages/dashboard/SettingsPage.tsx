@@ -15,7 +15,8 @@ export function SettingsPage() {
 
   const handleDeleteAccount = async () => {
     // Check confirmation text based on current language
-    const expectedText = i18n.language === 'da' ? 'slet' : 'delete'
+    const isDanish = i18n.language.startsWith('da')
+    const expectedText = isDanish ? 'slet' : 'delete'
     if (deleteConfirmText.toLowerCase() !== expectedText) {
       setDeleteError(t('settings.deleteAccount.confirmError'))
       return
@@ -127,7 +128,7 @@ export function SettingsPage() {
                     setDeleteConfirmText(e.target.value)
                     setDeleteError('')
                   }}
-                  placeholder={i18n.language === 'da' ? 'SLET' : 'DELETE'}
+                  placeholder={i18n.language.startsWith('da') ? 'SLET' : 'DELETE'}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
                   disabled={isDeleting}
                 />
@@ -151,7 +152,7 @@ export function SettingsPage() {
               </button>
               <button
                 onClick={handleDeleteAccount}
-                disabled={isDeleting || deleteConfirmText.toLowerCase() !== (i18n.language === 'da' ? 'slet' : 'delete')}
+                disabled={isDeleting || deleteConfirmText.toLowerCase() !== (i18n.language.startsWith('da') ? 'slet' : 'delete')}
                 className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isDeleting 

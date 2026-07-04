@@ -21,7 +21,7 @@ python3 main.py
 | Task | File |
 |------|------|
 | Add environment variable | `config.py` |
-| Change extraction logic | `extractors/pdf_extractor.py` or `vision_extractor.py` |
+| Change extraction logic | `extractors/pdf_extractor.py`, `vision_extractor.py`, or `browser_extractor.py` |
 | Modify parsing prompts | `parsers/menu_parser.py` |
 | Update text cleaning | `utils/text_processing.py` |
 | Change storage behavior | `utils/storage.py` |
@@ -79,6 +79,11 @@ from extractors.pdf_extractor import extract_text_digital
 with open('sample.pdf', 'rb') as f:
     text, metrics = extract_text_digital(f.read(), max_pages=5)
     print(f"Extracted {metrics['char_count']} chars")
+
+# Test browser extraction (JavaScript-rendered pages)
+from extractors.browser_extractor import extract_with_browser
+html, text = extract_with_browser("https://example.com/menu")
+print(f"Extracted {len(text)} chars from rendered page")
 
 # Test menu parsing
 from parsers.menu_parser import parse_menu_with_llm

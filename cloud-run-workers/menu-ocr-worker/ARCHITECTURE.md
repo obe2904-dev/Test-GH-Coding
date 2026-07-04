@@ -16,9 +16,13 @@ main.py (Flask app)
             │       │       ↓
             │       │       └─→ PyMuPDF, Tesseract, Document AI
             │       │
-            │       └─→ vision_extractor.py
+            │       ├─→ vision_extractor.py
+            │       │       ↓
+            │       │       └─→ GPT-4/5 Vision API
+            │       │
+            │       └─→ browser_extractor.py
             │               ↓
-            │               └─→ GPT-4/5 Vision API
+            │               └─→ Playwright (Chromium headless)
             │
             ├─→ parsers/
             │       └─→ menu_parser.py
@@ -55,6 +59,12 @@ main.py (Flask app)
    │       └─→ Last resort? → Tesseract OCR
    │
    └─→ HTML Branch
+       ↓
+       ├─→ Check if minimal/empty HTML
+       │   ↓
+       │   └─→ Yes? → extract_with_browser() (Playwright)
+       │       ↓
+       │       └─→ Render JavaScript, wait for content
        ↓
        └─→ html_to_text()
    ↓

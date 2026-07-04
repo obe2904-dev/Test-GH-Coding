@@ -31,6 +31,7 @@ from utils.storage import (
 )
 from extractors.pdf_extractor import extract_text_staged
 from extractors.vision_extractor import extract_with_vision
+from extractors.browser_extractor import extract_with_browser, is_html_empty_or_minimal
 from parsers.menu_parser import parse_menu_with_llm, validate_structured_menu
 
 logger = logging.getLogger(__name__)
@@ -302,6 +303,25 @@ class MenuOCRWorker:
             else:
                 # HTML menu page
                 html = content_bytes.decode('utf-8', errors='ignore')
+                
+                # Check if HTML is minimal/empty (JavaScript-rendered content)
+                # If so, use browser to render the page
+                if is_html_empty_or_minimal(html):
+                    logger.info("⚠️ HTML appears to be JavaScript-rendered - using browser fallback")
+                    try:
+                        rendered_html, rendered_text = extract_with_browser(pdf_url, timeout_ms=30000)
+                        html = rendered_html
+                        logger.info(f"✅ Browser rendering successful: {len(html)} chars HTML")
+                        metrics = {
+                            'total_pages': 1,
+                            'char_count': len(rendered_text),
+                            'method': 'browser',
+                        }
+                    except Exception as browser_err:
+                        logger.error(f"❌ Browser fallback failed: {browser_err}")
+                        # Continue with original static HTML (will likely fail parsing, but worth trying)
+                        logger.info("⚠️ Falling back to static HTML extraction")
+                
                 snapshot_path = f"{business_id}/menu_snapshots/{source_sha}.html"
                 public_url = storage_upload_public_with_mime_fallback(
                     "business-documents",
@@ -314,15 +334,18 @@ class MenuOCRWorker:
                 pdf_path = snapshot_path
 
                 raw_text = html_to_text(html)
-                metrics = {
-                    'total_pages': 1,
-                    'char_count': len(raw_text),
-                    'method': 'html',
-                }
+                
+                # Only set metrics if not already set by browser extraction
+                if 'metrics' not in locals():
+                    metrics = {
+                        'total_pages': 1,
+                        'char_count': len(raw_text),
+                        'method': 'html',
+                    }
 
             # Parse with LLM if not already parsed by vision
             method = metrics.get('method')
-            if method == 'html':
+            if method in ('html', 'browser'):
                 llm_text = clean_html_text_for_llm(raw_text, max_chars=MAX_LLM_CHARS)
             else:
                 llm_text = compress_text_for_llm(raw_text, max_chars=MAX_LLM_CHARS)

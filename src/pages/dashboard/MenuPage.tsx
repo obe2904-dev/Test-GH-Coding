@@ -60,7 +60,7 @@ function joinTimeValue(hour: string, minute: string) {
 }
 
 function MenuPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const currentTier = useTierStore((state) => state.currentTier)
 
   const [businessId, setBusinessId] = useState<string | null>(null)

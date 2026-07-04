@@ -19,6 +19,27 @@ const BOOKING_PLATFORMS = [
   'treatwell.com',
 ]
 
+// Domains that are never menu/booking/contact content — safe to always drop.
+// This is intentionally small and generic. We use a DENYLIST approach:
+// - ALLOW: External menu/ordering platforms (Mealo, Wolt, etc.) → classify normally
+// - DENY: Only social media, maps, messaging → always drop
+// - OVERRIDE: BOOKING_PLATFORMS always forced to BOOKING type (strong signal)
+const EXTERNAL_IGNORE_DOMAINS = [
+  'facebook.com',
+  'instagram.com',
+  'tiktok.com',
+  'twitter.com',
+  'x.com',
+  'youtube.com',
+  'linkedin.com',
+  'pinterest.com',
+  'snapchat.com',
+  'whatsapp.com',
+  'wa.me',
+  'google.com/maps',
+  'maps.app.goo.gl',
+]
+
 export type LinkType = 'MENU' | 'BOOKING' | 'CONTACT' | 'ABOUT' | 'CANCEL' | 'IGNORE' | 'OTHER'
 
 export interface Link {
@@ -139,19 +160,27 @@ export async function classifyLinks(
     openaiApiKey?: string
   }
 ): Promise<ClassifiedLink[]> {
-  // Classify internal links + external booking platform links
+  // Classify internal links + all external links except known-useless domains.
+  // External menu/ordering platforms (Mealo, etc.) are NOT pre-filtered here —
+  // they flow through the same pattern/AI classification as internal links.
   const internalLinks = links.filter(l => l.isInternal)
-  const externalBookingLinks = links.filter(l => 
-    !l.isInternal && BOOKING_PLATFORMS.some(domain => l.href.includes(domain))
+  const externalLinks = links.filter(l =>
+    !l.isInternal && !EXTERNAL_IGNORE_DOMAINS.some(domain => l.href.includes(domain))
   )
-  
+
   // Combine for classification
-  const linksToClassify = [...internalLinks, ...externalBookingLinks]
-  
-  let classifiedLinks = linksToClassify.map(link => ({
-    ...link,
-    type: classifyLink(link.href, link.text, link.ariaLabel, link.title)
-  }))
+  const linksToClassify = [...internalLinks, ...externalLinks]
+
+  let classifiedLinks = linksToClassify.map(link => {
+    const patternType = classifyLink(link.href, link.text, link.ariaLabel, link.title)
+    // Known booking platforms are forced to BOOKING regardless of pattern
+    // match — this is a stronger signal than link text/href keywords alone.
+    const isKnownBookingPlatform = BOOKING_PLATFORMS.some(domain => link.href.includes(domain))
+    return {
+      ...link,
+      type: isKnownBookingPlatform ? 'BOOKING' as LinkType : patternType,
+    }
+  })
   
   console.log('📋 Link classification:', {
     menu: classifiedLinks.filter(l => l.type === 'MENU').length,
