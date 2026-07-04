@@ -407,8 +407,9 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
     fetchUsageStats()
     const todayISO = toLocalISODate()
     
-    // First try today's suggestions, then fall back to most recent unconsumed ones
-    // This prevents losing suggestions at midnight if they haven't been used yet
+    // First try today's suggestions, then fall back to most recent batch
+    // Show all suggestions in 'available' or 'selected' status (consumed_at filter removed
+    // so suggestions remain visible after selection until user moves to Udgiv stage)
     supabase
       .from('daily_suggestions')
       .select('*')
@@ -416,20 +417,18 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
       .eq('date', todayISO)
       .in('status', ['available', 'selected'])
       .eq('source', 'quick_suggestions')
-      .is('consumed_at', null)  // Only show unconsumed suggestions
       .order('position', { ascending: true })
       .limit(3)
       .then(async ({ data, error }) => {
         // If no suggestions for today, try to get the most recent unconsumed batch
         if ((!error && (!data || data.length === 0)) || error) {
-          console.log('[AiSuggestionsCard] No suggestions for today, checking for recent unconsumed batch')
+          console.log('[AiSuggestionsCard] No suggestions for today, checking for recent batch')
           const { data: recentData, error: recentError } = await supabase
             .from('daily_suggestions')
             .select('*')
             .eq('business_id', businessId)
             .in('status', ['available', 'selected'])
             .eq('source', 'quick_suggestions')
-            .is('consumed_at', null)
             .order('created_at', { ascending: false })
             .limit(3)
           
@@ -621,10 +620,9 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
 
   // ── Suggestions list ──
   const isAtRegenerationLimit = usageStats && usageStats.regenerations_used >= usageStats.regenerations_limit
-  const visibleSuggestions = suggestions.filter(
-    (suggestion) => !(committedSuggestionIds?.has(suggestion.id) ?? false)
-  )
-  const hasCommittedSuggestions = visibleSuggestions.length !== suggestions.length
+  // Show all suggestions including committed ones (they'll be marked with a badge)
+  const visibleSuggestions = suggestions
+  const hasCommittedSuggestions = suggestions.some(s => committedSuggestionIds?.has(s.id) ?? false)
   
   // Calculate total suggestions pool: 3 per batch, (regenerations_limit + 1) batches total
   const suggestionsUsed = usageStats ? (usageStats.regenerations_used + 1) * 3 : 3
@@ -665,28 +663,33 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
         </div>
       )}
 
-      {hasCommittedSuggestions && visibleSuggestions.length === 0 && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          {t('dashboard.allSuggestionsScheduled', 'Alle dagens forslag er allerede planlagt. Generér nye forslag for at få friske idéer.')}
-        </div>
-      )}
-
       <div className="space-y-3">
         {visibleSuggestions.map((suggestion, idx) => {
           const isSelected = selectedIdea === suggestion.id.toString()
+          const isCommitted = committedSuggestionIds?.has(suggestion.id) ?? false
           return (
           <div
             key={suggestion.id}
-            className={`relative p-4 border-2 rounded-lg transition-all cursor-pointer ${
-              isSelected 
-                ? 'border-mint bg-mint/10 shadow-lg' 
-                : 'border-gray-200 hover:border-mint hover:bg-mint/5'
+            className={`relative p-4 border-2 rounded-lg transition-all ${
+              isCommitted
+                ? 'border-green-300 bg-green-50/50 cursor-default'
+                : isSelected 
+                  ? 'border-mint bg-mint/10 shadow-lg cursor-pointer' 
+                  : 'border-gray-200 hover:border-mint hover:bg-mint/5 cursor-pointer'
             }`}
             onClick={() => {
-              if (!isSelected) onSelectSuggestion(suggestion)
+              if (!isSelected && !isCommitted) onSelectSuggestion(suggestion)
             }}
           >
-            {idx > 0 && (
+            {isCommitted && (
+              <span className="absolute top-3 right-3 text-xs font-medium text-green-700 bg-green-100 border border-green-300 px-2 py-0.5 rounded flex items-center gap-1">
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                Planlagt/Publiceret
+              </span>
+            )}
+            {!isCommitted && idx > 0 && (
               <span className="absolute top-3 right-3 text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
                 Alternativt forslag
               </span>

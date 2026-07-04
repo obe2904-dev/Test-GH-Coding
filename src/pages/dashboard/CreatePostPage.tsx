@@ -277,35 +277,20 @@ export function CreatePostPage() {
     return null
   }, [businessData.business?.id, activePath, selectedSuggestionData?.id, weeklyPlanPost?.timing?.date, weeklyContentPlan?.id, weeklyPlanPostIndex, isCommittedAiSuggestion])
 
+  // Enable read-only mode for committed suggestions instead of clearing them
   useEffect(() => {
-    if (!isCommittedAiSuggestion || publishedInfo !== null) return
-
-    // The selected AI idea is already committed; clear the stale create-flow state
-    // so returning to the dashboard does not resurrect the same idea.
-    setAiIdeerStep('generate')
-    setSelectedIdea(null)
-    setSelectedSuggestionData(null)
-    setAiIdeerContent(null)
-    setAiIdeerPhotoIdea('')
-    setPostContent(null)
-    setPhotoContent(null)
-    setPostCta(null)
-    _clearDraft()
-    draftDbIdRef.current = null
-    uploadedBlobsRef.current.clear()
-    hasRestoredDbDraftRef.current = false
+    if (!isCommittedAiSuggestion) {
+      // Not committed - ensure read-only mode is off
+      setIsReadOnlyMode(false)
+      return
+    }
+    
+    // Suggestion is committed (published/scheduled) - enable read-only viewing
+    // User can see the content but cannot edit it
+    console.log('[CreatePostPage] Committed suggestion detected - enabling read-only mode')
+    setIsReadOnlyMode(true)
   }, [
     isCommittedAiSuggestion,
-    publishedInfo,
-    setAiIdeerStep,
-    setSelectedIdea,
-    setSelectedSuggestionData,
-    setAiIdeerContent,
-    setAiIdeerPhotoIdea,
-    setPostContent,
-    setPhotoContent,
-    setPostCta,
-    _clearDraft,
   ])
 
   // No-ops kept for backward compat with child component props
@@ -611,21 +596,12 @@ export function CreatePostPage() {
     console.log('[CreatePostPage] selectedSuggestionData:', selectedSuggestionData)
     console.log('[CreatePostPage] selectedPlatforms:', selectedPlatforms)
 
-    if (selectedSuggestionData?.id != null && committedSuggestionIds.has(selectedSuggestionData.id)) {
-      console.warn('[CreatePostPage] Blocked generation for committed AI suggestion:', selectedSuggestionData.id)
-      setAiIdeerStep('generate')
-      setSelectedIdea(null)
-      setSelectedSuggestionData(null)
-      setAiIdeerContent(null)
-      setAiIdeerPhotoIdea('')
-      setPostContent(null)
-      setPhotoContent(null)
-      setPostCta(null)
-      _clearDraft()
-      draftDbIdRef.current = null
-      uploadedBlobsRef.current.clear()
-      hasRestoredDbDraftRef.current = false
-      return
+    // If this is a committed suggestion, load it in read-only mode instead of blocking
+    const isCommitted = selectedSuggestionData?.id != null && committedSuggestionIds.has(selectedSuggestionData.id)
+    if (isCommitted) {
+      console.log('[CreatePostPage] Loading committed AI suggestion in read-only mode:', selectedSuggestionData.id)
+      // Read-only mode is set by the useEffect above based on isCommittedAiSuggestion
+      // Continue loading the content below so user can view it
     }
     
     // Check if user selected an AI suggestion

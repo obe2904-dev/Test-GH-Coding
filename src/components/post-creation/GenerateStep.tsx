@@ -829,28 +829,8 @@ export function GenerateStep({
     committedSuggestionIds?.has(selectedSuggestionData.id)
   )
 
-  useEffect(() => {
-    if (!selectedSuggestionIsCommitted) return
-
-    // A committed AI idea must not re-enter the Create/Design step from the AI flow.
-    // Clear the stale selection so the user has to choose a fresh idea.
-    setSelectedIdea(null)
-    setSelectedSuggestionData(null)
-    setPostContent(null)
-    setPhotoContent({
-      uploadedMedia: [],
-      selectedMedia: null,
-      isOriginal: true,
-      photoAdjustments: null,
-      carouselMode: false,
-    })
-  }, [
-    selectedSuggestionIsCommitted,
-    setSelectedIdea,
-    setSelectedSuggestionData,
-    setPostContent,
-    setPhotoContent,
-  ])
+  // Note: We no longer clear committed suggestions here - instead we load them
+  // in read-only mode so users can view the scheduled/posted content
 
   const handleValidatedNext = useCallback(() => {
     if (!validateBeforeNext()) {
@@ -859,11 +839,8 @@ export function GenerateStep({
     
     // If an AI suggestion is selected, skip the normal flow and let CreatePostPage handle generation
     if (selectedSuggestionData && selectedSuggestionData.id !== 0) {
-      if (selectedSuggestionIsCommitted) {
-        console.warn('[GenerateStep] Blocked navigation for committed AI suggestion:', selectedSuggestionData.id)
-        return
-      }
       console.log('[GenerateStep] AI suggestion selected, calling onNext directly for generation')
+      // Note: committed suggestions will be loaded in read-only mode by CreatePostPage
       onNext()  // Call CreatePostPage's handleGenerateNext which will do the AI generation
       return
     }
