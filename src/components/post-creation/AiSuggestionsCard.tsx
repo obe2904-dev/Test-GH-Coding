@@ -825,7 +825,11 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
               </button>
               {isSelected ? (
                 <button
-                  onClick={(e) => { e.stopPropagation(); onGenerate?.() }}
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    console.log('[AiSuggestionsCard] Generate button clicked, onGenerate:', !!onGenerate, 'suggestionId:', suggestion.id);
+                    onGenerate?.() 
+                  }}
                   className="flex items-center gap-2 px-4 py-2 bg-mint hover:bg-[#6FE0C2] text-white text-sm font-semibold rounded-lg transition-colors shadow-md hover:shadow-lg"
                   title={t('dashboard.generatePostWithAI')}
                 >

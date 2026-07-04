@@ -853,7 +853,15 @@ export function GenerateStep({
   ])
 
   const handleValidatedNext = useCallback(() => {
+    console.log('[GenerateStep] handleValidatedNext called')
+    console.log('[GenerateStep] Validation check...', { 
+      selectedPlatforms, 
+      selectedSuggestionData: selectedSuggestionData?.id,
+      validationIssues: validationIssues.length 
+    })
+    
     if (!validateBeforeNext()) {
+      console.warn('[GenerateStep] Validation failed, showing validation issues:', validationIssues)
       return
     }
     
@@ -872,7 +880,7 @@ export function GenerateStep({
     // Note: We keep the DB draft so content carries forward to Design stage
     // Draft is only deleted when user clicks "Slet alt" or publishes
     proceedToDesign()
-  }, [validateBeforeNext, proceedToDesign, selectedSuggestionData, selectedSuggestionIsCommitted, onNext])
+  }, [validateBeforeNext, proceedToDesign, selectedSuggestionData, selectedSuggestionIsCommitted, onNext, validationIssues, selectedPlatforms])
 
   const supportedSelectedPlatforms: CanonicalPlatform[] = canonicalSelectedPlatforms
 
