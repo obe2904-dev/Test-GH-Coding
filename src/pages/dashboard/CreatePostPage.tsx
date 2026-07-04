@@ -811,26 +811,12 @@ export function CreatePostPage() {
             || ''
           const captionBase = selectedSuggestionData.captionBase || rawIdea?.caption_base || ''
           const ctaIntent = selectedSuggestionData.ctaIntent || rawIdea?.cta_intent || 'visit'
-          
-          // CRITICAL: Ensure platforms array is never empty
-          const platformsToUse = selectedPlatforms && selectedPlatforms.length > 0 
-            ? selectedPlatforms 
-            : ['facebook']
-          
-          console.log('[CreatePostPage] Calling generate-text-from-idea with:', {
-            businessId: businessData.business?.id,
-            suggestionId: selectedSuggestionData.id,
-            platforms: platformsToUse,
-            tier: currentTier,
-            contentType
-          })
-          
           const { data: generatedData, error } = await supabase.functions.invoke('generate-text-from-idea', {
             body: {
               businessId: businessData.business?.id,
               suggestion: {
                 id: selectedSuggestionData.id,
-                title: selectedSuggestionData.title || 'Post',  // Provide fallback
+                title: selectedSuggestionData.title,  // Phase 3: May be undefined for quick suggestions, that's OK
                 source: 'ai_ideas',
                 contentType,
                 menuItemId: selectedSuggestionData.menuItemId || rawIdea?.menu_item_id || '',
@@ -842,7 +828,7 @@ export function CreatePostPage() {
                 whyExplanation: selectedSuggestionData.whyExplanation || '',
                 occasionContext: selectedSuggestionData.occasionContext || rawIdea?.occasion_context || '',
               },
-              platforms: platformsToUse,
+              platforms: selectedPlatforms,
               tier: currentTier,
             }
           })
