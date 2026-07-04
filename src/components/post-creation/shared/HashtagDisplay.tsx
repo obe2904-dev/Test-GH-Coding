@@ -144,8 +144,30 @@ function HashtagDisplayComponent({
   const hasInstagram = selectedPlatforms.includes('instagram')
   const both = hasFacebook && hasInstagram
 
-  const mainHashtags = hashtags.slice(0, 3)
-  const extraInstagramHashtags = hashtags.slice(3)
+  // Use platformHashtagViews if available (platform-specific filtering)
+  // Otherwise fall back to legacy slice approach for backwards compatibility
+  let facebookHashtags: string[] = []
+  let instagramHashtags: string[] = []
+  let sharedHashtags: string[] = []
+
+  if (platformHashtagViews && (platformHashtagViews.facebook || platformHashtagViews.instagram)) {
+    // New approach: use platform-specific views
+    const fbTags = (platformHashtagViews.facebook || []).filter(h => h.enabled).map(h => h.tag.replace(/^#/, ''))
+    const igTags = (platformHashtagViews.instagram || []).filter(h => h.enabled).map(h => h.tag.replace(/^#/, ''))
+    
+    // Find tags that appear on both platforms
+    const fbSet = new Set(fbTags)
+    const igSet = new Set(igTags)
+    
+    sharedHashtags = fbTags.filter(tag => igSet.has(tag))
+    facebookHashtags = fbTags.filter(tag => !igSet.has(tag))
+    instagramHashtags = igTags.filter(tag => !fbSet.has(tag))
+  } else {
+    // Legacy approach: first 3 = shared, rest = Instagram only
+    sharedHashtags = hashtags.slice(0, 3)
+    facebookHashtags = []
+    instagramHashtags = hashtags.slice(3)
+  }
 
   const renderGroup = (
     title: string,
@@ -184,20 +206,28 @@ function HashtagDisplayComponent({
   if (both) {
     return (
       <div className="flex flex-wrap gap-4">
-        {mainHashtags.length > 0 &&
+        {sharedHashtags.length > 0 &&
           renderGroup(
-            t('hashtagGroupShared', 'Shared across platforms'),
+            t('hashtagGroupShared', 'Til begge platforme'),
             'both',
-            mainHashtags,
+            sharedHashtags,
             0,
             'flex-1 min-w-[200px]'
           )}
-        {extraInstagramHashtags.length > 0 &&
+        {facebookHashtags.length > 0 &&
           renderGroup(
-            t('hashtagGroupInstagramExtra', 'Extra for Instagram'),
+            t('hashtagGroupFacebookOnly', 'Kun til Facebook'),
+            'facebook',
+            facebookHashtags,
+            sharedHashtags.length,
+            'flex-1 min-w-[200px]'
+          )}
+        {instagramHashtags.length > 0 &&
+          renderGroup(
+            t('hashtagGroupInstagramOnly', 'Kun til Instagram'),
             'instagram',
-            extraInstagramHashtags,
-            3,
+            instagramHashtags,
+            sharedHashtags.length + facebookHashtags.length,
             'flex-1 min-w-[200px]'
           )}
       </div>
@@ -205,26 +235,20 @@ function HashtagDisplayComponent({
   }
 
   if (hasFacebook) {
+    const fbOnly = [...sharedHashtags, ...facebookHashtags]
     return (
       <div className="flex flex-wrap gap-4">
-        {renderGroup(t('hashtagGroupFacebook', 'For Facebook'), 'facebook', mainHashtags, 0, 'flex-1 min-w-[200px]')}
+        {fbOnly.length > 0 && renderGroup(t('hashtagGroupFacebook', 'Til Facebook'), 'facebook', fbOnly, 0, 'flex-1 min-w-[200px]')}
       </div>
     )
   }
 
   if (hasInstagram) {
+    const igOnly = [...sharedHashtags, ...instagramHashtags]
     return (
       <div className="flex flex-wrap gap-4">
-        {mainHashtags.length > 0 &&
-          renderGroup(t('hashtagGroupInstagram', 'For Instagram'), 'instagram', mainHashtags, 0, 'flex-1 min-w-[200px]')}
-        {extraInstagramHashtags.length > 0 &&
-          renderGroup(
-            t('hashtagGroupInstagramExtra', 'Extra for Instagram'),
-            'instagram',
-            extraInstagramHashtags,
-            3,
-            'flex-1 min-w-[200px]'
-          )}
+        {igOnly.length > 0 &&
+          renderGroup(t('hashtagGroupInstagram', 'Til Instagram'), 'instagram', igOnly, 0, 'flex-1 min-w-[200px]')}
       </div>
     )
   }
