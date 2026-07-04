@@ -1,5 +1,12 @@
 // generate-text-from-idea/index.ts
-// VERSION: v5.1.7
+// VERSION: v5.1.8
+// 
+// v5.1.8 (2026-07-04): AI-generated hashtags in local language
+//   - Added hashtag generation to AI prompt (platform-specific: FB 0-2, IG 3-5)
+//   - Hashtags generated in business's language (Danish for Danish businesses)
+//   - Menu items stay in original language, lifestyle tags localized (#KaffeElskere vs #CoffeeLovers)
+//   - Falls back to rule-based hashtags if AI doesn't provide them
+//   - Modified: prompt-builders.ts (added HASHTAGS section), generate-text.ts (extract hashtags from JSON)
 // 
 // v5.1.7 (2026-07-04): Fix hashtag generation - text-conditional categories + word boundary fixes
 //   - FIX 07: Category hashtags (#Cafe, #Bar, etc.) ONLY appear if mentioned in POST TEXT
@@ -343,6 +350,8 @@ serve(async (req) => {
     // 7. Generate text with voice validation and retry
     let rawText = ''
     let aiKeyword = ''
+    let aiFacebookHashtags: string[] | undefined = undefined
+    let aiInstagramHashtags: string[] | undefined = undefined
     let voiceValidationAttempts = 0
     const maxValidationAttempts = 2
     
@@ -355,6 +364,8 @@ serve(async (req) => {
       const result = await callOpenAI(model, prompt, OPENAI_API_KEY, biz.language, undefined, temperature)
       rawText = result.cleanText
       aiKeyword = result.aiKeyword
+      aiFacebookHashtags = result.facebookHashtags
+      aiInstagramHashtags = result.instagramHashtags
       
       // If paid tier and V5 profile available, validate against voice rules
       // NEW (June 12, 2026): Use flattened voice_guardrails for 10x faster validation
@@ -477,15 +488,29 @@ serve(async (req) => {
     }
 
     // 8. Hashtags
-    const extractedKeyword = extractTopicKeyword(content.contentBlock, content.menuItemName, aiKeyword)
-    const hashtags = generateHashtags(biz.city, content.contentType, extractedKeyword, biz.businessName, {
-      vertical: biz.vertical,
-      text: cleanText,
-      detectedDishName: content.menuItemName || undefined,
-      detectedDishDescription: content.menuItemDescription || undefined,
-      aiPlaceSynopsis: biz.aiPlaceSynopsis || undefined,      // FIX 04: Stable venue classification signal
-      menuDescription: biz.menuDescription || undefined,      // FIX 04: Stable venue classification signal
-    }, locationNaturalVocab)  // FIX 03-B: Pass location vocabulary for location-specific hashtags
+    // Use AI-generated hashtags if available, otherwise fall back to rule-based generation
+    let hashtags: { facebook: string[], instagram: string[] }
+    if (aiFacebookHashtags && aiInstagramHashtags) {
+      console.log('✅ Using AI-generated hashtags:', { 
+        facebook: aiFacebookHashtags.length, 
+        instagram: aiInstagramHashtags.length 
+      })
+      hashtags = {
+        facebook: aiFacebookHashtags,
+        instagram: aiInstagramHashtags
+      }
+    } else {
+      console.log('⚙️ Falling back to rule-based hashtags (AI did not provide hashtags)')
+      const extractedKeyword = extractTopicKeyword(content.contentBlock, content.menuItemName, aiKeyword)
+      hashtags = generateHashtags(biz.city, content.contentType, extractedKeyword, biz.businessName, {
+        vertical: biz.vertical,
+        text: cleanText,
+        detectedDishName: content.menuItemName || undefined,
+        detectedDishDescription: content.menuItemDescription || undefined,
+        aiPlaceSynopsis: biz.aiPlaceSynopsis || undefined,      // FIX 04: Stable venue classification signal
+        menuDescription: biz.menuDescription || undefined,      // FIX 04: Stable venue classification signal
+      }, locationNaturalVocab)  // FIX 03-B: Pass location vocabulary for location-specific hashtags
+    }
 
     // 9. Response
     // FIX GAP A: Check for 'booking' not 'visit' (vocabulary normalized in select-cta.ts)

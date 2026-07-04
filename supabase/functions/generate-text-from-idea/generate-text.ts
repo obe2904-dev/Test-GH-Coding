@@ -27,6 +27,8 @@ function buildSystemMessage(language: string): string {
 export interface GenerationResult {
   cleanText: string
   aiKeyword: string | undefined
+  facebookHashtags?: string[]
+  instagramHashtags?: string[]
 }
 
 export async function callOpenAI(
@@ -72,9 +74,11 @@ export async function callOpenAI(
   const rawContent = openaiData.choices?.[0]?.message?.content
   if (!rawContent) throw new Error('No response from OpenAI API')
 
-  // Try to parse structured JSON output {text, keyword}
+  // Try to parse structured JSON output {text, keyword, facebookHashtags, instagramHashtags}
   let cleanText = rawContent.trim()
   let aiKeyword: string | undefined = undefined
+  let facebookHashtags: string[] | undefined = undefined
+  let instagramHashtags: string[] | undefined = undefined
   try {
     const jsonStr = rawContent.trim().replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim()
     const parsed = JSON.parse(jsonStr)
@@ -82,12 +86,20 @@ export async function callOpenAI(
       cleanText = parsed.text.trim().replace(/^["']/, '').replace(/["']$/, '').trim()
       const kw = typeof parsed.keyword === 'string' ? parsed.keyword.trim() : ''
       if (kw.length > 1) aiKeyword = kw.charAt(0).toUpperCase() + kw.slice(1)
+      
+      // Extract hashtags if provided
+      if (Array.isArray(parsed.facebookHashtags)) {
+        facebookHashtags = parsed.facebookHashtags.filter((tag: any) => typeof tag === 'string' && tag.startsWith('#'))
+      }
+      if (Array.isArray(parsed.instagramHashtags)) {
+        instagramHashtags = parsed.instagramHashtags.filter((tag: any) => typeof tag === 'string' && tag.startsWith('#'))
+      }
     }
   } catch {
     // Not JSON — treat raw output as plain text (backward compat / model fallback)
     cleanText = rawContent.trim().replace(/^["']/, '').replace(/["']$/, '').trim()
   }
 
-  console.log('✅ Generated:', cleanText.substring(0, 100), aiKeyword ? `(keyword: ${aiKeyword})` : '')
-  return { cleanText, aiKeyword }
+  console.log('✅ Generated:', cleanText.substring(0, 100), aiKeyword ? `(keyword: ${aiKeyword})` : '', facebookHashtags ? `FB: ${facebookHashtags.length} tags` : '', instagramHashtags ? `IG: ${instagramHashtags.length} tags` : '')
+  return { cleanText, aiKeyword, facebookHashtags, instagramHashtags }
 }

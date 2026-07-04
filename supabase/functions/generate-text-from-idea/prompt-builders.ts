@@ -755,9 +755,16 @@ ${anledningRule.da}
    ☕ MÅ KUN bruges, hvis kaffe, espresso, latte eller cappuccino er eksplicit nævnt som en drik i selve teksten — "Café" i virksomhedsnavnet tæller IKKE.
 9) ${selectedCta ? ctaRule8.da : 'Ingen CTA påkrævet for dette opslag — lad teksten tale for sig selv'}${qualityNote}
 
+HASHTAGS (generer platformspecifikke hashtags på dansk):
+- Facebook: 0-2 hashtags — fokus på lokal søgning (#${city}, #${city}Mad o.l.)
+- Instagram: 3-5 hashtags — bred mix af lokation, ret-type, community
+- Sprog: Brug DANSK for lifestyle/community tags (#MadElskere, #KaffeElskere)
+- Menupunkter: Behold originalsproget (#Burger, #Sandwich, #VolAuVent — disse er internationale)
+- Brug ALDRIG tags der ikke passer til indholdet i teksten
+
 OUTPUT
 Returner KUN dette JSON på én linje (ingen markdown, ingen forklaring):
-{"text":"<selve teksten>","keyword":"<ét PascalCase ord der bedst beskriver dette indhold>"}`,
+{"text":"<selve teksten>","keyword":"<ét PascalCase ord der bedst beskriver dette indhold>","facebookHashtags":["#tag1","#tag2"],"instagramHashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"]}`,
 
     sv: `UPPGIFT
 Skriv EN social media-text till ${businessName} i ${city}.
@@ -777,9 +784,15 @@ ${anledningRule.sv}
    ☕ FÅR BARA användas om kaffe, espresso, latte eller cappuccino uttryckligen nämns som en dryck i texten — "Café" i företagsnamnet räknas INTE.
 9) ${selectedCta ? ctaRule8.sv : 'Ingen CTA krävs för detta inlägg — låt texten tala för sig själv'}
 
+HASHTAGS (generera plattformspecifika hashtags på svenska):
+- Facebook: 0-2 hashtags — fokus på lokal sökning (#${city}, #${city}Mat o.s.v.)
+- Instagram: 3-5 hashtags — bred mix av plats, rätttyp, community
+- Språk: Använd SVENSKA för lifestyle/community-taggar (#MatÄlskare, #KaffeÄlskare)
+- Menyrätter: Behåll originalspråket (#Burger, #Sandwich — dessa är internationella)
+
 OUTPUT
 Returnera KUN detta JSON på en rad (ingen markdown, ingen förklaring):
-{"text":"<själva texten>","keyword":"<ett PascalCase-ord som bäst beskriver detta innehåll>"}`,
+{"text":"<själva texten>","keyword":"<ett PascalCase-ord som bäst beskriver detta innehåll>","facebookHashtags":["#tag1","#tag2"],"instagramHashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"]}`,
 
     de: `AUFGABE
 Schreibe EINEN Social-Media-Text für ${businessName} in ${city}.
@@ -799,10 +812,15 @@ ${anledningRule.de}
    ☕ DARF NUR genutzt werden, wenn Kaffee, Espresso, Latte oder Cappuccino ausdrücklich als Getränk im Text erwähnt wird — "Café" im Firmennamen zählt NICHT.
 9) ${selectedCta ? ctaRule8.de : 'Keine CTA erforderlich für diesen Beitrag — lass den Text für sich sprechen'}
 
+HASHTAGS (generiere plattformspezifische Hashtags auf Deutsch):
+- Facebook: 0-2 Hashtags — Fokus auf lokale Suche (#${city}, #${city}Essen usw.)
+- Instagram: 3-5 Hashtags — breite Mischung aus Ort, Gerichttyp, Community
+- Sprache: Verwende DEUTSCH für Lifestyle/Community-Tags (#EssenLiebhaber, #KaffeeLiebhaber)
+- Menüpunkte: Behalte die Originalsprache (#Burger, #Sandwich — diese sind international)
 
 OUTPUT
 Gib NUR dieses JSON auf einer Zeile zurück (kein Markdown, keine Erklärung):
-{"text":"<der eigentliche Text>","keyword":"<ein PascalCase-Wort das diesen Inhalt am besten beschreibt>"}`,
+{"text":"<der eigentliche Text>","keyword":"<ein PascalCase-Wort das diesen Inhalt am besten beschreibt>","facebookHashtags":["#tag1","#tag2"],"instagramHashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"]}`,
   }
 
   return templates[language] || templates.da
@@ -1149,9 +1167,16 @@ ${dishRules.da}
 8) ${selectedCta ? ctaRule8.da : 'Ingen CTA påkrævet for dette opslag — lad teksten tale for sig selv'}${qualityNote}
 9) Sætninger med kun subjekt + intransitivt verbum er forbudt overalt — "X venter", "X kalder", "X lokker" er scenefylde.
 
+HASHTAGS (generer platformspecifikke hashtags på dansk):
+- Facebook: 0-2 hashtags — fokus på lokal søgning (#${city}, #${city}Mad o.l.)
+- Instagram: 3-5 hashtags — bred mix af lokation, ret-type, community
+- Sprog: Brug DANSK for lifestyle/community tags (#MadElskere, #KaffeElskere)
+- Menupunkter: Behold originalsproget (#Burger, #Sandwich, #VolAuVent — disse er internationale)
+- Brug ALDRIG tags der ikke passer til indholdet i teksten
+
 OUTPUT
 Returner KUN dette JSON på én linje (ingen markdown, ingen forklaring):
-{"text":"<selve teksten>","keyword":"<ét PascalCase ord der bedst beskriver dette indhold>"}`,
+{"text":"<selve teksten>","keyword":"<ét PascalCase ord der bedst beskriver dette indhold>","facebookHashtags":["#tag1","#tag2"],"instagramHashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"]}`,
 
     sv: `UPPGIFT
 Skriv EN social media-text till ${businessName} i ${city}.
@@ -1171,9 +1196,15 @@ ${dishRules.sv}
 8) ${selectedCta ? ctaRule8.sv : 'Ingen CTA krävs för detta inlägg — låt texten tala för sig själv'}
 9) Meningar med bara subjekt + intransitivt verb är förbjudna genomgående — "X väntar", "X kallar", "X lockar" är scenfyllnad.
 
+HASHTAGS (generera plattformspecifika hashtags på svenska):
+- Facebook: 0-2 hashtags — fokus på lokal sökning (#${city}, #${city}Mat o.s.v.)
+- Instagram: 3-5 hashtags — bred mix av plats, rätttyp, community
+- Språk: Använd SVENSKA för lifestyle/community-taggar (#MatÄlskare, #KaffeÄlskare)
+- Menyrätter: Behåll originalspråket (#Burger, #Sandwich — dessa är internationella)
+
 OUTPUT
 Returnera KUN detta JSON på en rad (ingen markdown, ingen förklaring):
-{"text":"<själva texten>","keyword":"<ett PascalCase-ord som bäst beskriver detta innehåll>"}`,
+{"text":"<själva texten>","keyword":"<ett PascalCase-ord som bäst beskriver detta innehåll>","facebookHashtags":["#tag1","#tag2"],"instagramHashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"]}`,
 
     de: `AUFGABE
 Schreibe EINEN Social-Media-Text für ${businessName} in ${city}.
@@ -1193,9 +1224,15 @@ ${dishRules.de}
 8) ${selectedCta ? ctaRule8.de : 'Keine CTA erforderlich für diesen Beitrag — lass den Text für sich sprechen'}
 9) Sätze nur mit Subjekt + intransitivem Verb sind durchgehend verboten — "X wartet", "X ruft", "X lockt" sind Szenenerfüllung.
 
+HASHTAGS (generiere plattformspezifische Hashtags auf Deutsch):
+- Facebook: 0-2 Hashtags — Fokus auf lokale Suche (#${city}, #${city}Essen usw.)
+- Instagram: 3-5 Hashtags — breite Mischung aus Ort, Gerichttyp, Community
+- Sprache: Verwende DEUTSCH für Lifestyle/Community-Tags (#EssenLiebhaber, #KaffeeLiebhaber)
+- Menüpunkte: Behalte die Originalsprache (#Burger, #Sandwich — diese sind international)
+
 OUTPUT
 Gib NUR dieses JSON auf einer Zeile zurück (kein Markdown, keine Erklärung):
-{"text":"<der eigentliche Text>","keyword":"<ein PascalCase-Wort das diesen Inhalt am besten beschreibt>"}`,
+{"text":"<der eigentliche Text>","keyword":"<ein PascalCase-Wort das diesen Inhalt am besten beschreibt>","facebookHashtags":["#tag1","#tag2"],"instagramHashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"]}`,
   }
 
   return templates[language] || templates.da
