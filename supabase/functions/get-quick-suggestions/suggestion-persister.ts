@@ -244,6 +244,13 @@ export async function persistAndAssemble(
       cta_intent:
         s.slot === 'guest_moment' ? 'social' : s.slot === 'brand_behind' ? 'engagement' : 'visit',
       media_suggestion: s.media_suggestion || null,
+      // Clear cached generation when regenerating - forces fresh text generation
+      generated_text: null,
+      generated_hashtags: null,
+      generated_platform_content: null,
+      generated_at: null,
+      platforms_generated: null,
+      text_generation_version: null,
     }
   })
 
