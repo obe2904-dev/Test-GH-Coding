@@ -742,10 +742,7 @@ export function CreatePostPage() {
         // Use cached content if available, platforms match, and version is current
         if (cacheIsValid) {
           console.log('✅ Loading cached content from database (generated at:', cachedSuggestion.generated_at, ')')
-          // Show brief loading for visual feedback (cache loads fast but user should see something happened)
-          setIsGenerating(true)
-          // Small delay so the loading modal is visible
-          await new Promise(resolve => setTimeout(resolve, 300))
+          // Load cached content directly without delay
           data = {
             sharedText: cachedSuggestion.generated_text,
             facebook: cachedSuggestion.generated_platform_content?.facebook,
@@ -1011,13 +1008,7 @@ export function CreatePostPage() {
       console.log('[CreatePostPage] Keeping photos - same suggestion', currentSuggestionId)
     }
 
-    // Show success state on Generate stage before advancing
-    console.log('[CreatePostPage] Showing success state before advancing to Design')
-    setShowGenerationSuccess(true)
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    setShowGenerationSuccess(false)
-    
-    // Advance to Design step
+    // Advance directly to Design step without success modal delay
     console.log('[CreatePostPage] Navigating to Design step')
     setCurrentStep('create')
   }
@@ -1416,11 +1407,8 @@ export function CreatePostPage() {
     }
 
     // Show success state on Generate stage before advancing
-    console.log('[handleDirectTransfer] Showing success state before advancing to Design')
-    setShowGenerationSuccess(true)
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    setShowGenerationSuccess(false)
-
+    // Advance directly to Design step without success modal delay
+    console.log('[handleDirectTransfer] Navigating to Design step')
     setCurrentStep('create')
   }
 
