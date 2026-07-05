@@ -486,11 +486,33 @@ IDENTITETS-REGEL: Nævn kun forretningsmodellen eller brand-essensen i overview/
    Vær konkret: nævn hvad der var den dominerende vinkel sidste uge (fra FORRIGE UGERS OVERVIEW), og hvad der er anderledes eller skiftet denne uge. Brug ejernes eget hverdagssprog — ingen strategilabels.
    Hvis der ikke er nogen FORRIGE UGERS OVERVIEW: sæt feltet til null.
 
+9. strategic_distribution: Forklar HVORFOR denne specifikke fordeling af posts tjener ugens kommercielle mål.
+   Struktur i 2-3 sætninger med prioritet: booking (hvis relevant) → footfall → brand building.
+   
+   HVIS booking-posts er med:
+   Sætning 1: Forklar HVORFOR booking kommer først — link til konkret anledning/event/travl dag der kræver forhåndsreservation.
+   Eksempel: "Weekendreservationer til Mors Dag kræver 2-3 dages varsel — booking-posts torsdag-fredag sikrer, at lokale familier finder os i tide til søndagsbrunch."
+   
+   HVIS footfall-posts er med:
+   Sætning 2: Forklar HVORFOR walk-in posts — link til spontant besøgsmønster i ugens dagsdele.
+   Eksempel: "Midt på ugen er det spontane frokostgæster der dominerer — appetitvækkende visuals tirsdag-onsdag driver samme-dag besøg fra kontorfolk i området."
+   
+   HVIS brand-building posts er med:
+   Sætning 3: Forklar HVORFOR brand-strengthening — link til awareness-timing eller season.
+   Eksempel: "I højsæsonen med turister søger folk aktivt anbefalinger — brand-posts holder os top-of-mind når weekendgæster researcher spisesteder."
+   
+   HVIS KUN én type posts:
+   1-2 sætninger der forklarer hvorfor netop denne type og ingen andre — link til ugens konkrete kontekst.
+   
+   Tone: Professionel briefing til ejeren — ikke marketingsprog, men kommerciel logik. Konkret og hverdagsdansk.
+   FORBUDT: "strategisk vigtig", "prioriteret fokus", "målrettet indsats" — brug i stedet konkrete årsag-virkning-beskrivelser.
+
 Svar KUN med JSON:
 {
   "headline": "Uge ${context.week_number}: [kondenseret version af '${primaryAngleLabel}' — ikke et nyt tema, ikke lokation som suffix]",
   "overview": "• [S1: konkret trigger/mekanisme der gør ugens retning indlysende — ALDRIG et strategilabel]\n• [S2: hvad KUN denne forretning kan — ikke 'matcher', men konkret kombination der adskiller den]\n• [S3: hvad opslagene skal gøre let for gæsten — ikke 'prioritér', men gæstens næste skridt]\n• [S4 valgfri: kun hvis sekundær dagsdel/event ikke kan rummes i S3]",
   "continuation_note": "[1-2 sætninger: hvad var sidste uges dominerende vinkel, hvad er ændret denne uge — eller null hvis ingen sidste uge-data]",
+  "strategic_distribution": "[2-3 sætninger: HVORFOR booking først (hvis relevant) + HVORFOR footfall (hvis relevant) + HVORFOR brand (hvis relevant) — kommerciel logik, ikke marketingsprog]",
   "detailed_sections": {
     "weather_season": "Vejr + gæste-adfærd (3-4 sætninger) — INGEN ingredienser/retter, INGEN hygge-ord",
     "timing_context": "Gæste-handlemønster + events + ugespecifik adfærd (3-4 sætninger) — konkret, ikke stemnings-baseret",
@@ -524,6 +546,10 @@ Svar KUN med JSON:
       correctionPromises.push(silentSpellingCorrection(narrative.overview, 'da'));
       correctionKeys.push('overview');
     }
+    if (narrative.strategic_distribution && typeof narrative.strategic_distribution === 'string') {
+      correctionPromises.push(silentSpellingCorrection(narrative.strategic_distribution, 'da'));
+      correctionKeys.push('strategic_distribution');
+    }
     if (narrative.detailed_sections && typeof narrative.detailed_sections === 'object') {
       if (narrative.detailed_sections.weather_season) {
         correctionPromises.push(silentSpellingCorrection(narrative.detailed_sections.weather_season, 'da'));
@@ -551,6 +577,8 @@ Svar KUN med JSON:
         narrative.headline = value;
       } else if (key === 'overview') {
         narrative.overview = value;
+      } else if (key === 'strategic_distribution') {
+        narrative.strategic_distribution = value;
       } else if (narrative.detailed_sections) {
         narrative.detailed_sections[key] = value;
       }

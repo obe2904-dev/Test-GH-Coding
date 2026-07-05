@@ -497,7 +497,7 @@ serve(async (req) => {
         supabaseClient.from('business_brand_profile').select('*, voice_guardrails, business_identity_persona, marketing_manager_brief').eq('business_id', business.id).single(),
         supabaseClient.from('business_profile').select('*').eq('business_id', business.id).single(),
         supabaseClient.from('business_location_intelligence').select('*').eq('business_id', business.id).single(),
-        supabaseClient.from('menu_items_normalized').select('item_name, item_description, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', business.id).eq('menu_language', countryToLanguageCode(business.country)),
+        supabaseClient.from('menu_items_normalized').select('item_name, item_description, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', business.id).eq('menu_language', countryToLanguageCode(business.country)).eq('is_active', true),
         // Fetch all statuses, filter by language below (so we have IDs to cross-reference)
         supabaseClient.from('menu_results_v2').select('id, language_code, structured_data, service_periods, is_signature, ai_summary, source_url, service_period_name').eq('business_id', business.id).eq('status', 'done'),
         supabaseClient.from('business_programme_profiles').select('programme_type, programme_name, time_windows, operating_days, is_active').eq('business_id', business.id).eq('is_active', true),

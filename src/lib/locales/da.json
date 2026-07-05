@@ -2045,6 +2045,9 @@
       "strategicRationale": {
         "title": "Ugens Strategi"
       },
+      "strategicDistribution": {
+        "title": "Strategisk Fordeling"
+      },
       "months": {
         "january": "januar",
         "february": "februar",

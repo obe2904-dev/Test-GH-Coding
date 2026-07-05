@@ -440,7 +440,7 @@ serve(async (req)=>{
           updated_at
         `).eq('business_id', body.business_id).maybeSingle(),
       dataClient.from('business_profile').select('menu_signal, booking_url').eq('business_id', body.business_id).maybeSingle(),
-      dataClient.from('menu_items_normalized').select('id, item_name, item_description, category_name, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', body.business_id).eq('menu_language', expectedLanguage),
+      dataClient.from('menu_items_normalized').select('id, item_name, item_description, category_name, menu_language, service_periods, service_period_name, menu_result_id').eq('business_id', body.business_id).eq('menu_language', expectedLanguage).eq('is_active', true),
       dataClient.from('menu_results_v2').select('id, language_code, structured_data, service_periods, is_signature, ai_summary, source_url, service_period_name').eq('business_id', body.business_id).eq('status', 'done').limit(20),
       dataClient.from('business_programme_profiles').select('programme_type, programme_name, time_windows, operating_days, is_active, decision_timing, accepts_reservations, baseline_goal_split, audience_segments').eq('business_id', body.business_id).eq('is_active', true),
       dataClient.from('profiles').select('selected_platforms').eq('id', skipAuth ? business.owner_id : user.id).single()

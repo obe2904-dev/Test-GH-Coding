@@ -91,7 +91,7 @@ export async function getMenuRotationQueue(
 
   // Step 1: Get all ACTIVE menu items from menu_items_normalized
   // This is our source of truth for what dishes exist
-  // Filter by is_active = true to exclude obsolete items from previous menu versions
+  // Filter by is_active = true to exclude items manually excluded by user
   // Exclude kids_menu and sides - they're not suitable for general Quick Suggestions
   // OPTIMIZED: Fetch item_description here to eliminate redundant query
   // NEW: JOIN to menu_results_v2 for cuisine intelligence from ai_summary

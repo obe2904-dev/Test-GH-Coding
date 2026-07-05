@@ -93,9 +93,9 @@ function MenuPage() {
   const [editingTimeEnd, setEditingTimeEnd] = useState('')
   const [isSavingTiming, setIsSavingTiming] = useState(false)
 
-  // Normalized item flags (is_signature toggle)
-  // keyed by item_name.toLowerCase() → { id, is_signature }
-  const [normalizedItems, setNormalizedItems] = useState<Map<string, { id: string; is_signature: boolean }>>(new Map())
+  // Normalized item flags (is_signature toggle, is_active toggle)
+  // keyed by item_name.toLowerCase() → { id, is_signature, is_active }
+  const [normalizedItems, setNormalizedItems] = useState<Map<string, { id: string; is_signature: boolean; is_active: boolean }>>(new Map())
   
   // Store polling intervals for cleanup
   const pollIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
@@ -1107,13 +1107,13 @@ function MenuPage() {
     try {
       const { data } = await supabase
         .from('menu_items_normalized')
-        .select('id, item_name, is_signature')
+        .select('id, item_name, is_signature, is_active')
         .eq('business_id', bizId)
-        .eq('is_active', true) // Only load active items
+        // Load ALL items (active and inactive) so user can see and re-enable excluded items
       if (data) {
-        const map = new Map<string, { id: string; is_signature: boolean }>()
+        const map = new Map<string, { id: string; is_signature: boolean; is_active: boolean }>()
         for (const row of data as any[]) {
-          if (row.item_name) map.set(row.item_name.toLowerCase(), { id: row.id, is_signature: !!row.is_signature })
+          if (row.item_name) map.set(row.item_name.toLowerCase(), { id: row.id, is_signature: !!row.is_signature, is_active: row.is_active !== false })
         }
         setNormalizedItems(map)
       }
@@ -1166,6 +1166,32 @@ function MenuPage() {
         return next
       })
       console.error('Failed to toggle is_signature:', updateErr)
+    }
+  }
+
+  const toggleActive = async (itemName: string) => {
+    const key = itemName.toLowerCase()
+    const entry = normalizedItems.get(key)
+    if (!entry) return
+    const newVal = !entry.is_active
+    // Optimistic update
+    setNormalizedItems(prev => {
+      const next = new Map(prev)
+      next.set(key, { ...entry, is_active: newVal })
+      return next
+    })
+    const { error: updateErr } = await supabase
+      .from('menu_items_normalized')
+      .update({ is_active: newVal })
+      .eq('id', entry.id)
+    if (updateErr) {
+      // Revert
+      setNormalizedItems(prev => {
+        const next = new Map(prev)
+        next.set(key, entry)
+        return next
+      })
+      console.error('Failed to toggle is_active:', updateErr)
     }
   }
 
@@ -1602,33 +1628,49 @@ function MenuPage() {
                                   category.items.map((item: any, itemIdx: number) => {
                                     const normEntry = normalizedItems.get((item.name || '').toLowerCase())
                                     const isSig = normEntry?.is_signature ?? false
+                                    const isActive = normEntry?.is_active ?? true
                                     return (
-                                    <div key={itemIdx} className="flex items-start justify-between text-sm gap-2">
+                                    <div key={itemIdx} className={`flex items-start justify-between text-sm gap-2 ${!isActive ? 'opacity-50' : ''}`}>
                                       <div className="flex items-start gap-1.5 flex-1 min-w-0">
                                         {normEntry && (
                                           <button
                                             onClick={() => toggleSignature(item.name)}
                                             title={isSig ? 'Fjern signaturret-markering' : 'Markér som signaturret'}
                                             className={`mt-0.5 shrink-0 text-base leading-none transition-colors ${isSig ? 'text-warning' : 'text-text-muted hover:text-warning'}`}
+                                            disabled={!isActive}
                                           >
                                             {isSig ? '★' : '☆'}
                                           </button>
                                         )}
                                         <div className="flex-1 min-w-0">
-                                          <span className={`text-text${isSig ? ' font-medium' : ''}`}>{item.name}</span>
-                                          {isSig && (
+                                          <span className={`text-text${isSig ? ' font-medium' : ''}${!isActive ? ' line-through' : ''}`}>{item.name}</span>
+                                          {isSig && isActive && (
                                             <span className="ml-1.5 text-xs text-warning font-normal">Signaturret</span>
+                                          )}
+                                          {!isActive && (
+                                            <span className="ml-1.5 text-xs text-error font-normal">Ekskluderet</span>
                                           )}
                                           {item.description && (
                                             <p className="text-xs text-text-secondary mt-0.5">{item.description}</p>
                                           )}
                                         </div>
                                       </div>
-                                      {item.price && (
-                                        <span className="text-text-secondary font-medium whitespace-nowrap">
-                                          {item.price}{item.currency ? ` ${item.currency}` : ''}
-                                        </span>
-                                      )}
+                                      <div className="flex items-center gap-2">
+                                        {item.price && (
+                                          <span className="text-text-secondary font-medium whitespace-nowrap">
+                                            {item.price}{item.currency ? ` ${item.currency}` : ''}
+                                          </span>
+                                        )}
+                                        {normEntry && (
+                                          <button
+                                            onClick={() => toggleActive(item.name)}
+                                            title={isActive ? 'Ekskluder fra indhold (vises ikke i opslag)' : 'Inkluder igen i indhold'}
+                                            className={`shrink-0 text-base leading-none transition-colors ${!isActive ? 'text-success hover:text-success-text' : 'text-text-muted hover:text-error'}`}
+                                          >
+                                            {isActive ? '🚫' : '✓'}
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                     )
                                   })
