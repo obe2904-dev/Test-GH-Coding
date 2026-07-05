@@ -410,6 +410,13 @@ function MenuPage() {
         return
       }
 
+      // Deduplicate URLs from API response (in case same URL appears multiple times)
+      const uniqueDetectedUrls = [...new Set(detectedUrls)]
+      
+      if (uniqueDetectedUrls.length < detectedUrls.length) {
+        console.log(`⚠️ Removed ${detectedUrls.length - uniqueDetectedUrls.length} duplicate URL(s) from API response`)
+      }
+
       // Get existing menu sources to show which are already fetched
       console.log('🔍 Checking existing menus...')
       
@@ -420,16 +427,16 @@ function MenuPage() {
       
       const existingUrls = new Set((existingSources || []).map((s: any) => s.source_url))
       
-      console.log(`📊 Found ${detectedUrls.length} total menu URLs`)
+      console.log(`📊 Found ${uniqueDetectedUrls.length} unique menu URLs`)
       console.log(`   - ${existingUrls.size} already in database`)
-      console.log(`   - ${detectedUrls.length - existingUrls.size} are new`)
+      console.log(`   - ${uniqueDetectedUrls.length - existingUrls.size} are new`)
 
       // Merge newly detected URLs with existing state
-      // detectedUrls here is the API response (array of URL strings)
+      // uniqueDetectedUrls here is the deduplicated API response (array of URL strings)
       // We need to merge with the current detectedUrls state (array of objects)
       setDetectedUrls(currentUrls => {
         const currentUrlsSet = new Set(currentUrls.map((item: { url: string }) => item.url));
-        const newUrlsOnly = detectedUrls
+        const newUrlsOnly = uniqueDetectedUrls
           .filter((url: string) => !currentUrlsSet.has(url))
           .map((url: string) => ({
             url,
@@ -445,7 +452,7 @@ function MenuPage() {
           return [...currentUrls, ...newUrlsOnly]
         } else {
           // All detected URLs are already shown in the UI — pre-select them so user can re-extract
-          const existingDetected = detectedUrls.filter((url: string) => currentUrlsSet.has(url))
+          const existingDetected = uniqueDetectedUrls.filter((url: string) => currentUrlsSet.has(url))
           if (existingDetected.length > 0) {
             setSelectedUrls(new Set(existingDetected))
             setError(null)
