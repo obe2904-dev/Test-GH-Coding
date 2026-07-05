@@ -114,6 +114,20 @@ function toLocalISODate(date: Date = new Date()): string {
   return `${year}-${month}-${day}`
 }
 
+/**
+ * Get current local time as ISO string (without timezone suffix)
+ * This represents the user's actual local time, not UTC
+ */
+function toLocalISOTime(date: Date = new Date()): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  const seconds = String(date.getSeconds()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`
+}
+
 function addDaysToLocalDate(date: Date, days: number): string {
   const copy = new Date(date)
   copy.setDate(copy.getDate() + days)
@@ -300,7 +314,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
           count: 3,
           tier: currentTier,
           regenerate,  // Always request a refresh on explicit regenerate clicks
-          localTime: opts?.localTime,
+          localTime: opts?.localTime ?? toLocalISOTime(),
           localDate: opts?.localDate ?? toLocalISODate(),
           userContext: opts?.userContext || undefined,
         }
@@ -522,7 +536,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
     const handleGenerate = () => {
       setShowGate(false)
       fetchSuggestions(true, {
-        localTime: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, -1),
+        localTime: toLocalISOTime(),
         userContext: userContext.trim() || undefined,
       })
     }
