@@ -1322,36 +1322,34 @@ function MenuPage() {
           </div>
         )}
 
-        {/* 3-Column Menu Input Methods */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          {/* Left Column: URL Input */}
-          <div className="bg-surface rounded-lg border border-border p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-              </svg>
-              <h3 className="font-semibold text-brand">Find menusider</h3>
+        {/* Frame 1: Detect Menus from Website */}
+        {websiteUrl && (
+          <div className="bg-surface rounded-lg border border-border px-4 py-3 mb-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <p className="text-sm text-text-secondary">
+                  {t('menu.findOn')} <span className="font-medium">{websiteUrl}</span>
+                </p>
+              </div>
+              <button
+                onClick={handleDetectMenus}
+                disabled={isDetectingMenus}
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-opacity
+                  ${isDetectingMenus
+                    ? 'bg-cta text-text-inverse opacity-75 cursor-wait'
+                    : 'bg-cta text-text-inverse hover:bg-cta-hover disabled:bg-surface-alt disabled:text-text-muted disabled:cursor-not-allowed'
+                  }`}
+              >
+                <AnalyzeIcon className={isDetectingMenus ? 'w-4 h-4 animate-spin motion-reduce:animate-none text-text-inverse' : 'w-4 h-4 text-text-inverse'} />
+                <span>{isDetectingMenus ? t('menu.detect.searching') : t('menu.detect.find')}</span>
+              </button>
             </div>
-            <p className="text-xs text-text-secondary mb-3">
-              Indtast URL til jeres menu eller hjemmeside
-            </p>
-            <input
-              type="url"
-              value={newMenuInput}
-              onChange={(e) => setNewMenuInput(e.target.value)}
-              placeholder="https://example.dk/menu"
-              className="w-full px-3 py-2 border border-border rounded text-sm mb-3"
-            />
-            <button
-              onClick={handleAddManualUrl}
-              disabled={!newMenuInput.trim()}
-              className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
-            >
-              Tilføj URL
-            </button>
           </div>
+        )}
 
-          {/* Middle Column: PDF/JPG Upload */}
+        {/* 2-Column Menu Input Methods: Frames 2 & 3 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {/* Frame 2: PDF/JPG Upload */}
           <div className="bg-surface rounded-lg border border-border p-4">
             <div className="flex items-center gap-2 mb-3">
               <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -1391,7 +1389,7 @@ function MenuPage() {
             </button>
           </div>
 
-          {/* Right Column: Manual Text Input */}
+          {/* Frame 3: Manual Text Input */}
           <div className="bg-surface rounded-lg border border-border p-4">
             <div className="flex items-center gap-2 mb-3">
               <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -1419,31 +1417,6 @@ function MenuPage() {
         </div>
 
         <div className="space-y-3">
-          {/* Detect Menus Section */}
-          {websiteUrl && (
-            <div className="bg-surface rounded-lg border border-border px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex-1">
-                  <p className="text-sm text-text-secondary">
-                    {t('menu.findOn')} <span className="font-medium">{websiteUrl}</span>
-                  </p>
-                </div>
-                <button
-                  onClick={handleDetectMenus}
-                  disabled={isDetectingMenus}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-opacity
-                    ${isDetectingMenus
-                      ? 'bg-cta text-text-inverse opacity-75 cursor-wait'
-                      : 'bg-cta text-text-inverse hover:bg-cta-hover disabled:bg-surface-alt disabled:text-text-muted disabled:cursor-not-allowed'
-                    }`}
-                >
-                  <AnalyzeIcon className={isDetectingMenus ? 'w-4 h-4 animate-spin motion-reduce:animate-none text-text-inverse' : 'w-4 h-4 text-text-inverse'} />
-                  <span>{isDetectingMenus ? t('menu.detect.searching') : t('menu.detect.find')}</span>
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* URL Selection Section */}
           <div className="space-y-3">
               <div className="bg-surface rounded-lg border border-border p-4">
