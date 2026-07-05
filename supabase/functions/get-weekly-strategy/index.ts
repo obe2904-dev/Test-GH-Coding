@@ -10,7 +10,22 @@ import { fetchWeatherFromCoordinates, createSeasonalFallbackWeather } from './we
 import { getTypeAnalytics } from '../_shared/contentTypeTracking.ts';
 import { DEFAULT_TYPE_MIX, allocateContentTypes, getDominantGoalMode } from '../_shared/contentTypeSystem.ts';
 import { countryToLanguageCode } from '../_shared/helpers/country-to-language.ts';
-import { getBusinessTier } from '../_shared/tier-resolver.ts';
+
+// Inline tier resolver (tier-resolver.ts was removed)
+async function getBusinessTier(supabase: any, businessId: string) {
+  const { data } = await supabase
+    .from('business_subscriptions')
+    .select('tier')
+    .eq('business_id', businessId)
+    .maybeSingle();
+  
+  const legacyTier = data?.tier || 'free';
+  const isPaidTier = legacyTier !== 'free';
+  const isProTier = legacyTier === 'premium' || legacyTier === 'standardplus';
+  
+  return { legacyTier, isPaidTier, isProTier };
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
