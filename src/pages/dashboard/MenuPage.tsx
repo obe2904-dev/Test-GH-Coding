@@ -1436,7 +1436,7 @@ function MenuPage() {
                 <p className="text-sm text-text-secondary mb-2">
                   {t('menu.findOn')} <span className="font-medium">{websiteUrl}</span>
                 </p>
-                <p className="text-xs text-text-muted">
+                <p className="text-xs text-text-muted font-semibold">
                   Lad mig prøve at finde dine menuer automatisk. Du kan også vælge en af de andre metoder nedenfor.
                 </p>
               </div>
@@ -1975,7 +1975,8 @@ function MenuPage() {
             </div>
           )}
 
-          {/* Pricing Section */}
+          {/* Pricing Section - Hidden for now */}
+          {false && (
           <div className="bg-surface rounded-lg border border-border p-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
@@ -2027,6 +2028,7 @@ function MenuPage() {
               </div>
             )}
           </div>
+          )}
 
           {/* Error Display */}
           {error && (
@@ -2035,8 +2037,8 @@ function MenuPage() {
             </div>
           )}
 
-          {/* Empty State - Show when no menus exist */}
-          {menuCards.length === 0 && detectedUrls.length === 0 && (
+          {/* Empty State - Hidden for now */}
+          {false && menuCards.length === 0 && detectedUrls.length === 0 && (
             <div className="bg-surface rounded-lg border border-border px-4 py-8 text-center">
               <p className="text-sm text-text-secondary mb-3">{t('menu.sources.emptyState')}</p>
               <p className="text-xs text-text-muted">
@@ -2328,8 +2330,8 @@ function MenuPage() {
           </div>
           )}
 
-          {/* Empty State */}
-          {menuCards.length === 0 && detectedUrls.length === 0 && (
+          {/* Empty State - Hidden for now */}
+          {false && menuCards.length === 0 && detectedUrls.length === 0 && (
             <div className="bg-surface rounded-lg border border-border px-4 py-8 text-center">
               <p className="text-sm text-text-secondary mb-3">{t('menu.sources.emptyState2')}</p>
               <p className="text-xs text-text-muted">
