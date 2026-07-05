@@ -873,7 +873,7 @@ serve(async (req) => {
     }
     
     // Build prompt
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    const dayNames = ['søndag', 'mandag', 'tirsdag', 'onsdag', 'torsdag', 'fredag', 'lørdag']
     const prompt = buildPrompt({
       businessName: business.name || 'this restaurant',
       businessType: effectiveBusinessType,
