@@ -9,25 +9,6 @@ import { CORS_HEADERS, AI_CONFIG, TIMING } from './constants.ts'
 import { daysAgo, formatDate, isCacheStale } from './utils.ts'
 import { detectEffectiveVertical } from '../_shared/business-type-helpers.ts'
 
-// ── Helper: Country name → ISO alpha-2 for OpenWeather API ──────────────────
-function countryToISOAlpha2(countryName?: string): string {
-  if (!countryName) return 'DK'
-  const normalized = countryName.toLowerCase().trim()
-  const map: Record<string, string> = {
-    'denmark': 'DK',
-    'danmark': 'DK',
-    'sweden': 'SE',
-    'sverige': 'SE',
-    'norway': 'NO',
-    'norge': 'NO',
-    'germany': 'DE',
-    'deutschland': 'DE',
-    'netherlands': 'NL',
-    'nederland': 'NL',
-  }
-  return map[normalized] || 'DK'
-}
-
 // ── Weather Data Structure ─────────────────────────────────────────────────
 interface WeatherData {
   temp: number
@@ -35,6 +16,37 @@ interface WeatherData {
   windSpeed: number
   conditions: string  // 'Clear', 'Clouds', 'Rain', etc.
   cloudCoverage?: number  // 0-100%
+  precipProbability?: number  // 0-100%
+}
+
+// ── Helper: Map WMO Weather Code to Condition ───────────────────────────────
+function mapWMOToCondition(wmo: number): { condition: string; description: string } {
+  // WMO Weather interpretation codes
+  // 0 = Clear sky
+  // 1, 2, 3 = Mainly clear, partly cloudy, and overcast
+  // 45, 48 = Fog
+  // 51-67 = Drizzle/Rain
+  // 71-77 = Snow
+  // 80-82 = Rain showers
+  // 85-86 = Snow showers
+  // 95+ = Thunderstorm
+  
+  if (wmo === 0) return { condition: 'Clear', description: 'klar himmel' }
+  if (wmo === 1) return { condition: 'Clear', description: 'overvejende klart' }
+  if (wmo === 2) return { condition: 'Clouds', description: 'delvist skyet' }
+  if (wmo === 3) return { condition: 'Clouds', description: 'overskyet' }
+  if (wmo === 45 || wmo === 48) return { condition: 'Fog', description: 'tåge' }
+  if (wmo >= 51 && wmo <= 55) return { condition: 'Drizzle', description: 'let regn' }
+  if (wmo >= 56 && wmo <= 57) return { condition: 'Drizzle', description: 'frysende støvregn' }
+  if (wmo >= 61 && wmo <= 65) return { condition: 'Rain', description: 'regn' }
+  if (wmo >= 66 && wmo <= 67) return { condition: 'Rain', description: 'frysende regn' }
+  if (wmo >= 71 && wmo <= 75) return { condition: 'Snow', description: 'sne' }
+  if (wmo === 77) return { condition: 'Snow', description: 'snefnug' }
+  if (wmo >= 80 && wmo <= 82) return { condition: 'Rain', description: 'regnbyger' }
+  if (wmo >= 85 && wmo <= 86) return { condition: 'Snow', description: 'snebyger' }
+  if (wmo >= 95) return { condition: 'Thunderstorm', description: 'tordenvejr' }
+  
+  return { condition: 'Clouds', description: 'skyet' }
 }
 
 // ── Helper: Evaluate Outdoor Suitability ────────────────────────────────────
@@ -69,125 +81,119 @@ function evaluateOutdoorSuitability(weather: WeatherData): string | null {
   return null
 }
 
-// ── Helper: Fetch Today's Weather ───────────────────────────────────────────
+// ── Helper: Fetch Today's Weather from Open-Meteo ───────────────────────────
 async function fetchTodayWeather(
-  city: string | undefined,
-  postalCode: string | undefined,
-  country: string,
+  lat: number,
+  lon: number,
   currentHour: number,
   hasOutdoorSeating: boolean
 ): Promise<{ raw: string; data?: WeatherData; outdoorStatus?: string } | undefined> {
   try {
-    const owmKey = Deno.env.get('OPENWEATHER_API_KEY')
-    if (!owmKey) {
-      console.warn('⚠️ OPENWEATHER_API_KEY not set')
-      return undefined
-    }
-
-    const countryCode = countryToISOAlpha2(country)
+    // Use Open-Meteo hourly forecast (free, no API key needed)
+    const url = `https://api.open-meteo.com/v1/forecast?` +
+      `latitude=${lat}&longitude=${lon}` +
+      `&hourly=temperature_2m,precipitation_probability,weathercode,cloudcover,windspeed_10m` +
+      `&timezone=auto` +
+      `&forecast_days=1`
     
-    // Build location query - prefer postal code for precision
-    const locationQuery = postalCode 
-      ? `zip=${postalCode},${countryCode}`
-      : city
-        ? `q=${city},${countryCode}`
-        : null
+    const response = await fetch(url)
     
-    if (!locationQuery) {
-      console.warn('⚠️ No city or postal code available')
+    if (!response.ok) {
+      console.warn('⚠️ Open-Meteo API failed:', response.status)
       return undefined
     }
     
-    // Fetch current weather
-    const currentRes = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?${locationQuery}&appid=${owmKey}&units=metric&lang=da`
-    )
+    const data = await response.json()
+    const hourly = data.hourly
     
-    if (!currentRes.ok) {
-      console.warn('⚠️ Weather API failed:', currentRes.status)
+    if (!hourly || !hourly.time) {
+      console.warn('⚠️ No hourly data from Open-Meteo')
       return undefined
     }
     
-    const current = await currentRes.json()
-    const currentTemp = Math.round(current.main.temp)
-    const currentDesc = current.weather?.[0]?.description || ''
-    const windSpeed = current.wind?.speed || 0
-    const weatherCondition = current.weather?.[0]?.main || 'Clear'
-    const cloudCoverage = current.clouds?.all || 0
+    // Find current hour index
+    const now = new Date()
+    const currentIndex = hourly.time.findIndex((time: string) => {
+      const hour = new Date(time).getHours()
+      return hour === currentHour
+    })
+    
+    if (currentIndex === -1) {
+      console.warn('⚠️ Could not find current hour in forecast')
+      return undefined
+    }
+    
+    // Get current weather
+    const currentTemp = Math.round(hourly.temperature_2m[currentIndex])
+    const currentWMO = hourly.weathercode[currentIndex]
+    const currentWind = Math.round(hourly.windspeed_10m[currentIndex])
+    const currentClouds = hourly.cloudcover[currentIndex]
+    const currentPrecipProb = hourly.precipitation_probability[currentIndex] || 0
+    
+    const { condition, description } = mapWMOToCondition(currentWMO)
     
     // Build weather data object
     const weatherData: WeatherData = {
       temp: currentTemp,
-      description: currentDesc,
-      windSpeed,
-      conditions: weatherCondition,
-      cloudCoverage
+      description,
+      windSpeed: currentWind,
+      conditions: condition,
+      cloudCoverage: currentClouds,
+      precipProbability: currentPrecipProb
     }
     
-    // Fetch forecast (only today)
-    const forecastRes = await fetch(
-      `https://api.openweathermap.org/data/2.5/forecast?${locationQuery}&appid=${owmKey}&units=metric&lang=da&cnt=8`
-    )
+    // Get remaining hours today (up to 6 hours ahead)
+    const remainingHours = hourly.time
+      .slice(currentIndex + 1, Math.min(currentIndex + 7, hourly.time.length))
+      .map((time: string, idx: number) => ({
+        hour: new Date(time).getHours(),
+        temp: Math.round(hourly.temperature_2m[currentIndex + 1 + idx]),
+        wmo: hourly.weathercode[currentIndex + 1 + idx],
+        precipProb: hourly.precipitation_probability[currentIndex + 1 + idx] || 0,
+        clouds: hourly.cloudcover[currentIndex + 1 + idx]
+      }))
     
-    if (!forecastRes.ok) {
-      // Return current weather only
-      const outdoorStatus = hasOutdoorSeating ? evaluateOutdoorSuitability(weatherData) : undefined
-      return {
-        raw: `${currentTemp}°C, ${currentDesc}`,
-        data: weatherData,
-        outdoorStatus: outdoorStatus || undefined
+    // Find significant weather changes
+    const afternoon = remainingHours.find(h => h.hour >= 12 && h.hour < 18)
+    const evening = remainingHours.find(h => h.hour >= 18)
+    
+    // Build smart weather description
+    // Only mention rain if precipitation probability > 50%
+    let weatherDesc = description
+    if (currentPrecipProb > 50) {
+      weatherDesc = `${description} (${currentPrecipProb}% regn)`
+    } else if (currentPrecipProb > 30) {
+      weatherDesc = `${description} (risiko for regn)`
+    }
+    
+    let weatherStr = `Nu: ${currentTemp}°C, ${weatherDesc}`
+    
+    // Add afternoon if different
+    if (afternoon && Math.abs(afternoon.temp - currentTemp) > 2) {
+      const afternoonWeather = mapWMOToCondition(afternoon.wmo)
+      let afternoonDesc = afternoonWeather.description
+      if (afternoon.precipProb > 50) {
+        afternoonDesc = `${afternoonDesc} (${afternoon.precipProb}% regn)`
       }
+      weatherStr += `\nEftermiddag: ${afternoon.temp}°C, ${afternoonDesc}`
     }
     
-    const forecast = await forecastRes.json()
-    
-    // Filter to only today's forecast (same date)
-    const now = new Date()
-    const todayDate = now.toISOString().split('T')[0]
-    
-    const todayForecasts = forecast.list?.filter((item: any) => {
-      const itemDate = item.dt_txt.split(' ')[0]
-      return itemDate === todayDate
-    }) || []
-    
-    if (todayForecasts.length === 0) {
-      const outdoorStatus = hasOutdoorSeating ? evaluateOutdoorSuitability(weatherData) : undefined
-      return {
-        raw: `${currentTemp}°C, ${currentDesc}`,
-        data: weatherData,
-        outdoorStatus: outdoorStatus || undefined
+    // Add evening if different
+    if (evening && Math.abs(evening.temp - currentTemp) > 2) {
+      const eveningWeather = mapWMOToCondition(evening.wmo)
+      let eveningDesc = eveningWeather.description
+      if (evening.precipProb > 50) {
+        eveningDesc = `${eveningDesc} (${evening.precipProb}% regn)`
       }
+      weatherStr += `\nAften: ${evening.temp}°C, ${eveningDesc}`
     }
     
-    // Group by time period
-    const periods: { afternoon?: string; evening?: string } = {}
+    // Evaluate outdoor suitability (only if precipitation probability < 50%)
+    const outdoorStatus = hasOutdoorSeating && currentPrecipProb < 50
+      ? evaluateOutdoorSuitability(weatherData)
+      : undefined
     
-    for (const item of todayForecasts) {
-      const hour = parseInt(item.dt_txt.split(' ')[1].split(':')[0])
-      const temp = Math.round(item.main.temp)
-      const desc = item.weather?.[0]?.description || ''
-      
-      if (hour >= 12 && hour < 18 && !periods.afternoon && hour > currentHour) {
-        periods.afternoon = `${temp}°C, ${desc}`
-      } else if (hour >= 18 && !periods.evening && hour > currentHour) {
-        periods.evening = `${temp}°C, ${desc}`
-      }
-    }
-    
-    // Build weather string
-    let weatherStr = `Nu: ${currentTemp}°C, ${currentDesc}`
-    
-    if (periods.afternoon) {
-      weatherStr += `\nEftermiddag: ${periods.afternoon}`
-    }
-    if (periods.evening) {
-      weatherStr += `\nAften: ${periods.evening}`
-    }
-    
-    // Evaluate outdoor suitability
-    const outdoorStatus = hasOutdoorSeating ? evaluateOutdoorSuitability(weatherData) : undefined
-    
-    console.log('✅ Weather fetched:', weatherStr.replace(/\n/g, ' | '))
+    console.log('✅ Weather fetched (Open-Meteo):', weatherStr.replace(/\n/g, ' | '))
     if (outdoorStatus) {
       console.log('🌤️ Outdoor status:', outdoorStatus)
     }
@@ -532,7 +538,7 @@ serve(async (req) => {
         .single(),
       
       supabase.from('business_locations')
-        .select('city, postal_code')
+        .select('city, postal_code, latitude, longitude')
         .eq('business_id', businessId)
         .eq('is_primary', true)
         .maybeSingle(),
@@ -844,12 +850,11 @@ serve(async (req) => {
     let outdoorSeating: string | undefined
     const hasOutdoorSeating = operations?.has_outdoor_seating === true
     
-    console.log('🌤️ Weather check - Postal:', location?.postal_code, 'City:', location?.city, 'Has outdoor:', hasOutdoorSeating)
-    if ((location?.postal_code || location?.city) && business?.country) {
+    console.log('🌤️ Weather check - Lat:', location?.latitude, 'Lon:', location?.longitude, 'Has outdoor:', hasOutdoorSeating)
+    if (location?.latitude && location?.longitude) {
       const weatherResult = await fetchTodayWeather(
-        location.city,
-        location.postal_code,
-        business.country,
+        location.latitude,
+        location.longitude,
         clientNow.getHours(),
         hasOutdoorSeating
       )
@@ -864,7 +869,7 @@ serve(async (req) => {
         }
       }
     } else {
-      console.log('⚠️ No location data - skipping weather')
+      console.log('⚠️ No coordinates available - skipping weather')
     }
     
     // Build prompt
