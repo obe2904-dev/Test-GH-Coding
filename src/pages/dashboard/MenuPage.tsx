@@ -774,53 +774,91 @@ function MenuPage() {
   const handleAddManualUrl = async () => {
     if (!businessId || !newMenuInput.trim()) return
 
+    setError(null)
+
     try {
-      const url = newMenuInput.trim()
+      let url = newMenuInput.trim()
+      
+      // Normalize URL - add https:// if missing
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = `https://${url}`
+      }
+
+      // Basic URL validation
+      try {
+        new URL(url)
+      } catch (urlError) {
+        setError('URL er ikke gyldig. Tjek om du har skrevet den rigtigt (f.eks. https://example.dk/menu.pdf)')
+        return
+      }
       
       // Check if URL already exists
       const { data: existing } = await supabase
         .from('menu_sources')
-        .select('id')
+        .select('id, source_url')
         .eq('business_id', businessId)
         .eq('source_url', url)
         .maybeSingle()
 
       if (existing) {
-        setError(t('menu.error.linkAlreadyAdded'))
+        setError('Denne menu URL er allerede tilføjet. Du kan se den nedenfor.')
         return
       }
 
       const { data: authData } = await supabase.auth.getUser()
       const userId = authData?.user?.id
 
-      await supabase.from('menu_sources').insert({
-        business_id: businessId,
-        source_url: url,
-        source_type: 'url',
-        source_origin: 'manual_added',
-        status: 'pending',
-        menu_type: detectMenuType(url),
-        label: detectMenuLabel(url),
-        created_by: userId,
-      })
+      // Insert menu source
+      const { data: insertedSource, error: insertError } = await supabase
+        .from('menu_sources')
+        .insert({
+          business_id: businessId,
+          source_url: url,
+          source_type: 'url',
+          source_origin: 'manual_added',
+          status: 'pending',
+          menu_type: detectMenuType(url),
+          label: detectMenuLabel(url),
+          created_by: userId,
+        })
+        .select()
+        .single()
+
+      if (insertError) {
+        console.error('Error inserting menu source:', insertError)
+        setError('Der opstod en fejl ved tilføjelse af URL. Prøv igen om lidt.')
+        return
+      }
 
       setNewMenuInput('')
-      setShowAddLink(false)
       
+      // Reload cards to show new source
       await loadMenuCards(businessId)
+
+      // Auto-trigger extraction (same as automatic detection)
+      if (insertedSource?.id) {
+        handleExtractMenu(insertedSource.id, url)
+      }
     } catch (error) {
       console.error('Error adding manual URL:', error)
-      setError(t('menu.error.addFailed'))
+      setError('Der opstod en fejl. Prøv venligst igen eller brug en af de andre metoder nedenfor.')
     }
   }
 
   const handleAddManualText = async () => {
     if (!businessId || !newTextInput.trim()) return
 
+    setError(null)
+
     try {
       // Call Edge Function to process manual text
       const { data: { session } } = await supabase.auth.getSession()
       const authToken = session?.access_token
+
+      if (!authToken) {
+        setError('Du skal være logget ind for at analysere menu tekst.')
+        return
+      }
 
       const endpoint = import.meta.env.VITE_SUPABASE_FUNCTION_MENU_EXTRACT as string
       const response = await fetch(endpoint, {
@@ -837,16 +875,18 @@ function MenuPage() {
       })
 
       if (!response.ok) {
-        throw new Error(t('menu.error.analyzeMenuFailed'))
+        const errorData = await response.json().catch(() => ({}))
+        console.error('Menu text analysis failed:', errorData)
+        setError('Kunne ikke analysere menu teksten. Tjek om teksten indeholder menupunkter med priser, eller prøv en af de andre metoder.')
+        return
       }
 
       setNewTextInput('')
-      setShowAddText(false)
       
       await loadMenuCards(businessId)
     } catch (error) {
       console.error('Error processing manual text:', error)
-      setError(t('menu.error.analyzeMenuFailed'))
+      setError('Der opstod en fejl ved analyse af teksten. Prøv venligst igen eller brug en af de andre metoder.')
     }
   }
 
@@ -860,47 +900,84 @@ function MenuPage() {
       const { data: { session } } = await supabase.auth.getSession()
       const authToken = session?.access_token
 
-      if (!authToken) throw new Error('Not authenticated')
+      if (!authToken) {
+        setError('Du skal være logget ind for at uploade filer.')
+        setIsUploadingFile(false)
+        return
+      }
+
+      // Validate file types and sizes
+      const maxSize = 10 * 1024 * 1024 // 10MB
+      const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png']
+      
+      for (let i = 0; i < uploadFiles.length; i++) {
+        const file = uploadFiles[i]
+        if (file.size > maxSize) {
+          setError(`Filen "${file.name}" er for stor (max 10MB). Prøv med en mindre fil.`)
+          setIsUploadingFile(false)
+          return
+        }
+        if (!allowedTypes.includes(file.type) && !file.name.match(/\.(pdf|jpg|jpeg|png)$/i)) {
+          setError(`Filtypen for "${file.name}" understøttes ikke. Upload venligst PDF, JPG eller PNG filer.`)
+          setIsUploadingFile(false)
+          return
+        }
+      }
 
       const uploadEndpoint = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/queue-menu-upload-v2`
+      let successCount = 0
       
       // Upload each file sequentially
       for (let i = 0; i < uploadFiles.length; i++) {
         const file = uploadFiles[i]
         
-        // Create FormData for each file upload
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('businessId', businessId)
-        formData.append('languageCode', 'da')
-        formData.append('fileName', file.name)
-        formData.append('menuHeadline', uploadHeadline)
-        formData.append('servicePeriod', uploadServicePeriod)
+        try {
+          // Create FormData for each file upload
+          const formData = new FormData()
+          formData.append('file', file)
+          formData.append('businessId', businessId)
+          formData.append('languageCode', 'da')
+          formData.append('fileName', file.name)
+          formData.append('menuHeadline', uploadHeadline)
+          formData.append('servicePeriod', uploadServicePeriod)
 
-        // Call queue-menu-upload-v2 Edge Function
-        const response = await fetch(uploadEndpoint, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${authToken}`
-          },
-          body: formData
-        })
+          // Call queue-menu-upload-v2 Edge Function
+          const response = await fetch(uploadEndpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${authToken}`
+            },
+            body: formData
+          })
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Upload failed' }))
-          throw new Error(errorData.error || `Upload failed for ${file.name}`)
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}))
+            console.error(`Upload failed for ${file.name}:`, errorData)
+            throw new Error(errorData.error || `Upload fejlede for ${file.name}`)
+          }
+          
+          successCount++
+        } catch (fileError) {
+          console.error(`Error uploading ${file.name}:`, fileError)
+          // Continue with other files, show error at the end
+          if (i === uploadFiles.length - 1 || uploadFiles.length === 1) {
+            // Last file or only file - show error
+            setError(`${successCount > 0 ? `${successCount} fil(er) uploadet. ` : ''}Kunne ikke uploade "${file.name}". Prøv igen eller kontakt support hvis problemet fortsætter.`)
+          }
         }
       }
 
-      // Reset form
-      setUploadFiles(null)
-      setUploadHeadline('')
-      setUploadServicePeriod('')
+      // Reset form if all succeeded
+      if (successCount === uploadFiles.length) {
+        setUploadFiles(null)
+        setUploadHeadline('')
+        setUploadServicePeriod('')
+      }
       
       await loadMenuCards(businessId)
     } catch (error) {
       console.error('Error uploading file:', error)
-      setError(error instanceof Error ? error.message : 'Upload fejlede')
+      setError('Der opstod en fejl ved upload. Tjek din internet forbindelse og prøv igen.')
     } finally {
       setIsUploadingFile(false)
     }
