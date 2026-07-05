@@ -102,6 +102,11 @@ export interface MenuSuggestion {
   why_now: string                 // Why this item fits current context
   posting_angle: string           // Which content angle/hook to use
   suggested_time: string          // HH:MM format
+  context_reasoning?: string      // Contextual explanation with day/time/weather (paid tier feature)
+  alternative_timings?: Array<{   // Alternative posting times (paid tier feature)
+    time: string                  // HH:MM format
+    reasoning: string             // Why this time works
+  }>
 }
 
 /**

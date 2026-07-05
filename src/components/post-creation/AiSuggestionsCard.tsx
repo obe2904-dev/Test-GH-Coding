@@ -59,6 +59,12 @@ interface PostSuggestion {
   suggestedTime: string
   suggestedDate?: string  // ISO date (YYYY-MM-DD) the suggestion was generated for
   icon: string
+  // Paid tier features
+  contextReasoning?: string   // Contextual explanation with day/time/weather
+  alternativeTimings?: Array<{
+    time: string              // HH:MM format
+    reasoning: string         // Why this time works
+  }>
 }
 
 interface AiSuggestionsCardProps {
@@ -341,6 +347,8 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
             suggestedTime: s.suggested_time || s.suggestedTime || '12:00',
             suggestedDate: s.suggestion_date || s.suggestedDate || '',
             icon: CONTENT_TYPE_ICONS[s.content_type || s.contentType || 'menu_item'] || '📸',
+            contextReasoning: s.context_reasoning || undefined,
+            alternativeTimings: s.alternative_timings || []
           }))
 
         if (mappedSuggestions.length === 0) {
@@ -462,6 +470,8 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
               : '12:00',
             suggestedDate: row.suggestion_date || row.date || todayISO,
             icon: CONTENT_TYPE_ICONS[row.content_type] || '📸',
+            contextReasoning: row.context_reasoning || undefined,
+            alternativeTimings: row.alternative_timings || []
           }))
           setSuggestions(mapped)
           const wf = data[0]?.weather_forecast
@@ -712,6 +722,38 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
                     <p className="text-sm text-gray-700 leading-relaxed">
                       {suggestion.whyExplanation}
                     </p>
+                  </div>
+                )}
+                
+                {/* Contextual Reasoning - Paid Tier Feature */}
+                {currentTier !== 'free' && suggestion.contextReasoning && (
+                  <div className="mb-3 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-3">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-purple-700 mb-1.5">
+                      <TimingIcon className="w-3.5 h-3.5" />
+                      Hvorfor netop nu?
+                    </p>
+                    <p className="text-sm text-purple-900 leading-relaxed">
+                      {suggestion.contextReasoning}
+                    </p>
+                    
+                    {/* Alternative Timings */}
+                    {suggestion.alternativeTimings && suggestion.alternativeTimings.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-purple-200">
+                        <p className="text-xs font-medium text-purple-700 mb-2">
+                          Eller post senere i dag:
+                        </p>
+                        <div className="space-y-2">
+                          {suggestion.alternativeTimings.map((alt, i) => (
+                            <div key={i} className="flex items-start gap-2 text-xs">
+                              <span className="font-semibold text-purple-700 shrink-0 bg-purple-100 px-1.5 py-0.5 rounded">
+                                {alt.time}
+                              </span>
+                              <span className="text-purple-800">{alt.reasoning}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 

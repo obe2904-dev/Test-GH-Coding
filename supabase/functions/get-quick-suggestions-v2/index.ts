@@ -391,6 +391,8 @@ For each suggestion provide:
 1. menu_item_name: ONLY the item name from the list above - NOTHING ELSE. Do not add descriptions, do not add colons, just the exact name.
 2. post_time: When to post (HH:MM format, must be in future)
 3. why: Why this item + timing + context makes sense${isDanish ? ' (in Danish)' : ''}
+4. context_reasoning: A brief contextual explanation starting with the day/time/weather context, followed by why this suggestion makes sense NOW${isDanish ? ' (in Danish)' : ''}. Example format: "I dag er ${dayOfWeek} ${currentTime}${weatherContext ? ' og ' + weatherContext.split('\n')[1].toLowerCase() : ''} - derfor er mit bedste forslag..."
+5. alternative_timings: Optional array of 1-2 alternative times to post this later today with brief rationale for each${isDanish ? ' (in Danish)' : ''}
 
 CRITICAL: The menu_item_name field must contain ONLY the name (e.g., "OMELET" not "OMELET: classic Danish omelet...").
 
@@ -399,6 +401,8 @@ Use your judgment:
 - Consider time remaining and priorities
 - Use weather/outdoor context if it enhances the idea
 - Focus on what drives real value
+- Make context_reasoning conversational and helpful, explaining the strategic thinking
+- Alternative timings should be genuinely better options for later, not just random times
 
 Quality over quantity. ${maxIdeas} is a MAXIMUM, not a requirement.${languageInstruction}
 
@@ -408,7 +412,14 @@ Return JSON with this exact structure:
     {
       "menu_item_name": "BRUNCH DELUXE",
       "post_time": "11:30",
-      "why": "explanation here"
+      "why": "explanation here",
+      "context_reasoning": "I dag er ${dayOfWeek} formiddag og vejret er perfekt til udeservering - derfor er mit bedste forslag at fremhæve jeres brunch nu, når folk planlægger weekendfrokost",
+      "alternative_timings": [
+        {
+          "time": "14:00",
+          "reasoning": "Eftermiddagsgæster søger ofte en sen frokost"
+        }
+      ]
     }
   ]
 }
@@ -909,7 +920,9 @@ serve(async (req) => {
       menu_item_name: s.menu_item_name,
       why_now: s.why || 'Recommended for today',
       posting_angle: 'Featured item',
-      suggested_time: s.post_time || '12:00'
+      suggested_time: s.post_time || '12:00',
+      context_reasoning: s.context_reasoning || null,
+      alternative_timings: s.alternative_timings || []
     }))
     
     console.log(`✅ Generated ${enriched.length} validated suggestions`)
