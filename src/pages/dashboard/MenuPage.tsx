@@ -1419,22 +1419,6 @@ function MenuPage() {
             <p className="text-sm text-text-secondary">{t('menu.header.subtitle2')}</p>
           </div>
 
-        {/* Batch extraction progress indicator */}
-        {(activeExtractions.size > 0 || extractionQueue.length > 0) && (
-          <div className="mb-3 bg-info-surface border border-info rounded-lg p-3">
-            <div className="flex items-center gap-3">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-info"></div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-info-text">
-                  {activeExtractions.size > 0 && t('menu.batch.extracting')}
-                  {extractionQueue.length > 0 && ` ${extractionQueue.length} ${t('menu.batch.inQueue')}`}
-                </p>
-                <p className="text-xs text-info-text mt-0.5">{t('menu.batch.helper')}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Frame 1: Detect Menus from Website */}
         {websiteUrl && (
           <div className="bg-surface rounded-lg border border-border px-4 py-3 mb-4">
@@ -1564,6 +1548,22 @@ function MenuPage() {
             </button>
           </div>
         </div>
+
+        {/* Batch extraction progress indicator */}
+        {(activeExtractions.size > 0 || extractionQueue.length > 0) && (
+          <div className="mb-3 bg-info-surface border border-info rounded-lg p-3">
+            <div className="flex items-center gap-3">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-info"></div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-info-text">
+                  {activeExtractions.size > 0 && t('menu.batch.extracting')}
+                  {extractionQueue.length > 0 && ` ${extractionQueue.length} ${t('menu.batch.inQueue')}`}
+                </p>
+                <p className="text-xs text-info-text mt-0.5">{t('menu.batch.helper')}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-3">
           {/* URL Selection Section */}
