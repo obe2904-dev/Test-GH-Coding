@@ -365,25 +365,23 @@ function MenuPage() {
       })
 
       if (!response.ok) {
-        // Try to get the actual error message from the response
-        let errorMessage = t('menu.error.analyzeFailed')
+        // Show friendly error message instead of throwing
+        console.error('🔴 Menu detection failed with status:', response.status)
         try {
           const errorData = await response.json()
-          if (errorData.error) {
-            errorMessage = errorData.error
-            console.error('🔴 Edge function error:', errorData.error)
-          }
+          console.error('🔴 Edge function error:', errorData.error)
         } catch (e) {
           console.error('🔴 Could not parse error response')
         }
-        throw new Error(errorMessage)
+        setError('Det var desværre ikke muligt at finde dine menuer. Prøv en af de andre måder nedenfor.')
+        return
       }
 
       const result = await response.json()
       const detectedUrls = result.detectedMenuUrls || result.allMenuUrls || []
 
       if (detectedUrls.length === 0) {
-        setError(t('menu.error.noMenusFound'))
+        setError('Det var desværre ikke muligt at finde dine menuer. Prøv en af de andre måder nedenfor.')
         return
       }
 
@@ -435,7 +433,7 @@ function MenuPage() {
       })
     } catch (error) {
       console.error('Error detecting menus:', error)
-      setError((error as Error).message)
+      setError('Det var desværre ikke muligt at finde dine menuer. Prøv en af de andre måder nedenfor.')
     } finally {
       setIsDetectingMenus(false)
     }
@@ -1327,8 +1325,11 @@ function MenuPage() {
           <div className="bg-surface rounded-lg border border-border px-4 py-3 mb-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex-1">
-                <p className="text-sm text-text-secondary">
+                <p className="text-sm text-text-secondary mb-2">
                   {t('menu.findOn')} <span className="font-medium">{websiteUrl}</span>
+                </p>
+                <p className="text-xs text-text-muted">
+                  Lad mig prøve at finde dine menuer automatisk. Du kan også vælge en af de andre metoder nedenfor.
                 </p>
               </div>
               <button
