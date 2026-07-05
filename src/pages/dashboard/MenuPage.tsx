@@ -82,8 +82,8 @@ function MenuPage() {
   const [detectedUrls, setDetectedUrls] = useState<Array<{url: string; isExisting: boolean}>>([])
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set())
   
-  // File upload state
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  // File upload state (supports multiple files)
+  const [uploadFiles, setUploadFiles] = useState<FileList | null>(null)
   const [uploadHeadline, setUploadHeadline] = useState('')
   const [uploadServicePeriod, setUploadServicePeriod] = useState('')
   const [isUploadingFile, setIsUploadingFile] = useState(false)
@@ -851,7 +851,7 @@ function MenuPage() {
   }
 
   const handleUploadFile = async () => {
-    if (!businessId || !uploadFile || !uploadHeadline.trim() || !uploadServicePeriod.trim()) return
+    if (!businessId || !uploadFiles || uploadFiles.length === 0 || !uploadHeadline.trim() || !uploadServicePeriod.trim()) return
 
     setIsUploadingFile(true)
     setError(null)
@@ -862,32 +862,38 @@ function MenuPage() {
 
       if (!authToken) throw new Error('Not authenticated')
 
-      // Create FormData for file upload
-      const formData = new FormData()
-      formData.append('file', uploadFile)
-      formData.append('businessId', businessId)
-      formData.append('languageCode', 'da')
-      formData.append('fileName', uploadFile.name)
-      formData.append('menuHeadline', uploadHeadline)
-      formData.append('servicePeriod', uploadServicePeriod)
-
-      // Call queue-menu-upload-v2 Edge Function
       const uploadEndpoint = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/queue-menu-upload-v2`
-      const response = await fetch(uploadEndpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: formData
-      })
+      
+      // Upload each file sequentially
+      for (let i = 0; i < uploadFiles.length; i++) {
+        const file = uploadFiles[i]
+        
+        // Create FormData for each file upload
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('businessId', businessId)
+        formData.append('languageCode', 'da')
+        formData.append('fileName', file.name)
+        formData.append('menuHeadline', uploadHeadline)
+        formData.append('servicePeriod', uploadServicePeriod)
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Upload failed' }))
-        throw new Error(errorData.error || 'Upload failed')
+        // Call queue-menu-upload-v2 Edge Function
+        const response = await fetch(uploadEndpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: formData
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Upload failed' }))
+          throw new Error(errorData.error || `Upload failed for ${file.name}`)
+        }
       }
 
       // Reset form
-      setUploadFile(null)
+      setUploadFiles(null)
       setUploadHeadline('')
       setUploadServicePeriod('')
       
@@ -1348,8 +1354,35 @@ function MenuPage() {
           </div>
         )}
 
-        {/* 2-Column Menu Input Methods: Frames 2 & 3 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        {/* 3-Column Menu Input Methods: Frames 1, 2 & 3 */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {/* Frame 1: Manual URL Input */}
+          <div className="bg-surface rounded-lg border border-border p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              <h3 className="font-semibold text-brand">Tilføj menu URL</h3>
+            </div>
+            <p className="text-xs text-text-secondary mb-3">
+              Indtast URL til en specifik menuside
+            </p>
+            <input
+              type="url"
+              value={newMenuInput}
+              onChange={(e) => setNewMenuInput(e.target.value)}
+              placeholder="https://example.dk/menu.pdf"
+              className="w-full px-3 py-2 border border-border rounded text-sm mb-3"
+            />
+            <button
+              onClick={handleAddManualUrl}
+              disabled={!newMenuInput.trim()}
+              className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+            >
+              Tilføj URL
+            </button>
+          </div>
+
           {/* Frame 2: PDF/JPG Upload */}
           <div className="bg-surface rounded-lg border border-border p-4">
             <div className="flex items-center gap-2 mb-3">
@@ -1378,12 +1411,18 @@ function MenuPage() {
             <input
               type="file"
               accept=".pdf,.jpg,.jpeg,.png"
-              onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+              multiple
+              onChange={(e) => setUploadFiles(e.target.files)}
               className="w-full text-sm mb-3"
             />
+            {uploadFiles && uploadFiles.length > 0 && (
+              <p className="text-xs text-text-muted mb-2">
+                {uploadFiles.length} fil(er) valgt
+              </p>
+            )}
             <button
               onClick={handleUploadFile}
-              disabled={!uploadFile || !uploadHeadline.trim() || !uploadServicePeriod.trim() || isUploadingFile}
+              disabled={!uploadFiles || uploadFiles.length === 0 || !uploadHeadline.trim() || !uploadServicePeriod.trim() || isUploadingFile}
               className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
             >
               {isUploadingFile ? 'Uploader...' : 'Upload og analyser'}
