@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '../../lib/supabase'
 import { useTierStore } from '../../stores/tierStore'
+import { useBusinessStore } from '../../stores/businessStore'
 import { LoadingSpinner } from '../../components/ui/Feedback'
 import { AnalyzeIcon } from './BusinessProfileIcons'
 
@@ -152,21 +153,45 @@ function MenuPage() {
         const user = authData?.user
         if (!user) return
 
-        const { data: businessData } = await supabase
-          .from('businesses')
-          .select('id, website_url')
-          .eq('owner_id', user.id)
-          .maybeSingle()
+        const { selectedBusinessId, setSelectedBusiness } = useBusinessStore.getState()
 
-        if (!businessData) return
+        // Try to use selected business from store first
+        let businessId = selectedBusinessId
+
+        // If no business selected in store, query database
+        if (!businessId) {
+          const { data: businessData } = await supabase
+            .from('businesses')
+            .select('id, website_url')
+            .eq('owner_id', user.id)
+            .maybeSingle()
+
+          if (!businessData) return
+          
+          // Set this business as selected in the store
+          businessId = (businessData as any).id
+          setSelectedBusiness(businessId)
+          setWebsiteUrl((businessData as any).website_url || '')
+        } else {
+          // Load website URL for selected business
+          const { data: businessData } = await supabase
+            .from('businesses')
+            .select('id, website_url')
+            .eq('id', businessId)
+            .maybeSingle()
+          
+          if (businessData) {
+            setWebsiteUrl((businessData as any).website_url || '')
+          }
+        }
+
         if (!isActive) return
 
-        setBusinessId((businessData as any).id)
-        setWebsiteUrl((businessData as any).website_url || '')
+        setBusinessId(businessId)
 
-        await loadMenuCards((businessData as any).id)
-        await loadPricingData((businessData as any).id)
-        await loadNormalizedItems((businessData as any).id)
+        await loadMenuCards(businessId)
+        await loadPricingData(businessId)
+        await loadNormalizedItems(businessId)
       } finally {
         if (isActive) setIsLoading(false)
       }

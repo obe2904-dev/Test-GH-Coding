@@ -3,8 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { supabase } from '../../lib/supabase'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useTierStore } from '../../stores/tierStore'
+import { useBusinessStore } from '../../stores/businessStore'
 import { useUnsavedChangesPrompt } from '../../hooks/useUnsavedChangesPrompt'
 import { AnalyzeIcon } from './BusinessProfileIcons'
+import { BusinessSelector } from '../../components/business/BusinessSelector'
 import type { BusinessSector } from '../../types/businessSector'
 import { guessBusinessSector } from '../../types/businessSector'
 import { getPrimaryType, getBusinessTypeLabel } from '../../lib/businessTypeHelpers'
@@ -52,6 +54,16 @@ function BusinessProfilePage() {
   const sb = supabase as any
   const currentTier = useTierStore((state) => state.currentTier)
   const loadPlatformsFromDatabase = useConnectionsStore((state) => state.loadPlatformsFromDatabase)
+  const { 
+    selectedBusinessId, 
+    availableBusinesses, 
+    setSelectedBusiness, 
+    setAvailableBusinesses 
+  } = useBusinessStore()
+
+  // Multi-business handling
+  const [showBusinessSelector, setShowBusinessSelector] = useState(false)
+  const [allBusinesses, setAllBusinesses] = useState<any[]>([])
 
   // Form state
   const [websiteUrl, setWebsiteUrl] = useState('')
@@ -282,31 +294,68 @@ function BusinessProfilePage() {
         const user = authData?.user
         if (!user) return
 
-        const { data: businessData, error: businessError } = await sb
+        // Query for ALL businesses for this user (not just one)
+        const { data: allBusinessesData, error: businessError } = await sb
           .from('businesses')
           .select('*')
           .eq('owner_id', user.id)
-          .maybeSingle()
 
         if (businessError) {
-          console.error('Failed to load business:', businessError.message)
+          console.error('Failed to load businesses:', businessError.message)
           return
         }
 
-        if (!businessData) {
+        // No businesses found - show empty state
+        if (!allBusinessesData || allBusinessesData.length === 0) {
           const emptyState = createDefaultState()
           applyState(emptyState)
           syncSavedSnapshot(buildStateSnapshot())
           return
         }
 
-        setBusinessId((businessData as any).id)
+        // Store all businesses
+        setAllBusinesses(allBusinessesData)
+        setAvailableBusinesses(allBusinessesData)
 
-        console.log('🔍 Loading location for business_id:', (businessData as any).id)
+        let businessToUse: any = null
+
+        // Multiple businesses detected - need user to choose
+        if (allBusinessesData.length > 1) {
+          console.log(`🏢 Multiple businesses detected (${allBusinessesData.length}) for user ${user.id}`)
+          
+          // Check if user has already selected a business
+          if (selectedBusinessId) {
+            const selectedBusiness = allBusinessesData.find((b: any) => b.id === selectedBusinessId)
+            if (selectedBusiness) {
+              businessToUse = selectedBusiness
+              console.log('✅ Using previously selected business:', selectedBusiness.business_name)
+            } else {
+              // Selected business no longer exists - show selector
+              setShowBusinessSelector(true)
+              setIsLoadingProfile(false)
+              return
+            }
+          } else {
+            // No selection yet - show selector
+            setShowBusinessSelector(true)
+            setIsLoadingProfile(false)
+            return
+          }
+        } else {
+          // Single business - use it directly
+          businessToUse = allBusinessesData[0]
+          setSelectedBusiness(businessToUse.id)
+        }
+
+        if (!businessToUse) return
+
+        setBusinessId(businessToUse.id)
+
+        console.log('🔍 Loading location for business_id:', businessToUse.id)
         const { data: locationData } = await sb
           .from('business_locations')
           .select('*')
-          .eq('business_id', (businessData as any).id)
+          .eq('business_id', businessToUse.id)
           .eq('is_primary', true)
           .maybeSingle()
         
@@ -315,7 +364,7 @@ function BusinessProfilePage() {
         const { data: profileData } = await sb
           .from('business_profile')
           .select('*')
-          .eq('business_id', (businessData as any).id)
+          .eq('business_id', businessToUse.id)
           .maybeSingle()
         
         // Extract menu highlights (max 10 items)
@@ -369,13 +418,13 @@ function BusinessProfilePage() {
         const { data: brandData } = await sb
           .from('business_brand_profile')
           .select('*')
-          .eq('business_id', (businessData as any).id)
+          .eq('business_id', businessToUse.id)
           .maybeSingle()
 
         const { data: websiteAnalysisData } = await sb
           .from('website_analyses')
           .select('source_url')
-          .eq('business_id', (businessData as any).id)
+          .eq('business_id', businessToUse.id)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
@@ -392,13 +441,13 @@ function BusinessProfilePage() {
         const { data: hoursData } = await sb
           .from('opening_hours')
           .select('*')
-          .eq('business_id', (businessData as any).id)
+          .eq('business_id', businessToUse.id)
 
         // Load service model from business_operations table
         const { data: operationsData } = await sb
           .from('business_operations')
           .select('*')
-          .eq('business_id', (businessData as any).id)
+          .eq('business_id', businessToUse.id)
           .maybeSingle()
 
         // Parse opening hours into WeekSchedule format
@@ -446,9 +495,9 @@ function BusinessProfilePage() {
         }
 
         const sector: BusinessSector | null = 
-          (businessData as any).business_type_hybrid?.primary && 
-          ['hospitality', 'beauty', 'wellness', 'retail'].includes((businessData as any).business_type_hybrid.primary)
-            ? (businessData as any).business_type_hybrid.primary as BusinessSector
+          businessToUse.business_type_hybrid?.primary && 
+          ['hospitality', 'beauty', 'wellness', 'retail'].includes(businessToUse.business_type_hybrid.primary)
+            ? businessToUse.business_type_hybrid.primary as BusinessSector
             : null
 
         // Load key_offerings
@@ -456,14 +505,14 @@ function BusinessProfilePage() {
           setKeyOfferings(enrichKeyOfferings((profileData as any).key_offerings))
         }
 
-        console.log('🔍 DEBUG businessData.local_location_reference:', (businessData as any).local_location_reference)
-        console.log('🔍 DEBUG full businessData keys:', Object.keys(businessData))
+        console.log('🔍 DEBUG businessToUse.local_location_reference:', businessToUse.local_location_reference)
+        console.log('🔍 DEBUG full businessToUse keys:', Object.keys(businessToUse))
         
         const loadedState: ProfileFormState = {
-          websiteUrl: (businessData as any).website_url ?? (websiteAnalysisData as any)?.source_url ?? '',
-          businessName: (businessData as any).name ?? '',
+          websiteUrl: businessToUse.website_url ?? (websiteAnalysisData as any)?.source_url ?? '',
+          businessName: businessToUse.name ?? '',
           businessSector: sector,
-          businessCategory: (businessData as any).business_type_hybrid?.primary ?? '',
+          businessCategory: businessToUse.business_type_hybrid?.primary ?? '',
           aboutText: (profileData as any)?.user_about_text ?? (profileData as any)?.long_description ?? '',
           phone: (locationData as any)?.phone ?? '',
           email: (locationData as any)?.email ?? '',
@@ -472,8 +521,8 @@ function BusinessProfilePage() {
           city: (locationData as any)?.city ?? '',
           country: (locationData as any)?.country ?? DEFAULT_COUNTRY,
           bookingLink: (profileData as any)?.booking_url ?? (brandData as any)?.booking_link ?? '',
-          logoUrl: (businessData as any).logo_url ?? '',
-          localLocationReference: (businessData as any).local_location_reference ?? ''
+          logoUrl: businessToUse.logo_url ?? '',
+          localLocationReference: businessToUse.local_location_reference ?? ''
         }
         
         console.log('📋 Final loadedState:', loadedState)
@@ -493,7 +542,14 @@ function BusinessProfilePage() {
     return () => {
       isActive = false
     }
-  }, [])
+  }, [selectedBusinessId]) // Reload when business selection changes
+
+  // Handle business selection from selector modal
+  const handleBusinessSelect = (businessId: string) => {
+    setSelectedBusiness(businessId)
+    setShowBusinessSelector(false)
+    // Trigger reload by letting useEffect dependency handle it
+  }
 
   const handleWebsiteAnalysis = async () => {
     const sanitized = websiteUrl.trim()
@@ -1210,6 +1266,16 @@ function BusinessProfilePage() {
     if (!savedState) return
     applyState(savedState)
     setHasUnsavedChanges(false)
+  }
+
+  // Show business selector if multiple businesses detected
+  if (showBusinessSelector && allBusinesses.length > 1) {
+    return (
+      <BusinessSelector 
+        businesses={allBusinesses} 
+        onSelect={handleBusinessSelect}
+      />
+    )
   }
 
   if (isLoadingProfile) {
