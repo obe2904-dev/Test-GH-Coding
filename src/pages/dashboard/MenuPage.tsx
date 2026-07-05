@@ -82,6 +82,12 @@ function MenuPage() {
   const [detectedUrls, setDetectedUrls] = useState<Array<{url: string; isExisting: boolean}>>([])
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set())
   
+  // File upload state
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadHeadline, setUploadHeadline] = useState('')
+  const [uploadServicePeriod, setUploadServicePeriod] = useState('')
+  const [isUploadingFile, setIsUploadingFile] = useState(false)
+  
   // Pricing state
   const [priceLevel, setPriceLevel] = useState<string>('')
   const [isEditingPricing, setIsEditingPricing] = useState(false)
@@ -846,6 +852,56 @@ function MenuPage() {
     }
   }
 
+  const handleUploadFile = async () => {
+    if (!businessId || !uploadFile || !uploadHeadline.trim() || !uploadServicePeriod.trim()) return
+
+    setIsUploadingFile(true)
+    setError(null)
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const authToken = session?.access_token
+
+      if (!authToken) throw new Error('Not authenticated')
+
+      // Create FormData for file upload
+      const formData = new FormData()
+      formData.append('file', uploadFile)
+      formData.append('businessId', businessId)
+      formData.append('languageCode', 'da')
+      formData.append('fileName', uploadFile.name)
+      formData.append('menuHeadline', uploadHeadline)
+      formData.append('servicePeriod', uploadServicePeriod)
+
+      // Call queue-menu-upload-v2 Edge Function
+      const uploadEndpoint = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/queue-menu-upload-v2`
+      const response = await fetch(uploadEndpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: formData
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Upload failed' }))
+        throw new Error(errorData.error || 'Upload failed')
+      }
+
+      // Reset form
+      setUploadFile(null)
+      setUploadHeadline('')
+      setUploadServicePeriod('')
+      
+      await loadMenuCards(businessId)
+    } catch (error) {
+      console.error('Error uploading file:', error)
+      setError(error instanceof Error ? error.message : 'Upload fejlede')
+    } finally {
+      setIsUploadingFile(false)
+    }
+  }
+
   const handleDeleteCard = async (cardId: string, sourceUrl: string) => {
     // Prevent deletion when ANY menu is being extracted
     if (activeExtractions.size > 0) {
@@ -1265,6 +1321,102 @@ function MenuPage() {
             </div>
           </div>
         )}
+
+        {/* 3-Column Menu Input Methods */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          {/* Left Column: URL Input */}
+          <div className="bg-surface rounded-lg border border-border p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              <h3 className="font-semibold text-brand">Find menusider</h3>
+            </div>
+            <p className="text-xs text-text-secondary mb-3">
+              Indtast URL til jeres menu eller hjemmeside
+            </p>
+            <input
+              type="url"
+              value={newMenuInput}
+              onChange={(e) => setNewMenuInput(e.target.value)}
+              placeholder="https://example.dk/menu"
+              className="w-full px-3 py-2 border border-border rounded text-sm mb-3"
+            />
+            <button
+              onClick={handleAddManualUrl}
+              disabled={!newMenuInput.trim()}
+              className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+            >
+              Tilføj URL
+            </button>
+          </div>
+
+          {/* Middle Column: PDF/JPG Upload */}
+          <div className="bg-surface rounded-lg border border-border p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              <h3 className="font-semibold text-brand">Upload PDF eller JPG</h3>
+            </div>
+            <p className="text-xs text-text-secondary mb-3">
+              Upload menu som fil (AI læser den automatisk)
+            </p>
+            <input
+              type="text"
+              value={uploadHeadline}
+              onChange={(e) => setUploadHeadline(e.target.value)}
+              placeholder="Menu overskrift (f.eks. Frokost, Brunch)"
+              className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
+            />
+            <input
+              type="text"
+              value={uploadServicePeriod}
+              onChange={(e) => setUploadServicePeriod(e.target.value)}
+              placeholder="Serverings tid (f.eks. Man-Fre 11-15)"
+              className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
+            />
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+              className="w-full text-sm mb-3"
+            />
+            <button
+              onClick={handleUploadFile}
+              disabled={!uploadFile || !uploadHeadline.trim() || !uploadServicePeriod.trim() || isUploadingFile}
+              className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+            >
+              {isUploadingFile ? 'Uploader...' : 'Upload og analyser'}
+            </button>
+          </div>
+
+          {/* Right Column: Manual Text Input */}
+          <div className="bg-surface rounded-lg border border-border p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <h3 className="font-semibold text-brand">Tilføj menu som tekst</h3>
+            </div>
+            <p className="text-xs text-text-secondary mb-3">
+              Indsæt menu som tekst - AI parser det automatisk
+            </p>
+            <textarea
+              value={newTextInput}
+              onChange={(e) => setNewTextInput(e.target.value)}
+              placeholder="Spaghetti Carbonara - 125 kr&#10;Margherita Pizza - 95 kr&#10;Caesar Salad"
+              className="w-full px-3 py-2 border border-border rounded text-sm mb-3 min-h-[100px]"
+            />
+            <button
+              onClick={handleAddManualText}
+              disabled={!newTextInput.trim()}
+              className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+            >
+              Analyser tekst
+            </button>
+          </div>
+        </div>
 
         <div className="space-y-3">
           {/* Detect Menus Section */}
@@ -2060,94 +2212,6 @@ function MenuPage() {
             })}
           </div>
           )}
-
-          {/* Add Manual Text Section — primary path for businesses with inaccessible menus */}
-          <div className="bg-surface rounded-lg border border-border px-4 py-3">
-            {!showAddText && (
-              <button
-                onClick={() => setShowAddText(true)}
-                className="flex items-center gap-2 text-sm font-medium text-cta hover:text-cta-text"
-              >
-                <span>+</span>
-                <span>{t('menu.addManualText')}</span>
-              </button>
-            )}
-
-            {showAddText && (
-              <div className="space-y-2">
-                <p className="text-xs text-text-secondary">Indsæt jeres menu som tekst — f.eks. kopieret fra jeres kassesystem, PDF eller eget dokument.</p>
-                <textarea
-                  value={newTextInput}
-                  onChange={(e) => setNewTextInput(e.target.value)}
-                  placeholder={t('ui.menu.placeholder.example_list')}
-                  className="w-full px-3 py-2 border border-border rounded text-sm min-h-[120px]"
-                  autoFocus
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddManualText}
-                    disabled={!newTextInput.trim()}
-                    className="px-3 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt"
-                  >
-                    {t('menu.add.analyze')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowAddText(false)
-                      setNewTextInput('')
-                    }}
-                    className="px-3 py-2 text-sm font-medium text-text-secondary border border-border rounded hover:bg-surface-alt"
-                  >
-                    {t('common.cancel')}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Add Link Section */}
-          <div className="bg-surface rounded-lg border border-border px-4 py-3">
-            {!showAddLink && (
-              <button
-                onClick={() => setShowAddLink(true)}
-                className="flex items-center gap-2 text-sm font-medium text-cta hover:text-cta-text"
-              >
-                <span>+</span>
-                <span>{t('menu.addManual')}</span>
-              </button>
-            )}
-
-            {showAddLink && (
-              <div className="space-y-2">
-                <input
-                  type="url"
-                  value={newMenuInput}
-                  onChange={(e) => setNewMenuInput(e.target.value)}
-                  placeholder={t('menu.add.linkPlaceholder')}
-                  className="w-full px-3 py-2 border border-border rounded text-sm"
-                  autoFocus
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddManualUrl}
-                    disabled={!newMenuInput.trim()}
-                    className="px-3 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt"
-                  >
-                    {t('menu.add.add')}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowAddLink(false)
-                      setNewMenuInput('')
-                    }}
-                    className="px-3 py-2 text-sm font-medium text-text-secondary border border-border rounded hover:bg-surface-alt"
-                  >
-                    {t('common.cancel')}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
 
           {/* Empty State */}
           {menuCards.length === 0 && detectedUrls.length === 0 && (

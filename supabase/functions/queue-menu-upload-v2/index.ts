@@ -272,6 +272,12 @@ serve(async (req: Request) => {
     const originalName = typeof form.get('fileName') === 'string' ? String(form.get('fileName')) : file.name
     const safeName = (originalName || 'menu.pdf').replace(/[^a-zA-Z0-9._-]/g, '_')
 
+    // Optional: menu headline and service period from user
+    const menuHeadline = form.get('menuHeadline')
+    const servicePeriod = form.get('servicePeriod')
+    const serviceHeadline = typeof menuHeadline === 'string' ? menuHeadline.trim() : null
+    const servicePeriodText = typeof servicePeriod === 'string' ? servicePeriod.trim() : null
+
     const pdfBytes = new Uint8Array(await file.arrayBuffer())
     if (pdfBytes.length === 0) throw new Error('Empty file')
 
@@ -309,17 +315,27 @@ serve(async (req: Request) => {
       })
 
     // Enqueue v2 async extraction job
+    const insertPayload: any = {
+      business_id: businessId,
+      source_kind: 'storage',
+      source_url: urlData.publicUrl,
+      storage_bucket: 'business-documents',
+      storage_path: storagePath,
+      status: 'queued',
+      language_code: languageCode,
+    }
+
+    // Add optional service period metadata if provided
+    if (serviceHeadline) {
+      insertPayload.service_period_name = serviceHeadline
+    }
+    if (servicePeriodText) {
+      insertPayload.service_periods = [servicePeriodText]
+    }
+
     const { data: resultData, error: resultError } = await supabaseService
       .from('menu_results_v2')
-      .insert({
-        business_id: businessId,
-        source_kind: 'storage',
-        source_url: urlData.publicUrl,
-        storage_bucket: 'business-documents',
-        storage_path: storagePath,
-        status: 'queued',
-        language_code: languageCode,
-      })
+      .insert(insertPayload)
       .select('id')
       .single()
 
