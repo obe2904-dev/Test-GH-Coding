@@ -1822,7 +1822,7 @@ function MenuPage() {
                 return (
                   <div 
                     key={item.url} 
-                    className={`bg-surface rounded-lg border-2 transition-colors ${
+                    className={`w-full bg-surface rounded-lg border-2 transition-colors ${
                       isSelected ? 'border-cta' : 
                       menuCard?.status === 'pending' ? 'border-orange-200 bg-orange-50/30' : 
                       'border-border'
