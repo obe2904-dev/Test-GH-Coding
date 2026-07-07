@@ -1458,17 +1458,17 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
 
           {/* Upgrade Prompt - show for Free users ONLY when photo exists */}
           {hasPhoto && currentTier === 'free' && (
-            <div className="p-2 bg-[#FEFCE8] border border-[#F6EBA5] rounded-lg">
+            <div className="p-2 bg-white border border-slate-200 rounded-lg">
                 <div className="flex items-start gap-2">
-                <Sparkles className="w-4 h-4 text-[#8C6D1F] flex-shrink-0 mt-0.5" />
+                <Sparkles className="w-4 h-4 text-slate-700 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <p className="text-xs text-[#8C6D1F] leading-tight mb-1">
+                  <p className="text-xs text-slate-700 leading-tight mb-1">
                     {getUpgradePromptText()}
                     <br />{t('photoAnalysis.upgradePrompt.ctaText')}
                   </p>
                   <button
                     onClick={() => setShowUpgradeModal('photo-picker')}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-[#8C6D1F] hover:text-[#78350F] underline transition-colors"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-slate-900 underline transition-colors"
                   >
                     {t('photoAnalysis.upgradePrompt.upgradeButton')}
                   </button>
