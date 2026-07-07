@@ -30,15 +30,17 @@ const GenerateStep = lazy(() => import('../../components/post-creation/GenerateS
 const CreateStep = lazy(() => import('../../components/post-creation/CreateStep').then(m => ({ default: m.CreateStep })))
 const PublishStep = lazy(() => import('../../components/post-creation/PublishStep').then(m => ({ default: m.PublishStep })))
 
-// Loading component
-const StepLoader = () => (
-  <div className="flex items-center justify-center min-h-[400px]">
-    <div className="text-center">
-      <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin mx-auto mb-4 motion-reduce:animate-none"></div>
-      <p className="text-sm text-muted">Loading...</p>
+const StepLoader = () => {
+  const { t } = useTranslation(undefined, { keyPrefix: 'createPost' });
+  return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin mx-auto mb-4 motion-reduce:animate-none"></div>
+        <p className="text-sm text-muted">{t('loading', 'Indlæser...')}</p>
+      </div>
     </div>
-  </div>
-)
+  );
+};
 
 export function CreatePostPage() {
   const { isEnabled: _isEnabled, loadPlatformsFromDatabase, enabledPlatforms } = useConnectionsStore()
@@ -386,7 +388,7 @@ export function CreatePostPage() {
             setPostContent(dbContent)
             setDraftMapEntry(weeklyPlanPostIndex, dbContent)  // populate in-memory map too
             if (dbDraft!.photoUrl) {
-              setPhotoContent({
+              const restoredPhotoContent = {
                 uploadedMedia: [{
                   id: 'db-draft-photo',
                   file: null as any,
@@ -399,7 +401,9 @@ export function CreatePostPage() {
                 isOriginal: true,
                 photoAdjustments: null,
                 carouselMode: false,
-              })
+              }
+              setPhotoContent(restoredPhotoContent)
+              setPhotoDraftMapEntry(weeklyPlanPostIndex, restoredPhotoContent)  // populate in-memory photo cache
             } else {
               setPhotoContent(null)
             }
@@ -1657,12 +1661,8 @@ export function CreatePostPage() {
             <div className="flex items-start gap-3">
               <div className="text-2xl">🔒</div>
               <div className="flex-1">
-                <h3 className="text-sm font-bold text-amber-900 mb-1">
-                  Idé og Design er låst
-                </h3>
-                <p className="text-xs text-amber-800 leading-relaxed">
-                  Efter at have nået Udgiv, kan idé og design ikke længere ændres. 
-                  Du kan se indholdet, men kun sletning af hele idéen frigør det igen.
+                <p className="text-sm text-amber-900">
+                  Idé er låst, en du kan stadig ændre tekst i Design
                 </p>
               </div>
             </div>
