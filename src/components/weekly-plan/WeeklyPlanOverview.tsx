@@ -834,7 +834,7 @@ export function WeeklyPlanOverview({
                           ? t('weeklyPlan.overview.lockedButton', { defaultValue: 'Låst' })
                           : hasCreatedPost
                           ? t('weeklyPlan.overview.goToPost', { defaultValue: 'Gå til opslag →' })
-                          : createdPostInfo?.has_caption
+                          : createdPostInfo?.hasCaption
                           ? t('weeklyPlan.overview.goToDesign', { defaultValue: 'Gå til design →' })
                           : t('weeklyPlan.overview.createPost')
                         }

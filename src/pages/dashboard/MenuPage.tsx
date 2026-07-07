@@ -170,7 +170,9 @@ function MenuPage() {
           
           // Set this business as selected in the store
           businessId = (businessData as any).id
-          setSelectedBusiness(businessId)
+          if (businessId) {
+            setSelectedBusiness(businessId)
+          }
           setWebsiteUrl((businessData as any).website_url || '')
         } else {
           // Load website URL for selected business
@@ -189,9 +191,11 @@ function MenuPage() {
 
         setBusinessId(businessId)
 
-        await loadMenuCards(businessId)
-        await loadPricingData(businessId)
-        await loadNormalizedItems(businessId)
+        if (businessId) {
+          await loadMenuCards(businessId)
+          await loadPricingData(businessId)
+          await loadNormalizedItems(businessId)
+        }
       } finally {
         if (isActive) setIsLoading(false)
       }
@@ -436,7 +440,8 @@ function MenuPage() {
       // We need to merge with the current detectedUrls state (array of objects)
       setDetectedUrls(currentUrls => {
         const currentUrlsSet = new Set(currentUrls.map((item: { url: string }) => item.url));
-        const newUrlsOnly = uniqueDetectedUrls
+        const detectedUrlStrings = uniqueDetectedUrls as string[];
+        const newUrlsOnly = detectedUrlStrings
           .filter((url: string) => !currentUrlsSet.has(url))
           .map((url: string) => ({
             url,
@@ -452,7 +457,7 @@ function MenuPage() {
           return [...currentUrls, ...newUrlsOnly]
         } else {
           // All detected URLs are already shown in the UI — pre-select them so user can re-extract
-          const existingDetected = uniqueDetectedUrls.filter((url: string) => currentUrlsSet.has(url))
+          const existingDetected = detectedUrlStrings.filter((url: string) => currentUrlsSet.has(url))
           if (existingDetected.length > 0) {
             setSelectedUrls(new Set(existingDetected))
             setError(null)
