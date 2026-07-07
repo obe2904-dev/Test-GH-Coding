@@ -145,7 +145,7 @@ serve(async (req) => {
       
       const { data: uploadData, error: uploadError } = await supabaseClient
         .storage
-        .from('post-images')
+        .from('post-media')
         .upload(path, variant.buffer, {
           contentType: 'image/jpeg',
           upsert: false
@@ -159,7 +159,7 @@ serve(async (req) => {
       // Get public URL
       const { data: { publicUrl } } = supabaseClient
         .storage
-        .from('post-images')
+        .from('post-media')
         .getPublicUrl(path)
 
       uploadedVariants.push({
