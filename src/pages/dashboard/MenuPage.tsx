@@ -1429,13 +1429,13 @@ function MenuPage() {
 
         {/* Frame 1: Detect Menus from Website */}
         {websiteUrl && (
-          <div className="bg-green-50 rounded-lg border-2 border-green-500 px-4 py-3 mb-4">
+          <div className="bg-surface rounded-lg border-2 border-green-500 px-4 py-3 mb-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex-1">
-                <p className="text-sm font-semibold text-green-900 mb-2">
+                <p className="text-sm font-semibold text-text-secondary mb-2">
                   {t('menu.findOn')} <span className="font-bold">{websiteUrl}</span>
                 </p>
-                <p className="text-xs text-green-800 font-semibold">
+                <p className="text-xs text-text-muted font-semibold">
                   Lad mig prøve at finde dine menuer automatisk. Du kan også vælge en af de andre metoder nedenfor.
                 </p>
               </div>
