@@ -1891,13 +1891,48 @@ function MenuPage() {
                           </div>
                           <p className="text-xs text-text-muted break-all">{item.url}</p>
                           
+                          {/* Menu Availability Time Frame */}
+                          {menuCard?.result_id && menuCard.status === 'extracted' && (
+                            <div className="mt-3 p-3 bg-blue-50 rounded border border-blue-200">
+                              {editingTimingCardId !== menuCard.result_id ? (
+                                // Display Mode
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-medium text-gray-700">Menuen serveres:</span>
+                                    {menuCard.time_start && menuCard.time_end ? (
+                                      <span className={`inline-flex items-center px-3 py-1 rounded text-sm font-semibold ${
+                                        menuCard.time_source === 'user_edited' || menuCard.time_confirmed
+                                          ? 'bg-green-100 text-green-800 border border-green-300'
+                                          : menuCard.time_source === 'opening_hours_fallback' || (menuCard.time_start === '00:00' && menuCard.time_end === '23:59')
+                                          ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                                          : 'bg-blue-100 text-blue-800 border border-blue-300'
+                                      }`}>
+                                        🕐 {menuCard.time_start} – {menuCard.time_end}
+                                        {menuCard.time_source === 'opening_hours_fallback' && ' (åbningstider)'}
+                                        {menuCard.time_start === '00:00' && menuCard.time_end === '23:59' && ' (hele dagen)'}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-gray-500 italic">Ingen tidspunkt angivet</span>
+                                    )}
+                                  </div>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
+                                    className="px-3 py-1.5 text-xs bg-white border border-blue-300 text-blue-700 rounded hover:bg-blue-50 font-medium"
+                                  >
+                                    ✏️ Rediger tid
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          )}
+                          
                           {/* Timing Editor - Inline when editing */}
-                          {editingTimingCardId === menuCard?.result_id && (
-                            <div className="mt-2 p-3 bg-orange-50 rounded border-2 border-orange-500">
-                              <p className="text-xs text-orange-900 font-semibold mb-2">
-                                Indtast tid hvornår dette serveres, så vi kan tilpasse opslag til dig
+                          {editingTimingCardId === menuCard?.result_id && menuCard?.result_id && (
+                            <div className="mt-3 p-3 bg-orange-50 rounded border-2 border-orange-500">
+                              <p className="text-xs text-orange-900 font-semibold mb-3">
+                                ✏️ Rediger serverings tid
                               </p>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 mb-3">
                                 <div className="flex items-center gap-1">
                                   <label className="text-xs text-text-secondary font-medium">Fra:</label>
                                   <select
@@ -1958,16 +1993,18 @@ function MenuPage() {
                                     ))}
                                   </select>
                                 </div>
+                              </div>
+                              <div className="flex items-center gap-2 mt-3">
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleSaveTiming(menuCard.result_id!); }}
                                   disabled={isSavingTiming}
-                                  className="px-3 py-1 bg-cta text-text-inverse rounded text-xs font-medium hover:bg-cta-hover disabled:opacity-50"
+                                  className="px-4 py-2 bg-cta text-text-inverse rounded text-sm font-medium hover:bg-cta-hover disabled:opacity-50"
                                 >
-                                  {isSavingTiming ? 'Gemmer...' : 'Gem'}
+                                  {isSavingTiming ? 'Gemmer...' : '✓ Gem'}
                                 </button>
                                 <button
                                   onClick={(e) => { e.stopPropagation(); handleCancelEditTiming(); }}
-                                  className="px-2 py-1 bg-surface text-text-secondary rounded text-xs hover:bg-border border border-border"
+                                  className="px-4 py-2 bg-surface text-text-secondary rounded text-sm hover:bg-border border border-border"
                                 >
                                   Annuller
                                 </button>
@@ -2009,34 +2046,6 @@ function MenuPage() {
                               {menuCard.menu_type_extracted === 'seasonal' && '🍂 Sæson'}
                               {!['breakfast', 'brunch', 'lunch', 'dinner', 'cocktail', 'wine', 'beer', 'beverage', 'dessert', 'kids', 'seasonal'].includes(menuCard.menu_type_extracted) && menuCard.menu_type_extracted}
                             </span>
-                          )}
-                          {menuCard?.result_id && menuCard.status === 'extracted' && (
-                            <div className="flex items-center gap-1">
-                              {menuCard.time_start && menuCard.time_end ? (
-                                <>
-                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                    menuCard.time_source === 'user_edited' || menuCard.time_confirmed
-                                      ? 'bg-success-surface text-success-text border border-success'
-                                      : menuCard.time_source === 'opening_hours_fallback' || (menuCard.time_start === '00:00' && menuCard.time_end === '23:59')
-                                      ? 'bg-warning-surface text-warning-text border border-warning'
-                                      : 'bg-info-surface text-info-text border border-info'
-                                  }`}>
-                                    🕐 {menuCard.time_start}–{menuCard.time_end}
-                                    {menuCard.time_source === 'opening_hours_fallback' && ' (åbningstider)'}
-                                    {menuCard.time_start === '00:00' && menuCard.time_end === '23:59' && ' (hele dagen)'}
-                                  </span>
-                                  {editingTimingCardId !== menuCard.result_id && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
-                                      className="px-1.5 py-0.5 text-xs text-cta hover:text-cta-text"
-                                      title="Rediger tidspunkt"
-                                    >
-                                      ✏️
-                                    </button>
-                                  )}
-                                </>
-                              ) : null}
-                            </div>
                           )}
                           
                           {menuCard?.status === 'extracted' && menuCard.extracted_data && (
