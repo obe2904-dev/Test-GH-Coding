@@ -1845,7 +1845,7 @@ function MenuPage() {
                           }}
                           className="mt-1 h-5 w-5 text-cta border-border rounded focus:ring-cta"
                         />
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0 overflow-hidden">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             {!menuCard && <span className="text-gray-400">📋</span>}
                             {menuCard?.status === 'pending' && (
@@ -1898,7 +1898,7 @@ function MenuPage() {
                                 // Display Mode
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
-                                    <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres:</span>
+                                    <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres: </span>
                                     {menuCard.time_start && menuCard.time_end ? (
                                       <>
                                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap" style={{ backgroundColor: '#FFFFFF', color: '#633806', borderWidth: '1px', borderColor: '#EF9F27' }}>
