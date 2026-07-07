@@ -355,6 +355,8 @@ export function MediaAnalysisPanel({
       )}
 
       {/* ── Layer 3: AI actions ──────────────────────────────────────────── */}
+      {/* Hide entire section when recommendation is 'good-enough' and no suggestions */}
+      {!(sortedSuggestions.length === 0 && analysis.recommendation === 'good-enough') && (
       <div className="p-4 bg-white rounded-lg border border-slate-200 space-y-3">
         <div>
           <div className="flex items-center gap-2 mb-0.5">
@@ -471,6 +473,7 @@ export function MediaAnalysisPanel({
           </button>
         )}
       </div>
+      )}
     </div>
   )
 }
