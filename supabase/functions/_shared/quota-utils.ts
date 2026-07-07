@@ -99,17 +99,31 @@ export async function getUserQuota(
 
   console.log(`🔍 getUserQuota called for user: ${userId}, quota: ${quotaType}, period: ${period}`)
 
-  // Get user's business (as owner or team member)
+  // First, get user's plan from profiles table
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('plan')
+    .eq('id', userId)
+    .maybeSingle()
+  
+  if (profileError) {
+    console.error(`❌ Error fetching profile for user ${userId}:`, profileError)
+  }
+  
+  const userPlan = (profile?.plan as UserTier) || 'free'
+  console.log(`👤 User plan from profile: ${userPlan}`)
+
+  // Get user's business (as owner or team member) for usage data
   const { data: business, error: businessError } = await supabase
     .from('businesses')
-    .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
+    .select('id, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
     .eq('owner_id', userId)
     .maybeSingle()
   
   if (businessError) {
     console.error(`❌ Error fetching business for owner_id ${userId}:`, businessError)
   } else if (business) {
-    console.log(`✅ Found business as owner: ${business.id}, plan: ${business.plan}`)
+    console.log(`✅ Found business as owner: ${business.id}`)
   } else {
     console.log(`⚠️ No business found for owner_id: ${userId}, checking team members...`)
   }
@@ -131,7 +145,7 @@ export async function getUserQuota(
       console.log(`✅ Found team membership: business_id ${teamMember.business_id}`)
       const { data: teamBusiness, error: teamBusinessError } = await supabase
         .from('businesses')
-        .select('id, plan, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
+        .select('id, ai_generations_today, ai_generations_this_month, pdf_uploads_today, pdf_uploads_this_month, website_analysis_today, website_analysis_this_month')
         .eq('id', teamMember.business_id)
         .maybeSingle()
       
@@ -148,17 +162,17 @@ export async function getUserQuota(
     console.error(`❌ QUOTA CHECK FAILED: No business found for user ${userId}`)
     return {
       allowed: false,
-      tier: 'free',
+      tier: userPlan,
       current: 0,
       limit: 0,
       reason: 'No business found for user'
     }
   }
   
-  console.log(`✅ Using business: ${businessData.id}, plan: ${businessData.plan}`)
+  console.log(`✅ Using business: ${businessData.id}, plan: ${userPlan}`)
 
-  // Get tier from business plan
-  const tier: UserTier = (businessData.plan as UserTier) || 'free'
+  // Get tier from user's profile plan
+  const tier: UserTier = userPlan
   
   // Get usage from the correct column
   const columnKey = columnMap[quotaType][period]
