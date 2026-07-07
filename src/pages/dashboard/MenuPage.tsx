@@ -2035,106 +2035,7 @@ function MenuPage() {
                                     </button>
                                   )}
                                 </>
-                              ) : (
-                                <>
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-error-surface text-error-text border border-error">
-                                    ⚠️ Ingen tid
-                                  </span>
-                                  {editingTimingCardId !== menuCard.result_id && (
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
-                                      className="px-2 py-0.5 text-xs bg-cta text-text-inverse rounded font-medium hover:bg-cta-hover"
-                                      title="Tilføj tidspunkt"
-                                    >
-                                      + Tilføj
-                                    </button>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          )}
-                          
-                          {/* Timing Editor Frame - appears when editing menu card time */}
-                          {editingTimingCardId === menuCard?.result_id && (
-                            <div className="mt-3 p-3 bg-orange-50 rounded border-2 border-orange-500">
-                              <p className="text-xs text-orange-900 font-semibold mb-2">
-                                Indtast tid hvornår dette serveres, så vi kan tilpasse opslag til dig
-                              </p>
-                              <div className="flex items-center gap-2">
-                                <div className="flex items-center gap-1">
-                                  <label className="text-xs text-text-secondary font-medium">Fra:</label>
-                                  <select
-                                    value={splitTimeValue(editingTimeStart).hour}
-                                    onChange={(e) => setEditingTimeStart(updateTimePart(editingTimeStart, 'hour', e.target.value))}
-                                    className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <option value="">--</option>
-                                    {TIME_HOUR_OPTIONS.map((hour) => (
-                                      <option key={hour} value={hour}>
-                                        {hour}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <span className="text-xs">:</span>
-                                  <select
-                                    value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeStart).minute) ? splitTimeValue(editingTimeStart).minute : ''}
-                                    onChange={(e) => setEditingTimeStart(updateTimePart(editingTimeStart, 'minute', e.target.value))}
-                                    className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <option value="">--</option>
-                                    {TIME_MINUTE_OPTIONS.map((minute) => (
-                                      <option key={minute} value={minute}>
-                                        {minute}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <label className="text-xs text-text-secondary font-medium">Til:</label>
-                                  <select
-                                    value={splitTimeValue(editingTimeEnd).hour}
-                                    onChange={(e) => setEditingTimeEnd(updateTimePart(editingTimeEnd, 'hour', e.target.value))}
-                                    className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <option value="">--</option>
-                                    {TIME_HOUR_OPTIONS.map((hour) => (
-                                      <option key={hour} value={hour}>
-                                        {hour}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <span className="text-xs">:</span>
-                                  <select
-                                    value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeEnd).minute) ? splitTimeValue(editingTimeEnd).minute : ''}
-                                    onChange={(e) => setEditingTimeEnd(updateTimePart(editingTimeEnd, 'minute', e.target.value))}
-                                    className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <option value="">--</option>
-                                    {TIME_MINUTE_OPTIONS.map((minute) => (
-                                      <option key={minute} value={minute}>
-                                        {minute}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleSaveTiming(menuCard.result_id!); }}
-                                  disabled={isSavingTiming}
-                                  className="px-3 py-1 bg-cta text-text-inverse rounded text-xs font-medium hover:bg-cta-hover disabled:opacity-50"
-                                >
-                                  {isSavingTiming ? 'Gemmer...' : 'Gem'}
-                                </button>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleCancelEditTiming(); }}
-                                  className="px-2 py-1 bg-surface text-text-secondary rounded text-xs hover:bg-border border border-border"
-                                >
-                                  Annuller
-                                </button>
-                              </div>
+                              ) : null}
                             </div>
                           )}
                           
@@ -2543,6 +2444,121 @@ function MenuPage() {
                                 📅 {card.extracted_data.availabilityDays}
                               </span>
                             )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Time Input Frame - shows when no time is set */}
+                      {(!card.time_start || !card.time_end) && (
+                        <div className="p-4 bg-orange-50 rounded-lg border-2 border-orange-500">
+                          <p className="text-sm text-orange-900 font-semibold mb-3">
+                            ⏰ Ingen serverningstid angivet
+                          </p>
+                          <p className="text-xs text-orange-800 mb-3">
+                            Indtast hvornår denne menu serveres fra og til, så opslag kan tilpasses din forretning.
+                          </p>
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <div className="flex items-center gap-2">
+                              <label className="text-sm text-text-secondary font-medium">Fra:</label>
+                              <select
+                                value={splitTimeValue(editingTimeStart).hour}
+                                onChange={(e) => {
+                                  if (editingTimingCardId !== card.result_id) {
+                                    setEditingTimingCardId(card.result_id || null);
+                                    setEditingTimeStart(joinTimeValue(e.target.value, splitTimeValue(editingTimeStart).minute));
+                                    setEditingTimeEnd(card.time_end || '');
+                                  } else {
+                                    setEditingTimeStart(updateTimePart(editingTimeStart, 'hour', e.target.value));
+                                  }
+                                }}
+                                className="px-3 py-2 border border-border rounded text-sm w-16 bg-white"
+                              >
+                                <option value="">--</option>
+                                {TIME_HOUR_OPTIONS.map((hour) => (
+                                  <option key={hour} value={hour}>
+                                    {hour}
+                                  </option>
+                                ))}
+                              </select>
+                              <span className="text-sm">:</span>
+                              <select
+                                value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeStart).minute) ? splitTimeValue(editingTimeStart).minute : ''}
+                                onChange={(e) => {
+                                  if (editingTimingCardId !== card.result_id) {
+                                    setEditingTimingCardId(card.result_id || null);
+                                    setEditingTimeStart(joinTimeValue(splitTimeValue(editingTimeStart).hour, e.target.value));
+                                    setEditingTimeEnd(card.time_end || '');
+                                  } else {
+                                    setEditingTimeStart(updateTimePart(editingTimeStart, 'minute', e.target.value));
+                                  }
+                                }}
+                                className="px-3 py-2 border border-border rounded text-sm w-16 bg-white"
+                              >
+                                <option value="">--</option>
+                                {TIME_MINUTE_OPTIONS.map((minute) => (
+                                  <option key={minute} value={minute}>
+                                    {minute}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="text-sm text-text-secondary font-medium">Til:</label>
+                              <select
+                                value={splitTimeValue(editingTimeEnd).hour}
+                                onChange={(e) => {
+                                  if (editingTimingCardId !== card.result_id) {
+                                    setEditingTimingCardId(card.result_id || null);
+                                    setEditingTimeStart(card.time_start || '');
+                                    setEditingTimeEnd(joinTimeValue(e.target.value, splitTimeValue(editingTimeEnd).minute));
+                                  } else {
+                                    setEditingTimeEnd(updateTimePart(editingTimeEnd, 'hour', e.target.value));
+                                  }
+                                }}
+                                className="px-3 py-2 border border-border rounded text-sm w-16 bg-white"
+                              >
+                                <option value="">--</option>
+                                {TIME_HOUR_OPTIONS.map((hour) => (
+                                  <option key={hour} value={hour}>
+                                    {hour}
+                                  </option>
+                                ))}
+                              </select>
+                              <span className="text-sm">:</span>
+                              <select
+                                value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeEnd).minute) ? splitTimeValue(editingTimeEnd).minute : ''}
+                                onChange={(e) => {
+                                  if (editingTimingCardId !== card.result_id) {
+                                    setEditingTimingCardId(card.result_id || null);
+                                    setEditingTimeStart(card.time_start || '');
+                                    setEditingTimeEnd(joinTimeValue(splitTimeValue(editingTimeEnd).hour, e.target.value));
+                                  } else {
+                                    setEditingTimeEnd(updateTimePart(editingTimeEnd, 'minute', e.target.value));
+                                  }
+                                }}
+                                className="px-3 py-2 border border-border rounded text-sm w-16 bg-white"
+                              >
+                                <option value="">--</option>
+                                {TIME_MINUTE_OPTIONS.map((minute) => (
+                                  <option key={minute} value={minute}>
+                                    {minute}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                if (editingTimingCardId !== card.result_id) {
+                                  setEditingTimingCardId(card.result_id || null);
+                                }
+                                handleSaveTiming(card.result_id!); 
+                              }}
+                              disabled={isSavingTiming || !editingTimeStart || !editingTimeEnd}
+                              className="px-4 py-2 bg-cta text-text-inverse rounded text-sm font-medium hover:bg-cta-hover disabled:opacity-50"
+                            >
+                              {isSavingTiming ? 'Gemmer...' : 'Gem'}
+                            </button>
                           </div>
                         </div>
                       )}
