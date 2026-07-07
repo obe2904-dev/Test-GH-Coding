@@ -326,7 +326,7 @@ export function CreatePostPage() {
       hasDraftText: !!(draftMap[weeklyPlanPostIndex] as any)?.text,
       hasBusinessId: !!businessData.business?.id,
     })
-    if (weeklyContentPlan && weeklyPlanPost && currentStep === 'generate') {
+    if (weeklyContentPlan && weeklyPlanPost) {
       const savedContent = draftMap[weeklyPlanPostIndex]
       const savedPhotos = photoDraftMap[weeklyPlanPostIndex]
       if (savedContent?.text) {
@@ -409,15 +409,19 @@ export function CreatePostPage() {
             }
             setCurrentStep('create')
           } else {
-            // Truly fresh — generate
-            console.log('[WeeklyPlanEffect] No DB draft found, generating fresh text')
-            handleDirectTransfer()
+            // Truly fresh — generate only if we're at the generate step
+            if (currentStep === 'generate') {
+              console.log('[WeeklyPlanEffect] No DB draft found, generating fresh text')
+              handleDirectTransfer()
+            } else {
+              console.log('[WeeklyPlanEffect] No draft found but not at generate step, skipping generation')
+            }
           }
         })()
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weeklyPlanPost, businessData.business?.id, currentStep])
+  }, [weeklyPlanPost, businessData.business?.id, currentStep, weeklyPlanPostIndex])
 
   // AI Ideas should not auto-restore into Design on mount.
   // The cached draft is picked up later after the user selects a suggestion
