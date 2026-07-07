@@ -52,7 +52,6 @@ export interface CommercialOrientation {
   baseline_goal_split: {
     drive_footfall: number;
     strengthen_brand: number;
-    retain_regulars: number;
   };
   decision_timing: "last_minute" | "planned" | "hybrid";
   content_type_affinity: {

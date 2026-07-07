@@ -260,11 +260,11 @@ export function economicRelevanceForArchetype(archetype) {
     summer: monthIndex >= 6 && monthIndex <= 7 // July (6) and August (7) only
      ? [
       'højsæson og turistflow',
-      'lune aftener forstærker terrassebesøg',
+      'lune aftener forstærker udeservering',
       'feriemodus og spontane besøg dominerer'
     ] : [
       'stigende udendørs aktivitet hos lokale',
-      'lune aftener forstærker terrassebesøg',
+      'lune aftener forstærker udeservering',
       'spontane besøg stiger blandt lokale'
     ],
     autumn: [
@@ -500,7 +500,7 @@ export function economicRelevanceForArchetype(archetype) {
   if (weatherEffectOnDaypart !== 'minimal') {
     const wEffect = ctx.weather_effect_on_visit_behavior;
     const wNote = {
-      terrace_pull: `terrasse-vejr (${ctx.weather.avg_temp}°C)`,
+      terrace_pull: `udeserverings-vejr (${ctx.weather.avg_temp}°C)`,
       indoor_refuge: `indendørs bias (${ctx.weather.avg_temp}°C)`,
       takeaway_pull: `afhentningsvejr (${ctx.weather.avg_temp}°C)`
     };
@@ -552,9 +552,9 @@ export function economicRelevanceForArchetype(archetype) {
   // 2. Terrace / outdoor season
   if (weatherVisitBehavior === 'terrace_pull' && ctx.location.has_outdoor_seating) {
     candidates.push({
-      label: 'Terrasse — walk-in trafik og udendørs besøg i godt vejr',
+      label: 'Udeservering — walk-in trafik og udendørs besøg i godt vejr',
       customer_behavior_reason: `${avgTemp}°C og sol øger spontane udendørsbeslutninger og walk-in besøg`,
-      business_reason: 'Udendørs servering er en direkte konkurrencefordel i godt vejr',
+      business_reason: 'Udeservering er en direkte konkurrencefordel i godt vejr',
       daypart_relevance: [
         primaryDaypart,
         'all_day'
@@ -937,7 +937,7 @@ export function economicRelevanceForArchetype(archetype) {
   // Contextual: weather — only if material for this business
   if (weatherRelevance !== 'low' && weatherVisitBehavior !== 'minimal') {
     const WEATHER_LABEL = {
-      terrace_pull: `terrasse-vejr (${ctx.weather.avg_temp}°C — øger walk-in)`,
+      terrace_pull: `udeserverings-vejr (${ctx.weather.avg_temp}°C — øger walk-in)`,
       indoor_refuge: `indendørs-bias (${ctx.weather.avg_temp}°C — skubber beslutning indad)`,
       takeaway_pull: `afhentningsvejr (${ctx.weather.avg_temp}°C — øger takeaway-demand)`
     };
@@ -1195,7 +1195,7 @@ export function economicRelevanceForArchetype(archetype) {
   }
   // Weather-derived: if weather is strongly indoor, avoid outdoor framing
   if (ctx.weather_interpretation?.indoor_outdoor_bias === 'strongly_indoor') {
-    narrative_guardrails.push('Undgå at omtale udendørs oplevelse eller terrasse som et plus denne uge — vejret understøtter det ikke');
+    narrative_guardrails.push('Undgå at omtale udendørs oplevelse eller udeservering som et plus denne uge — vejret understøtter det ikke');
   }
   // ── 7. Weather Is Differentiator (backwards compat — derived from new fields) ─
   const weather_is_differentiator = weather_relevance_for_business !== 'low';

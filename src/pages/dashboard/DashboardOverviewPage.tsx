@@ -1,12 +1,15 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useTranslation } from 'react-i18next'
+import { useState, useEffect } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
+import { useTranslation, Trans } from 'react-i18next'
 import { MediaGalleryModal } from '../../components/media/media-gallery'
 import { useBusinessData } from '../../hooks/useBusinessData'
 import { useSetupCompletion } from '../../hooks/useSetupCompletion'
 import { useDashboardNavigationStore } from '../../stores/dashboardNavigationStore'
 import { usePostCreationStore } from '../../stores/postCreationStore'
 import { useTierStore } from '../../stores/tierStore'
+import { DashboardCard } from '../../components/dashboard/DashboardCard'
+import { ContentCard } from '../../components/dashboard/ContentCard'
+import { supabase } from '../../lib/supabase'
 
 const GlobeIcon = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
@@ -108,13 +111,36 @@ type DashboardSection = {
   cards: DashboardCard[]
 }
 
+// Helper Components
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-6">
+      <p className="text-[11px] font-semibold tracking-widest text-slate-500 uppercase mb-3">
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function SequenceArrow({ active }: { active: boolean }) {
+  return (
+    <div className="flex items-center justify-center pt-5">
+      <ArrowRightIcon className={`h-3.5 w-3.5 ${active ? 'text-[#0A7D5F]' : 'text-slate-400'}`} />
+    </div>
+  );
+}
+
 export function DashboardOverviewPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const currentTier = useTierStore((state) => state.currentTier)
   const { business, profile, location, latestAnalysis } = useBusinessData()
   const setupCompletion = useSetupCompletion()
   const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
+  const [hasWeeklyPlan, setHasWeeklyPlan] = useState(false)
+  const [hasDailySuggestions, setHasDailySuggestions] = useState(false)
+  const [currentTip, setCurrentTip] = useState<{ tip_da: string; tip_en: string } | null>(null)
   const setHoveredSidebarItem = useDashboardNavigationStore((state) => state.setHoveredSidebarItem)
   const clearHoveredSidebarItem = useDashboardNavigationStore((state) => state.clearHoveredSidebarItem)
   const setActivePath = usePostCreationStore((state) => state.setActivePath)
@@ -122,11 +148,149 @@ export function DashboardOverviewPage() {
 
   const isFreeTier = currentTier === 'free'
 
+  // Fetch a random tip (excluding last 5 shown)
+  useEffect(() => {
+    const fetchRandomTip = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user || isFreeTier) {
+          console.log('Tips: Skipping - user not logged in or free tier')
+          return
+        }
+
+        console.log('Tips: Fetching for user:', user.id)
+
+        // Get the last 5 shown tip IDs for this user
+        const { data: recentTips, error: recentError } = await supabase
+          .from('user_shown_tips')
+          .select('tip_id')
+          .eq('user_id', user.id)
+          .order('shown_at', { ascending: false })
+          .limit(5)
+
+        if (recentError) {
+          console.error('Tips: Error fetching recent tips:', recentError)
+        }
+
+        const excludedIds = recentTips?.map(t => t.tip_id) || []
+        console.log('Tips: Excluding', excludedIds.length, 'recent tips')
+
+        // Get a random tip that's not in the excluded list
+        let query = supabase
+          .from('dashboard_tips')
+          .select('id, tip_da, tip_en')
+          .eq('active', true)
+
+        if (excludedIds.length > 0) {
+          query = query.not('id', 'in', `(${excludedIds.join(',')})`)
+        }
+
+        const { data: tips, error: tipsError } = await query
+
+        if (tipsError) {
+          console.error('Tips: Error fetching tips:', tipsError)
+          return
+        }
+
+        console.log('Tips: Found', tips?.length || 0, 'available tips')
+
+        if (tips && tips.length > 0) {
+          // Select random tip from available ones
+          const randomTip = tips[Math.floor(Math.random() * tips.length)]
+          console.log('Tips: Selected tip:', randomTip.id)
+          setCurrentTip(randomTip)
+
+          // Track that this tip was shown
+          const { error: upsertError } = await supabase
+            .from('user_shown_tips')
+            .upsert({
+              user_id: user.id,
+              tip_id: randomTip.id,
+              shown_at: new Date().toISOString()
+            }, {
+              onConflict: 'user_id,tip_id'
+            })
+
+          if (upsertError) {
+            console.error('Tips: Error tracking shown tip:', upsertError)
+          }
+        }
+      } catch (error) {
+        console.error('Tips: Unexpected error:', error)
+      }
+    }
+
+    fetchRandomTip()
+  }, [isFreeTier])
+
+  // Check for existing weekly plan and daily suggestions
+  useEffect(() => {
+    const checkContentStatus = async () => {
+      if (!business) return
+
+      // Check for weekly plan
+      const { data: weeklyPlan } = await supabase
+        .from('weekly_content_plans')
+        .select('id')
+        .eq('business_id', business.id)
+        .limit(1)
+        .maybeSingle()
+      
+      setHasWeeklyPlan(!!weeklyPlan)
+
+      // Check for daily suggestions
+      const { data: dailySuggestion } = await supabase
+        .from('daily_suggestions')
+        .select('id')
+        .eq('business_id', business.id)
+        .limit(1)
+        .maybeSingle()
+      
+      setHasDailySuggestions(!!dailySuggestion)
+    }
+
+    checkContentStatus()
+  }, [business])
+
   const getFrameTone = (completed: boolean, hasData: boolean): 'ok' | 'warn' | 'empty' => {
     if (completed) return 'ok'
     if (hasData) return 'warn'
     return 'empty'
   }
+
+  // Determine which welcome message to show based on tier and completion states
+  const getWelcomeMessageKey = (): string => {
+    if (isFreeTier) {
+      // Free tier logic
+      if (setupCompletion.profileState !== 'complete') {
+        return 'dashboard.welcomeFreeNoProfile'
+      } else {
+        return 'dashboard.welcomeFreeProfileDone'
+      }
+    } else {
+      // Paid tier logic - first check setup completion
+      if (setupCompletion.menuState === 'none') {
+        return 'dashboard.welcomePaidNoMenu'
+      } else if (setupCompletion.locationState === 'none') {
+        return 'dashboard.welcomePaidNoLocation'
+      } else if (setupCompletion.brandState === 'none') {
+        return 'dashboard.welcomePaidNoBrand'
+      } else {
+        // Setup complete - check content generation status
+        if (!hasWeeklyPlan && !hasDailySuggestions) {
+          return 'dashboard.welcomePaidNoContent'
+        } else if (hasWeeklyPlan && !hasDailySuggestions) {
+          return 'dashboard.welcomePaidHasWeeklyNoDaily'
+        } else if (!hasWeeklyPlan && hasDailySuggestions) {
+          return 'dashboard.welcomePaidHasDailyNoWeekly'
+        } else {
+          return 'dashboard.welcomePaidHasBoth'
+        }
+      }
+    }
+  }
+
+  const welcomeMessageKey = getWelcomeMessageKey()
 
   const menuHasData = Boolean(
     profile?.menu_structure ||
@@ -291,104 +455,206 @@ export function DashboardOverviewPage() {
     setMediaGalleryOpen(true)
   }
 
+  // Helper to determine lock tier based on whether it's a free tier requirement
+  const getLockTier = (locked?: boolean, isSequentialLock?: boolean): 'Smart' | 'Pro' | undefined => {
+    if (!locked) return undefined;
+    return isSequentialLock ? undefined : 'Smart'; // Only show tier badge for tier locks, not sequential
+  }
+
+  // Helper to map statusTone to status for DashboardCard
+  const mapStatus = (statusTone?: 'ok' | 'warn' | 'empty', completed?: boolean): 'complete' | 'partial' | undefined => {
+    if (completed) return 'complete';
+    if (statusTone === 'warn') return 'partial';
+    return undefined;
+  }
+
   return (
     <div className="p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-900">
-            {t('dashboard.welcome')}
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm text-slate-600">
-            {t('dashboard.description')}
-          </p>
-        </div>
+        {isFreeTier ? (
+          // Free tier: full-width welcome message
+          <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-slate-900">
+              {t('dashboard.welcome')}
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">
+              <Trans
+                i18nKey={welcomeMessageKey}
+                components={{
+                  profileLink: <Link to="/dashboard/profile" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                  aiLink: <Link to="/dashboard/create?mode=ai" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                  writeLink: <Link to="/dashboard/create?mode=write" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                  menuLink: <Link to="/dashboard/menu" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                  locationLink: <Link to="/dashboard/location" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                  brandLink: <Link to="/dashboard/brand" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                  weeklyLink: <Link to="/dashboard/ai-weekly-plan" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />
+                }}
+              />
+            </p>
+          </div>
+        ) : (
+          // Paid tier: welcome message + tips in grid layout matching business cards below
+          <div className="grid grid-cols-[1fr_16px_1fr_16px_1fr_16px_1fr] gap-0 items-stretch">
+            {/* Welcome message - spans 3 cards + 2 arrows (columns 1-5) */}
+            <div className="col-span-5 h-full rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
+              <h2 className="text-xl font-semibold text-slate-900">
+                {t('dashboard.welcome')}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                <Trans
+                  i18nKey={welcomeMessageKey}
+                  components={{
+                    profileLink: <Link to="/dashboard/profile" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                    aiLink: <Link to="/dashboard/create?mode=ai" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                    writeLink: <Link to="/dashboard/create?mode=write" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                    menuLink: <Link to="/dashboard/menu" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                    locationLink: <Link to="/dashboard/location" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                    brandLink: <Link to="/dashboard/brand" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />,
+                    weeklyLink: <Link to="/dashboard/ai-weekly-plan" className="text-[#0A7D5F] hover:text-[#0A7D5F]/80 font-medium underline" />
+                  }}
+                />
+              </p>
+            </div>
+            
+            {/* Empty arrow space */}
+            <div />
+            
+            {/* Tips card - spans last card (column 7) */}
+            <div className="h-full rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
+              <h2 className="text-xl font-semibold text-slate-900">
+                {t('dashboard.tipsTitle')}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                {currentTip 
+                  ? (i18n.language === 'da' ? currentTip.tip_da : currentTip.tip_en)
+                  : t('dashboard.tipsLoading')
+                }
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-6">
-          {dashboardSections.map((section) => (
-            <div key={section.title} className="space-y-3">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">
-                {section.title}
-              </h3>
-              <div
-                className={`${
-                  section.cards.length === 2 ? 'grid grid-cols-1 gap-4 lg:grid-cols-2' : 
-                  section.title === t('navigation.yourBusiness') 
-                    ? 'flex flex-col lg:flex-row lg:items-center gap-3'
-                    : 'grid grid-cols-1 gap-4 lg:grid-cols-4'
-                }`}
-              >
-                {section.cards.map((card, index) => {
-                  const Icon = card.icon
-                  const isBusinessSection = section.title === t('navigation.yourBusiness')
-                  const isProfileCard = card.sidebarId === 'profile'
-                  const emphasizeFrame = isFreeTier && ['profile', 'write', 'ai-ideas'].includes(card.sidebarId)
-                  const statusTone = card.statusTone ?? 'empty'
-                  const businessFrameClass = statusTone === 'ok'
-                    ? 'border-[#CFE3DB] bg-[#FBFCFB]'
-                    : statusTone === 'warn'
-                      ? 'border-[#E6DDC4] bg-[#FCFBF5]'
-                      : 'border-[#E8D8D8] bg-[#FCF8F8]'
+          {dashboardSections.map((section) => {
+            const isBusinessSection = section.title === t('navigation.yourBusiness');
+            
+            // Business section with sequence arrows
+            if (isBusinessSection) {
+              return (
+                <Section key={section.title} label={section.title}>
+                  <div className="grid grid-cols-[1fr_16px_1fr_16px_1fr_16px_1fr] gap-0 items-start">
+                    {section.cards.map((card, index) => {
+                      const Icon = card.icon;
+                      const tier = getLockTier(card.locked, card.isSequentialLock);
+                      const status = mapStatus(card.statusTone, card.completed);
+                      
+                      return (
+                        <>
+                          <DashboardCard
+                            key={card.sidebarId}
+                            icon={<Icon className="w-[18px] h-[18px]" />}
+                            title={card.title}
+                            description={card.description}
+                            status={status}
+                            locked={card.locked ? {
+                              tier: tier || 'Smart',
+                              prerequisite: card.lockedReason
+                            } : undefined}
+                            onClick={() => {
+                              if (card.sidebarId === 'write') {
+                                setActivePath('write');
+                                setWriteSelfStep('generate');
+                              }
+                              handleCardClick(card.action, card.locked, card.lockedReason);
+                            }}
+                          />
+                          {index < section.cards.length - 1 && (
+                            <SequenceArrow 
+                              key={`arrow-${index}`}
+                              active={card.completed || false} 
+                            />
+                          )}
+                        </>
+                      );
+                    })}
+                  </div>
+                </Section>
+              );
+            }
 
-                  return (
-                    <>
-                      <div
-                        key={card.title}
-                        role="button"
-                        tabIndex={0}
+            // Other sections - grid layout
+            const isContentSection = section.title === t('navigation.sectionContent');
+            
+            return (
+              <Section key={section.title} label={section.title}>
+                <div className={`grid gap-2.5 ${
+                  section.cards.length === 2 ? 'grid-cols-2' : 'grid-cols-4'
+                }`}>
+                  {section.cards.map((card) => {
+                    const Icon = card.icon;
+                    const tier = getLockTier(card.locked, card.isSequentialLock);
+                    const status = mapStatus(card.statusTone, card.completed);
+                    
+                    // Use ContentCard for content section
+                    if (isContentSection) {
+                      const isHeroCard = card.sidebarId === 'ai-ideas' || card.sidebarId === 'weekly-plan';
+                      const payoffKey = card.sidebarId === 'write' 
+                        ? 'writeSelfPayoff'
+                        : card.sidebarId === 'ai-ideas'
+                          ? 'dailySuggestionPayoff'
+                          : card.sidebarId === 'weekly-plan'
+                            ? 'weeklyPlanPayoff'
+                            : 'contentCalendarPayoff';
+                      
+                      return (
+                        <ContentCard
+                          key={card.sidebarId}
+                          icon={<Icon className="w-[17px] h-[17px]" />}
+                          title={card.title}
+                          description={card.description}
+                          payoff={t(`navigation.${payoffKey}`)}
+                          isHero={isHeroCard}
+                          locked={card.locked ? {
+                            tier: tier || 'Smart',
+                            prerequisite: card.lockedReason
+                          } : undefined}
+                          onClick={() => {
+                            if (card.sidebarId === 'write') {
+                              setActivePath('write');
+                              setWriteSelfStep('generate');
+                            }
+                            handleCardClick(card.action, card.locked, card.lockedReason);
+                          }}
+                        />
+                      );
+                    }
+                    
+                    // Use DashboardCard for other sections
+                    return (
+                      <DashboardCard
+                        key={card.sidebarId}
+                        icon={<Icon className="w-[18px] h-[18px]" />}
+                        title={card.title}
+                        description={card.description}
+                        status={status}
+                        locked={card.locked ? {
+                          tier: tier || 'Smart',
+                          prerequisite: card.lockedReason
+                        } : undefined}
                         onClick={() => {
                           if (card.sidebarId === 'write') {
-                            setActivePath('write')
-                            setWriteSelfStep('generate')
+                            setActivePath('write');
+                            setWriteSelfStep('generate');
                           }
-                          handleCardClick(card.action, card.locked, card.lockedReason)
+                          handleCardClick(card.action, card.locked, card.lockedReason);
                         }}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault()
-                            if (card.sidebarId === 'write') {
-                              setActivePath('write')
-                              setWriteSelfStep('generate')
-                            }
-                            handleCardClick(card.action, card.locked, card.lockedReason)
-                          }
-                        }}
-                        onMouseEnter={() => setHoveredSidebarItem(card.sidebarId)}
-                        onMouseLeave={clearHoveredSidebarItem}
-                        onFocus={() => setHoveredSidebarItem(card.sidebarId)}
-                        onBlur={clearHoveredSidebarItem}
-                        data-card-id={card.sidebarId}
-                        className={`cursor-pointer rounded-3xl p-5 shadow-sm transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#0A7D5F]/20 ${
-                          isBusinessSection ? 'flex-1' : ''
-                        } ${card.locked ? 'bg-white border border-slate-200 opacity-70' : isBusinessSection ? `${businessFrameClass} border ${isProfileCard ? 'border-2' : ''}` : 'bg-white border border-slate-200'} ${emphasizeFrame ? 'border-2 border-slate-300' : ''}`}
-                      >
-                        <div className="mb-3 flex items-center gap-3">
-                          <Icon className="h-5 w-5 shrink-0 text-slate-500" />
-                          <h4 className="text-base font-semibold text-slate-900">
-                            {card.title}
-                          </h4>
-                          {card.locked && (
-                            <span className="ml-auto text-xs text-slate-400">
-                              {card.isSequentialLock ? '⏻' : '🔒'}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm leading-6 text-slate-600">
-                          {isProfileCard && !setupCompletion.profile
-                            ? t('dashboard.profileNeedsContent', 'For indhold, udfyld venligst.')
-                            : card.description}
-                        </p>
-                      </div>
-                      {isBusinessSection && index < section.cards.length - 1 && (
-                        <div className="hidden lg:flex items-center justify-center px-2">
-                          <ArrowRightIcon className="h-6 w-6 text-slate-400" />
-                        </div>
-                      )}
-                    </>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
+                      />
+                    );
+                  })}
+                </div>
+              </Section>
+            );
+          })}
         </div>
       </div>
 

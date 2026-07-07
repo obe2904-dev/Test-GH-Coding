@@ -39,7 +39,7 @@ function classifyUserInput(
     return 'offer'
 
   // Outdoor / seasonal posts
-  if (/(udendørs|udeservering|terrasse|sommer|solskin|vejret|forår|vinter|sæson)/i.test(t))
+  if (/(udendørs|udeservering|sommer|solskin|vejret|forår|vinter|sæson)/i.test(t))
     return 'atmosphere'
 
   // Team / people posts

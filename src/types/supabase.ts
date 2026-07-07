@@ -1276,11 +1276,13 @@ export type Database = {
       }
       daily_suggestions: {
         Row: {
+          alternative_timings: Json | null
           business_id: string
           caption_base: string | null
           consumed_at: string | null
           content_angle: string | null
           content_type: string
+          context_reasoning: string | null
           created_at: string
           cta_intent: string | null
           date: string
@@ -1322,11 +1324,13 @@ export type Database = {
           why_explanation: string | null
         }
         Insert: {
+          alternative_timings?: Json | null
           business_id: string
           caption_base?: string | null
           consumed_at?: string | null
           content_angle?: string | null
           content_type?: string
+          context_reasoning?: string | null
           created_at?: string
           cta_intent?: string | null
           date?: string
@@ -1368,11 +1372,13 @@ export type Database = {
           why_explanation?: string | null
         }
         Update: {
+          alternative_timings?: Json | null
           business_id?: string
           caption_base?: string | null
           consumed_at?: string | null
           content_angle?: string | null
           content_type?: string
+          context_reasoning?: string | null
           created_at?: string
           cta_intent?: string | null
           date?: string
@@ -1422,6 +1428,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      dashboard_tips: {
+        Row: {
+          active: boolean | null
+          created_at: string | null
+          id: string
+          requires_verification: boolean | null
+          tip_da: string
+          tip_en: string
+          updated_at: string | null
+          verification_notes: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          created_at?: string | null
+          id?: string
+          requires_verification?: boolean | null
+          tip_da: string
+          tip_en: string
+          updated_at?: string | null
+          verification_notes?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          created_at?: string | null
+          id?: string
+          requires_verification?: boolean | null
+          tip_da?: string
+          tip_en?: string
+          updated_at?: string | null
+          verification_notes?: string | null
+        }
+        Relationships: []
       }
       media_assets: {
         Row: {
@@ -2395,6 +2434,35 @@ export type Database = {
             columns: ["business_id"]
             isOneToOne: true
             referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_shown_tips: {
+        Row: {
+          id: string
+          shown_at: string | null
+          tip_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          shown_at?: string | null
+          tip_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          shown_at?: string | null
+          tip_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_shown_tips_tip_id_fkey"
+            columns: ["tip_id"]
+            isOneToOne: false
+            referencedRelation: "dashboard_tips"
             referencedColumns: ["id"]
           },
         ]

@@ -4,7 +4,7 @@
 // Paid tier: links to full weekly plan
 
 import { useState, useCallback, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
 import { supabase } from '../../lib/supabase'
 import { useBusinessData } from '../../hooks/useBusinessData'
@@ -59,6 +59,7 @@ interface PostSuggestion {
   suggestedTime: string
   suggestedDate?: string  // ISO date (YYYY-MM-DD) the suggestion was generated for
   icon: string
+  generatedText?: string | null  // AI-generated text if it exists
   // Paid tier features
   contextReasoning?: string   // Contextual explanation with day/time/weather
   alternativeTimings?: Array<{
@@ -136,6 +137,7 @@ function addDaysToLocalDate(date: Date, days: number): string {
 
 export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, selectedIdea, committedSuggestionIds }: AiSuggestionsCardProps) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const currentTier = useTierStore((s) => s.currentTier)
   const canUseAiIdeas = useTierStore((s) => s.canUseAiIdeas)
   const incrementAiIdeas = useTierStore((s) => s.incrementAiIdeas)
@@ -437,29 +439,12 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
       .select('*')
       .eq('business_id', businessId)
       .eq('date', todayISO)
-      .in('status', ['available', 'selected'])
+      .in('status', ['available', 'selected', 'consumed'])
       .eq('source', 'quick_suggestions')
       .order('position', { ascending: true })
       .limit(3)
       .then(async ({ data, error }) => {
-        // If no suggestions for today, try to get the most recent unconsumed batch
-        if ((!error && (!data || data.length === 0)) || error) {
-          console.log('[AiSuggestionsCard] No suggestions for today, checking for recent batch')
-          const { data: recentData, error: recentError } = await supabase
-            .from('daily_suggestions')
-            .select('*')
-            .eq('business_id', businessId)
-            .in('status', ['available', 'selected'])
-            .eq('source', 'quick_suggestions')
-            .order('created_at', { ascending: false })
-            .limit(3)
-          
-          if (!recentError && recentData && recentData.length > 0) {
-            data = recentData
-            console.log('[AiSuggestionsCard] Loaded recent unconsumed suggestions from', recentData[0]?.date)
-          }
-        }
-        
+        // Only load suggestions if they're from today — no fallback to yesterday
         if (!error && data && data.length > 0) {
           // Suggestions exist — map directly, no edge function call
           const isFromToday = data[0]?.date === todayISO
@@ -484,6 +469,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
               : '12:00',
             suggestedDate: row.suggestion_date || row.date || todayISO,
             icon: CONTENT_TYPE_ICONS[row.content_type] || '📸',
+            generatedText: row.generated_text || null,
             contextReasoning: row.context_reasoning || undefined,
             alternativeTimings: row.alternative_timings || []
           }))
@@ -590,6 +576,8 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
   if (error) {
     const sparseProfileMessage = t('dashboard.noHoursConfigured')
     const shouldRenderLinkedProfileHint = error === sparseProfileMessage
+    const isTooLate = error === t('dashboard.tooLateForQuickSuggestions')
+    const shouldRedirectToWrite = isTooLate
 
     return (
       <div className="space-y-4">
@@ -611,10 +599,10 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
         </p>
         {!error.includes(t('dashboard.quotaExceeded')) && (
           <button
-            onClick={() => fetchSuggestions(true)}
+            onClick={() => shouldRedirectToWrite ? navigate('/dashboard/create?mode=write') : fetchSuggestions(true)}
             className="px-4 py-2 bg-cta text-white rounded-lg hover:bg-cta-hover transition-colors text-sm font-medium"
           >
-            {t('dashboard.retrySuggestions')}
+            {shouldRedirectToWrite ? t('dashboard.goToWriteYourself') : t('dashboard.retrySuggestions')}
           </button>
         )}
       </div>
@@ -866,7 +854,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
               </div>
             </div>
             
-            {/* Bottom row: thumbs-up + select arrow */}
+            {/* Bottom row: thumbs-up + action button */}
             <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
               <button
                 onClick={(e) => handleThumbsUp(e, suggestion.id)}
@@ -882,18 +870,18 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
                 </svg>
                 <span>{thumbsUp.has(suggestion.id) ? t('dashboard.likedLabel') : t('dashboard.likeLabel')}</span>
               </button>
-              {isSelected ? (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onGenerate?.() }}
-                  className="flex items-center gap-2 px-4 py-2 bg-mint hover:bg-[#6FE0C2] text-white text-sm font-semibold rounded-lg transition-colors shadow-md hover:shadow-lg"
-                  title={t('dashboard.generatePostWithAI')}
-                >
-                  <span>Generér tekst med AI</span>
-                  <span className="text-lg">→</span>
-                </button>
-              ) : (
-                <span className="text-xs text-gray-400">{t('dashboard.tapToSelect')}</span>
-              )}
+              <button
+                onClick={(e) => { 
+                  e.stopPropagation()
+                  if (!isSelected && !isCommitted) onSelectSuggestion(suggestion)
+                  onGenerate?.()
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-cta hover:bg-cta-hover text-white text-sm font-semibold rounded-lg transition-colors shadow-md hover:shadow-lg"
+                title={suggestion.generatedText ? 'Gå til din tekst' : t('dashboard.generatePostWithAI')}
+              >
+                <span>{suggestion.generatedText ? 'Gå til din tekst' : 'Generér tekst med AI'}</span>
+                <span className="text-lg">→</span>
+              </button>
             </div>
           </div>
           )

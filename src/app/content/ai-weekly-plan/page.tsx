@@ -1077,7 +1077,7 @@ export default function AIWeeklyPlanPage() {
                         <path d="M12 2a10 10 0 1 0 10 10" />
                         <path d="m9 12 2 2 4-4" />
                       </svg>
-                      <span>7-dages content plan</span>
+                      <span>7-dages indholdsplan</span>
                     </div>
                     <div style={{ background: '#F0EEFE', border: '0.5px solid #C7BAF7', color: '#3D339A', borderRadius: '100px', padding: '4px 12px', fontSize: '12px', fontWeight: '500' }} className="inline-flex items-center gap-1.5">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B5CE7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1484,7 +1484,7 @@ export default function AIWeeklyPlanPage() {
             onCreatePost={handleCreatePost}
             lockedIdeaIds={committedWeeklyPlanIdeaIds}
             weeklyPlanPostMap={weeklyPlanPostMap}
-            showGenerateButton={!existingPlanFound}
+            showGenerateButton={true}
             onRefreshWeather={handleRefreshWeather}
             refreshingWeather={refreshingWeather}
             weatherStaleAlert={weatherStaleAlert}

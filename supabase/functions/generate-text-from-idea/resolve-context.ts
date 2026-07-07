@@ -613,20 +613,28 @@ export async function fetchBusinessContext(
         if (tone_dna.recommended_tone?.tone_positioning && typeof tone_dna.recommended_tone.tone_positioning === 'string') {
           brandTone = tone_dna.recommended_tone.tone_positioning.trim()
           console.log('✅ V5.5 tone_positioning extracted:', brandTone)
+        } else if (!brandTone && v5Voice.personality_traits && Array.isArray(v5Voice.personality_traits)) {
+          // FIX: Generate brandTone summary from personality traits when tone_positioning is missing
+          const traits = v5Voice.personality_traits.filter((s: any) => typeof s === 'string').slice(0, 5).join(', ')
+          const formalityLabel = v5Voice.formality_level === 'informal' ? 'afslappet' : v5Voice.formality_level === 'formal' ? 'formel' : 'semi-formel'
+          const humorLabel = v5Voice.humor_style === 'playful' ? 'legende' : v5Voice.humor_style === 'dry' ? 'tør humor' : v5Voice.humor_style === 'serious' ? 'seriøs' : ''
+          brandTone = [traits, formalityLabel, humorLabel].filter(Boolean).join(' · ')
+          console.log('✅ V5.5 brandTone synthesized from personality traits:', brandTone)
         }
         
         // Merge structural rules (tone_rules) + strategic rules (tone_do_list)
+        // FIX: Cap to 5 rules BEFORE merging to prevent AI overload
         const v5ToneRules = Array.isArray(v5Voice.tone_rules) 
-          ? v5Voice.tone_rules.filter((s: any) => typeof s === 'string')
+          ? v5Voice.tone_rules.filter((s: any) => typeof s === 'string').slice(0, 3)  // Cap tone_rules to 3
           : []
         const toneDNARules = Array.isArray(tone_dna.tone_do_list)
-          ? tone_dna.tone_do_list.filter((s: any) => typeof s === 'string')
+          ? tone_dna.tone_do_list.filter((s: any) => typeof s === 'string').slice(0, 2)  // Cap tone_do_list to 2
           : []
         
-        // V5.5 rules override legacy tone_model.writing_rules
+        // V5.5 rules override legacy tone_model.writing_rules (total max 5)
         if (v5ToneRules.length > 0 || toneDNARules.length > 0) {
           brandWritingRules = [...v5ToneRules, ...toneDNARules]
-          console.log('✅ V5.5 brandWritingRules merged:', {
+          console.log('✅ V5.5 brandWritingRules merged (capped):', {
             tone_rules: v5ToneRules.length,
             tone_do_list: toneDNARules.length,
             total: brandWritingRules.length
@@ -1207,7 +1215,7 @@ export async function resolveContentContext(
 
   // Context-aware signature phrase filtering — remove phrases that directly contradict
   // the idea's intent. Example: outdoor seating phrases must not appear in indoor-warmth posts.
-  const OUTDOOR_PHRASE_KW = ['udeservering', 'terrasse', 'udendørs', 'havedining', 'udeafdeling', 'outdoor', 'udetjeneste', 'rooftop', 'havemiljø']
+  const OUTDOOR_PHRASE_KW = ['udeservering', 'udendørs', 'havedining', 'udeafdeling', 'outdoor', 'udetjeneste', 'rooftop', 'havemiljø']
   const INDOOR_WARMTH_KW  = ['varme', 'varm', 'indenfor', 'ly fra', 'tag over', 'søg ly', 'lunt ', 'lunten', 'indendørs', 'komfort indenfor', 'come inside', 'step inside', 'træd ind']
   const hookLower = hook.toLowerCase()
   const isIndoorWarmthContext = INDOOR_WARMTH_KW.some(kw => hookLower.includes(kw))

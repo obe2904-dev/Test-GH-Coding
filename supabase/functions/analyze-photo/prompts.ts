@@ -494,7 +494,7 @@ Ignorér aldrigé svar med "Emoji matches" eller "Emoji er synlig" — kun null.
 
 CONTENT MATCH:
 Ignorér emojis og vurder om teksten matcher billedet.
-Lokationsætninger ("ved åen", "på terrassen" osv.) er stedsbeskrivelse — ikke visuelle krav til billedet.
+Lokationsætninger ("ved åen", "ved udeserveringen" osv.) er stedsbeskrivelse — ikke visuelle krav til billedet.
 
 ---
 
@@ -677,7 +677,7 @@ retake kræver en TEKNISK BILLEDFEJL. Dæmpet restaurantlys, rod på bordet og g
 
 PAS 2 — TEKSTMATCH (evaluer KUN tekst mod billedets faktiske indhold fra Pas 1):
 TRIN 4 — Hvad er tekstens kerneemne? Hvad er billedets kerneindhold (bestemt i Pas 1)?
-LOKATIONSREGEL: Sætninger der beskriver HVOR maden nydes ("ved åen", "på terrassen", "i gården", "under åben himmel", restaurantnavne med stedord) er kontekst om stedets placering — de er IKKE visuelle krav til billedet. Billedet behøver ikke vise åen, terrassen eller stedet. Ignorer disse fuldstændigt. Positionen af lokationssætningen i teksten er irrelevant — om den optræder som overskrift, første sætning eller gentages i brødteksten gør ingen forskel. "Forkæl dig selv ved åen" som overskrift er stadig lokationskontekst, ikke et visuelt krav.
+LOKATIONSREGEL: Sætninger der beskriver HVOR maden nydes ("ved åen", "ved udeserveringen", "i gården", "under åben himmel", restaurantnavne med stedord) er kontekst om stedets placering — de er IKKE visuelle krav til billedet. Billedet behøver ikke vise åen, udeserveringen eller stedet. Ignorer disse fuldstændigt. Positionen af lokationssætningen i teksten er irrelevant — om den optræder som overskrift, første sætning eller gentages i brødteksten gør ingen forskel. "Forkæl dig selv ved åen" som overskrift er stadig lokationskontekst, ikke et visuelt krav.
 Når en lokationsætning OG en stemningsemoji (🌊, 🌿, ☀️ osv.) optrer sammen i teksten — f.eks. "ved åen 🌊" — ignoreres begge. De forstærker ikke hinanden som visuelle krav. contentMatch skal UDELUKKENDE vurdere om madens/produktets kerneindhold matcher billedet.
 TRIN 4b — Nævner teksten specifikke saucer, tilbehør eller sekundære madelementer (f.eks. "cremet bearnaise", "karamelliserede løg", "frisk guacamole")? Gennemgå hvert navngivet element: Er det synligt og visuelt præcist beskrevet i billedet? Hvis et navngivet sekundært element TYDELIGT er erstattet af noget andet (anden saucetype, anden farve, forkert tilbehør) → sænk rating ét niveau og anfør uoverensstemmelsen præcist i feedback.
 TRIN 5 — Fastsæt contentMatch.rating og contentMatch.feedback.

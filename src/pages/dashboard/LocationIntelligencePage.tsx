@@ -485,14 +485,14 @@ function LocationIntelligencePage() {
         .from('business_location_intelligence')
         .select('*')
         .eq('business_id', businessId)
-        .single();
+        .maybeSingle();
 
       if (loadError) {
         throw new Error(`Failed to load location data: ${loadError.message}`);
       }
 
       if (!locationData) {
-        throw new Error('No location data found after generation');
+        throw new Error('No location data found after generation - AI analysis may have failed and fallback was not saved');
       }
 
       console.log('✅ Location intelligence loaded (schema v2):');
@@ -708,7 +708,7 @@ function LocationIntelligencePage() {
           <span className="text-text-muted">→</span>
           <span className="bg-[#E6F4F1] text-brand font-medium px-3 py-1 rounded-lg">{t('location.breadcrumb.location')}</span>
           <span className="text-text-muted">→</span>
-          <a href="/dashboard/brand-v5" className="text-text-muted hover:text-text-secondary">{t('location.breadcrumb.brand')}</a>
+          <a href="/dashboard/brand" className="text-text-muted hover:text-text-secondary">{t('location.breadcrumb.brand')}</a>
         </div>
       </div>
 
@@ -720,7 +720,7 @@ function LocationIntelligencePage() {
       {/* AI usage transparency banner — shown once analysis data exists */}
       {(analysis || lastAnalyzedAt) && (
         <div className="mb-4 px-4 py-3 bg-[#F0EEFE] border-[0.5px] border-[#C7BAF7] rounded-lg text-[13px] text-[#5547C4]">
-          <strong className="font-medium text-[#3D339A]">{t('location.aiDataUsageLabel')}</strong> {t('location.aiDataUsageInfo')}
+          {t('location.aiDataUsageInfo')}
         </div>
       )}
 

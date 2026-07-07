@@ -555,9 +555,11 @@ export function GenerateStep({
     clarificationQuestion,
     clarificationInput,
     errorMessage,
+    hasOriginalText,
     handleAIUpdate,
     handleSpellingCheck,
     generateHashtagsOnly,
+    handleRevertToOriginal,
     handleClarificationDismiss,
     handleClarificationSubmit,
     resetClarificationState,
@@ -922,10 +924,12 @@ export function GenerateStep({
     onUpgrade: handleUpgradeNavigate,
     onEnhance: handleEnhanceClick,
     onSpellingCheck: handleSpellingCheck,
+    onRevert: handleRevertToOriginal,
     isEnhancing: isAIEnhancing,
     isSpellChecking: isSpellingChecking,
     isSpellingChecked,
     isEdited,
+    hasOriginalText,
     hasAISuggestion: hasHeadlineFromAI,
     canEditHeadline,
     isHeadlineEditorVisible,
@@ -1037,7 +1041,7 @@ export function GenerateStep({
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center text-gray-500">
             <div className="flex items-center justify-center gap-2">
               <div className="w-5 h-5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
-              <span>Loading suggestions...</span>
+              <span>{t('generate.loadingSuggestions', 'Henter forslag...')}</span>
             </div>
           </div>
         ) : (
@@ -1068,7 +1072,7 @@ export function GenerateStep({
               </div>
             ) : (
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center text-gray-500">
-                Loading...
+                {t('generate.loading', 'Indlæser...')}
               </div>
             )}
           </div>

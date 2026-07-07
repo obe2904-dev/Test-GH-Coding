@@ -291,7 +291,7 @@ function detectAtmosphereContentType(postText: string): AtmosphereContentType | 
   const bts = ['bag scenen', 'bag kulisserne', 'bag om', 'klargøring', 'inden vi åbner',
     'klar til åbning', 'behind the scene', 'backstage', 'before we open', 'bts',
     'teamet er klar', 'vores team', 'i dag starter vi']
-  const interior = ['udeservering', 'terrasse', 'vores lokale', 'interiør', 'indretning',
+  const interior = ['udeservering', 'vores lokale', 'interiør', 'indretning',
     'glasvægge', 'vores café', 'vores restaurant', 'vores plads', 'kom ind',
     'her sidder', 'our café', 'our space', 'our terrace', 'outdoor seating', 'our restaurant']
   const atmosphere = ['stemning', 'atmosfære', 'hygge', 'en aften hos', 'en dag hos',
@@ -530,7 +530,10 @@ serve(async (req) => {
     const { imageUrl, postText, businessType, language = 'da', mediaType = 'image', duration, imageWidth: clientWidth, imageHeight: clientHeight, businessId }: AnalyzePhotoRequest = await req.json()
     const tier = dailyQuota.tier
 
+    console.log('📥 Request received:', { imageUrl: imageUrl?.substring(0, 80), postText: postText?.substring(0, 50), mediaType, tier })
+
     if (!imageUrl) {
+      console.error('❌ Missing imageUrl in request')
       return new Response(
         JSON.stringify({ error: 'imageUrl is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -540,13 +543,16 @@ serve(async (req) => {
     // SSRF protection: only allow HTTPS URLs pointing to Supabase storage
     try {
       const parsedUrl = new URL(imageUrl)
+      console.log('🔍 URL validation:', { protocol: parsedUrl.protocol, hostname: parsedUrl.hostname })
       if (parsedUrl.protocol !== 'https:' || !parsedUrl.hostname.endsWith('.supabase.co')) {
+        console.error('❌ Invalid URL - not Supabase storage:', { protocol: parsedUrl.protocol, hostname: parsedUrl.hostname })
         return new Response(
           JSON.stringify({ error: 'Invalid image URL: only Supabase storage URLs are permitted' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-    } catch {
+    } catch (urlError) {
+      console.error('❌ URL parsing failed:', urlError)
       return new Response(
         JSON.stringify({ error: 'Invalid image URL format' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

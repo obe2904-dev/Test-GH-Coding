@@ -268,7 +268,7 @@ function buildHybridNarrative(dataSources: DataSources, language: LanguageConfig
       ops_facts.push(`åbent til kl. ${weekendRow.close_time.substring(0, 5)} i weekenden`)
     }
   }
-  if (ops.has_outdoor_seating) ops_facts.push('med udendørs siddepladser')
+  if (ops.has_outdoor_seating) ops_facts.push('med udeservering')
   if (ops.has_takeaway) ops_facts.push('mulighed for takeaway')
   
   // Combine S3 (features) + S4 (ops_facts) into one sentence if both exist
@@ -314,7 +314,7 @@ function buildCafeDescription(dataSources: DataSources, language: LanguageConfig
   const locationPart = location ? ` ${location}` : ''
   const features: string[] = []
   
-  if (ops.has_outdoor_seating) features.push('udendørs siddepladser')
+  if (ops.has_outdoor_seating) features.push('udeservering')
   if (ops.has_takeaway) features.push('takeaway')
   
   const earlyHour = hours.length > 0 
@@ -355,7 +355,7 @@ function buildRestaurantDescription(dataSources: DataSources, language: Language
     
     if (ops.has_table_service) {
       const features: string[] = ['bordbetjening']
-      if (ops.has_outdoor_seating) features.push('udendørs siddepladser')
+      if (ops.has_outdoor_seating) features.push('udeservering')
       sentences.push(`Stedet har ${features.join(' og ')}.`)
     }
     
@@ -657,7 +657,7 @@ export function buildFallbackCoreOfferings(dataSources: DataSources, analysis: a
     if (hasOutdoorSeating) {
       // Only use "terrasse" if explicitly mentioned, otherwise use generic term
       expBullets.push(isDanish 
-        ? (explicitTerrasse ? 'Udendørs terrasse' : 'Udendørs servering')
+        ? 'Udeservering'
         : (explicitTerrasse ? 'Outdoor terrace' : 'Outdoor seating'))
     }
     if (/event|privat|selskab|reception/i.test(combinedDesc)) expBullets.push(isDanish ? 'Private events og selskaber' : 'Private events')

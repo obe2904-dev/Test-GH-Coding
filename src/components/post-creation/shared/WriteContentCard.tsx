@@ -40,10 +40,12 @@ interface WriteContentCardProps {
   onUpgrade: () => void
   onEnhance: () => void
   onSpellingCheck: () => void
+  onRevert?: () => void
   isEnhancing: boolean
   isSpellChecking: boolean
   isSpellingChecked: boolean
   isEdited: boolean
+  hasOriginalText?: boolean
   canEditHeadline: boolean
   isHeadlineEditorVisible: boolean
   onToggleHeadlineEditor: () => void
@@ -87,10 +89,12 @@ export function WriteContentCard({
   onUpgrade: _onUpgrade,
   onEnhance,
   onSpellingCheck,
+  onRevert,
   isEnhancing,
   isSpellChecking,
   isSpellingChecked,
   isEdited,
+  hasOriginalText,
   canEditHeadline,
   isHeadlineEditorVisible,
   onToggleHeadlineEditor,
@@ -282,6 +286,7 @@ export function WriteContentCard({
           <ActionButtons
             onEnhance={onEnhance}
             onSpellingCheck={onSpellingCheck}
+            onRevert={onRevert}
             isEnhancing={isEnhancing}
             isSpellChecking={isSpellChecking}
             isSpellingChecked={isSpellingChecked}
@@ -289,6 +294,7 @@ export function WriteContentCard({
             hasAISuggestion={hasAISuggestion}
             showEnhance={true}
             showSpellingCheck={true}
+            showRevert={hasOriginalText}
           />
         </div>
 

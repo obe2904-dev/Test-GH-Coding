@@ -551,7 +551,7 @@ Ugen er primært regnfuld (${badDays}/${forecasts.length} dage med regn/sne/tåg
     return `
 ⚠️ UDESERVERING (kritisk — gælder for hele analysen):
 Forretningen HAR IKKE udeservering.
-• Nævn ALDRIG udeservering, udendørs servering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter som en faktor eller fordel.
+• Nævn ALDRIG udeservering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter som en faktor eller fordel.
 • Generer INGEN angles eller faktorer der relaterer til udendørs oplevelser.
 • Fokusér udelukkende på indendørs oplevelser, stemning, menu og service.`;
   })();
@@ -701,7 +701,7 @@ ${(() => {
   if (hasOutdoorSeating) return ''; // Business has outdoor seating — no constraint needed
   return `⚠️ UDESERVERING (kritisk — gælder for ALLE angles og al formulering):
 Forretningen HAR IKKE udeservering.
-• Nævn ALDRIG udeservering, udendørs servering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter i week_summary, competitive_advantage eller angles.
+• Nævn ALDRIG udeservering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter i week_summary, competitive_advantage eller angles.
 • Generer INGEN angles baseret på udendørs oplevelser — fokusér udelukkende på indendørs oplevelser, stemning, menu og service.
 
 `;
@@ -952,7 +952,7 @@ ${(() => {
   // Outdoor seating constraint — blocks outdoor angles when business doesn't have outdoor seating
   const hasOutdoorSeating = (context.weather as any)?.has_outdoor_seating ?? (context.location as any)?.has_outdoor_seating ?? false;
   if (hasOutdoorSeating) return ''; // Business has outdoor seating — no constraint needed
-  return `⚠️ UDESERVERING: Forretningen HAR IKKE udeservering. Nævn ALDRIG udeservering, udendørs servering, terrasse, gårdhave eller udendørs faciliteter i week_summary, competitive_advantage eller angles. Fokusér kun på indendørs oplevelser.`;
+  return `⚠️ UDESERVERING: Forretningen HAR IKKE udeservering. Nævn ALDRIG udeservering, terrasse, gårdhave eller udendørs faciliteter i week_summary, competitive_advantage eller angles. Fokusér kun på indendørs oplevelser.`;
 })()}
 
 ⚠️ VARIATION — Dynamisér feeden, undgå et repetitivt broadcast:

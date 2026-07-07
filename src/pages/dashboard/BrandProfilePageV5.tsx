@@ -503,20 +503,6 @@ export function BrandProfilePageV5() {
                         )}
                       </div>
                     )}
-
-                    {/* Programme Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {programmes.map((prog) => (
-                        <div key={prog.programme_type} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                          <div className="text-[13px] font-medium text-[#111714] mb-1 normal-case">{prog.programme_name}</div>
-                          <div className="text-xs text-slate-600 mb-2">{prog.time_windows?.join(', ')}</div>
-                          <div className="text-xs">
-                            <div className="text-[#A09A91] text-[12px]">Confidence: <span className="font-medium text-[#076B4E]">{((prog.confidence || 0) * 100).toFixed(0)}%</span></div>
-                            <div className="text-[#A09A91] text-[12px]">Menu items: {prog.menu_evidence?.length || 0}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 </div>
               ) : (
@@ -571,15 +557,6 @@ export function BrandProfilePageV5() {
                                   </div>
                                   <div className="w-full bg-gray-200 rounded-full h-2">
                                     <div className="bg-[#0A7D5F] h-2 rounded-full" style={{ width: `${prog.baseline_goal_split.strengthen_brand}%` }} />
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="flex justify-between text-xs mb-1">
-                                    <span>{t('brandProfileV5.retainRegulars')}</span>
-                                    <span className="font-medium">{prog.baseline_goal_split.retain_regulars}%</span>
-                                  </div>
-                                  <div className="w-full bg-gray-200 rounded-full h-2">
-                                    <div className="bg-[#6B5CE7] h-2 rounded-full" style={{ width: `${prog.baseline_goal_split.retain_regulars}%` }} />
                                   </div>
                                 </div>
                               </div>
@@ -695,7 +672,7 @@ export function BrandProfilePageV5() {
                           <div>
                             <span className="font-medium text-[#3C3830]">{t('brandProfileV5.emoji')}</span> 
                             <span className="ml-1 text-[#5C5650]">{profile.brand_profile_v5.voice.emoji_level}</span>
-                            <span className="ml-1 text-gray-500 text-[10px]">(+29% engagement)</span>
+                            <span className="ml-1 text-gray-500 text-[10px]">{t('brandProfileV5.emojiEngagementNote')}</span>
                           </div>
                           <div>
                             <span className="font-medium text-[#3C3830]">{t('brandProfileV5.sentenceStyle')}</span> 
@@ -725,7 +702,7 @@ export function BrandProfilePageV5() {
                           <div>
                             <p className="text-[11px] font-medium text-[#A09A91] uppercase tracking-[0.07em] mb-3 flex items-center gap-2">
                               <VoiceProfileIcon className="w-4 h-4 flex-shrink-0 text-[#076B4E]" />
-                              <span>Social Media Tone (fraser der viser hvordan vi taler)</span>
+                              <span>{t('brandProfileV5.socialMediaTone')}</span>
                             </p>
                             <div className="grid grid-cols-2 gap-2">
                               {profile.brand_profile_v5.voice.social_writing_examples.map((phrase: string, i: number) => (
@@ -767,7 +744,7 @@ export function BrandProfilePageV5() {
                                     {/* Variation B (alternative) */}
                                     {variationB && (
                                       <div className="bg-[#F4F1EC] border-[0.5px] border-[#C8C3BB] rounded-lg px-[14px] py-[10px] border-dashed">
-                                        <p className="text-[12px] font-medium text-[#076B4E] mb-1">Alternative:</p>
+                                        <p className="text-[12px] font-medium text-[#076B4E] mb-1">{t('brandProfileV5.alternative')}</p>
                                         <p className="text-[13px] text-[#5C5650] leading-relaxed italic">"{variationB}"</p>
                                       </div>
                                     )}

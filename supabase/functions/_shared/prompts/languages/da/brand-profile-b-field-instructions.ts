@@ -41,7 +41,7 @@ export function buildVoiceRationaleInstructions(): string {
       - PATH B: "Stemme-reglerne er vurderet ud fra stedets koncept og målgruppesignaler — ikke fra direkte tekstprøver."
    
    ✅ KONKRET EKSEMPEL (PATH B — ingen website text):
-   "Datagrundlaget består af 5 menu-programmer (BRUNCH, FROKOST, AFTEN, COCKTAILS, BØRNEMENU), åbningstider 09:30-02:00 (weekend bekræfter senprogrammer), samt location intelligence (vandfront ved åen, bymidte-sekundær, tourist context). Da hjemmesiden har begrænset tekstindhold, er stemme-reglerne udledt fra multi-program karakteren (morgen til nat), vandfront-specificiteten, og familievenlige features (børnemenu, udendørs servering). Stemme-reglerne er derfor vurderet ud fra stedets koncept — ikke fra direkte tekstprøver."
+  "Datagrundlaget består af 5 menu-programmer (BRUNCH, FROKOST, AFTEN, COCKTAILS, BØRNEMENU), åbningstider 09:30-02:00 (weekend bekræfter senprogrammer), samt location intelligence (vandfront ved åen, bymidte-sekundær, tourist context). Da hjemmesiden har begrænset tekstindhold, er stemme-reglerne udledt fra multi-program karakteren (morgen til nat), vandfront-specificiteten, og familievenlige features (børnemenu, udeservering). Stemme-reglerne er derfor vurderet ud fra stedets koncept — ikke fra direkte tekstprøver."
    
    ❌ FORBUDT: Tom streng, generiske udsagn uden konkrete signaler, kopiering af instruktioner
    ⚠️ VALIDATION: Dette felt SKAL være udfyldt. Tom streng = hard error.`

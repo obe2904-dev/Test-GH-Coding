@@ -121,11 +121,13 @@ export interface UsePostCreationAIReturn {
   clarificationInput: string
   errorMessage: string
   isLoadingPhotoIdea: boolean
+  hasOriginalText: boolean
 
   // Actions
   handleAIUpdate: () => Promise<void>
   handleSpellingCheck: () => Promise<void>
   generateHashtagsOnly: (textToUse: string, headlineToUse?: string) => Promise<void>
+  handleRevertToOriginal: () => void
   handleClarificationDismiss: () => void
   handleClarificationSubmit: () => void
   resetClarificationState: () => void
@@ -184,6 +186,7 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
   const [hasUsedClarification, setHasUsedClarification] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [isLoadingPhotoIdea, setIsLoadingPhotoIdea] = useState(false)
+  const [originalText, setOriginalText] = useState<{ headline: string; text: string } | null>(null)
 
   const showError = useCallback((message: string, duration = 5000) => {
     setErrorMessage(message)
@@ -279,6 +282,14 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     }
 
     showError('')
+
+    // Store original text before enhancement (only if not already stored)
+    if (!originalText) {
+      setOriginalText({
+        headline: currentContent.headline,
+        text: currentContent.text
+      })
+    }
 
     if (!canUseCaptionGeneration()) {
       const limits = getTierLimits(currentTier)
@@ -939,6 +950,20 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     setHasUsedClarification(true)
   }, [])
 
+  const handleRevertToOriginal = useCallback(() => {
+    if (!originalText) return
+    
+    setHeadline(originalText.headline)
+    setText(originalText.text)
+    
+    // Clear original text so "Revert" button disappears
+    setOriginalText(null)
+    setIsEdited(false)
+    setIsSpellingChecked(false)
+    
+    console.log('[handleRevertToOriginal] Reverted to original text')
+  }, [originalText, setHeadline, setText, setIsEdited])
+
   const handleClarificationSubmit = useCallback(() => {
     if (!clarificationInput.trim()) {
       return
@@ -961,10 +986,10 @@ export function usePostCreationAI(params: UsePostCreationAIParams): UsePostCreat
     clarificationInput,
     errorMessage,
     isLoadingPhotoIdea,
+    hasOriginalText: originalText !== null,
     handleAIUpdate,
     handleSpellingCheck,
-    generateHashtagsOnly,
-    handleClarificationDismiss,
+    generateHashtagsOnly,    handleRevertToOriginal,    handleClarificationDismiss,
     handleClarificationSubmit,
     resetClarificationState,
     clearClarificationPrompt,

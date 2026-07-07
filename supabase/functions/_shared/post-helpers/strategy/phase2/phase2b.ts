@@ -507,7 +507,7 @@ export async function generatePostDetail(
     // Business DOES NOT have outdoor seating — strict block
     return `\n⛔ UDESERVERING (KRITISK — gælder ALLE felter):
 Forretningen HAR IKKE udeservering.
-• Nævn ALDRIG udeservering, udendørs servering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter i titel, rationale, media direction eller captions.
+• Nævn ALDRIG udeservering, terrasse, gårdhave, udeområde eller andre udendørs faciliteter i titel, rationale, media direction eller captions.
 • Generer INGEN angles eller faktorer der relaterer til udendørs oplevelser.
 • Fokusér udelukkende på indendørs oplevelser, placering, stemning, menu og service.
 \n`;

@@ -113,7 +113,7 @@ export const DANISH_HOLIDAYS: Holiday[] = [
     type: 'easter-relative',
     daysFromEaster: 49,
     category: 'national',
-    contentIdeas: ['Pinsefrokost', 'Sommer starter', 'Udendørsservering']
+    contentIdeas: ['Pinsefrokost', 'Sommer starter', 'Udeservering']
   },
   {
     name: '2. Pinsedag',
@@ -188,7 +188,7 @@ export const DANISH_HOLIDAYS: Holiday[] = [
     date: '06-28',
     type: 'variable',
     category: 'seasonal',
-    contentIdeas: ['Sommermenu', 'Ferietilbud', 'Udendørsservering', 'Afkøling']
+    contentIdeas: ['Sommermenu', 'Ferietilbud', 'Udeservering', 'Afkøling']
   },
   {
     name: 'Efterårsferie',

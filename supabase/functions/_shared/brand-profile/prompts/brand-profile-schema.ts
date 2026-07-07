@@ -63,7 +63,7 @@ export const BRAND_PROFILE_SCHEMA = {
     },
     business_character: {
       type: "string",
-      description: "1–2 sentences of plain factual text describing what this business actually is. Cover: (1) all venue types or roles when a hybrid — list each e.g. 'café, restaurant og bar'; (2) defining physical features that create content opportunities e.g. 'med udendørs servering', 'med havudsigt', 'i en gammel fabrikshal' (ONLY use 'terrasse' if the business explicitly calls it that); (3) key temporal formats or transitions if relevant. Not marketing language. Must let an AI infer content priorities without any other context. Example 1: 'Café, restaurant og bar med udendørs siddepladser. Brunch og frokost fra åbning, aftensmad og drinks fra middag og fremefter.' Example 2: 'Klassisk dansk restaurant med fokus på smørrebrød til frokost og moderne aftenmenu.' Example 3: 'Specialty kaffebar med travl morgenstemning og rolig eftermiddagskarakter — primær take-away men med få indepladser.'" ,
+      description: "1–2 sentences of plain factual text describing what this business actually is. Cover: (1) all venue types or roles when a hybrid — list each e.g. 'café, restaurant og bar'; (2) defining physical features that create content opportunities e.g. 'med udeservering', 'med havudsigt', 'i en gammel fabrikshal' (ONLY use 'terrasse' if the business explicitly calls it that); (3) key temporal formats or transitions if relevant. Not marketing language. Must let an AI infer content priorities without any other context. Example 1: 'Café, restaurant og bar med udeservering. Brunch og frokost fra åbning, aftensmad og drinks fra middag og fremefter.' Example 2: 'Klassisk dansk restaurant med fokus på smørrebrød til frokost og moderne aftenmenu.' Example 3: 'Specialty kaffebar med travl morgenstemning og rolig eftermiddagskarakter — primær take-away men med få indepladser.'" ,
       maxLength: 350
     },
     tone_of_voice: {
@@ -156,7 +156,7 @@ export const BRAND_PROFILE_SCHEMA = {
       properties: {
         value: {
           type: "string",
-          description: "Bulleted list: 3 meal CATEGORY anchors (e.g. 'Brunch med klassiske morgenmadsretter', 'Frokost og smørrebrød', 'Middagsmenuer') + 2 experience/service anchors (e.g. 'Udendørs servering', 'Take away'). Use MEAL CATEGORIES — NOT specific dish names or menu item names from the menu. Each bullet should describe a CATEGORY of offering, not a specific item. ONLY use 'terrasse' if business explicitly calls it that.",
+          description: "Bulleted list: 3 meal CATEGORY anchors (e.g. 'Brunch med klassiske morgenmadsretter', 'Frokost og smørrebrød', 'Middagsmenuer') + 2 experience/service anchors (e.g. 'Udeservering', 'Take away'). Use MEAL CATEGORIES — NOT specific dish names or menu item names from the menu. Each bullet should describe a CATEGORY of offering, not a specific item. ONLY use 'terrasse' if business explicitly calls it that.",
           maxLength: 800
         },
         proof: {

@@ -3,24 +3,28 @@ import { useTranslation } from 'react-i18next'
 interface ActionButtonsProps {
   onEnhance: () => void
   onSpellingCheck: () => void
+  onRevert?: () => void
   isEnhancing: boolean
   isSpellChecking: boolean
   isSpellingChecked: boolean
   isEdited: boolean
   showSpellingCheck?: boolean
   showEnhance?: boolean
+  showRevert?: boolean
   hasAISuggestion: boolean
 }
 
 export function ActionButtons({
   onEnhance,
   onSpellingCheck,
+  onRevert,
   isEnhancing,
   isSpellChecking,
   isSpellingChecked,
   isEdited,
   showSpellingCheck = false,
   showEnhance = true,
+  showRevert = false,
   hasAISuggestion
 }: ActionButtonsProps) {
   const { t } = useTranslation(undefined, { keyPrefix: 'createPost.generate' })
@@ -37,6 +41,16 @@ export function ActionButtons({
   
   return (
     <div className="flex flex-wrap gap-2">
+      {showRevert && (
+        <button
+          onClick={onRevert}
+          disabled={isEnhancing || isSpellChecking}
+          className="px-3 py-1.5 rounded-md border border-slate-300 text-xs font-medium flex items-center gap-1.5 transition-all bg-white text-slate-700 hover:bg-slate-50"
+        >
+          <span>↶</span>
+          <span>{t('revertToOriginal', 'Fortryd AI-forslag')}</span>
+        </button>
+      )}
       {showEnhance && <button
         onClick={onEnhance}
         disabled={enhanceDisabled}

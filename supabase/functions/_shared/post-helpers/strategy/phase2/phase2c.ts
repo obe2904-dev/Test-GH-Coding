@@ -609,7 +609,7 @@ Svar KUN med JSON:
     
     // Rainy week hallucination phrases — forbidden when rainyWeekWarning is active
     const RAINY_WEEK_HALLUCINATIONS = rainyWeekWarning 
-      ? ['godt vejr', 'fint vejr', 'solrigt', 'solskin', 'varmt vejr', 'sommervejr', 'varme aftener', 'varme sommeraftener', 'lune aftener', 'lune sommeraftener', 'udendørs muligheder', 'udendørs servering', 'udeservering', 'udeservering åbner', 'udeservering aktiveres', 'åben udeservering', 'al fresco', 'lokker gæster til udendørs', 'lokker til udendørs']
+      ? ['godt vejr', 'fint vejr', 'solrigt', 'solskin', 'varmt vejr', 'sommervejr', 'varme aftener', 'varme sommeraftener', 'lune aftener', 'lune sommeraftener', 'udendørs muligheder', 'udeservering', 'udeservering åbner', 'udeservering aktiveres', 'åben udeservering', 'al fresco', 'lokker gæster til udendørs', 'lokker til udendørs']
       : [];
     
     // Catches both classic "er/var et Xte" and "til et Xte" (e.g. "gør stedet til et planlagte besøg")

@@ -353,7 +353,7 @@ Eksempel format:
 Du er Marketing ekspert for Café Faust.
 
 FORRETNING:
-Café ved åen i Aarhus med brunch, frokost og 3-retters aftenmenuer. Frokostservering kl. 09:00-17:30 med retter som pariserbøf, bøf & bearnaise og falafelsalat. Bar med cocktails åbent til kl. 02:00 i weekenden. Udendørs siddepladser og takeaway.
+Café ved åen i Aarhus med brunch, frokost og 3-retters aftenmenuer. Frokostservering kl. 09:00-17:30 med retter som pariserbøf, bøf & bearnaise og falafelsalat. Bar med cocktails åbent til kl. 02:00 i weekenden. Udeservering og takeaway.
 
 LOKATION:
 - Åboulevarden 38, 8000 Aarhus

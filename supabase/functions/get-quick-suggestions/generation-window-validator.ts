@@ -6,8 +6,10 @@
  * Quick Suggestions are tactical, same-day content designed to drive customers
  * in TODAY during active service periods. They should NOT generate when:
  * - Too late to drive footfall (< 1.5h before last service ends)
- * - Business is closed
- * - No service periods remain
+ * - No service periods or hours configured
+ * 
+ * Note: Closed days are ALLOWED — the system will generate 1 brand/atmosphere
+ * post using the closedTimeline() function (no food content).
  * 
  * When the window is invalid, return a user-friendly message directing them
  * to "Write Yourself" for manual posting.
@@ -47,18 +49,7 @@ export function validateGenerationWindow(
   const nowMins = clientNow.getHours() * 60 + clientNow.getMinutes()
   const currentTime = `${clientNow.getHours().toString().padStart(2, '0')}:${clientNow.getMinutes().toString().padStart(2, '0')}`
   
-  // ── Check 1: Closed today ──
-  if (isClosedToday) {
-    return {
-      isValid: false,
-      reason: 'business_closed_today',
-      errorCode: 'businessClosedToday',
-      userMessage: 'Virksomheden er lukket i dag. Brug "Skriv selv" for at oprette opslag til andre dage.',  // Fallback
-      currentTime
-    }
-  }
-  
-  // ── Check 2: No service periods or hours ──
+  // ── Check 1: No service periods or hours ──
   if (programs.length === 0 && (!openTime || !closeTime)) {
     return {
       isValid: false,
@@ -105,7 +96,12 @@ export function validateGenerationWindow(
     lastServiceName = 'lukning'
   }
   
-  // ── Check 3: Calculate cutoff (last service end - 1.5 hours) ──
+  // ── Check 2: Calculate cutoff (last service end - 1.5 hours) ──
+  // Skip this check if business is closed today — closedTimeline() will handle it
+  if (isClosedToday) {
+    return { isValid: true, currentTime }
+  }
+  
   const CUTOFF_BUFFER_MINS = 90  // 1.5 hours
   const cutoffMins = lastServiceEndMins - CUTOFF_BUFFER_MINS
   

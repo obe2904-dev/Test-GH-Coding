@@ -249,16 +249,16 @@ function buildSharedToneCore(opts: PromptOptions): SharedToneCore {
   const dishRules: Record<string, string> = {
     da: menuItemName
       ? '4. Nævn KUN den ret der er nævnt i INDHOLD — ingen andre retter, ingen add-ons'
-      : '4. Nævn INGEN mad, retter eller drikkevarer medmindre de er eksplicit nævnt i INDHOLD',
+      : '4. Nævn INGEN mad, retter eller drikkevarer medmindre de er eksplicit nævnt i INDHOLD. FORBUDT: kaffe, kaffekande, espresso, te, vin, øl, cocktails, drikkevarer generelt — MED MINDRE ordret nævnt i INDHOLD. Bynavnet eller virksomhedstypen ("café") er IKKE tilladelse til at opfinde kaffe i teksten.',
     sv: menuItemName
       ? '4. Nämn BARA den rätt som anges i INNEHÅLL — inga andra rätter, inga tillägg'
-      : '4. Nämn INGEN mat, rätter eller drycker om de inte uttryckligen anges i INNEHÅLL',
+      : '4. Nämn INGEN mat, rätter eller drycker om de inte uttryckligen anges i INNEHÅLL. FÖRBJUDET: kaffe, kaffekanna, espresso, te, vin, öl, cocktails, drycker generellt — OM INTE ordagrant nämnda i INNEHÅLL. Stadsnamnet eller företagstypen ("café") är INTE tillstånd att uppfinna kaffe i texten.',
     de: menuItemName
       ? '4. Erwähne NUR das Gericht, das im INHALT angegeben ist — keine anderen Gerichte, keine Add-ons'
-      : '4. Erwähne KEINE Speisen, Gerichte oder Getränke, die nicht ausdrücklich im INHALT stehen',
+      : '4. Erwähne KEINE Speisen, Gerichte oder Getränke, die nicht ausdrücklich im INHALT stehen. VERBOTEN: Kaffee, Kaffeekanne, Espresso, Tee, Wein, Bier, Cocktails, Getränke allgemein — ES SEI DENN wörtlich im INHALT erwähnt. Der Stadtname oder Geschäftstyp ("Café") ist KEINE Erlaubnis, Kaffee im Text zu erfinden.',
     en: menuItemName
       ? '4. Mention ONLY the dish named in CONTENT — no other dishes, no add-ons'
-      : '4. Mention NO food, dishes or drinks unless they are explicitly stated in CONTENT',
+      : '4. Mention NO food, dishes or drinks unless they are explicitly stated in CONTENT. FORBIDDEN: coffee, coffee pot, espresso, tea, wine, beer, cocktails, beverages in general — UNLESS explicitly stated in CONTENT. The city name or business type ("café") is NOT permission to invent coffee in the text.',
   }
 
   // ── Sensory rules ──────────────────────────────────────────────────────
@@ -337,7 +337,7 @@ This text is journalism, not creative fiction. You may ONLY write about what is 
         ? [parts[0].trim(), parts[1].trim()]
         : [r]
     })
-    .slice(0, 5)
+    .slice(0, 8)  // Increased from 5 to 8 to capture more rules
   const cappedGoodExamples   = brandGoodExamples.slice(0, 3)
   const cappedAvoidExamples  = brandAvoidExamples.slice(0, 3)
   const cappedPreferVocab    = brandPreferVocab.slice(0, 4)
@@ -441,7 +441,7 @@ function buildBrandBlock(o: BrandBlockOptions): string {
 - Du MÅ IKKE opfinde sanselige detaljer om interiøret (vinduer, lys, gulv, indretning, stemning inde).
 - Brug KUN verificerede lokationsreferencer: ${locationVocabForPrompt}.
 - Faktuelle ankerpunkter du KAN bruge: ${factualAnchors}.
-${o.hasOutdoorSeating === false ? '- 🚫 NÆVN IKKE udeservering, terrasse eller udendørs spisning — virksomheden har IKKE udendørs pladser.\n' : ''}- Hvis intet konkret at sige: skriv én sætning om location + én om hvad der serveres nu. Stop.`
+${o.hasOutdoorSeating === false ? '- 🚫 NÆVN IKKE udeservering eller udendørs spisning — virksomheden har IKKE udeservering.\n' : ''}- Hvis intet konkret at sige: skriv én sætning om location + én om hvad der serveres nu. Stop.`
   }
   
   if (o.brandTone)                  b += `\n${o.brandTone}`
@@ -695,7 +695,7 @@ function buildAIIdeasPrompt(opts: PromptOptions): string {
   const forbiddenOpener: Record<string, string> = { da: forbiddenOpenerDA, sv: forbiddenOpenerSV, de: forbiddenOpenerDE }
 
   // AI Ideas: lighter brand block — same source, trimmed at call site.
-  const aiWritingRules   = cappedWritingRules.slice(0, 3)
+  const aiWritingRules   = cappedWritingRules.slice(0, 5)  // Increased from 3 to 5
   const aiGoodExamples   = isSceneMoodPost ? cappedGoodExamples.slice(0, 1) : []
   const aiPreferVocab    = cappedPreferVocab.slice(0, 5)
   const aiAvoidVocab     = cappedAvoidVocab.slice(0, 5)

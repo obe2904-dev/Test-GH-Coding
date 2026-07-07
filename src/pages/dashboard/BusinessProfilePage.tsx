@@ -85,6 +85,7 @@ function BusinessProfilePage() {
 
   // UI state
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisCompleted, setAnalysisCompleted] = useState(false)
   const [justSaved, setJustSaved] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [isLoadingProfile, setIsLoadingProfile] = useState(true)
@@ -532,6 +533,11 @@ function BusinessProfilePage() {
 
         applyState(loadedState)
         syncSavedSnapshot(loadedState)
+        
+        // Set analysisCompleted if website analysis has been run
+        if (websiteAnalysisData || profileData) {
+          setAnalysisCompleted(true)
+        }
       } finally {
         if (isActive) setIsLoadingProfile(false)
       }
@@ -926,8 +932,8 @@ function BusinessProfilePage() {
         // Mark as unsaved so user can review and save manually
         markUnsaved()
         
-        // Show success message
-        alert(t('businessProfile.alertFieldsFetched', { count: fieldsUpdated }))
+        // Set analysis completed state instead of showing alert
+        setAnalysisCompleted(true)
       } else {
         alert(t('businessProfile.alertFetchFailed'))
       }
@@ -1336,7 +1342,12 @@ function BusinessProfilePage() {
                   <AnalyzeIcon className={isAnalyzing ? 'w-4 h-4 animate-spin motion-reduce:animate-none text-text-inverse' : 'w-4 h-4 text-text-inverse'} />
                   <span>{isAnalyzing ? t('businessProfile.analyzingWebsiteButton') : t('businessProfile.analyzeWebsiteButton')}</span>
                 </button>
-                <span className="text-xs text-text-muted">{t('businessProfile.analyzeWebsiteHint')}</span>
+                <span className="text-xs text-text-muted">
+                  {analysisCompleted 
+                    ? t('businessProfile.analyzeWebsiteHintCompleted')
+                    : t('businessProfile.analyzeWebsiteHint')
+                  }
+                </span>
                 <span className="sr-only" aria-live="polite">{isAnalyzing ? t('businessProfile.analyzeWebsiteAriaLive') : ''}</span>
               </div>
             </div>
@@ -1902,24 +1913,17 @@ function BusinessProfilePage() {
         </div>
       </div>
 
-      {/* Navigation button */}
-      <div className="flex justify-end mt-6">
-        {currentTier === 'free' ? (
-          <span
-            aria-disabled="true"
-            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm bg-slate-200 text-slate-500 font-medium rounded-lg cursor-not-allowed"
-          >
-            {t('businessProfile.nextMenu')}
-          </span>
-        ) : (
+      {/* Navigation button - only shown for paid tiers */}
+      {currentTier !== 'free' && (
+        <div className="flex justify-end mt-6">
           <a
             href="/dashboard/menu"
             className="inline-flex items-center gap-2 px-5 py-2.5 text-sm bg-cta text-text-inverse font-medium rounded-lg hover:bg-cta-hover transition-colors"
           >
             {t('businessProfile.nextMenu')}
           </a>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -203,9 +203,12 @@ export function Sidebar({ className = '' }: SidebarProps) {
     <div className={`w-72 bg-surface border-r border-border flex flex-col h-screen ${className}`}>
       {/* Logo */}
       <div className="px-4 py-4 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-brand">
+        <button 
+          onClick={() => navigate('/dashboard')}
+          className="text-2xl font-bold text-brand hover:text-brand-hover transition-colors cursor-pointer"
+        >
           Post2Grow
-        </h1>
+        </button>
         {/* Tier Badge */}
         {currentTier === 'free' ? (
           <button

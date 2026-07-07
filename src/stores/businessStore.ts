@@ -3,9 +3,9 @@ import { persist } from 'zustand/middleware'
 
 interface Business {
   id: string
-  business_name: string
+  name: string
   owner_id: string
-  created_at?: string
+  created_at?: string | null
 }
 
 interface BusinessStoreState {

@@ -329,6 +329,55 @@ export function CreatePostPage() {
     if (weeklyContentPlan && weeklyPlanPost) {
       const savedContent = draftMap[weeklyPlanPostIndex]
       const savedPhotos = photoDraftMap[weeklyPlanPostIndex]
+      const hasSavedPhotoUrl = !!savedPhotos?.uploadedMedia?.[0] && (() => {
+        const media = savedPhotos.uploadedMedia[0]
+        const url = media.selectedVersionForPost === 'adjusted'
+          ? media.adjustedUrl
+          : media.originalUrl ?? media.url
+        return !!url && !url.startsWith('blob:')
+      })()
+
+      const restorePhotoFromDb = async () => {
+        const businessId = businessData.business?.id
+        if (!businessId) {
+          setPhotoContent(null)
+          return
+        }
+
+        const dbKey: DbPostKey = {
+          businessId,
+          ideaSource: 'weekly_plan',
+          weeklyPlanSlotDate: weeklyPlanPost.timing.date,
+          weeklyPlanId: weeklyContentPlan?.id ?? null,
+          weeklyPlanSlotIndex: weeklyPlanPostIndex ?? null,
+        }
+
+        const dbDraft = await posts.loadPost(dbKey).catch((err) => {
+          console.error('[WeeklyPlanEffect] DB photo load error:', err)
+          return null
+        })
+
+        if (dbDraft?.photoUrl) {
+          const restoredPhotoContent = {
+            uploadedMedia: [{
+              id: 'db-draft-photo',
+              file: null as any,
+              url: dbDraft.photoUrl,
+              originalUrl: dbDraft.photoUrl,
+              type: 'image' as const,
+              selectedVersionForPost: 'original' as const,
+            }],
+            selectedMedia: null,
+            isOriginal: true,
+            photoAdjustments: null,
+            carouselMode: false,
+          }
+          setPhotoContent(restoredPhotoContent)
+          setPhotoDraftMapEntry(weeklyPlanPostIndex, restoredPhotoContent)
+        } else {
+          setPhotoContent(null)
+        }
+      }
       if (savedContent?.text) {
         // In-memory draft (same session) — restore instantly.
         // Also populate weeklyPlanSuggestion so the photo suggestion is
@@ -345,10 +394,10 @@ export function CreatePostPage() {
         }
         setPostContent(savedContent)
         // Restore saved photos, or clear any stale photo from a previous session
-        if (savedPhotos) {
+        if (hasSavedPhotoUrl) {
           setPhotoContent(savedPhotos)
         } else {
-          setPhotoContent(null)
+          void restorePhotoFromDb()
         }
         setCurrentStep('create')
       } else {

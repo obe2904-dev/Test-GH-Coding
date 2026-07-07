@@ -1164,32 +1164,42 @@ ${input.legacy_voice.voice_constraints}
 ` : ''}
 
 DIN OPGAVE:
-Generer voice framework (tone rules, personality traits, formality, humor, sentence structure) 
+Generer voice framework (positive guidelines + minimal constraints) 
 der er 100% tilpasset DENNE specifikke business.
 
-KRAV TIL TONE RULES:
+KRAV TIL TONE_DO_LIST (4-6 POSITIVE structural rules):
 1. AFLED fra konteksten ovenfor - ikke generiske regler
    ❌ "Vær professionel" (kunne være ENHVER business)
-   ✅ "Fokusér på tilberedningsmetoder" (reflects culinary + signature themes)
+   ✅ "Fremhæv tilberedningsmetoder og ingrediensers kvalitet" (reflects culinary + signature themes)
    ✅ "Brug lokale referencer til ${input.geographicContext?.city_profile?.city || 'området'}" (location-specific)
 
-2. GØR dem actionable - ikke vage principper  
-   ❌ "Vær autentisk"
-   ✅ "Skriv én tanke pr. sætning — stop før du forklarer"
+2. POSITIVE FRAMING - fortæl hvad man SKAL gøre
+   ❌ "Undgå lange sætninger"
+   ✅ "Skriv én tanke pr. sætning — hold det enkelt"
+   ❌ "Undgå overflødige beskrivelser"
+   ✅ "Fokusér på konkrete sanseindtryk og ingredienser"
 
 3. REFLEKTER intelligence-specifics:
-   - Hvis location = waterfront → reference social/atmospheric vibe
-   - Hvis signature themes = European bistro → balance klassisk og moderne
-   - Hvis audience = urban professionals + students → tilgængelig men sofistikeret
-   - Hvis prisniveau = mid-range → værdi uden pretension
+   - Hvis location = waterfront → "Brug stedets atmosfære som naturlig kontekst"
+   - Hvis signature themes = European bistro → "Balancér mellem klassisk og moderne fortolkning"
+   - Hvis audience = urban professionals + students → "Kombiner sofistikeret tone med tilgængelighed"
+   - Hvis prisniveau = mid-range → "Kommunikér værdi gennem håndværk, ikke pris"
+
+KRAV TIL AVOID_PATTERNS (minimale constraints - kun kritiske forbud):
+- compound_sentences: Max 2 strukturelle forbud
+  Eksempel: ["imperativer som åbning: 'Kom forbi', 'Oplev'"]
+- generic_marketing: Max 6 marketing-klichéer
+  Eksempel: ["perfekt", "lækker", "hyggelig", "nyd", "unik"]
+- brochure_language: Max 4 daterede udtryk
+  Eksempel: ["svip", "tag en pause", "varm omfavnelse"]
 
 KRAV TIL PERSONALITY TRAITS:
 - Konkrete adjektiver ("moderne", "indbydende", "lokal")
 - IKKE vage ("friendly", "professional")
 - 3-5 traits der matcher location + audience + culinary identity
 
-Fokusér på at definere HVORDAN denne business skal kommunikere.
-Tone rules skal fungere for ALLE indholdstyper (menu posts, atmosphere, events, behind-the-scenes).`
+Fokusér på POSITIVE guidance i tone_do_list.
+Negative constraints skal være MINIMALE og separeret for lavere salience.`
 
   try {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1219,11 +1229,22 @@ Tone rules skal fungere for ALLE indholdstyper (menu posts, atmosphere, events, 
     const parsed = JSON.parse(content)
 
     console.log(`🔍 AI Voice Response Keys:`, Object.keys(parsed))
-    console.log(`   - menu_description_examples present: ${!!parsed.menu_description_examples}`)
-    if (parsed.menu_description_examples) {
-      console.log(`   - Examples count: ${parsed.menu_description_examples.length}`)
-      console.log(`   - Examples:`, JSON.stringify(parsed.menu_description_examples, null, 2))
+    console.log(`   - tone_do_list present: ${!!parsed.tone_do_list}`)
+    console.log(`   - avoid_patterns present: ${!!parsed.avoid_patterns}`)
+    
+    // Map new structure to existing fields for backward compatibility
+    // tone_do_list → tone_rules (for now, until full migration)
+    const toneRules = parsed.tone_do_list || parsed.tone_rules || []
+    
+    // Extract avoid patterns for guardrails
+    const avoidPatterns = parsed.avoid_patterns || {
+      compound_sentences: [],
+      generic_marketing: [],
+      brochure_language: []
     }
+
+    console.log(`   - Positive rules count: ${toneRules.length}`)
+    console.log(`   - Avoid patterns: ${Object.keys(avoidPatterns).map(k => `${k}:${avoidPatterns[k]?.length || 0}`).join(', ')}`)
     
     // VALIDATION: Enforce constraints on menu_description_examples
     if (parsed.menu_description_examples && Array.isArray(parsed.menu_description_examples)) {
@@ -1346,7 +1367,6 @@ The ${parsed.tone_rules.length} voice rules ensure consistent voice adapted to s
       openAiKey,
       language
     )
-    
     // Calculate enforcement metadata
     const enforcementLevel: 'strict' | 'moderate' | 'flexible' = 
       categorized.structural.length >= 3 ? 'strict'
@@ -1356,7 +1376,7 @@ The ${parsed.tone_rules.length} voice rules ensure consistent voice adapted to s
     // Calculate max sentence length from sentence_structure and tone_rules
     let sentenceLengthMax: number | undefined
     const sentenceStructure = parsed.sentence_structure || 'conversational'
-    const toneRulesText = parsed.tone_rules?.join(' ').toLowerCase() || ''
+    const toneRulesText = toneRules.join(' ').toLowerCase()
     
     if (sentenceStructure === 'short_declarative' || 
         toneRulesText.includes('kort') || 
@@ -1389,11 +1409,11 @@ The ${parsed.tone_rules.length} voice rules ensure consistent voice adapted to s
     }
     
     // Merge base rules + expanded rules
-    const allToneRules = [...(parsed.tone_rules || []), ...expandedRules]
+    const allToneRules = [...toneRules, ...expandedRules]
     const recategorized = categorizeRules(allToneRules)
     
     const result: V5Voice = {
-      tone_rules: allToneRules,
+      tone_rules: allToneRules,  // Positive rules from tone_do_list + expanded
       structural_rules: recategorized.structural,
       style_rules: recategorized.style,
       personality_traits: parsed.personality_traits || [],

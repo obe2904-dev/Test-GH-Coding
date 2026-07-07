@@ -2,16 +2,13 @@
 // Deterministic CTA selection: intent resolution, brand-voice pool, booking-link gating,
 // and ctaStyle flag (strict = verbatim for booking URLs, soft = model integrates naturally).
 
+import { APPROVED_BOOKING_CTAS, APPROVED_WALKIN_CTAS, getRandomApprovedCTAs } from '../_shared/ctas/approved-danish-ctas.ts'
+
 // CTA pool — variety sets per language and intent.
 // Swedish and German entries are stubs pending localisation.
 export const FREE_CTAS: Record<string, Record<string, string[]>> = {
   da: {
-    visit: [
-      'Ses vi i dag? 😊',
-      'Vi har åbent — og vi glæder os',
-      'Kom forbi når det passer dig 🍽️',
-      'Se menuen og book bord 👇'
-    ],
+    visit: getRandomApprovedCTAs('walk_in', 6),  // Use approved walk-in CTAs (modern Danish, no archaic phrases)
     social: [
       'Tag den du vil dele det med 👇',
       'Hvem tager du med? 😋',
@@ -271,12 +268,7 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
   if (isImpulseFriendly && ctaIntent === 'visit') {
     // Use casual "kom forbi" language, never booking
     const casualVisitCTAs: Record<string, string[]> = {
-      da: [
-        'Kom forbi i dag 😊',
-        'Vi ses snart? ☕',
-        'Hop forbi',
-        'Vi glæder os til at se dig'
-      ],
+      da: getRandomApprovedCTAs('walk_in', 8),  // Pre-vetted modern Danish walk-in CTAs
       sv: ['Titta förbi idag ☀️', 'Ses vi snart? 😊'],
       de: ['Schau heute vorbei ☀️', 'Sehen wir uns bald? 😊']
     };
@@ -287,12 +279,7 @@ export function selectCTA(params: CTASelectionParams): CTASelection {
   if (reservationRequired && ctaIntent === 'visit' && bookingLink) {
     // Always use booking-focused CTAs
     const bookingFocusedCTAs: Record<string, string[]> = {
-      da: [
-        'Book bord online 👇',
-        'Book dit bord 📅',
-        'Se menuen og book bord',
-        'Sikr dig et bord — book nu'
-      ],
+      da: getRandomApprovedCTAs('booking', 8),  // Pre-vetted modern Danish booking CTAs
       sv: ['Boka bord online 👇', 'Reservera din plats 📅'],
       de: ['Tisch online buchen 👇', 'Reservieren Sie Ihren Platz 📅']
     };

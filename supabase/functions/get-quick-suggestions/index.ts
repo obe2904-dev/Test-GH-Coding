@@ -1490,7 +1490,7 @@ serve(async (req) => {
     // When weather is unsuitable OR business doesn't have outdoor seating, add an explicit hard prohibition
     // so Gemini doesn't suggest outdoor content inappropriately.
     const outdoorProhibitionBlock = !hasOutdoorSeating
-      ? `\n🚫 FORBUDT I DAG: Forretningen HAR IKKE udeservering. Forslå ALDRIG udeservering, udendørs servering, terrasse, gårdhave eller udendørs-relaterede idéer. Fokusér kun på indendørs oplevelser.`
+      ? `\n🚫 FORBUDT I DAG: Forretningen HAR IKKE udeservering. Forslå ALDRIG udeservering, terrasse, gårdhave eller udendørs-relaterede idéer. Fokusér kun på indendørs oplevelser.`
       : (!outdoorSuitability && hasOutdoorSeating)
         ? `\n🚫 FORBUDT I DAG: Forslå IKKE udeservering eller udendørs-ophold som indholds-ide. Vejret kvalificerer IKKE (${weatherInfo}). Gæsterne sidder ikke udenfor — udelad dette fra alle tre slots.`
         : ''
