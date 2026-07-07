@@ -8,23 +8,23 @@ import { SUPPORTED_COUNTRIES } from '../../lib/constants'
 
 export function DashboardLayout() {
   const { i18n } = useTranslation()
-  const { profile, isLoading } = useBusinessData()
+  const { location, isLoading } = useBusinessData()
 
   // Auto-set language based on business country (only if user hasn't manually set language)
   useEffect(() => {
-    if (isLoading || !profile?.country) return
+    if (isLoading || !location?.country) return
 
     // Check if user has manually overridden language preference
     const userSetLanguage = localStorage.getItem('userSetLanguage')
     if (userSetLanguage === 'true') return
 
     // Map country code to language
-    const countryConfig = SUPPORTED_COUNTRIES.find(c => c.code === profile.country)
+    const countryConfig = SUPPORTED_COUNTRIES.find(c => c.code === location.country)
     if (countryConfig && countryConfig.language !== i18n.language) {
-      console.log(`[DashboardLayout] Auto-setting language to ${countryConfig.language} based on business country ${profile.country}`)
+      console.log(`[DashboardLayout] Auto-setting language to ${countryConfig.language} based on business country ${location.country}`)
       i18n.changeLanguage(countryConfig.language)
     }
-  }, [profile?.country, isLoading, i18n])
+  }, [location?.country, isLoading, i18n])
 
   return (
     <div className="h-screen flex bg-gray-50">

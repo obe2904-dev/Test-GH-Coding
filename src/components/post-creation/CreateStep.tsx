@@ -1382,9 +1382,6 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
               )}
               {currentAnalysisResult && (
                 <div className="mt-3 space-y-3">
-                  {/* Debug: log contentMatch structure */}
-                  {console.log('[CreateStep] Full analysis result:', currentAnalysisResult)}
-                  {console.log('[CreateStep] contentMatch structure:', JSON.stringify((currentAnalysisResult as any).contentMatch, null, 2))}
                   <MediaAnalysisPanel
                     analysis={{
                       contentMatch: (currentAnalysisResult as any).contentMatch,
