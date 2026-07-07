@@ -1893,7 +1893,7 @@ function MenuPage() {
                           
                           {/* Menu Availability Time Frame - Combined Display and Edit */}
                           {menuCard?.result_id && menuCard.status === 'extracted' && (
-                            <div className="mt-2 p-2 rounded border w-full" style={{ backgroundColor: '#FAEEDA', borderColor: '#FAC775' }}>
+                            <div className="mt-1.5 p-1.5 rounded border w-full" style={{ backgroundColor: '#FAEEDA', borderColor: '#FAC775' }}>
                               {editingTimingCardId !== menuCard.result_id ? (
                                 // Display Mode
                                 <div className="flex items-start justify-between gap-2">
@@ -1901,7 +1901,7 @@ function MenuPage() {
                                     <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres: </span>
                                     {menuCard.time_start && menuCard.time_end ? (
                                       <>
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap" style={{ backgroundColor: '#FFFFFF', color: '#633806', borderWidth: '1px', borderColor: '#EF9F27' }}>
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold whitespace-nowrap" style={{ backgroundColor: '#FFFFFF', color: '#633806', borderWidth: '1px', borderColor: '#EF9F27' }}>
                                           {menuCard.time_start} – {menuCard.time_end}
                                           {menuCard.time_source === 'opening_hours_fallback' && ' (åbningstider)'}
                                           {menuCard.time_start === '00:00' && menuCard.time_end === '23:59' && ' (hele dagen)'}
@@ -1914,7 +1914,7 @@ function MenuPage() {
                                   </div>
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
-                                    className="px-2 py-1 text-xs bg-white rounded hover:bg-amber-50 font-medium whitespace-nowrap flex-shrink-0"
+                                    className="px-1.5 py-0.5 text-xs bg-white rounded hover:bg-amber-50 font-medium whitespace-nowrap flex-shrink-0"
                                     style={{ borderWidth: '1px', borderColor: '#FAC775', color: '#854F0B' }}
                                   >
                                     ✏️ Rediger tid
