@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { usePostCreationStore, MediaItem, type PlatformContent, type PhotoContent } from '../../stores/postCreationStore'
+import { usePostCreationStore, MediaItem, type PlatformContent, type PlatformHashtag, type PhotoContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useTierStore } from '../../stores/tierStore'
@@ -10,7 +10,7 @@ import { useVideoCover } from '../../hooks/useVideoCover'
 import { VideoCoverSelector } from '../media/VideoCoverSelector'
 import { UpgradeModal } from '../ui/UpgradeModal'
 import { PlatformSelector } from './shared/PlatformSelector'
-import { PlatformPreview, CaptionEditModal, PhotoUploadManager, CarouselActivationBanner, CarouselSetup } from './design'
+import { PlatformPreview, CaptionEditModal, HashtagEditModal, PhotoUploadManager, CarouselActivationBanner, CarouselSetup } from './design'
 import { useCarouselOrganise } from '../../hooks/useCarouselOrganise'
 import { buildPlatformPreviewContent } from './publish/utils'
 import { PostCreationFooter } from './shared/PostCreationFooter'
@@ -130,6 +130,9 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
 
   // Caption edit modal state
   const [captionEditOpen, setCaptionEditOpen] = useState(false)
+  
+  // Hashtag edit modal state
+  const [hashtagEditOpen, setHashtagEditOpen] = useState(false)
 
   // Load storage quota on mount
   useEffect(() => {
@@ -193,6 +196,33 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       }
     }
   }, [postContent, setPostContent, markAsChanged, previewPlatform, businessData.business?.id])
+  
+  const handleHashtagSave = useCallback((sharedHashtags: PlatformHashtag[], platformHashtags: Record<string, PlatformHashtag[]>) => {
+    if (!postContent) return
+    
+    // Update hashtags based on platform-specific mode
+    if (postContent.platformSpecific && postContent.platformContent) {
+      // Update platform-specific hashtags
+      const updatedPlatformContent: Record<string, PlatformContent> = {}
+      for (const platform of Object.keys(postContent.platformContent)) {
+        updatedPlatformContent[platform] = {
+          ...postContent.platformContent[platform],
+          hashtags: platformHashtags[platform] || []
+        }
+      }
+      setPostContent({
+        ...postContent,
+        platformContent: updatedPlatformContent
+      })
+    } else {
+      // Update shared hashtags
+      setPostContent({
+        ...postContent,
+        hashtags: sharedHashtags
+      })
+    }
+    markAsChanged?.()
+  }, [postContent, setPostContent, markAsChanged])
   
   // Load saved photo analysis and media when editing an existing suggestion
   useEffect(() => {
@@ -938,6 +968,8 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       // ignore
     }
 
+    console.log('[CreateStep] Analyzing photo with language:', i18n.language)
+    
     const result = await analyzePhoto(
       currentMedia.originalUrl,
       postContent?.text || '',
@@ -1350,6 +1382,9 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
               )}
               {currentAnalysisResult && (
                 <div className="mt-3 space-y-3">
+                  {/* Debug: log contentMatch structure */}
+                  {console.log('[CreateStep] Full analysis result:', currentAnalysisResult)}
+                  {console.log('[CreateStep] contentMatch structure:', JSON.stringify((currentAnalysisResult as any).contentMatch, null, 2))}
                   <MediaAnalysisPanel
                     analysis={{
                       contentMatch: (currentAnalysisResult as any).contentMatch,
@@ -1524,6 +1559,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
                 currentTier={currentTier}
                 businessName={businessData.business?.name || undefined}
                 onEditCaption={() => setCaptionEditOpen(true)}
+                onEditHashtags={() => setHashtagEditOpen(true)}
                 platformFormat={strategicIdea?.platformFormat}
                 carouselMode={photoContent?.carouselMode ?? false}
               />
@@ -1577,6 +1613,20 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         currentTier={currentTier}
         language={i18n.language}
         businessId={businessData.business?.id || undefined}
+      />
+
+      {/* Hashtag Edit Modal */}
+      <HashtagEditModal
+        isOpen={hashtagEditOpen}
+        onClose={() => setHashtagEditOpen(false)}
+        onSave={handleHashtagSave}
+        sharedHashtags={postContent?.hashtags || []}
+        platformHashtags={postContent?.platformContent ? {
+          facebook: postContent.platformContent['facebook']?.hashtags || [],
+          instagram: postContent.platformContent['instagram']?.hashtags || []
+        } : {}}
+        selectedPlatforms={selectedPlatforms}
+        isPlatformSpecific={postContent?.platformSpecific || false}
       />
 
       {/* Media Gallery Modal */}

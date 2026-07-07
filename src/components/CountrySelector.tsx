@@ -32,7 +32,11 @@ export function CountrySelector() {
   const handleSelect = (country: (typeof SUPPORTED_COUNTRIES)[number]) => {
     i18n.changeLanguage(country.language)
     setCurrentCountry(country)
-    if (typeof window !== 'undefined') localStorage.setItem('selectedCountry', country.code)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('selectedCountry', country.code)
+      // Mark that user has manually set language preference
+      localStorage.setItem('userSetLanguage', 'true')
+    }
     setIsOpen(false)
   }
 

@@ -239,29 +239,43 @@ export function MediaAnalysisPanel({
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  const getRating = (contentMatch: any) => {
+    if (!contentMatch) return null
+    if (typeof contentMatch.rating === 'string') return contentMatch.rating
+    if (typeof contentMatch.rating === 'object' && contentMatch.rating?.rating) return contentMatch.rating.rating
+    return null
+  }
+
+  const contentMatchRating = getRating(analysis.contentMatch)
+  const contentMatchIsPoor = contentMatchRating === 'poor'
+
   return (
     <div className="space-y-3">
 
       {/* ── Layer 1: Assessment ──────────────────────────────────────────── */}
-      <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
-        {analysis.recommendation && (
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-700">
-              {t('createPost.photoAnalysis.assessmentTitle', 'Vurdering')}
-            </span>
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${getRecommendationColors(analysis.recommendation)}`}>
-              {t(`createPost.photoAnalysis.recommendations.${analysis.recommendation}`, analysis.recommendation)}
-            </span>
-          </div>
-        )}
-        {analysis.recommendationText && (
-          <p className="text-xs font-medium text-slate-800 leading-relaxed">{analysis.recommendationText}</p>
-        )}
-        <p className="text-xs text-slate-600 leading-relaxed">{analysis.generalFeedback}</p>
-      </div>
+      {/* Hide assessment when content match is poor - photo quality doesn't matter if content is wrong */}
+      {!contentMatchIsPoor && (
+        <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
+          {analysis.recommendation && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700">
+                {t('createPost.photoAnalysis.assessmentTitle', 'Vurdering')}
+              </span>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${getRecommendationColors(analysis.recommendation)}`}>
+                {t(`createPost.photoAnalysis.recommendations.${analysis.recommendation}`, analysis.recommendation)}
+              </span>
+            </div>
+          )}
+          {analysis.recommendationText && (
+            <p className="text-xs font-medium text-slate-800 leading-relaxed">{analysis.recommendationText}</p>
+          )}
+          <p className="text-xs text-slate-600 leading-relaxed">{analysis.generalFeedback}</p>
+        </div>
+      )}
 
       {/* ── whatWorks ───────────────────────────────────────────────────── */}
-      {analysis.whatWorks && analysis.whatWorks.length > 0 && (
+      {/* Hide whatWorks when content match is poor */}
+      {!contentMatchIsPoor && analysis.whatWorks && analysis.whatWorks.length > 0 && (
         <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
           <h4 className="text-xs font-semibold text-green-800 mb-2">
             ✅ {t('createPost.photoAnalysis.whatWorks', 'Hvad der virker godt')}
@@ -277,7 +291,7 @@ export function MediaAnalysisPanel({
       {(
         (analysis.contentMatch && analysis.contentMatch.actionNeeded && analysis.contentMatch.actionNeeded !== 'none') ||
         // fallback for old responses without actionNeeded
-        (analysis.contentMatch && !analysis.contentMatch.actionNeeded && (analysis.contentMatch.rating === 'fair' || analysis.contentMatch.rating === 'poor')) ||
+        (analysis.contentMatch && !analysis.contentMatch.actionNeeded && (contentMatchRating === 'fair' || contentMatchRating === 'poor')) ||
         !!analysis.emojiMatch ||
         (analysis.humanSuggestions && analysis.humanSuggestions.length > 0)
       ) && (
@@ -288,17 +302,23 @@ export function MediaAnalysisPanel({
 
           {/* Content match action card */}
           {analysis.contentMatch && (analysis.contentMatch.actionNeeded === 'rewrite' || analysis.contentMatch.actionNeeded === 'choice' ||
-            (!analysis.contentMatch.actionNeeded && (analysis.contentMatch.rating === 'fair' || analysis.contentMatch.rating === 'poor'))) && (
+            (!analysis.contentMatch.actionNeeded && (contentMatchRating === 'fair' || contentMatchRating === 'poor'))) && (
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium text-amber-800">
                   {t('createPost.photoAnalysis.contentMatch', 'Indhold match')}
                 </span>
-                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${getRatingColors(analysis.contentMatch.rating)}`}>
-                  {getRatingLabel(analysis.contentMatch.rating)}
-                </span>
+                {contentMatchRating && (
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${getRatingColors(contentMatchRating)}`}>
+                    {getRatingLabel(contentMatchRating)}
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-amber-700 leading-relaxed">{analysis.contentMatch.feedback}</p>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                {typeof analysis.contentMatch.feedback === 'string' 
+                  ? analysis.contentMatch.feedback 
+                  : (analysis.contentMatch.feedback as any)?.feedback || ''}
+              </p>
 
               {/* Actions: two simple choices */}
               {(analysis.contentMatch.rewriteSuggestion || analysis.contentMatch.reshootGuidance || onEditText) && (
