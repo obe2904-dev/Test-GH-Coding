@@ -631,14 +631,9 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
   }
 
   // ── Suggestions list ──
-  const isAtRegenerationLimit = usageStats && usageStats.regenerations_used >= usageStats.regenerations_limit
   // Show all suggestions including committed ones (they'll be marked with a badge)
   const visibleSuggestions = suggestions
   const hasCommittedSuggestions = suggestions.some(s => committedSuggestionIds?.has(s.id) ?? false)
-  
-  // Calculate total suggestions pool: 3 per batch, (regenerations_limit + 1) batches total
-  const suggestionsUsed = usageStats ? (usageStats.regenerations_used + 1) * 3 : 3
-  const suggestionsMax = usageStats ? (usageStats.regenerations_limit + 1) * 3 : 9
   
   return (
     <div className="space-y-4">
@@ -904,15 +899,10 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
       {/* Regenerate button */}
       <button
         onClick={() => fetchSuggestions(true, { localDate: toLocalISODate() })}
-        disabled={isAtRegenerationLimit || false}
-        className={`w-full text-center text-sm py-2 border rounded-lg transition-colors ${
-          isAtRegenerationLimit
-            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-            : 'text-gray-500 hover:text-gray-700 border-gray-200 hover:border-gray-300'
-        }`}
-        title={isAtRegenerationLimit ? t('dashboard.regenerateLimitTitle') : t('dashboard.regenerateButtonLabel')}
+        className="w-full text-center text-sm py-2 border rounded-lg transition-colors text-gray-500 hover:text-gray-700 border-gray-200 hover:border-gray-300"
+        title={t('dashboard.regenerateButtonLabel')}
       >
-        {isAtRegenerationLimit ? t('dashboard.regenerateButtonLocked') : t('dashboard.regenerateButtonActive')}
+        {t('dashboard.regenerateButtonActive')}
       </button>
 
     </div>
