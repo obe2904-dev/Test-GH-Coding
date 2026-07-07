@@ -311,7 +311,7 @@ function weekWeatherSummary(
       // Warm but windy
       weekendLine += t('weeklyPlan.weather.weekendWindy', { 
         wind: wWindDesc,
-        defaultValue: ` — ${wWindDesc} påvirker udendørsservering`
+        defaultValue: ` — ${wWindDesc} påvirker udeservering`
       })
     } else if (wRain >= 1) {
       weekendLine += t('weeklyPlan.weather.weekendRain')
@@ -331,6 +331,29 @@ function getCTAChip(ctaType: string, t: TFunction): { label: string; classes: st
   if (cta.startsWith('awareness')) return { label: t('weeklyPlan.overview.cta.awareness'), classes: 'bg-purple-100 text-purple-800' }
   if (cta.startsWith('traffic')) return { label: t('weeklyPlan.overview.cta.traffic'), classes: 'bg-cta-surface text-cta-text' }
   return { label: t('weeklyPlan.overview.cta.default'), classes: 'bg-slate-100 text-slate-700' }
+}
+
+// Helper to get goal mode badge text
+function getGoalModeBadge(post: PostSpecification): string | null {
+  const goalMode = post.postType?.goal_mode
+  const ctaIntent = post.strategicContext?.cta_intent
+  
+  if (goalMode === 'build_brand') {
+    return 'Brand'
+  }
+  
+  if (goalMode === 'drive_footfall') {
+    if (ctaIntent === 'booking') {
+      return 'Booking'
+    }
+    if (ctaIntent === 'traffic') {
+      return 'Besøg'
+    }
+    // Fallback for drive_footfall without specific cta_intent
+    return 'Besøg'
+  }
+  
+  return null
 }
 
 // Helper to get status badge
@@ -478,28 +501,6 @@ export function WeeklyPlanOverview({
           </div>
         ) : null}
 
-        {/* Strategic Distribution — WHY this post mix */}
-        {plan.strategicRationale && (
-          <div className="mt-4 bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex-shrink-0 mt-0.5">
-                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-purple-900 mb-2 uppercase tracking-wide">
-                  {t('weeklyPlan.overview.strategicDistribution.title', 'Strategisk Fordeling')}
-                </div>
-                <p className="text-sm text-purple-900 leading-relaxed font-medium">
-                  {plan.strategicRationale}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Execution Brief — HOW to execute */}
         {plan.strategyNarrative ? (
           <div className="mt-4 bg-cta-surface border border-cta rounded-lg p-4">
             <div className="text-sm font-semibold text-cta-text mb-2">{stripWeekPrefix(plan.strategyNarrative.headline)}</div>
@@ -538,7 +539,7 @@ export function WeeklyPlanOverview({
               <svg className="w-4 h-4 mr-1.5" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
               </svg>
-              AI Generation
+              {t('weeklyPlan.overview.aiGeneration')}
             </div>
             <div className="mt-2 space-y-1">
               {(() => {
@@ -548,7 +549,7 @@ export function WeeklyPlanOverview({
                 return (
                   <>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-700">AI Captions</span>
+                      <span className="text-slate-700">{t('weeklyPlan.overview.aiCaptions')}</span>
                       <span className="font-semibold text-brand">{aiPosts}/{totalPosts}</span>
                     </div>
                     <div className="w-full bg-white rounded-full h-2 mt-1">
@@ -557,7 +558,7 @@ export function WeeklyPlanOverview({
                         style={{ width: `${percentage}%` }}
                       ></div>
                     </div>
-                    <div className="text-xs text-cta-text font-medium mt-1">{percentage}% AI-genereret</div>
+                    <div className="text-xs text-cta-text font-medium mt-1">{percentage}% {t('weeklyPlan.overview.aiGeneratedPercent')}</div>
                   </>
                 )
               })()}
@@ -726,7 +727,7 @@ export function WeeklyPlanOverview({
                     <div className="text-base font-bold text-slate-900 mt-0.5">{post.timing.time}</div>
                     {post.timing.rationale && (
                       <div className="text-[9px] text-purple-600 font-medium mt-1 leading-tight" title={post.timing.rationale}>
-                        🧠 AI
+                        ✨ AI
                       </div>
                     )}
                   </div>
@@ -758,14 +759,18 @@ export function WeeklyPlanOverview({
 
                   {/* Chips */}
                   <div className="flex-shrink-0 flex items-center gap-2">
-                    {post.strategicContext?.slot_id && (
-                      <span 
-                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-600 text-white"
-                        title={post.strategicContext.strategic_intent || `Strategic Slot ${post.strategicContext.slot_id}`}
-                      >
-                        #{post.strategicContext.slot_id}
-                      </span>
-                    )}
+                    {(() => {
+                      const goalBadgeText = getGoalModeBadge(post)
+                      if (!goalBadgeText) return null
+                      return (
+                        <span 
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700"
+                          title={post.strategicContext?.strategic_intent || goalBadgeText}
+                        >
+                          {goalBadgeText}
+                        </span>
+                      )
+                    })()}
                     {hasCreatedPost && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-600 text-white">✓ {t('weeklyPlan.overview.createdBadge', { defaultValue: 'Lavet' })}</span>
                     )}
@@ -829,6 +834,8 @@ export function WeeklyPlanOverview({
                           ? t('weeklyPlan.overview.lockedButton', { defaultValue: 'Låst' })
                           : hasCreatedPost
                           ? t('weeklyPlan.overview.goToPost', { defaultValue: 'Gå til opslag →' })
+                          : createdPostInfo?.has_caption
+                          ? t('weeklyPlan.overview.goToDesign', { defaultValue: 'Gå til design →' })
                           : t('weeklyPlan.overview.createPost')
                         }
                       </button>

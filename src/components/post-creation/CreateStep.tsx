@@ -25,6 +25,7 @@ import type { MediaItem as GalleryMediaItem } from '../../api/mediaLibrary'
 import type { Suggestion } from '../media/types'
 import { supabase } from '../../lib/supabase'
 import { buildZeroRowAuditMessage, getAffectedRowCount } from '../../lib/dailySuggestionIntegrity'
+import { usePosts } from '../../hooks/usePosts'
 
 interface CreateStepProps {
   onNext: () => void
@@ -65,6 +66,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
   const { currentTier } = useTierStore()
   const businessData = useBusinessData()
   const currentBusinessId = businessData.business?.id
+  const posts = usePosts()
 
   const [previewPlatform, setPreviewPlatform] = useState<'facebook' | 'instagram'>(
     selectedPlatforms[0] === 'instagram' ? 'instagram' : 'facebook'
@@ -463,6 +465,38 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
     }
   }, [suggestionId, currentBusinessId])
 
+  // Helper function to save weekly-plan photo to posts table
+  const saveWeeklyPlanPhoto = useCallback(async (photoUrl: string) => {
+    const { weeklyPlanPost, weeklyContentPlan } = usePostCreationStore.getState()
+    
+    if (!currentBusinessId || !weeklyPlanPost?.timing?.date) {
+      console.log('ℹ️ Missing weekly plan context - skipping photo save')
+      return
+    }
+
+    console.log('💾 Saving weekly-plan photo to posts:', photoUrl)
+    console.log('📅 Slot date:', weeklyPlanPost.timing.date)
+
+    try {
+      const dbKey = {
+        businessId: currentBusinessId,
+        ideaSource: 'weekly_plan' as const,
+        weeklyPlanSlotDate: weeklyPlanPost.timing.date,
+        weeklyPlanId: weeklyContentPlan?.id ?? null,
+        weeklyPlanSlotIndex: weeklyPlanPostIndex ?? null,
+      }
+
+      await posts.saveDraft(dbKey, {
+        photoUrl,
+        platforms: selectedPlatforms.length > 0 ? selectedPlatforms : ['instagram', 'facebook'],
+      })
+
+      console.log('✅ Weekly-plan photo saved to posts table')
+    } catch (err) {
+      console.error('❌ Failed to save weekly-plan photo:', err)
+    }
+  }, [currentBusinessId, weeklyPlanPostIndex, selectedPlatforms, posts])
+
   // Helper to get video duration
   const getVideoDuration = (file: File): Promise<number> => {
     return new Promise((resolve, reject) => {
@@ -595,8 +629,14 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       
       markAsChanged?.() // Mark draft as changed when photo is uploaded
 
-      // Save media to database if editing a suggestion
-      await saveMediaToDatabase(updatedMedia)
+      // Save media to database based on context
+      if (activePath === 'weekly-plan' && newPhotos.length > 0 && newPhotos[0].originalUrl) {
+        // For weekly-plan: save first photo URL to posts table immediately
+        await saveWeeklyPlanPhoto(newPhotos[0].originalUrl)
+      } else if (suggestionId) {
+        // For AI ideas: save to daily_suggestions
+        await saveMediaToDatabase(updatedMedia)
+      }
 
       // NOTE: Media is NOT saved to media_library here - it will be saved
       // in PublishStep when the post is actually published/scheduled.

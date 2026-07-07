@@ -86,15 +86,18 @@ export function usePhotoAnalysis(): UsePhotoAnalysisReturn {
 
       if (functionError) {
         console.error('Error calling analyze-photo function:', functionError)
+        console.error('Full error details:', JSON.stringify(functionError, null, 2))
         setError(functionError.message || 'Failed to analyze photo')
         return null
       }
 
       if (!data) {
+        console.error('Analysis failed - no result returned')
         setError('No data returned from analysis')
         return null
       }
 
+      console.log('Analysis successful:', data)
       return data as PhotoAnalysisResult
     } catch (err) {
       console.error('Error analyzing photo:', err)

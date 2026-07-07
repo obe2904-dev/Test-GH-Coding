@@ -201,7 +201,7 @@ export function usePosts() {
       
       // Content
       post_text:                data.postText ?? null,
-      photo_url:                data.photoUrl ?? null,
+      ...(data.photoUrl !== undefined && { photo_url: data.photoUrl }),
       content_json:             (data.contentJson as any) ?? null,
       photo_idea:               data.photoIdea ?? null,
       caption_data:             (data.captionData as any) ?? null,

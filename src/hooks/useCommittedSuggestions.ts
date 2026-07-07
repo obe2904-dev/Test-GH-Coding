@@ -18,6 +18,7 @@ export interface WeeklyPlanPostInfo {
   postId: string
   scheduledFor?: Date
   postedAt?: Date
+  hasCaption: boolean
 }
 
 export interface CommittedState {
@@ -59,12 +60,12 @@ export function useCommittedSuggestions(businessId: string | null): CommittedSta
     // Fetch rows that are either created today (for suggestion / write-self locking)
     // OR have a future/current weekly plan slot date / idea id (for weekly-plan locking).
     // Using PostgREST .or() so a single round-trip covers both cases.
+    // For weekly plan posts, include drafts to check if text has been generated
     const { data, error } = await supabase
       .from('posts')
-      .select('id, suggestion_id, weekly_plan_idea_id, weekly_plan_slot_date, posted_at, scheduled_for')
+      .select('id, suggestion_id, weekly_plan_idea_id, weekly_plan_slot_date, posted_at, scheduled_for, post_text, status')
       .eq('business_id', businessId)
-      .in('status', ['published', 'scheduled'])
-      .or(`posted_at.gte.${todayStart.toISOString()},weekly_plan_slot_date.gte.${todayDateStr}`)
+      .or(`and(status.in.(published,scheduled),or(posted_at.gte.${todayStart.toISOString()},weekly_plan_slot_date.gte.${todayDateStr})),and(status.eq.draft,weekly_plan_idea_id.not.is.null)`)
 
     if (error || !data) {
       console.warn('[useCommittedSuggestions] query failed:', error?.message)
@@ -79,27 +80,35 @@ export function useCommittedSuggestions(businessId: string | null): CommittedSta
     let writeCommitted = false
 
     for (const row of data) {
+      const isCommitted = row.status === 'published' || row.status === 'scheduled'
+      const isDraft = row.status === 'draft'
+      
       if (row.weekly_plan_idea_id != null) {
         const ideaId = Number(row.weekly_plan_idea_id)
-        ideaIds.add(ideaId)
         
-        // Store post details for this idea
+        // Only lock committed posts, not drafts
+        if (isCommitted) {
+          ideaIds.add(ideaId)
+        }
+        
+        // Store post details for both draft and committed posts
         postMap.set(ideaId, {
           postId: row.id as string,
           scheduledFor: row.scheduled_for ? new Date(row.scheduled_for) : undefined,
           postedAt: row.posted_at ? new Date(row.posted_at) : undefined,
+          hasCaption: (row.post_text as string | null) != null && (row.post_text as string).trim().length > 0,
         })
       }
 
-      // Weekly plan slot — date-keyed lock (survives refresh)
-      if (row.weekly_plan_slot_date != null) {
+      // Weekly plan slot — date-keyed lock (survives refresh) - only for committed posts
+      if (isCommitted && row.weekly_plan_slot_date != null) {
         planDates.add(row.weekly_plan_slot_date as string)
       }
 
       // Suggestion / write-self rows — only count if posted today
       const postedAt = row.posted_at ? new Date(row.posted_at) : null
       const isToday = postedAt != null && postedAt >= todayStart
-      if (isToday) {
+      if (isCommitted && isToday) {
         if (row.suggestion_id != null) {
           ids.add(Number(row.suggestion_id))
         } else if (row.weekly_plan_slot_date == null) {
