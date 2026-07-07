@@ -1429,7 +1429,7 @@ function MenuPage() {
 
         {/* Frame 1: Detect Menus from Website */}
         {websiteUrl && (
-          <div className="bg-surface rounded-lg border-2 border-green-500 px-4 py-3 mb-4">
+          <div className="bg-surface rounded-lg border-2 border-green-600 px-4 py-3 mb-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex-1">
                 <p className="text-sm font-semibold text-text-secondary mb-2">
