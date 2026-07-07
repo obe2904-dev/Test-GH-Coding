@@ -78,7 +78,7 @@ export async function uploadAdjustedImageToStorage(
   const fileName = `${userId}/adjusted/${Date.now()}.${ext}`
 
   const { error } = await supabase.storage
-    .from('post-images')
+    .from('post-media')
     .upload(fileName, blob, {
       contentType: blob.type,
       cacheControl: '3600',
@@ -88,7 +88,7 @@ export async function uploadAdjustedImageToStorage(
   if (error) throw error
 
   const { data: { publicUrl } } = supabase.storage
-    .from('post-images')
+    .from('post-media')
     .getPublicUrl(fileName)
 
   return publicUrl
@@ -132,7 +132,7 @@ export async function uploadImageToStorage(file: File, userId: string): Promise<
 
     // Upload to Supabase Storage
     const { error } = await supabase.storage
-      .from('post-images')
+      .from('post-media')
       .upload(fileName, compressed, {
         contentType: 'image/jpeg',
         cacheControl: '3600',
@@ -145,7 +145,7 @@ export async function uploadImageToStorage(file: File, userId: string): Promise<
 
     // Get public URL
     const { data: { publicUrl } } = supabase.storage
-      .from('post-images')
+      .from('post-media')
       .getPublicUrl(fileName)
 
     return publicUrl
@@ -168,7 +168,7 @@ export async function uploadVideoCoverFrame(
   const fileName = `${userId}/covers/${Date.now()}-${index}.jpg`
 
   const { error } = await supabase.storage
-    .from('post-images')
+    .from('post-media')
     .upload(fileName, blob, {
       contentType: 'image/jpeg',
       cacheControl: '31536000', // 1 year — cover frames are immutable once uploaded
@@ -178,7 +178,7 @@ export async function uploadVideoCoverFrame(
   if (error) throw error
 
   const { data: { publicUrl } } = supabase.storage
-    .from('post-images')
+    .from('post-media')
     .getPublicUrl(fileName)
 
   return publicUrl
