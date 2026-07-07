@@ -1901,7 +1901,7 @@ function MenuPage() {
                                     <span className="text-xs font-medium" style={{ color: '#854F0B' }}>Menuen serveres:</span>
                                     {menuCard.time_start && menuCard.time_end ? (
                                       <>
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: '#FAEEDA', color: '#854F0B' }}>
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: '#FAEEDA', color: '#854F0B', borderWidth: '1px', borderColor: '#FAC775' }}>
                                           {menuCard.time_start} – {menuCard.time_end}
                                           {menuCard.time_source === 'opening_hours_fallback' && ' (åbningstider)'}
                                           {menuCard.time_start === '00:00' && menuCard.time_end === '23:59' && ' (hele dagen)'}
