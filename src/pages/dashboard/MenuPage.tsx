@@ -68,6 +68,9 @@ function MenuPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [menuCards, setMenuCards] = useState<MenuCard[]>([])
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
+  const [isUrlSectionOpen, setIsUrlSectionOpen] = useState(false)
+  const [isUploadSectionOpen, setIsUploadSectionOpen] = useState(false)
+  const [isTextSectionOpen, setIsTextSectionOpen] = useState(false)
   const [editingCard, setEditingCard] = useState<string | null>(null)
   const [editingData, setEditingData] = useState<any>(null)
   const [activeExtractions, setActiveExtractions] = useState<Set<string>>(new Set())
@@ -1455,102 +1458,138 @@ function MenuPage() {
         {/* 3-Column Menu Input Methods: Frames 1, 2 & 3 */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           {/* Frame 1: Manual URL Input */}
-          <div className="bg-surface rounded-lg border border-border p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-              </svg>
-              <h3 className="font-semibold text-brand">Tilføj menu URL</h3>
-            </div>
-            <p className="text-xs text-text-secondary mb-3">
-              Indtast URL til en specifik menuside
-            </p>
-            <input
-              type="url"
-              value={newMenuInput}
-              onChange={(e) => setNewMenuInput(e.target.value)}
-              placeholder="https://example.dk/menu.pdf"
-              className="w-full px-3 py-2 border border-border rounded text-sm mb-3"
-            />
+          <div className="bg-surface rounded-lg border border-border">
             <button
-              onClick={handleAddManualUrl}
-              disabled={!newMenuInput.trim()}
-              className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+              onClick={() => setIsUrlSectionOpen(!isUrlSectionOpen)}
+              className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
             >
-              Tilføj URL
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                <h3 className="font-semibold text-brand">Tilføj menu URL</h3>
+              </div>
+              <svg className={`w-5 h-5 text-gray-500 transition-transform ${isUrlSectionOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
+            {isUrlSectionOpen && (
+              <div className="p-4 pt-0">
+                <p className="text-xs text-text-secondary mb-3">
+                  Indtast URL til en specifik menuside
+                </p>
+                <input
+                  type="url"
+                  value={newMenuInput}
+                  onChange={(e) => setNewMenuInput(e.target.value)}
+                  placeholder="https://example.dk/menu.pdf"
+                  className="w-full px-3 py-2 border border-border rounded text-sm mb-3"
+                />
+                <button
+                  onClick={handleAddManualUrl}
+                  disabled={!newMenuInput.trim()}
+                  className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+                >
+                  Tilføj URL
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Frame 2: PDF/JPG Upload */}
-          <div className="bg-surface rounded-lg border border-border p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <h3 className="font-semibold text-brand">Upload PDF eller JPG</h3>
-            </div>
-            <p className="text-xs text-text-secondary mb-3">
-              Upload menu som fil (AI læser den automatisk)
-            </p>
-            <input
-              type="text"
-              value={uploadHeadline}
-              onChange={(e) => setUploadHeadline(e.target.value)}
-              placeholder="Menu overskrift (f.eks. Frokost, Brunch)"
-              className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
-            />
-            <input
-              type="text"
-              value={uploadServicePeriod}
-              onChange={(e) => setUploadServicePeriod(e.target.value)}
-              placeholder="Serverings tid (f.eks. Man-Fre 11-15)"
-              className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
-            />
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              multiple
-              onChange={(e) => setUploadFiles(e.target.files)}
-              className="w-full text-sm mb-3"
-            />
-            {uploadFiles && uploadFiles.length > 0 && (
-              <p className="text-xs text-text-muted mb-2">
-                {uploadFiles.length} fil(er) valgt
-              </p>
-            )}
+          <div className="bg-surface rounded-lg border border-border">
             <button
-              onClick={handleUploadFile}
-              disabled={!uploadFiles || uploadFiles.length === 0 || !uploadHeadline.trim() || !uploadServicePeriod.trim() || isUploadingFile}
-              className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+              onClick={() => setIsUploadSectionOpen(!isUploadSectionOpen)}
+              className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
             >
-              {isUploadingFile ? 'Uploader...' : 'Upload og analyser'}
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <h3 className="font-semibold text-brand">Upload PDF eller JPG</h3>
+              </div>
+              <svg className={`w-5 h-5 text-gray-500 transition-transform ${isUploadSectionOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
+            {isUploadSectionOpen && (
+              <div className="p-4 pt-0">
+                <p className="text-xs text-text-secondary mb-3">
+                  Upload menu som fil (AI læser den automatisk)
+                </p>
+                <input
+                  type="text"
+                  value={uploadHeadline}
+                  onChange={(e) => setUploadHeadline(e.target.value)}
+                  placeholder="Menu overskrift (f.eks. Frokost, Brunch)"
+                  className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
+                />
+                <input
+                  type="text"
+                  value={uploadServicePeriod}
+                  onChange={(e) => setUploadServicePeriod(e.target.value)}
+                  placeholder="Serverings tid (f.eks. Man-Fre 11-15)"
+                  className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
+                />
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  multiple
+                  onChange={(e) => setUploadFiles(e.target.files)}
+                  className="w-full text-sm mb-3"
+                />
+                {uploadFiles && uploadFiles.length > 0 && (
+                  <p className="text-xs text-text-muted mb-2">
+                    {uploadFiles.length} fil(er) valgt
+                  </p>
+                )}
+                <button
+                  onClick={handleUploadFile}
+                  disabled={!uploadFiles || uploadFiles.length === 0 || !uploadHeadline.trim() || !uploadServicePeriod.trim() || isUploadingFile}
+                  className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+                >
+                  {isUploadingFile ? 'Uploader...' : 'Upload og analyser'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Frame 3: Manual Text Input */}
-          <div className="bg-surface rounded-lg border border-border p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <h3 className="font-semibold text-brand">Tilføj menu som tekst</h3>
-            </div>
-            <p className="text-xs text-text-secondary mb-3">
-              Indsæt menu som tekst - AI parser det automatisk
-            </p>
-            <textarea
-              value={newTextInput}
-              onChange={(e) => setNewTextInput(e.target.value)}
-              placeholder="Spaghetti Carbonara - 125 kr&#10;Margherita Pizza - 95 kr&#10;Caesar Salad"
-              className="w-full px-3 py-2 border border-border rounded text-sm mb-3 min-h-[100px]"
-            />
+          <div className="bg-surface rounded-lg border border-border">
             <button
-              onClick={handleAddManualText}
-              disabled={!newTextInput.trim()}
-              className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+              onClick={() => setIsTextSectionOpen(!isTextSectionOpen)}
+              className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
             >
-              Analyser tekst
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <h3 className="font-semibold text-brand">Tilføj menu som tekst</h3>
+              </div>
+              <svg className={`w-5 h-5 text-gray-500 transition-transform ${isTextSectionOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
+            {isTextSectionOpen && (
+              <div className="p-4 pt-0">
+                <p className="text-xs text-text-secondary mb-3">
+                  Indsæt menu som tekst - AI parser det automatisk
+                </p>
+                <textarea
+                  value={newTextInput}
+                  onChange={(e) => setNewTextInput(e.target.value)}
+                  placeholder="Spaghetti Carbonara - 125 kr&#10;Margherita Pizza - 95 kr&#10;Caesar Salad"
+                  className="w-full px-3 py-2 border border-border rounded text-sm mb-3 min-h-[100px]"
+                />
+                <button
+                  onClick={handleAddManualText}
+                  disabled={!newTextInput.trim()}
+                  className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
+                >
+                  Analyser tekst
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
