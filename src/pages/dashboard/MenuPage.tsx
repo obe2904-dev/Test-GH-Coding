@@ -1893,21 +1893,19 @@ function MenuPage() {
                           
                           {/* Menu Availability Time Frame - Combined Display and Edit */}
                           {menuCard?.result_id && menuCard.status === 'extracted' && (
-                            <div className="mt-1.5 p-1.5 rounded border-2 w-full max-w-4xl" style={{ backgroundColor: '#FAEEDA', borderColor: '#FAC775' }}>
+                            <div className="mt-1.5 p-1.5 rounded border-2 w-full max-w-4xl box-border" style={{ backgroundColor: '#FAEEDA', borderColor: '#FAC775' }}>
                               {editingTimingCardId !== menuCard.result_id ? (
                                 // Display Mode
-                                <div className="flex items-start justify-between gap-2">
+                                <div className="w-full box-border flex items-center gap-2">
                                   {menuCard.time_start && menuCard.time_end ? (
                                     <>
-                                      <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
-                                        <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres: </span>
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold whitespace-nowrap" style={{ backgroundColor: '#FFFFFF', color: '#633806', borderWidth: '1px', borderColor: '#EF9F27' }}>
-                                          {menuCard.time_start} – {menuCard.time_end}
-                                          {menuCard.time_source === 'opening_hours_fallback' && ' (åbningstider)'}
-                                          {menuCard.time_start === '00:00' && menuCard.time_end === '23:59' && ' (hele dagen)'}
-                                        </span>
-                                        <span className="text-xs italic ml-1 break-words" style={{ color: '#854F0B' }}>Du kan altid redigere, hvornår menuen serveres her →</span>
-                                      </div>
+                                      <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres:</span>
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold whitespace-nowrap" style={{ backgroundColor: '#FFFFFF', color: '#633806', borderWidth: '1px', borderColor: '#EF9F27' }}>
+                                        {menuCard.time_start} – {menuCard.time_end}
+                                        {menuCard.time_source === 'opening_hours_fallback' && ' (åbningstider)'}
+                                        {menuCard.time_start === '00:00' && menuCard.time_end === '23:59' && ' (hele dagen)'}
+                                      </span>
+                                      <span className="text-xs italic flex-1" style={{ color: '#854F0B' }}>Du kan altid redigere, hvornår menuen serveres her →</span>
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
                                         className="px-1.5 py-0.5 text-xs bg-white rounded hover:bg-amber-50 font-medium whitespace-nowrap flex-shrink-0"
@@ -1918,10 +1916,8 @@ function MenuPage() {
                                     </>
                                   ) : (
                                     <>
-                                      <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0 py-2">
-                                        <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres: </span>
-                                        <span className="text-xs font-bold text-center" style={{ color: '#854F0B' }}>Serveringstid mangler — AI bruger det til at vælge det rigtige tidspunkt for opslaget</span>
-                                      </div>
+                                      <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres:</span>
+                                      <span className="text-xs font-bold flex-1" style={{ color: '#854F0B' }}>Serveringstid mangler — AI bruger det til at vælge det rigtige tidspunkt for opslaget</span>
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
                                         className="px-1.5 py-0.5 text-xs bg-white rounded hover:bg-amber-50 font-medium whitespace-nowrap flex-shrink-0"
