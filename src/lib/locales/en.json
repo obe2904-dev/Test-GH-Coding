@@ -70,6 +70,7 @@
   "dashboard": {
     "title": "Dashboard",
     "welcome": "Welcome! 👋",
+    "welcomeIncomplete": "Let's get started 🚀",
     "description": "Your social media management dashboard will appear here.",
     "tips": "Use photos of your location to create authentic posts that show what makes you unique.",
     "tipsTitle": "💡 Tips",

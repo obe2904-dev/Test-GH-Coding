@@ -70,6 +70,7 @@
   "dashboard": {
     "title": "Dashboard",
     "welcome": "Velkommen! 👋",
+    "welcomeIncomplete": "Lad os komme i gang 🚀",
     "description": "Her er dit overblik over funktionerne ✨",
     "tips": "Brug billedet af din lokation til at skabe autentiske opslag der viser, hvad der gør jer unikke.",
     "tipsTitle": "💡 Tips",

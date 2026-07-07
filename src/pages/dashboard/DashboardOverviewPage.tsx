@@ -292,6 +292,21 @@ export function DashboardOverviewPage() {
 
   const welcomeMessageKey = getWelcomeMessageKey()
 
+  // Determine header text based on setup completion
+  const getWelcomeHeaderKey = (): string => {
+    if (isFreeTier) {
+      return setupCompletion.profileState === 'complete' ? 'dashboard.welcome' : 'dashboard.welcomeIncomplete'
+    } else {
+      // Paid tier - check if basic setup is complete
+      const setupComplete = setupCompletion.menuState !== 'none' && 
+                           setupCompletion.locationState !== 'none' && 
+                           setupCompletion.brandState !== 'none'
+      return setupComplete ? 'dashboard.welcome' : 'dashboard.welcomeIncomplete'
+    }
+  }
+
+  const welcomeHeaderKey = getWelcomeHeaderKey()
+
   const menuHasData = Boolean(
     profile?.menu_structure ||
     profile?.menu_description?.trim() ||
@@ -475,7 +490,7 @@ export function DashboardOverviewPage() {
           // Free tier: full-width welcome message
           <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
             <h2 className="text-xl font-semibold text-slate-900">
-              {t('dashboard.welcome')}
+              {t(welcomeHeaderKey)}
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">
               <Trans
@@ -498,7 +513,7 @@ export function DashboardOverviewPage() {
             {/* Welcome message - spans 3 cards + 2 arrows (columns 1-5) */}
             <div className="col-span-5 h-full rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
               <h2 className="text-xl font-semibold text-slate-900">
-                {t('dashboard.welcome')}
+                {t(welcomeHeaderKey)}
               </h2>
               <p className="mt-2 text-sm text-slate-600">
                 <Trans
