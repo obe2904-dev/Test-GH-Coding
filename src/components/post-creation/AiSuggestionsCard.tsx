@@ -877,9 +877,9 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
                   onGenerate?.()
                 }}
                 className="flex items-center gap-2 px-4 py-2 bg-cta hover:bg-cta-hover text-white text-sm font-semibold rounded-lg transition-colors shadow-md hover:shadow-lg"
-                title={suggestion.generatedText ? 'Gå til din tekst' : t('dashboard.generatePostWithAI')}
+                title={suggestion.generatedText ? 'Gå til design' : t('dashboard.generatePostWithAI')}
               >
-                <span>{suggestion.generatedText ? 'Gå til din tekst' : 'Generér tekst med AI'}</span>
+                <span>{suggestion.generatedText ? 'Gå til design' : 'Generér tekst'}</span>
                 <span className="text-lg">→</span>
               </button>
             </div>
