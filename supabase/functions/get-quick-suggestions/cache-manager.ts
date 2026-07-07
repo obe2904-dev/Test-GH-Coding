@@ -39,7 +39,7 @@ export async function checkCache(
   try {
     const { data: existingSuggestions, error: dbError } = await supabase
       .from('daily_suggestions')
-      .select('id, why_explanation, occasion_context, photo_idea, media_suggestion, content_type, suggested_time, position, menu_item_name, menu_item_description, cta_intent, weather_forecast, planner_rationale, created_at, status')
+      .select('id, title, rationale, why_explanation, occasion_context, photo_idea, media_suggestion, content_type, suggested_time, position, menu_item_name, menu_item_description, caption_base, cta_intent, weather_forecast, planner_rationale, created_at, status, generated_text')
       .eq('business_id', businessId)
       .eq('date', today)
       .in('status', ['available', 'selected'])
@@ -151,6 +151,7 @@ export async function buildCachedResponse(
     menu_item_description: s.menu_item_description || '',
     caption_base: s.caption_base || '',
     cta_intent: s.cta_intent || 'visit',
+    generated_text: (s as any).generated_text || null,
   }))
 
   // Return stored weather forecast and planner rationale from when ideas were generated

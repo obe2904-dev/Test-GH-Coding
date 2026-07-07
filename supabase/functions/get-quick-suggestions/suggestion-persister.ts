@@ -297,7 +297,7 @@ export async function persistAndAssemble(
     .from('daily_suggestions')
     .upsert(suggestionRows, { onConflict: 'business_id,date,position,source' })
     .select(
-      'id, title, rationale, why_explanation, occasion_context, photo_idea, media_suggestion, content_type, suggested_time, menu_item_id, menu_item_name, menu_item_description, service_period, content_angle, cta_intent, position'
+      'id, title, rationale, why_explanation, occasion_context, photo_idea, media_suggestion, content_type, suggested_time, menu_item_id, menu_item_name, menu_item_description, service_period, content_angle, cta_intent, position, generated_text'
     )
 
   if (saveError) {

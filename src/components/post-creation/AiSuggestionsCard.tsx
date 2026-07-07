@@ -363,6 +363,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
             suggestedTime: s.suggested_time || s.suggestedTime || '12:00',
             suggestedDate: s.suggestion_date || s.suggestedDate || '',
             icon: CONTENT_TYPE_ICONS[s.content_type || s.contentType || 'menu_item'] || '📸',
+            generatedText: s.generated_text || null,
             contextReasoning: s.context_reasoning || undefined,
             alternativeTimings: s.alternative_timings || []
           }))
