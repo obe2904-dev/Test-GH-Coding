@@ -551,6 +551,37 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
       }
     }
 
+    // For Weekly Plan: also save to photoDraftMap[currentIndex] so blob→Storage URL updates persist
+    if (state.activePath === 'weekly-plan' && state.weeklyPlanPostIndex !== null) {
+      const planId = (state.weeklyContentPlan as any)?.id
+      const index = state.weeklyPlanPostIndex
+      
+      // Update in-memory map
+      updates.photoDraftMap = {
+        ...state.photoDraftMap,
+        [index]: content,
+      }
+      
+      // Persist to localStorage (same logic as setPhotoDraftMapEntry)
+      if (planId && content) {
+        try {
+          const photoMedia = content.uploadedMedia?.map(m => ({
+            id: m.id,
+            url: m.originalUrl || m.url,
+            originalUrl: m.originalUrl,
+            adjustedUrl: m.adjustedUrl,
+            type: m.type,
+            selectedVersionForPost: m.selectedVersionForPost,
+            analysisCache: m.analysisCache,
+          })) ?? []
+          localStorage.setItem(
+            `p2g_draft_plan_${planId}_${index}_photos`,
+            JSON.stringify({ data: photoMedia, savedAt: Date.now() })
+          )
+        } catch { /* quota exceeded — fail silently */ }
+      }
+    }
+
     return updates
   }),
 
