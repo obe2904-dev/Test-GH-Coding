@@ -1918,8 +1918,9 @@ function MenuPage() {
                                     </>
                                   ) : (
                                     <>
-                                      <div className="flex items-center justify-center flex-1">
-                                        <span className="text-xs italic text-center" style={{ color: '#854F0B' }}>Serveringstid mangler — AI bruger det til at vælge det rigtige tidspunkt for opslaget</span>
+                                      <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0 py-2">
+                                        <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres: </span>
+                                        <span className="text-xs font-bold text-center" style={{ color: '#854F0B' }}>Serveringstid mangler — AI bruger det til at vælge det rigtige tidspunkt for opslaget</span>
                                       </div>
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleStartEditTiming(menuCard); }}
