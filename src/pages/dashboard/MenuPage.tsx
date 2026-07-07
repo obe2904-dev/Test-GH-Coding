@@ -1893,74 +1893,85 @@ function MenuPage() {
                           
                           {/* Timing Editor - Inline when editing */}
                           {editingTimingCardId === menuCard?.result_id && (
-                            <div className="flex items-center gap-1 mt-2 p-2 bg-surface-alt rounded border border-border">
-                              <label className="text-xs text-text-secondary font-medium">Tid:</label>
-                              <select
-                                value={splitTimeValue(editingTimeStart).hour}
-                                onChange={(e) => setEditingTimeStart(updateTimePart(editingTimeStart, 'hour', e.target.value))}
-                                className="px-2 py-1 border border-border rounded text-xs w-16 bg-white"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <option value="">--</option>
-                                {TIME_HOUR_OPTIONS.map((hour) => (
-                                  <option key={hour} value={hour}>
-                                    {hour}
-                                  </option>
-                                ))}
-                              </select>
-                              <select
-                                value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeStart).minute) ? splitTimeValue(editingTimeStart).minute : ''}
-                                onChange={(e) => setEditingTimeStart(updateTimePart(editingTimeStart, 'minute', e.target.value))}
-                                className="px-2 py-1 border border-border rounded text-xs w-16 bg-white"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <option value="">--</option>
-                                {TIME_MINUTE_OPTIONS.map((minute) => (
-                                  <option key={minute} value={minute}>
-                                    {minute}
-                                  </option>
-                                ))}
-                              </select>
-                              <span className="text-xs text-text-muted">–</span>
-                              <select
-                                value={splitTimeValue(editingTimeEnd).hour}
-                                onChange={(e) => setEditingTimeEnd(updateTimePart(editingTimeEnd, 'hour', e.target.value))}
-                                className="px-2 py-1 border border-border rounded text-xs w-16 bg-white"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <option value="">--</option>
-                                {TIME_HOUR_OPTIONS.map((hour) => (
-                                  <option key={hour} value={hour}>
-                                    {hour}
-                                  </option>
-                                ))}
-                              </select>
-                              <select
-                                value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeEnd).minute) ? splitTimeValue(editingTimeEnd).minute : ''}
-                                onChange={(e) => setEditingTimeEnd(updateTimePart(editingTimeEnd, 'minute', e.target.value))}
-                                className="px-2 py-1 border border-border rounded text-xs w-16 bg-white"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <option value="">--</option>
-                                {TIME_MINUTE_OPTIONS.map((minute) => (
-                                  <option key={minute} value={minute}>
-                                    {minute}
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleSaveTiming(menuCard.result_id!); }}
-                                disabled={isSavingTiming}
-                                className="px-3 py-1 bg-cta text-text-inverse rounded text-xs font-medium hover:bg-cta-hover disabled:opacity-50"
-                              >
-                                {isSavingTiming ? 'Gemmer...' : 'Gem'}
-                              </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleCancelEditTiming(); }}
-                                className="px-2 py-1 bg-surface text-text-secondary rounded text-xs hover:bg-border border border-border"
-                              >
-                                Annuller
-                              </button>
+                            <div className="mt-2 p-3 bg-orange-50 rounded border-2 border-orange-500">
+                              <p className="text-xs text-orange-900 font-semibold mb-2">
+                                Indtast tid hvornår dette serveres, så vi kan tilpasse opslag til dig
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1">
+                                  <label className="text-xs text-text-secondary font-medium">Fra:</label>
+                                  <select
+                                    value={splitTimeValue(editingTimeStart).hour}
+                                    onChange={(e) => setEditingTimeStart(updateTimePart(editingTimeStart, 'hour', e.target.value))}
+                                    className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <option value="">--</option>
+                                    {TIME_HOUR_OPTIONS.map((hour) => (
+                                      <option key={hour} value={hour}>
+                                        {hour}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <span className="text-xs">:</span>
+                                  <select
+                                    value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeStart).minute) ? splitTimeValue(editingTimeStart).minute : ''}
+                                    onChange={(e) => setEditingTimeStart(updateTimePart(editingTimeStart, 'minute', e.target.value))}
+                                    className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <option value="">--</option>
+                                    {TIME_MINUTE_OPTIONS.map((minute) => (
+                                      <option key={minute} value={minute}>
+                                        {minute}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <label className="text-xs text-text-secondary font-medium">Til:</label>
+                                  <select
+                                    value={splitTimeValue(editingTimeEnd).hour}
+                                    onChange={(e) => setEditingTimeEnd(updateTimePart(editingTimeEnd, 'hour', e.target.value))}
+                                    className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <option value="">--</option>
+                                    {TIME_HOUR_OPTIONS.map((hour) => (
+                                      <option key={hour} value={hour}>
+                                        {hour}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <span className="text-xs">:</span>
+                                  <select
+                                    value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(editingTimeEnd).minute) ? splitTimeValue(editingTimeEnd).minute : ''}
+                                    onChange={(e) => setEditingTimeEnd(updateTimePart(editingTimeEnd, 'minute', e.target.value))}
+                                    className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <option value="">--</option>
+                                    {TIME_MINUTE_OPTIONS.map((minute) => (
+                                      <option key={minute} value={minute}>
+                                        {minute}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleSaveTiming(menuCard.result_id!); }}
+                                  disabled={isSavingTiming}
+                                  className="px-3 py-1 bg-cta text-text-inverse rounded text-xs font-medium hover:bg-cta-hover disabled:opacity-50"
+                                >
+                                  {isSavingTiming ? 'Gemmer...' : 'Gem'}
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleCancelEditTiming(); }}
+                                  className="px-2 py-1 bg-surface text-text-secondary rounded text-xs hover:bg-border border border-border"
+                                >
+                                  Annuller
+                                </button>
+                              </div>
                             </div>
                           )}
                           
