@@ -92,6 +92,14 @@ function MenuPage() {
   const [uploadServicePeriod, setUploadServicePeriod] = useState('')
   const [isUploadingFile, setIsUploadingFile] = useState(false)
   
+  // Time state for three input sections
+  const [urlTimeStart, setUrlTimeStart] = useState('')
+  const [urlTimeEnd, setUrlTimeEnd] = useState('')
+  const [uploadTimeStart, setUploadTimeStart] = useState('')
+  const [uploadTimeEnd, setUploadTimeEnd] = useState('')
+  const [textTimeStart, setTextTimeStart] = useState('')
+  const [textTimeEnd, setTextTimeEnd] = useState('')
+  
   // Pricing state
   const [priceLevel, setPriceLevel] = useState<string>('')
   const [isEditingPricing, setIsEditingPricing] = useState(false)
@@ -1485,6 +1493,61 @@ function MenuPage() {
                   placeholder="https://example.dk/menu.pdf"
                   className="w-full px-3 py-2 border border-border rounded text-sm mb-3"
                 />
+                
+                <p className="text-xs text-text-secondary mb-2 mt-3">
+                  Indtast tid hvornår dette serveres, så vi kan tilpasse opslag til dig
+                </p>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-text-secondary">Fra:</label>
+                    <select
+                      value={splitTimeValue(urlTimeStart).hour}
+                      onChange={(e) => setUrlTimeStart(updateTimePart(urlTimeStart, 'hour', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_HOUR_OPTIONS.map((hour) => (
+                        <option key={hour} value={hour}>{hour}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs">:</span>
+                    <select
+                      value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(urlTimeStart).minute) ? splitTimeValue(urlTimeStart).minute : ''}
+                      onChange={(e) => setUrlTimeStart(updateTimePart(urlTimeStart, 'minute', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_MINUTE_OPTIONS.map((minute) => (
+                        <option key={minute} value={minute}>{minute}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-text-secondary">Til:</label>
+                    <select
+                      value={splitTimeValue(urlTimeEnd).hour}
+                      onChange={(e) => setUrlTimeEnd(updateTimePart(urlTimeEnd, 'hour', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_HOUR_OPTIONS.map((hour) => (
+                        <option key={hour} value={hour}>{hour}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs">:</span>
+                    <select
+                      value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(urlTimeEnd).minute) ? splitTimeValue(urlTimeEnd).minute : ''}
+                      onChange={(e) => setUrlTimeEnd(updateTimePart(urlTimeEnd, 'minute', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_MINUTE_OPTIONS.map((minute) => (
+                        <option key={minute} value={minute}>{minute}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
                 <button
                   onClick={handleAddManualUrl}
                   disabled={!newMenuInput.trim()}
@@ -1531,6 +1594,61 @@ function MenuPage() {
                   placeholder="Serverings tid (f.eks. Man-Fre 11-15)"
                   className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
                 />
+                
+                <p className="text-xs text-text-secondary mb-2 mt-3">
+                  Indtast tid hvornår dette serveres, så vi kan tilpasse opslag til dig
+                </p>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-text-secondary">Fra:</label>
+                    <select
+                      value={splitTimeValue(uploadTimeStart).hour}
+                      onChange={(e) => setUploadTimeStart(updateTimePart(uploadTimeStart, 'hour', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_HOUR_OPTIONS.map((hour) => (
+                        <option key={hour} value={hour}>{hour}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs">:</span>
+                    <select
+                      value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(uploadTimeStart).minute) ? splitTimeValue(uploadTimeStart).minute : ''}
+                      onChange={(e) => setUploadTimeStart(updateTimePart(uploadTimeStart, 'minute', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_MINUTE_OPTIONS.map((minute) => (
+                        <option key={minute} value={minute}>{minute}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-text-secondary">Til:</label>
+                    <select
+                      value={splitTimeValue(uploadTimeEnd).hour}
+                      onChange={(e) => setUploadTimeEnd(updateTimePart(uploadTimeEnd, 'hour', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_HOUR_OPTIONS.map((hour) => (
+                        <option key={hour} value={hour}>{hour}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs">:</span>
+                    <select
+                      value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(uploadTimeEnd).minute) ? splitTimeValue(uploadTimeEnd).minute : ''}
+                      onChange={(e) => setUploadTimeEnd(updateTimePart(uploadTimeEnd, 'minute', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_MINUTE_OPTIONS.map((minute) => (
+                        <option key={minute} value={minute}>{minute}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
                 <input
                   type="file"
                   accept=".pdf,.jpg,.jpeg,.png"
@@ -1581,6 +1699,61 @@ function MenuPage() {
                   placeholder="Spaghetti Carbonara - 125 kr&#10;Margherita Pizza - 95 kr&#10;Caesar Salad"
                   className="w-full px-3 py-2 border border-border rounded text-sm mb-3 min-h-[100px]"
                 />
+                
+                <p className="text-xs text-text-secondary mb-2 mt-3">
+                  Indtast tid hvornår dette serveres, så vi kan tilpasse opslag til dig
+                </p>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-text-secondary">Fra:</label>
+                    <select
+                      value={splitTimeValue(textTimeStart).hour}
+                      onChange={(e) => setTextTimeStart(updateTimePart(textTimeStart, 'hour', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_HOUR_OPTIONS.map((hour) => (
+                        <option key={hour} value={hour}>{hour}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs">:</span>
+                    <select
+                      value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(textTimeStart).minute) ? splitTimeValue(textTimeStart).minute : ''}
+                      onChange={(e) => setTextTimeStart(updateTimePart(textTimeStart, 'minute', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_MINUTE_OPTIONS.map((minute) => (
+                        <option key={minute} value={minute}>{minute}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <label className="text-xs text-text-secondary">Til:</label>
+                    <select
+                      value={splitTimeValue(textTimeEnd).hour}
+                      onChange={(e) => setTextTimeEnd(updateTimePart(textTimeEnd, 'hour', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_HOUR_OPTIONS.map((hour) => (
+                        <option key={hour} value={hour}>{hour}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs">:</span>
+                    <select
+                      value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(textTimeEnd).minute) ? splitTimeValue(textTimeEnd).minute : ''}
+                      onChange={(e) => setTextTimeEnd(updateTimePart(textTimeEnd, 'minute', e.target.value))}
+                      className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                    >
+                      <option value="">--</option>
+                      {TIME_MINUTE_OPTIONS.map((minute) => (
+                        <option key={minute} value={minute}>{minute}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
                 <button
                   onClick={handleAddManualText}
                   disabled={!newTextInput.trim()}
