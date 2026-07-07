@@ -1896,20 +1896,20 @@ function MenuPage() {
                             <div className="mt-2 p-2 rounded border w-full" style={{ backgroundColor: '#FAEEDA', borderColor: '#FAC775' }}>
                               {editingTimingCardId !== menuCard.result_id ? (
                                 // Display Mode
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-1.5 flex-1">
-                                    <span className="text-xs font-medium" style={{ color: '#854F0B' }}>Menuen serveres:</span>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+                                    <span className="text-xs font-medium whitespace-nowrap" style={{ color: '#854F0B' }}>Menuen serveres:</span>
                                     {menuCard.time_start && menuCard.time_end ? (
                                       <>
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold" style={{ backgroundColor: '#FFFFFF', color: '#633806', borderWidth: '1px', borderColor: '#EF9F27' }}>
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap" style={{ backgroundColor: '#FFFFFF', color: '#633806', borderWidth: '1px', borderColor: '#EF9F27' }}>
                                           {menuCard.time_start} – {menuCard.time_end}
                                           {menuCard.time_source === 'opening_hours_fallback' && ' (åbningstider)'}
                                           {menuCard.time_start === '00:00' && menuCard.time_end === '23:59' && ' (hele dagen)'}
                                         </span>
-                                        <span className="text-xs italic ml-1" style={{ color: '#854F0B' }}>Du kan altid redigere, hvornår menuen serveres her →</span>
+                                        <span className="text-xs italic ml-1 break-words" style={{ color: '#854F0B' }}>Du kan altid redigere, hvornår menuen serveres her →</span>
                                       </>
                                     ) : (
-                                      <span className="text-xs italic" style={{ color: '#854F0B' }}>Angiv hvornår menuen serveres, så jeg bedre kan hjælpe med dine posts →</span>
+                                      <span className="text-xs italic break-words" style={{ color: '#854F0B' }}>Angiv hvornår menuen serveres, så jeg bedre kan hjælpe med dine posts →</span>
                                     )}
                                   </div>
                                   <button
