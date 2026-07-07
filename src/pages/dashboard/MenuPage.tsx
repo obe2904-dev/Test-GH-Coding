@@ -1893,7 +1893,7 @@ function MenuPage() {
                           
                           {/* Menu Availability Time Frame - Combined Display and Edit */}
                           {menuCard?.result_id && menuCard.status === 'extracted' && (
-                            <div className="mt-2 p-2 rounded border" style={{ backgroundColor: '#FAEEDA', borderColor: '#FAC775' }}>
+                            <div className="mt-2 p-2 rounded border w-full" style={{ backgroundColor: '#FAEEDA', borderColor: '#FAC775' }}>
                               {editingTimingCardId !== menuCard.result_id ? (
                                 // Display Mode
                                 <div className="flex items-center justify-between gap-2">
