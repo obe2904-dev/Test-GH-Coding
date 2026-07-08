@@ -1274,9 +1274,10 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
   } : null
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Scrollable content area */}
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+    <>
+      <div className="flex flex-col h-full">
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-y-auto space-y-4 pb-4">
 
         {/* ── Weekly Plan idea tab strip ── */}
         {weeklyContentPlan && onSwitchIdea && weeklyContentPlan.posts.length > 1 && (
@@ -1626,6 +1627,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
           />
         </div>
       </div>
+      </div>
 
       {showCropOverlay && currentPhoto && (currentPhoto.adjustedUrl || currentPhoto.originalUrl) && (
         <CropOverlay
@@ -1678,6 +1680,6 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         />
       )}
 
-    </div>
+    </>
   )
 }
