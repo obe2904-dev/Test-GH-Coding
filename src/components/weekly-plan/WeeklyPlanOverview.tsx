@@ -759,18 +759,6 @@ export function WeeklyPlanOverview({
 
                   {/* Chips */}
                   <div className="flex-shrink-0 flex items-center gap-2">
-                    {(() => {
-                      const goalBadgeText = getGoalModeBadge(post)
-                      if (!goalBadgeText) return null
-                      return (
-                        <span 
-                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700"
-                          title={post.strategicContext?.strategic_intent || goalBadgeText}
-                        >
-                          {goalBadgeText}
-                        </span>
-                      )
-                    })()}
                     {hasCreatedPost && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-600 text-white">✓ {t('weeklyPlan.overview.createdBadge', { defaultValue: 'Lavet' })}</span>
                     )}
@@ -783,6 +771,18 @@ export function WeeklyPlanOverview({
                     {isPast && !isSessionDone && !isLocked && !hasCreatedPost && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-500 text-white">{t('weeklyPlan.overview.pastBadge')}</span>
                     )}
+                    {(() => {
+                      const goalBadgeText = getGoalModeBadge(post)
+                      if (!goalBadgeText) return null
+                      return (
+                        <span 
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700"
+                          title={post.strategicContext?.strategic_intent || goalBadgeText}
+                        >
+                          {goalBadgeText}
+                        </span>
+                      )
+                    })()}
                     {post.strategicContext?.owner_note_applied && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">{t('weeklyPlan.overview.ownerNoteBadge')}</span>
                     )}
