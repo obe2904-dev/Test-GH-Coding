@@ -239,6 +239,9 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
   // ── Calendar Browsing State (separate from post scheduled date) ──
   const [calendarBrowseDate, setCalendarBrowseDate] = useState<Date | null>(() => new Date())
 
+  // ── Track currently editing draft IDs (per platform) to avoid duplicates ──
+  const editingDraftIds = useRef<Record<string, string>>({})
+
   // Load all posts for the timeline (drafts + scheduled + published)
   const loadTimelineData = useCallback(async () => {
     if (!business?.id) return
@@ -359,9 +362,14 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
 
       // Save draft for EACH selected platform
       const saveTasks = selectedPlatforms.map(async (platform) => {
+        const platformKey = platform.toLowerCase()
+        
+        // Check if we're already editing a draft for this platform+idea
+        const existingDraftId = editingDraftIds.current[platformKey]
+        
         const draftData = {
           businessId: business.id,
-          platform: platform.toLowerCase(),
+          platform: platformKey,
           postText: postContent?.text ?? '',
           photoUrl: photoContent?.uploadedMedia?.[0]?.url ?? null,
           ideaSource,
@@ -377,7 +385,33 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
           contentType: weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType ?? null,
         }
 
-        return savePublishedPost(draftData)
+        // If we have an existing draft ID, update it instead of creating new
+        if (existingDraftId) {
+          const { error } = await supabase
+            .from('posts')
+            .update({
+              post_text: draftData.postText,
+              photo_url: draftData.photoUrl,
+              scheduled_for: draftData.scheduledFor?.toISOString() ?? null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existingDraftId)
+          
+          if (error) {
+            console.error(`[Auto-save] Failed to update draft ${existingDraftId}:`, error)
+            throw error
+          }
+          console.log(`[Auto-save] Updated existing draft ${existingDraftId} for ${platform}`)
+          return { id: existingDraftId }
+        } else {
+          // Create new draft and track its ID
+          const result = await savePublishedPost(draftData)
+          if (result.id) {
+            editingDraftIds.current[platformKey] = result.id
+            console.log(`[Auto-save] Created new draft ${result.id} for ${platform}`)
+          }
+          return result
+        }
       })
 
       try {
@@ -1389,8 +1423,38 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                   ideaPosts={ideaPosts}
                   currentIdeaTitle={currentIdeaTitle}
                   onPostClick={(post) => {
-                    console.log('[PublishStep] Idea post clicked:', post.id)
-                    // TODO: Open post modal
+                    if (!post.platform) return // Skip posts without platform
+                    
+                    console.log('[PublishStep] Loading post into editor:', post.id)
+                    // Load the post data into the editor
+                    usePostCreationStore.setState({
+                      postContent: {
+                        text: post.postText ?? '',
+                        headline: '',
+                        adjustments: {
+                          length: 'current',
+                          tone: 'brand',
+                          includeHashtags: false,
+                          includeEmojis: false,
+                          includeBookingLink: false,
+                        },
+                      },
+                      photoContent: null, // User will need to re-upload photo from library if needed
+                      selectedPlatforms: [post.platform.charAt(0).toUpperCase() + post.platform.slice(1)], // Capitalize platform name
+                    })
+                    
+                    // Track this post as being edited
+                    if (post.status === 'draft') {
+                      editingDraftIds.current[post.platform] = post.id
+                    }
+                    
+                    // Update date/time if scheduled
+                    if (post.scheduledFor) {
+                      const scheduledDate = new Date(post.scheduledFor)
+                      setSelectedDate(scheduledDate)
+                      setSelectedHour(String(scheduledDate.getHours()).padStart(2, '0'))
+                      setSelectedMinute(String(scheduledDate.getMinutes()).padStart(2, '0'))
+                    }
                   }}
                   isLoading={isLoadingTimeline}
                 />
@@ -1401,8 +1465,38 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                   selectedDate={calendarBrowseDate}
                   locale={locale}
                   onPostClick={(post) => {
-                    console.log('[PublishStep] Date post clicked:', post.id)
-                    // TODO: Open post modal
+                    if (!post.platform) return // Skip posts without platform
+                    
+                    console.log('[PublishStep] Loading scheduled post into editor:', post.id)
+                    // Load the post data into the editor
+                    usePostCreationStore.setState({
+                      postContent: {
+                        text: post.postText ?? '',
+                        headline: '',
+                        adjustments: {
+                          length: 'current',
+                          tone: 'brand',
+                          includeHashtags: false,
+                          includeEmojis: false,
+                          includeBookingLink: false,
+                        },
+                      },
+                      photoContent: null, // User will need to re-upload photo from library if needed
+                      selectedPlatforms: [post.platform.charAt(0).toUpperCase() + post.platform.slice(1)],
+                    })
+                    
+                    // Track this post as being edited if it's a draft
+                    if (post.status === 'draft') {
+                      editingDraftIds.current[post.platform] = post.id
+                    }
+                    
+                    // Update date/time
+                    if (post.scheduledFor) {
+                      const scheduledDate = new Date(post.scheduledFor)
+                      setSelectedDate(scheduledDate)
+                      setSelectedHour(String(scheduledDate.getHours()).padStart(2, '0'))
+                      setSelectedMinute(String(scheduledDate.getMinutes()).padStart(2, '0'))
+                    }
                   }}
                   isLoading={isLoadingTimeline}
                 />

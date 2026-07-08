@@ -23,6 +23,11 @@ export function DatePostsFrame({
   onPostClick,
   isLoading,
 }: DatePostsFrameProps) {
+  // Filter out posts without valid platform labels
+  const validPosts = datePosts.filter(
+    (post) => post.platform && (post.platform === 'facebook' || post.platform === 'instagram')
+  )
+
   const formattedDate = selectedDate
     ? selectedDate.toLocaleDateString(locale, {
         day: 'numeric',
@@ -38,7 +43,7 @@ export function DatePostsFrame({
           Opslag for {formattedDate || 'valgt dato'}
         </h4>
         <span className="text-xs text-slate-500">
-          {datePosts.length} {datePosts.length === 1 ? 'opslag' : 'opslag'}
+          {validPosts.length} {validPosts.length === 1 ? 'opslag' : 'opslag'}
         </span>
       </div>
 
@@ -48,7 +53,7 @@ export function DatePostsFrame({
           <div className="flex items-center justify-center h-full">
             <div className="w-8 h-8 border-4 border-cta border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : datePosts.length === 0 ? (
+        ) : validPosts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-4">
             <p className="text-sm text-slate-500 mb-1">Ingen opslag denne dag</p>
             <p className="text-xs text-slate-400">
@@ -56,7 +61,7 @@ export function DatePostsFrame({
             </p>
           </div>
         ) : (
-          datePosts.map((post) => (
+          validPosts.map((post) => (
             <PostFrame
               key={post.id}
               id={post.id}

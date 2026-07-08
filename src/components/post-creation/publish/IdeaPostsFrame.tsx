@@ -21,6 +21,11 @@ export function IdeaPostsFrame({
   onPostClick,
   isLoading,
 }: IdeaPostsFrameProps) {
+  // Filter out posts without valid platform labels
+  const validPosts = ideaPosts.filter(
+    (post) => post.platform && (post.platform === 'facebook' || post.platform === 'instagram')
+  )
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
@@ -28,7 +33,7 @@ export function IdeaPostsFrame({
           Opslag for denne idé
         </h4>
         <span className="text-xs text-slate-500">
-          {ideaPosts.length} {ideaPosts.length === 1 ? 'version' : 'versioner'}
+          {validPosts.length} {validPosts.length === 1 ? 'version' : 'versioner'}
         </span>
       </div>
 
@@ -45,7 +50,7 @@ export function IdeaPostsFrame({
           <div className="flex items-center justify-center h-full">
             <div className="w-8 h-8 border-4 border-cta border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : ideaPosts.length === 0 ? (
+        ) : validPosts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-4">
             <p className="text-sm text-slate-500 mb-1">Ingen opslag endnu</p>
             <p className="text-xs text-slate-400">
@@ -53,7 +58,8 @@ export function IdeaPostsFrame({
             </p>
           </div>
         ) : (
-          ideaPosts.map((post) => (
+          validPosts
+            .map((post) => (
             <PostFrame
               key={post.id}
               id={post.id}
