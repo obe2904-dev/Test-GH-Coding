@@ -67,11 +67,7 @@ export function IdeaPostsFrame({
               }
               text={post.postText ?? ''}
               photoUrl={post.photoUrl}
-              scheduledAt={
-                post.scheduledFor?.toISOString() ??
-                post.postedAt?.toISOString() ??
-                null
-              }
+              scheduledAt={post.scheduledFor ?? post.postedAt ?? null}
               onClick={() => onPostClick(post)}
             />
           ))

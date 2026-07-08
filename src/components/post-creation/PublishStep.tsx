@@ -284,8 +284,8 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
       return false
     }).sort((a, b) => {
       // Sort by created date (newest first)
-      const dateA = a.createdAt ?? new Date(0)
-      const dateB = b.createdAt ?? new Date(0)
+      const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0)
+      const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0)
       return dateB.getTime() - dateA.getTime()
     })
   }, [allPosts, activePath, weeklyPlanPost?.idea_id, selectedSuggestionData?.id, business?.id])
@@ -306,12 +306,12 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
       const postDate = post.scheduledFor ?? post.postedAt
       if (!postDate) return false
 
-      const postTime = postDate.getTime()
+      const postTime = new Date(postDate).getTime()
       return postTime >= targetDate.getTime() && postTime < nextDate.getTime()
     }).sort((a, b) => {
       // Sort by scheduled/posted time (earliest first)
-      const dateA = (a.scheduledFor ?? a.postedAt)?.getTime() ?? 0
-      const dateB = (b.scheduledFor ?? b.postedAt)?.getTime() ?? 0
+      const dateA = a.scheduledFor ? new Date(a.scheduledFor).getTime() : a.postedAt ? new Date(a.postedAt).getTime() : 0
+      const dateB = b.scheduledFor ? new Date(b.scheduledFor).getTime() : b.postedAt ? new Date(b.postedAt).getTime() : 0
       return dateA - dateB
     })
   }, [allPosts, calendarBrowseDate])
@@ -350,17 +350,17 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     autoSaveTimeoutRef.current = setTimeout(async () => {
       console.log('[Auto-save] Saving draft to DB...')
       
-      const ideaSource =
+      const ideaSource:  'manual' | 'quick_suggestions' | 'weekly_plan' | undefined =
         activePath === 'weekly-plan'
           ? 'weekly_plan'
           : activePath === 'ai-ideas'
           ? 'quick_suggestions'
-          : 'write'
+          : 'manual'
 
       const draftData = {
         businessId: business.id,
         platform: selectedPlatforms[0]?.toLowerCase() ?? 'facebook',
-        postText: getFormattedContent(selectedPlatforms[0] ?? 'facebook'),
+        postText: postContent?.text ?? '',
         photoUrl: photoContent?.uploadedMedia?.[0]?.url ?? null,
         ideaSource,
         weeklyPlanIdeaId: weeklyPlanPost?.idea_id ?? null,
@@ -369,6 +369,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
         weeklyPlanSlotDate: weeklyPlanPost?.timing?.date ?? null,
         status: 'draft' as const,
         scheduledFor: selectedDateTime,
+        postedAt: new Date(),
         menuItemId: weeklyPlanPost?.contentSubject?.menuItemId ?? selectedSuggestionData?.menuItemId ?? null,
         menuItemName: weeklyPlanPost?.contentSubject?.menuItemName ?? selectedSuggestionData?.menuItemName ?? null,
         contentType: weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType ?? null,
@@ -407,7 +408,6 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     selectedSuggestionData?.menuItemId,
     selectedSuggestionData?.menuItemName,
     selectedSuggestionData?.contentType,
-    getFormattedContent,
     loadTimelineData,
   ])
 
