@@ -300,88 +300,87 @@ export function ScheduleCalendarPicker({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-          <button
-            onClick={handlePreviousMonth}
-            className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <ChevronLeft className="w-4 h-4 text-slate-600" />
-          </button>
-          <h4 className="text-sm font-bold text-slate-800">
-            {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
-          </h4>
-          <button
-            onClick={handleNextMonth}
-            className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <ChevronRight className="w-4 h-4 text-slate-600" />
-          </button>
-        </div>
+        <button
+          onClick={handlePreviousMonth}
+          className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4 text-slate-600" />
+        </button>
+        <h4 className="text-sm font-bold text-slate-800">
+          {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+        </h4>
+        <button
+          onClick={handleNextMonth}
+          className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
+        >
+          <ChevronRight className="w-4 h-4 text-slate-600" />
+        </button>
+      </div>
 
-        <div className="grid grid-cols-7 gap-0.5 mb-1">
-          {dayNames.map((day) => (
-            <div
-              key={day}
-              className="text-center text-xs font-semibold text-slate-600"
+      <div className="grid grid-cols-7 gap-0.5 mb-1">
+        {dayNames.map((day) => (
+          <div
+            key={day}
+            className="text-center text-xs font-semibold text-slate-600"
+          >
+            {day}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-0.5">
+        {calendarDays.map((dayObj, index) => {
+          const pastDate = isPastDate(dayObj.date)
+          const todayDate = isToday(dayObj.date)
+          const selected = isSelectedDay(dayObj.date)
+          const timeInPast = todayDate &&
+            isPastDateTime(dayObj.date, selectedHour, selectedMinute)
+          const key = dateKey(dayObj.date)
+          const postsForDay = postsByDay.get(key) ?? []
+          const showTooltip = pastDate && hoveredPastDayKey === key && postsForDay.length > 0
+
+          return (
+            <button
+              key={`${dayObj.date.toISOString()}-${index}`}
+              onClick={() => handleDayClick(dayObj.date)}
+              onMouseEnter={() => setHoveredPastDayKey(pastDate ? key : null)}
+              onMouseLeave={() => setHoveredPastDayKey((current) => (current === key ? null : current))}
+              aria-disabled={pastDate}
+              className={`relative aspect-square flex flex-col items-center justify-center text-xs font-medium rounded transition-all overflow-visible ${
+                pastDate
+                  ? 'bg-transparent text-slate-300 cursor-default'
+                  : selected
+                  ? timeInPast
+                    ? 'bg-amber-500 text-white shadow-md'
+                    : 'bg-purple-600 text-white shadow-md'
+                  : todayDate
+                  ? 'bg-cta-surface text-cta-text font-bold'
+                  : dayObj.isCurrentMonth
+                  ? 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                  : 'bg-transparent text-slate-400 hover:bg-slate-50 hover:text-slate-500'
+              }`}
             >
-              {day}
-            </div>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-7 gap-0.5">
-          {calendarDays.map((dayObj, index) => {
-            const pastDate = isPastDate(dayObj.date)
-            const todayDate = isToday(dayObj.date)
-            const selected = isSelectedDay(dayObj.date)
-            const timeInPast = todayDate &&
-              isPastDateTime(dayObj.date, selectedHour, selectedMinute)
-            const key = dateKey(dayObj.date)
-            const postsForDay = postsByDay.get(key) ?? []
-            const showTooltip = pastDate && hoveredPastDayKey === key && postsForDay.length > 0
-
-            return (
-              <button
-                key={`${dayObj.date.toISOString()}-${index}`}
-                onClick={() => handleDayClick(dayObj.date)}
-                onMouseEnter={() => setHoveredPastDayKey(pastDate ? key : null)}
-                onMouseLeave={() => setHoveredPastDayKey((current) => (current === key ? null : current))}
-                aria-disabled={pastDate}
-                className={`relative aspect-square flex flex-col items-center justify-center text-xs font-medium rounded transition-all overflow-visible ${
-                  pastDate
-                    ? 'bg-transparent text-slate-300 cursor-default'
-                    : selected
-                    ? timeInPast
-                      ? 'bg-amber-500 text-white shadow-md'
-                      : 'bg-purple-600 text-white shadow-md'
-                    : todayDate
-                    ? 'bg-cta-surface text-cta-text font-bold'
-                    : dayObj.isCurrentMonth
-                    ? 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                    : 'bg-transparent text-slate-400 hover:bg-slate-50 hover:text-slate-500'
-                }`}
-              >
-                <span>{dayObj.day}</span>
-                {postsForDay.length > 0 && (
-                  <div className="flex max-w-full flex-wrap justify-center gap-0.5 px-1 mt-0.5">
-                    {postsForDay.map((post, postIndex) => {
-                      const dotColor = selected 
-                        ? 'bg-white/80' 
-                        : post.platform.toLowerCase() === 'facebook' 
-                        ? 'bg-blue-500' 
+              <span>{dayObj.day}</span>
+              {postsForDay.length > 0 && (
+                <div className="flex max-w-full flex-wrap justify-center gap-0.5 px-1 mt-0.5">
+                  {postsForDay.map((post, postIndex) => {
+                    const dotColor = selected 
+                      ? 'bg-white/80' 
+                      : post.platform.toLowerCase() === 'facebook' 
+                      ? 'bg-blue-500' 
                         : post.platform.toLowerCase() === 'instagram' 
                         ? 'bg-pink-500' 
                         : 'bg-slate-400'
-                      return (
-                        <span key={`${key}-post-${postIndex}`} className={`h-1 w-1 rounded-full ${dotColor}`} />
-                      )
-                    })}
-                  </div>
-                )}
-                {showTooltip && <PastDayTooltip posts={postsForDay} />}
-              </button>
-            )
-          })}
-        </div>
+                    return (
+                      <span key={`${key}-post-${postIndex}`} className={`h-1 w-1 rounded-full ${dotColor}`} />
+                    )
+                  })}
+                </div>
+              )}
+              {showTooltip && <PastDayTooltip posts={postsForDay} />}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
