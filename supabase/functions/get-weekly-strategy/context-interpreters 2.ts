@@ -554,7 +554,7 @@ export function economicRelevanceForArchetype(archetype) {
     candidates.push({
       label: 'Terrasse — walk-in trafik og udendørs besøg i godt vejr',
       customer_behavior_reason: `${avgTemp}°C og sol øger spontane udendørsbeslutninger og walk-in besøg`,
-      business_reason: 'Udendørs servering er en direkte konkurrencefordel i godt vejr',
+      business_reason: 'Udeservering er en direkte konkurrencefordel i godt vejr',
       daypart_relevance: [
         primaryDaypart,
         'all_day'

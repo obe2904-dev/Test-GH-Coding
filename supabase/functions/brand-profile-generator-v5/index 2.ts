@@ -32,7 +32,7 @@
  *                     generation_constraints: compound_sentences (guide AI, never strip)
  * @changelog v5.1.2 - GUARDRAILS FIX: Vocabulary-aware seasonal notes
  *                     Extracts outdoor seating term from business_character instead of hardcoding "terrasse".
- *                     Café Faust uses "udendørs siddepladser" - now detected and used correctly.
+ *                     Café Faust uses "udeservering" - now detected and used correctly.
  * @changelog v5.1.1 - VOICE FIX: Null out legacy tone_of_voice field (contradicts V5 guardrails)
  *                     Legacy examples like "Tag en pause" violate generic_marketing avoidance.
  *                     V5 voice derives everything from signature themes + context.

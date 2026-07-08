@@ -114,7 +114,7 @@ DO NOT write one clause per signal. STACK 2-3 signals in EACH clause for maximum
 → Could apply to ANY waterfront family café
 
 ✅ RIGHT (multi-signal clauses — specific):
-"Når besøgende til [city name from data] tager børnene med til udendørs servering ved åen i roligt tempo"
+"Når besøgende til [city name from data] tager børnene med til udeservering ved åen i roligt tempo"
 → Stacks 4 signals: tourist_strength + has_kids_menu + location hook + price_register
 
 "Når åbningstiden fra brunch til kl. 02:00 bliver forskellen"
@@ -236,7 +236,7 @@ PRIORITERING:
 3. Menu specificity (kun hvis stabilt og emotionelt ankret)
 4. Physical features (SIDST, kun hvis differentierender >7/10)
 
-❌ "Café med udendørs servering ved åen der serverer brunch og cocktails"
+❌ "Café med udeservering ved åen der serverer brunch og cocktails"
    → Operational description, physical-first
 
 ✅ "Det velfortjente stop ved åen — kaffe om morgenen, drinks når du skal have det godt"
@@ -267,14 +267,14 @@ BUSINESS CHARACTER (business_character) — ⚠️ OBLIGATORISK:
 - Include ALL confirmed details from data: opening hours, specific menu items, service types, operational facts
 - For paid businesses, let V5 identity/programmes/commercial orientation govern the hybrid framing; web analysis labels are fallback only.
 - When a hybrid, list EVERY role explicitly: 'café, restaurant og bar' — not just the primary one
-- ⚠️ OUTDOOR SEATING: Use generic terms ONLY — "udendørs siddepladser" or "udendørs servering". NEVER invent "terrasse", "altan", "gårdhave" unless explicitly in website text
+- ⚠️ OUTDOOR SEATING: Use generic terms ONLY — "udeservering". NEVER invent "terrasse", "altan", "gårdhave" unless explicitly in website text
 - Include physical features when they shape content: 'ved åen', 'med havudsigt', 'i en gammel industrihal'
 - Include temporal format or transitions if relevant — use programme names from meal_arc, not time-of-day assumptions.
   ✅ 'brunch og kaffe fra åbning, aftensmad og cocktails fra middag og fremefter'
   ❌ 'om morgenen som kaffebar, om aftenen som vinbar' (time-of-day labels are assumptions — programme names are facts from data)
   Reason: a venue opening at 09:30 is NOT a 'morgen'-venue in Danish culture; its opening programme is 'brunch', not 'morgenmad'.
 - No marketing language — just factual operational details for an AI to infer content priorities
-- Example: 'Café beliggende ved havnen, der tilbyder brunch, frokost og aftenmenu. Frokostservering fra kl. 11.00 til 16.00 med retter som flæskestegssandwich og fiskefilet. Stedet har også en cocktailmenu og børnemenu. Åbent til kl. 23 i weekenden, med udendørs siddepladser og mulighed for takeaway.'
+- Example: 'Café beliggende ved havnen, der tilbyder brunch, frokost og aftenmenu. Frokostservering fra kl. 11.00 til 16.00 med retter som flæskestegssandwich og fiskefilet. Stedet har også en cocktailmenu og børnemenu. Åbent til kl. 23 i weekenden, med udeservering og mulighed for takeaway.'
 - VALIDERINGSKRAV: Feltet må IKKE være tomt. Hvis ingen menuprogrammer er tilgængelige, beskriv forretningen baseret på business_type og location intelligence.
 
 VOICE CONSTRAINTS (voice_constraints):
@@ -432,7 +432,7 @@ CONTENT PILLARS (content_pillars):
   * Vibe: atmosphere shots — light, space, setting, location texture → encouraged=true for venues with distinctive physical context (waterfront, terrace, unique interior, open-air area)
   * Engagement: interactive content, questions, polls → encouraged=true only for community-driven local venues where audience interaction is natural; otherwise allowed=true, encouraged=false
   * Offers: promotions, seasonal specials, events → encouraged=true only if the venue has frequent events or seasonal menu changes in the data; otherwise allowed=true, encouraged=false
-- notes: 1–2 sentences with TWO elements: (1) HOW this pillar applies to THIS venue — reference a specific venue attribute (location, food style, temporal context, service arc); (2) WHY this content type performs commercially for this guest profile — what social/emotional trigger does it activate, what decision does it influence. Never write a generic note. Example good note for "Vibe" at a waterfront café: "Udendørs udeservering ved åen er stedets primære visuelle appel. Vibe-content driver 'hvor skal vi mødes?'-beslutningen hos grupper — vandkanten er det kommercielle argument."
+- notes: 1–2 sentences with TWO elements: (1) HOW this pillar applies to THIS venue — reference a specific venue attribute (location, food style, temporal context, service arc); (2) WHY this content type performs commercially for this guest profile — what social/emotional trigger does it activate, what decision does it influence. Never write a generic note. Example good note for "Vibe" at a waterfront café: "Udeservering ved åen er stedets primære visuelle appel. Vibe-content driver 'hvor skal vi mødes?'-beslutningen hos grupper — vandkanten er det kommercielle argument."
 
 BANNED WORDS (never use):
 hyggelig, lækker, indbydende, autentisk, unik, afslappet/afslappede, perfekt spot, charmerende, fantastisk, udsøgt, gastronomisk
@@ -1303,11 +1303,11 @@ FIELD-SPECIFIC RULES:
 1d) core_offerings.value
    - MUST list 3 meal CATEGORY anchors + 2 experience/service anchors
    - MEAL ANCHORS = broad meal time categories: "Brunch og morgenmad", "Frokost og smørrebrød", "Middag og 3-retters", "Brunch og frokost" etc.
-   - EXPERIENCE ANCHORS = non-food offerings with SPECIFIC location terms when applicable: "Udendørs servering ved åen" (NOT "ved vandet"), "Take away", "Private events", "Bar og cocktails", "Beliggenhed ved fjorden", "Udsigt over søen". ONLY use "terrasse" if the business explicitly calls it that in their own description.
+  - EXPERIENCE ANCHORS = non-food offerings with SPECIFIC location terms when applicable: "Udeservering ved åen" (NOT "ved vandet"), "Take away", "Private events", "Bar og cocktails", "Beliggenhed ved fjorden", "Udsigt over søen". ONLY use "terrasse" if the business explicitly calls it that in their own description.
    - LOCATION TERMINOLOGY: ALWAYS use specific waterway terms ("åen", "fjorden", "søen", "havnen", "bugten") - NEVER "vandet" unless actually open sea
    - STRICTLY FORBIDDEN: copying menu item names (THE FAVORIT, BRUNCH DELUXE, DEN NYE, etc.) or ALL-CAPS token names
    - USE EVIDENCE: Derive categories from the MENU items and USAGE OCCASIONS — don't copy item names verbatim
-   - EXAMPLE: "- Brunch og morgenmad\n- Frokost og salater\n- Middagsmenuer\n- Udendørs servering ved åen\n- Cocktails og drinks"
+  - EXAMPLE: "- Brunch og morgenmad\n- Frokost og salater\n- Middagsmenuer\n- Udeservering ved åen\n- Cocktails og drinks"
 
 2) target_audience.value
    - Pattern: "Når gæster [behavior + context], når [situation + time], samt når [transition]"

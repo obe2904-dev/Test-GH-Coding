@@ -120,6 +120,7 @@ BEGIN
                 is_seasonal,
                 is_limited_time,
                 dish_temp_category,
+                product_segment,
                 source_sha256,
                 synced_at
               ) VALUES (
@@ -139,6 +140,7 @@ BEGIN
                 COALESCE((v_item->>'is_seasonal')::BOOLEAN, false),
                 COALESCE((v_item->>'is_limited_time')::BOOLEAN, false),
                 NULL, -- dish_temp_category - to be enriched later
+                v_item->>'productSegment', -- product_segment from AI extraction
                 NEW.sha256,
                 NOW()
               )
@@ -152,6 +154,7 @@ BEGIN
                 is_signature = EXCLUDED.is_signature,
                 is_seasonal = EXCLUDED.is_seasonal,
                 is_limited_time = EXCLUDED.is_limited_time,
+                product_segment = EXCLUDED.product_segment,
                 source_sha256 = EXCLUDED.source_sha256,
                 synced_at = NOW();
               

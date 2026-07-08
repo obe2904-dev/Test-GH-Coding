@@ -1693,12 +1693,8 @@ export function CreatePostPage() {
             <div className="flex items-start gap-3">
               <div className="text-2xl">🔒</div>
               <div className="flex-1">
-                <h3 className="text-sm font-bold text-amber-900 mb-1">
-                  Idé og Design er låst
-                </h3>
-                <p className="text-xs text-amber-800 leading-relaxed">
-                  Efter at have nået Udgiv, kan idé og design ikke længere ændres. 
-                  Du kan se indholdet, men kun sletning af hele idéen frigør det igen.
+                <p className="text-sm text-amber-900">
+                  Idé er låst, en du kan stadig ændre tekst i Design
                 </p>
               </div>
             </div>

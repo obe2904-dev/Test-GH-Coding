@@ -485,14 +485,14 @@ function LocationIntelligencePage() {
         .from('business_location_intelligence')
         .select('*')
         .eq('business_id', businessId)
-        .single();
+        .maybeSingle();
 
       if (loadError) {
         throw new Error(`Failed to load location data: ${loadError.message}`);
       }
 
       if (!locationData) {
-        throw new Error('No location data found after generation');
+        throw new Error('No location data found after generation - AI analysis may have failed and fallback was not saved');
       }
 
       console.log('✅ Location intelligence loaded (schema v2):');

@@ -39,9 +39,9 @@ const HOSPITALITY_REGISTER: HospitalityRegisterMap = {
     block: (vertical = 'serveringssted') => `\
 FAGLIG REGISTER: Du skriver om et kommercielt ${vertical}-sted. Tænk og skriv som en professionel i restaurationsbranchen: brug den naturlige faglige jargon en erfaren vært eller køkkenchef ville bruge. Konkrete eksempler på korrekt register (princippet gælder ALLE lignende tilfælde; generaliser selv):
   Rum/lokale → brug: stedets navn, "restauranten", "lokalet", "baren", "udeservering" (IKKE "spisestuen", "stuen", "haven" - det er rum i private hjem; IKKE "salen" - det er teater- og biografsprog; brug "lokalet" med mindre stedet selv kalder det "salen")
-  Udendørsareal → brug: "udeserveringen", "udendørs servering" som STANDARD. Brug kun "terrassen" hvis det er stedets EKSPLICITTE betegnelse fra deres egen beskrivelse. Brug "haven/gårdhaven" kun hvis det er stedets faktiske navn (IKKE "have" som generisk ord)
+  Udendørsareal → brug: "udeserveringen" som STANDARD. Brug kun "terrassen" hvis det er stedets EKSPLICITTE betegnelse fra deres egen beskrivelse. Brug "haven/gårdhaven" kun hvis det er stedets faktiske navn (IKKE "have" som generisk ord)
   Besøgende → brug: "gæster" (IKKE "familien", "vennerne", "selskabet" med mindre det er en faktuel anledning som firmafest)
-Disse 3 eksempler illustrerer princippet: anvend erhvervssprog konsekvent i alle rum, relationer og situationer. VIGTIGT: Brug aldrig "terrasse" med mindre stedet selv kalder det det - brug altid "udendørs servering" eller "udeservering" som standard.`,
+Disse 3 eksempler illustrerer princippet: anvend erhvervssprog konsekvent i alle rum, relationer og situationer. VIGTIGT: Brug aldrig "terrasse" med mindre stedet selv kalder det det - brug altid "udeservering" som standard.`,
   },
 
   // ── Norwegian ─────────────────────────────────────────────────────────────────────────────

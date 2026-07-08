@@ -1111,8 +1111,8 @@ serve(async (req: any) => {
           let desc: string | null = basicInfo.description
           if (desc && /terrasse/i.test(desc) && !contentLower.includes('terrasse')) {
             desc = desc
-              .replace(/\budendørs\s+terrasse\b/gi, 'udendørs servering')
-              .replace(/\bterrasse\b/gi, 'udendørs servering')
+              .replace(/\budendørs\s+terrasse\b/gi, 'udeservering')
+              .replace(/\bterrasse\b/gi, 'udeservering')
             console.log('⚠️ short_description terrasse guard: replaced "terrasse" (not confirmed in scrape)')
           }
           return desc

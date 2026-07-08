@@ -352,7 +352,7 @@ function extractOutdoorSeatingTerm(businessCharacter?: string): string {
   const text = businessCharacter.toLowerCase()
   
   // Check in priority order (most specific first)
-  if (text.includes('udendørs siddepladser')) return 'udendørs siddepladser'
+  if (text.includes('udeservering')) return 'udeservering'
   if (text.includes('udeservering')) return 'udeservering'
   if (text.includes('terrasse')) return 'terrasse'
   if (text.includes('udservering')) return 'udservering'

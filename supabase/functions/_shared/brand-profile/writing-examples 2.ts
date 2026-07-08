@@ -22,6 +22,7 @@ import {
 import type { VoiceArchetype } from './voice-archetypes.ts'
 import type { ProfessionalPersona } from './professional-persona.ts'
 import type { GeographicContext } from './geographic-context.ts'
+import { getRandomApprovedCTAs } from '../ctas/approved-danish-ctas.ts'
 
 /**
  * Clean never_say rules from JSON artifacts (quotes, commas)
@@ -816,16 +817,16 @@ RETURN AS JSON:
   } catch (error) {
     console.error('❌ CTA library generation failed:', error)
     
-    // Return minimal fallback
+    // Return minimal fallback using approved CTAs (no archaic language)
     return {
       cta_library: {
         visit: {
-          casual: ['Kom forbi!', 'Vi ses snart', 'Hop forbi'],
+          casual: getRandomApprovedCTAs('walk_in', 5),
           formal: [`Besøg os ${locationPhrase}`, `Velkommen til ${business.business_name}`]
         },
         booking: {
-          soft: ['Book bord online', 'Book dit bord'],
-          urgent: ['Book nu', 'Sikr dig et bord']
+          soft: getRandomApprovedCTAs('booking', 3).filter(cta => !cta.toLowerCase().includes('nu')),
+          urgent: getRandomApprovedCTAs('booking', 3).filter(cta => cta.toLowerCase().includes('nu') || cta.toLowerCase().includes('sikr'))
         },
         engagement: {
           question: ['Hvad synes du?', 'Hvad ville du vælge?'],
@@ -836,7 +837,7 @@ RETURN AS JSON:
       cta_preferences: {
         default_style: toneStyle as 'casual' | 'formal',
         booking_priority: commercialMode === 'premium' ? 'urgent' : 'soft',
-        avoid_phrases: ['Svip forbi', 'Få fingrene i']
+        avoid_phrases: ['Svip forbi', 'Hop forbi', 'Få fingrene i', 'går på hæld', 'stik indenfor']
       }
     }
   }

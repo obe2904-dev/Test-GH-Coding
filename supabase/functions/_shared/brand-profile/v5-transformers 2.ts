@@ -187,32 +187,36 @@ export function deriveContentStrategy(
     return null
   }
   
-  // Calculate weighted average of goal splits
+  // Calculate weighted average of goal splits (2 goals only: drive_footfall + strengthen_brand)
   const aggregateGoals = programmes.reduce((acc, prog) => {
     const split = prog.commercialOrientation?.baseline_goal_split
     if (split) {
       acc.drive_footfall += split.drive_footfall || 0
-      acc.build_brand += split.strengthen_brand || 0  // FIXED: map strengthen_brand → build_brand
-      acc.retain_loyalty += split.retain_regulars || 0  // FIXED: map retain_regulars → retain_loyalty
+      acc.build_brand += split.strengthen_brand || 0  // Map strengthen_brand → build_brand
     }
     return acc
-  }, { drive_footfall: 0, build_brand: 0, retain_loyalty: 0 })
+  }, { drive_footfall: 0, build_brand: 0 })
   
   const count = programmes.length
   
-  // Normalize to 100%
-  const total = aggregateGoals.drive_footfall + aggregateGoals.build_brand + aggregateGoals.retain_loyalty
-  const goal_blend = {
-    drive_footfall: total > 0 ? Math.round((aggregateGoals.drive_footfall / total) * 100) : 33,
-    build_brand: total > 0 ? Math.round((aggregateGoals.build_brand / total) * 100) : 33,
-    retain_loyalty: total > 0 ? Math.round((aggregateGoals.retain_loyalty / total) * 100) : 34
+  // Normalize to 100% (2 goals only)
+  const total = aggregateGoals.drive_footfall + aggregateGoals.build_brand
+  let goal_blend: { drive_footfall: number; build_brand: number; retain_loyalty: number }
+  
+  if (total > 0) {
+    const drive_pct = Math.round((aggregateGoals.drive_footfall / total) * 100)
+    const build_pct = 100 - drive_pct  // Ensure exact 100% sum
+    goal_blend = {
+      drive_footfall: drive_pct,
+      build_brand: build_pct,
+      retain_loyalty: 0  // Deprecated - kept for backward compatibility
+    }
+  } else {
+    goal_blend = { drive_footfall: 60, build_brand: 40, retain_loyalty: 0 }
   }
   
-  // Derive primary goal
-  const primary_goal = goal_blend.drive_footfall >= 45 ? 'drive_footfall' 
-    : goal_blend.build_brand >= 45 ? 'build_brand'
-    : goal_blend.retain_loyalty >= 45 ? 'retain_loyalty'
-    : 'drive_footfall'  // Default to footfall for balanced businesses
+  // Derive primary goal (between 2 goals only)
+  const primary_goal = goal_blend.drive_footfall >= 50 ? 'drive_footfall' : 'build_brand'
   
   // Derive content_category_weights from programme types
   // If multi-programme (3+), reduce menu focus; if single-focus, increase menu

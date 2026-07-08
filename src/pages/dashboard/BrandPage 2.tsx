@@ -32,6 +32,12 @@ function BrandPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<string | null>(null)
   
+  // Weekly plan regeneration state
+  const [isRegenerating, setIsRegenerating] = useState(false)
+  const [regenerateStatus, setRegenerateStatus] = useState<string>('')
+  const [regenerateError, setRegenerateError] = useState<string | null>(null)
+  const [regenerateSuccess, setRegenerateSuccess] = useState(false)
+  
   // Input fields
   const [toneInput, setToneInput] = useState('')
   const [valueInput, setValueInput] = useState('')
@@ -149,6 +155,177 @@ function BrandPage() {
       console.error('Error saving brand profile:', error)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleRegenerateWeeklyPlan = async () => {
+    if (!businessId) return
+
+    setIsRegenerating(true)
+    setRegenerateError(null)
+    setRegenerateSuccess(false)
+    setRegenerateStatus('Forbereder regenerering...')
+
+    try {
+      // Get current session
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        throw new Error('Ingen aktiv session. Log venligst ind igen.')
+      }
+
+      // Calculate this week's start date (Monday)
+      const today = new Date()
+      const dayOfWeek = today.getDay()
+      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+      const weekStart = new Date(today)
+      weekStart.setDate(today.getDate() + diff)
+      weekStart.setHours(0, 0, 0, 0)
+      
+      const weekStartISO = weekStart.toISOString().split('T')[0]
+
+      // Step 1: Generate weekly strategy
+      setRegenerateStatus('Genererer ugentlig strategi...')
+      console.log('Calling get-weekly-strategy with regenerate:true')
+      
+      const strategyResponse = await fetch(`${(supabase as any).supabaseUrl}/functions/v1/get-weekly-strategy`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          business_id: businessId,
+          week_start: weekStartISO,
+          regenerate: true,
+        }),
+      })
+
+      if (!strategyResponse.ok) {
+        const errorText = await strategyResponse.text()
+        throw new Error(`Strategi-generering fejlede: ${errorText}`)
+      }
+
+      const strategyData = await strategyResponse.json()
+      let strategyId = strategyData.strategy_id
+
+      // Poll for strategy completion if it's pending
+      if (strategyData.status === 'pending' && strategyId) {
+        setRegenerateStatus('Venter på strategi-analyse... (dette kan tage op til 8 minutter)')
+        console.log('Strategy generation pending, polling for completion...', strategyId)
+        
+        const MAX_WAIT_MS = 8 * 60 * 1000
+        const POLL_INITIAL_MS = 3_000
+        const POLL_MAX_MS = 12_000
+        const POLL_STEP_MS = 2_000
+        let pollInterval = POLL_INITIAL_MS
+        const started = Date.now()
+
+        await new Promise<void>((resolve, reject) => {
+          const checkStatus = async () => {
+            if (Date.now() - started > MAX_WAIT_MS) {
+              reject(new Error('Strategi-generering timeout efter 8 minutter'))
+              return
+            }
+
+            const { data: stratRow } = await supabase
+              .from('weekly_strategies')
+              .select('id, status')
+              .eq('id', strategyId!)
+              .single()
+
+            if (stratRow?.status === 'generated') {
+              console.log('Strategy ready:', strategyId)
+              resolve()
+            } else if (stratRow?.status === 'error') {
+              reject(new Error('Strategi-generering fejlede'))
+            } else {
+              pollInterval = Math.min(pollInterval + POLL_STEP_MS, POLL_MAX_MS)
+              setTimeout(checkStatus, pollInterval)
+            }
+          }
+          checkStatus()
+        })
+      }
+
+      if (!strategyId) {
+        throw new Error('Ingen strategi-ID modtaget')
+      }
+
+      // Step 2: Generate weekly plan
+      setRegenerateStatus('Genererer ugentlig indholdsplan...')
+      console.log('Calling generate-weekly-plan with strategy_id:', strategyId)
+      
+      const planResponse = await fetch(`${(supabase as any).supabaseUrl}/functions/v1/generate-weekly-plan`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          weekStart: weekStartISO,
+          regenerate: true,
+          strategy_id: strategyId,
+        }),
+      })
+
+      if (!planResponse.ok) {
+        const errorText = await planResponse.text()
+        throw new Error(`Plan-generering fejlede: ${errorText}`)
+      }
+
+      const planData = await planResponse.json()
+
+      // Handle async (202) response - poll for completion
+      if (planResponse.status === 202) {
+        setRegenerateStatus('Venter på plan-generering... (dette kan tage op til 5 minutter)')
+        const MAX_WAIT_MS = 5 * 60 * 1000
+        const POLL_INTERVAL_MS = 3000
+        const pollStart = Date.now()
+
+        while (Date.now() - pollStart < MAX_WAIT_MS) {
+          await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
+
+          const { data: stratRow } = await supabase
+            .from('weekly_strategies')
+            .select('status')
+            .eq('id', strategyId)
+            .single()
+
+          if (stratRow?.status === 'error') {
+            throw new Error('Plan-generering fejlede - strategi markeret som fejl')
+          }
+          
+          if (stratRow?.status === 'posts_created') {
+            const { data: loadedPlan, error: planErr } = await supabase
+              .from('weekly_content_plans')
+              .select('*')
+              .eq('strategy_id', strategyId)
+              .order('generated_at', { ascending: false })
+              .limit(1)
+              .single()
+            
+            if (!planErr && loadedPlan) {
+              console.log('Plan generated successfully:', loadedPlan.id)
+              break
+            }
+          }
+        }
+
+        if (Date.now() - pollStart >= MAX_WAIT_MS) {
+          throw new Error('Plan-generering timeout efter 5 minutter')
+        }
+      }
+
+      setRegenerateSuccess(true)
+      setRegenerateStatus('Ugentlig plan regenereret! Se den i AI Ugeplan.')
+      console.log('Weekly plan regeneration completed successfully')
+
+    } catch (error) {
+      console.error('Weekly plan regeneration error:', error)
+      setRegenerateError(error instanceof Error ? error.message : 'Ukendt fejl')
+    } finally {
+      setIsRegenerating(false)
     }
   }
 
@@ -275,6 +452,48 @@ function BrandPage() {
             )}
           </div>
         )}
+
+        {/* Weekly Plan Regeneration */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-gray-900 mb-1">Ugentlig Indholdsplan</h3>
+              <p className="text-xs text-gray-600 mb-3">
+                Regenerer denne uges indholdsplan med fuld AI-analyse baseret på din opdaterede brand profil
+              </p>
+              
+              {regenerateSuccess && (
+                <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded text-sm text-green-800">
+                  ✓ {regenerateStatus}
+                </div>
+              )}
+              
+              {regenerateError && (
+                <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+                  ✕ {regenerateError}
+                </div>
+              )}
+              
+              {isRegenerating && (
+                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+                  ⏳ {regenerateStatus}
+                </div>
+              )}
+            </div>
+            
+            <button
+              onClick={handleRegenerateWeeklyPlan}
+              disabled={isRegenerating}
+              className={`px-4 py-2 text-sm font-medium rounded whitespace-nowrap ${
+                isRegenerating
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-cta to-purple-600 text-white hover:from-cta-hover hover:to-purple-700'
+              }`}
+            >
+              {isRegenerating ? '⏳ Regenererer...' : '🔄 Regenerer Ugeplan'}
+            </button>
+          </div>
+        </div>
 
         <div className="space-y-3">
           {/* Voice & Tone Section */}

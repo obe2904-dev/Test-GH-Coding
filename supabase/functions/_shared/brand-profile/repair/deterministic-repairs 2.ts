@@ -241,7 +241,7 @@ export function applyDeterministicRepairs(sections: any, dataSources: any, analy
   // STEP 8: Vocabulary guard on business_character.
   // Rule 1: "terrasse" is only allowed if the word literally appears in website analysis text.
   //         If AI wrote "terrasse" but the scrape data doesn't confirm it, replace with
-  //         "udendørs servering" — the safe unconfirmed fallback.
+  //         "udeservering" — the safe unconfirmed fallback.
   // Rule 2: Remove temporal narration phrases ("om dagen", "om aftenen", "skifter til").
   //         Prompt B instructions already forbid these; this guard handles AI non-compliance.
   try {
@@ -273,9 +273,9 @@ export function applyDeterministicRepairs(sections: any, dataSources: any, analy
         if (!/terrasse/i.test(wsText)) {
           // If "udendørs" already precedes "terrasse", keep just "siddepladser" to avoid duplication
           guarded = guarded
-            .replace(/\b(stor\s+)?udendørs\s+terrasse\b/gi, 'udendørs siddepladser')
-            .replace(/\bterrasse\b/gi, 'udendørs siddepladser')
-          console.log(`⚠️ Vocabulary guard: replaced "terrasse" → "udendørs siddepladser" in business_character (not confirmed in venue description)`)
+            .replace(/\b(stor\s+)?udendørs\s+terrasse\b/gi, 'udeservering')
+            .replace(/\bterrasse\b/gi, 'udeservering')
+          console.log(`⚠️ Vocabulary guard: replaced "terrasse" → "udeservering" in business_character (not confirmed in venue description)`)
         }
       }
 
@@ -403,7 +403,7 @@ function buildDeterministicCoreOfferings(dataSources: any, analysis: any, canoni
   const locationRef = canonicalLocationHook ? ` ${canonicalLocationHook}` : ''
   // Only use "terrasse" if explicitly mentioned in description
   expBullets.push(hasOutdoorSeating 
-    ? (explicitTerrasse ? `- Udendørs terrasse${locationRef}` : `- Udendørs servering${locationRef}`)
+    ? `- Udeservering${locationRef}`
     : `- Afslappede siddepladser${locationRef}`)
 
   if (/event|privat|selskab|reception/i.test(combinedDesc)) {
@@ -845,9 +845,9 @@ function buildDeterministicElaborationBlock(
     + (typeof profile.long_description === 'string' ? ' ' + profile.long_description : '')
 
   // Outdoor seating — ONLY from structured database field, NOT from unreliable regex on web scrape.
-  // Use generic "udendørs siddepladser" term — do NOT invent specific details like "terrasse".
+  // Use generic "udeservering" term — do NOT invent specific details like "terrasse".
   const hasOutdoor = !!(dataSources?.operations?.has_outdoor_seating)
-  const outdoorTerm = 'udendørs siddepladser'
+  const outdoorTerm = 'udeservering'
 
   // ─── OFFERING PROFILE ───
   // Three data sources, checked exhaustively for EVERY category — not just first-match.

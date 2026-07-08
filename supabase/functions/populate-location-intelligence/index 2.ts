@@ -574,17 +574,23 @@ serve(async (req) => {
       is_null: analyzedLocation.neighborhood_character === null,
     });
 
+    // ALWAYS save to database, even if fallback
+    // Frontend needs data to display, and we'll mark fallback with architecture version 1
+    const saver = new DatabaseSaver(supabase);
+    const versionToSave = analyzedLocation._is_fallback ? 1 : LOCATION_SCHEMA_VERSION;
+    
     if (analyzedLocation._is_fallback) {
       console.warn(
-        '⚠️ AI-analyse fejlede — POI-fallback scores gemmes IKKE i databasen. ' +
-        'Returnerer fallback til klienten, men cache forgiftes ikke. ' +
-        'Næste request vil prøve AI-analysen igen.'
+        '⚠️ AI-analyse fejlede — gemmer POI-fallback scores med architecture version 1. ' +
+        'Næste request (med force_refresh=true eller ny adresse) vil prøve AI-analysen igen.'
       );
-    } else {
-      const saver = new DatabaseSaver(supabase);
-      await saver.saveLocationIntelligence(business_id, analyzedLocation, LOCATION_SCHEMA_VERSION);
-      console.log('✅ Location intelligence populated successfully!');
+      // Remove the _is_fallback flag before saving
+      delete analyzedLocation._is_fallback;
+      delete analyzedLocation._fallback_warning;
     }
+    
+    await saver.saveLocationIntelligence(business_id, analyzedLocation, versionToSave);
+    console.log('✅ Location intelligence saved successfully!');
     console.log('ℹ️ Architecture: V2 - AI+web search scoring, graceful fallback, schema versioning');
 
     return new Response(

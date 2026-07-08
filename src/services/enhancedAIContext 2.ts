@@ -84,9 +84,63 @@ async function fetchBrandProfile(businessId: string): Promise<BusinessBrandProfi
 export function mapToBrandProfileForAI(dbProfile: BusinessBrandProfile | null): BrandProfileForAI | null {
   if (!dbProfile) return null
   
+  // =========================================================================
+  // V5 EXTRACTION - Read from brand_profile_v5 JSONB when legacy columns are NULL
+  // Mirrors backend logic in resolve-context.ts
+  // =========================================================================
+  const v5Profile = (dbProfile as any).brand_profile_v5
+  const v5Voice = v5Profile?.voice
+  
+  let extractedToneOfVoice: string | undefined = undefined
+  let extractedToneModel: BrandProfileForAI['toneModel'] = null
+  
+  if (v5Voice && !dbProfile.tone_of_voice) {
+    // Synthesize toneOfVoice from personality traits + formality + humor
+    const traits = Array.isArray(v5Voice.personality_traits) 
+      ? v5Voice.personality_traits.filter((s: any) => typeof s === 'string').slice(0, 5).join(', ')
+      : ''
+    const formalityLabel = v5Voice.formality_level === 'informal' ? 'afslappet' 
+                         : v5Voice.formality_level === 'formal' ? 'formel' 
+                         : 'semi-formel'
+    const humorLabel = v5Voice.humor_style === 'playful' ? 'legende'
+                     : v5Voice.humor_style === 'dry' ? 'tør humor'
+                     : v5Voice.humor_style === 'serious' ? 'seriøs'
+                     : ''
+    
+    extractedToneOfVoice = [traits, formalityLabel, humorLabel]
+      .filter(Boolean)
+      .join(' · ')
+    
+    console.log('✅ Frontend V5 extraction - synthesized toneOfVoice:', extractedToneOfVoice)
+  }
+  
+  // Extract tone_rules from V5 (cap to 3 like backend)
+  if (v5Voice?.tone_rules && Array.isArray(v5Voice.tone_rules) && !dbProfile.tone_model) {
+    const toneRules = v5Voice.tone_rules
+      .filter((s: any) => typeof s === 'string')
+      .slice(0, 3)  // Cap to 3 rules to prevent overload
+    
+    if (toneRules.length > 0) {
+      extractedToneModel = {
+        emoji_level: v5Voice.emoji_level,
+        formality: v5Voice.formality_level,
+        writing_rules: toneRules,
+        good_examples: [],
+        avoid_examples: [],
+        primary_keywords: []
+      }
+      console.log('✅ Frontend V5 extraction - extracted tone_rules:', toneRules.length)
+    }
+  }
+  
+  // =========================================================================
+  // END V5 EXTRACTION
+  // =========================================================================
+  
   // Check if any meaningful data exists
   // NOTE: brand_essence deprecated - use signature_themes from menu intelligence instead
   const hasData = dbProfile.tone_of_voice || 
+                  extractedToneOfVoice ||  // V5 extracted tone
                   dbProfile.target_audience ||
                   dbProfile.core_offerings ||
                   dbProfile.things_to_avoid ||
@@ -94,6 +148,7 @@ export function mapToBrandProfileForAI(dbProfile: BusinessBrandProfile | null): 
                   dbProfile.communication_goal ||
                   dbProfile.image_preferences ||
                   dbProfile.tone_model ||
+                  extractedToneModel ||  // V5 extracted rules
                   (dbProfile as any).signature_themes  // Menu intelligence
   
   if (!hasData) return null
@@ -106,14 +161,16 @@ export function mapToBrandProfileForAI(dbProfile: BusinessBrandProfile | null): 
     brandEssence: undefined,
     identityKeywords: (typeof dbProfile.identity_keywords === 'string' ? dbProfile.identity_keywords.split(',').map(k => k.trim()) : null),
     voiceConstraints: dbProfile.voice_constraints ?? null,
-    toneOfVoice: (Array.isArray(dbProfile.tone_of_voice) ? (dbProfile.tone_of_voice as string[]).join(', ') : (typeof dbProfile.tone_of_voice === 'string' ? dbProfile.tone_of_voice : undefined)),
+    // FIX: Use V5 extracted tone if legacy column is NULL
+    toneOfVoice: (Array.isArray(dbProfile.tone_of_voice) ? (dbProfile.tone_of_voice as string[]).join(', ') : (typeof dbProfile.tone_of_voice === 'string' ? dbProfile.tone_of_voice : extractedToneOfVoice)),
     thingsToAvoid: (typeof dbProfile.things_to_avoid === 'string' ? dbProfile.things_to_avoid : undefined),
     targetAudience: (typeof dbProfile.target_audience === 'string' ? dbProfile.target_audience : undefined),
     coreOfferings: (typeof dbProfile.core_offerings === 'string' || Array.isArray(dbProfile.core_offerings) ? dbProfile.core_offerings : undefined),
     contentFocus: (typeof dbProfile.content_focus === 'string' ? dbProfile.content_focus : undefined),
     communicationGoal: (typeof dbProfile.communication_goal === 'string' ? dbProfile.communication_goal : undefined),
     imagePreferences: (typeof dbProfile.image_preferences === 'string' ? dbProfile.image_preferences : undefined),
-    toneModel: (dbProfile.tone_model as BrandProfileForAI['toneModel']) ?? null,
+    // FIX: Use V5 extracted toneModel if legacy column is NULL
+    toneModel: (dbProfile.tone_model as BrandProfileForAI['toneModel']) ?? extractedToneModel,
     contentPillars: contentPillars,
     socialStyle: (dbProfile.social_style as BrandProfileForAI['socialStyle']) ?? null,
     voiceExamples: (dbProfile.voice_examples as BrandProfileForAI['voiceExamples']) ?? null,

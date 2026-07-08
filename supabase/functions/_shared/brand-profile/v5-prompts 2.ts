@@ -71,14 +71,13 @@ KRITISKE PRINCIPPER:
    NOTE: Walk-in only ≠ automatisk spontaneous (se foodtruck eksempel ovenfor)
 
 3. DECISION TIMING OPTIONS:
-   - "last_minute": Same-day decision (0-2 timer før besøg) → 60-70% footfall baseline
-   - "planned": Advance booking (1-7 dage før) → 25-35% footfall baseline  
-   - "hybrid": BÅDE spontan og planlagt → 40-50% footfall baseline (balanced)
+   - "last_minute": Same-day decision (0-2 timer før besøg) → 65-75% footfall baseline
+   - "planned": Advance booking (1-7 dage før) → 30-40% footfall baseline  
+   - "hybrid": BÅDE spontan og planlagt → 45-55% footfall baseline (balanced)
 
-4. 6 CONTENT TYPES mapper til 3 GOAL MODES:
-   - Drive Footfall: Product + Urgency (synlig menu, tidsbegrænset appel)
-   - Strengthen Brand: Place + Process + Proof (location, bagvedscenen, social bevis)
-   - Retain Regulars: Retention (community, ingen CTA)
+4. 6 CONTENT TYPES mapper til 2 GOAL MODES:
+   - Drive Footfall/Booking: Product + Urgency (synlig menu, tidsbegrænset appel, motivér besøg)
+   - Strengthen Brand: Place + Process + Proof + Retention (location, bagvedscenen, social bevis, community)
 
 5. BASELINE er STATISK:
    - Dette er "normal operations" strategi
@@ -89,8 +88,7 @@ OUTPUT FORMAT (JSON):
 {
   "baseline_goal_split": {
     "drive_footfall": <0-100>,
-    "strengthen_brand": <0-100>,
-    "retain_regulars": <0-100>
+    "strengthen_brand": <0-100>
   },
   "decision_timing": "last_minute" | "planned" | "hybrid",
   "content_type_affinity": {
@@ -112,7 +110,7 @@ OUTPUT FORMAT (JSON):
 }
 
 VALIDERING:
-- goal_split skal summe til 100
+- goal_split skal summe til 100 (kun drive_footfall + strengthen_brand)
 - content_type_affinity skal summe til 100
 - Reasoning skal være konkret (ikke generisk)`,
 
@@ -358,18 +356,14 @@ DECISION_TIMING OPTIONS:
 - "planned": Book/planlæg i forvejen (weekend brunch, special occasion)
 - "mixed": Begge (nogen booker, nogen dropper ind)
 
-GOAL_CONTRIBUTION OPTIONS:
-- "drive_footfall": Fyld lokalet med walk-in gæster (brug KUN hvis accepts_walk_ins = TRUE)
-- "drive_booking": Motivér til at booke bord (brug KUN hvis booking_url findes ELLER reservation_required = TRUE)
-- "strengthen_brand": Byg brand awareness, create content moments  
-- "retain_regulars": Fasthold stamgæster, community building
+GOAL_CONTRIBUTION OPTIONS (kun 2 mål):
+- "drive_footfall": Fyld lokalet med gæster (walk-ins OG/ELLER bookings) - konvertering til besøg
+- "strengthen_brand": Byg brand awareness, skab content moments, fasthold community
 
 VIGTIG REGEL FOR MÅL-VALG:
-- Hvis BÅDE accepts_walk_ins OG booking_url findes → segmenter kan have FORSKELLIGE mål afhængigt af kontekst
-  Eksempel: Familier (lørdag frokost) = drive_footfall, Par (fredag aften) = drive_booking
-- Hvis KUN accepts_walk_ins = TRUE (ingen booking_url) → ALLE segmenter SKAL bruge "drive_footfall"
-- Hvis KUN reservation_required = TRUE (booking påkrævet) → ALLE segmenter SKAL bruge "drive_booking"
-- "strengthen_brand" og "retain_regulars" er ALTID tilladte uanset operations setup
+- "drive_footfall" dækker BÅDE walk-in gæster OG motivering til booking - uanset om stedet kun tager walk-ins, kun bookings, eller begge
+- "strengthen_brand" dækker BÅDE brand awareness OG retention/community building
+- Alle segmenter SKAL bruge ét af disse 2 mål baseret på deres primære formål
 
 VALIDERINGSKRAV:
 1. Antal segments = mellem 2 og 4
@@ -415,7 +409,7 @@ export const V5_LAYER_5A_VOICE_PROMPTS: Record<string, string> = {
   da: `Du er brand voice specialist for restauranter og caféer.
 
 DIN OPGAVE:
-Generer voice framework (tone rules, personality, formality) baseret på brand identity og business context.
+Generer voice framework (positive guidelines + constraints) baseret på brand identity og business context.
 
 NOTE: Menu-beskrivelseseksempler genereres separat i en dedikeret prompt.
 Fokusér 100% på at definere HVORDAN brandet skal kommunikere (ikke eksempler endnu).
@@ -423,7 +417,12 @@ Fokusér 100% på at definere HVORDAN brandet skal kommunikere (ikke eksempler e
 OUTPUT FORMAT:
 Returner valid JSON med denne struktur:
 {
-  "tone_rules": ["Rule 1", "Rule 2", ...5-7 rules],
+  "tone_do_list": ["Rule 1", "Rule 2", ...4-6 positive rules],
+  "avoid_patterns": {
+    "compound_sentences": ["forbud 1", "forbud 2"],
+    "generic_marketing": ["ord 1", "ord 2", ...max 6],
+    "brochure_language": ["udtryk 1", "udtryk 2", ...max 4]
+  },
   "personality_traits": ["trait1", "trait2", ...3-5 traits],
   "formality_level": "informal" | "semi-formal" | "formal",
   "humor_style": "dry" | "playful" | "professional" | "none",
@@ -432,34 +431,54 @@ Returner valid JSON med denne struktur:
 
 PRINCIPPER:
 
-1. TONE RULES - Actionable, Specific (5-7 rules)
-   ❌ "Vær autentisk"
-   ✅ "Skriv én tanke pr. sætning — stop før du forklarer"
+1. TONE_DO_LIST - POSITIVE Actionable Rules (4-6 rules)
+   ALTID positiv framing - fortæl hvad man SKAL gøre, ikke hvad man skal undgå
+   ❌ "Undgå lange sætninger"
+   ✅ "Skriv én tanke pr. sætning — hold det enkelt"
+   ❌ "Undgå generiske beskrivelser"
    ✅ "Fokusér på ingrediensernes kvalitet og tilberedningsmetoder"
-   ✅ "Undgå overflødige beskrivelser, hold det enkelt og klart"
+   ❌ "Undgå overflødige ord"
+   ✅ "Brug lokale referencer til [by] for at skabe forbindelse"
    
-2. PERSONALITY TRAITS - Concrete Descriptors (3-5 traits)
+   Gode eksempler på positive structural rules:
+   ✅ "Fremhæv kreative smagskombinationer og moderne fortolkninger"
+   ✅ "Balancér mellem sofistikeret og tilgængelig tone"
+   ✅ "Brug deklarative åbninger — start med konkrete elementer"
+   
+2. AVOID_PATTERNS - Negative Constraints (separeret for lavere salience)
+   - compound_sentences: Strukturelle forbud (max 2)
+     Eksempel: ["imperativer som åbning: 'Kom forbi', 'Oplev', 'Tag'"]
+   - generic_marketing: Marketing-klichéer at undgå (max 6 ord)
+     Eksempel: ["perfekt", "lækker", "hyggelig", "nyd", "unik", "autentisk"]
+   - brochure_language: Dateret eller prætentiøst sprog (max 4 udtryk)
+     Eksempel: ["svip", "tag en pause fra hverdagen", "varm omfavnelse"]
+   
+3. PERSONALITY TRAITS - Concrete Descriptors (3-5 traits)
    ❌ "Friendly and welcoming"
    ✅ ["kortfattet", "direkte", "venlig", "lokal"]
    ✅ ["moderne", "indbydende", "professionel"]
    
-3. FORMALITY LEVEL
+4. FORMALITY LEVEL
    - informal: Du-form, casual
    - semi-formal: Professionel men tilgængelig
    - formal: De-form, distance
    
-4. HUMOR STYLE
+5. HUMOR STYLE
    - dry: Underspillet, lakonisk
    - playful: Legende, munter
    - professional: Seriøs med varme
    - none: Ingen humor
    
-5. SENTENCE STRUCTURE
+6. SENTENCE STRUCTURE
    - short_declarative: Korte, fyndige sætninger
    - conversational: Naturlig tale-stil
    - formal: Længere, komplekse sætninger
 
-VIGTIGT: Fokusér på at definere HVORDAN der skrives, ikke på eksempler endnu.
+VIGTIGT: 
+- tone_do_list skal være POSITIVE handlingsanvisninger (4-6 rules max)
+- avoid_patterns skal være MINIMALE forbud (kun kritiske constraints)
+- Adskillelse forhindrer AI i at fixere på det man IKKE skal sige
+
 Menu-beskrivelseseksempler genereres i en separat, dedikeret prompt for bedre kvalitet.`,
 
   // sv: `Swedish translation to be added when Sweden market launches`,
