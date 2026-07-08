@@ -333,24 +333,42 @@ function getCTAChip(ctaType: string, t: TFunction): { label: string; classes: st
   return { label: t('weeklyPlan.overview.cta.default'), classes: 'bg-slate-100 text-slate-700' }
 }
 
-// Helper to get goal mode badge text
-function getGoalModeBadge(post: PostSpecification): string | null {
+// Helper to get goal mode badge text and styling
+function getGoalModeBadge(post: PostSpecification): { text: string; style: { background: string; color: string; border: string } } | null {
   const goalMode = post.postType?.goal_mode
   const ctaIntent = post.strategicContext?.cta_intent
   
   if (goalMode === 'build_brand') {
-    return 'Brand'
+    return {
+      text: 'Brand',
+      style: {
+        background: '#e6f5f0',
+        color: '#0F6E56',
+        border: '#9FE1CB',
+      },
+    }
   }
   
   if (goalMode === 'drive_footfall') {
     if (ctaIntent === 'booking') {
-      return 'Booking'
+      return {
+        text: 'Booking',
+        style: {
+          background: '#ede9fb',
+          color: '#5B4FCF',
+          border: '#CECBF6',
+        },
+      }
     }
-    if (ctaIntent === 'traffic') {
-      return 'Besøg'
+    // traffic or fallback
+    return {
+      text: 'Besøg',
+      style: {
+        background: '#e6f1fb',
+        color: '#185FA5',
+        border: '#B5D4F4',
+      },
     }
-    // Fallback for drive_footfall without specific cta_intent
-    return 'Besøg'
   }
   
   return null
@@ -772,14 +790,19 @@ export function WeeklyPlanOverview({
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-500 text-white">{t('weeklyPlan.overview.pastBadge')}</span>
                     )}
                     {(() => {
-                      const goalBadgeText = getGoalModeBadge(post)
-                      if (!goalBadgeText) return null
+                      const goalBadge = getGoalModeBadge(post)
+                      if (!goalBadge) return null
                       return (
                         <span 
-                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700"
-                          title={post.strategicContext?.strategic_intent || goalBadgeText}
+                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium border whitespace-nowrap"
+                          style={{
+                            backgroundColor: goalBadge.style.background,
+                            color: goalBadge.style.color,
+                            borderColor: goalBadge.style.border,
+                          }}
+                          title={post.strategicContext?.strategic_intent || goalBadge.text}
                         >
-                          {goalBadgeText}
+                          {goalBadge.text}
                         </span>
                       )
                     })()}
