@@ -399,7 +399,9 @@ export function CreatePostPage() {
         } else {
           void restorePhotoFromDb()
         }
-        setCurrentStep('create')
+        if (currentStep !== 'publish') {
+          setCurrentStep('create')
+        }
       } else {
         // No in-memory draft — check DB before triggering a fresh generation.
         // This handles the "came back after a page refresh" case.
@@ -456,7 +458,9 @@ export function CreatePostPage() {
             } else {
               setPhotoContent(null)
             }
-            setCurrentStep('create')
+            if (currentStep !== 'publish') {
+              setCurrentStep('create')
+            }
           } else {
             // Truly fresh — generate only if we're at the generate step
             if (currentStep === 'generate') {
