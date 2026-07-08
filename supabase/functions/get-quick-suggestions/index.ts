@@ -1477,22 +1477,16 @@ serve(async (req) => {
         console.log(`   Cutoff time: ${windowCheck.cutoffTime}`)
       }
       
-      return new Response(JSON.stringify({ 
-        error: windowCheck.reason,
-        errorCode: windowCheck.errorCode,  // i18n translation key
-        message: windowCheck.userMessage,  // Fallback message
-        meta: {
-          currentTime: windowCheck.currentTime,
-          lastServiceEnd: windowCheck.lastServiceEnd,
-          cutoffTime: windowCheck.cutoffTime
-        }
-      }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      // Instead of blocking, switch to BRAND POST mode
+      // Generate atmosphere/team/experience content instead of menu-focused posts
+      console.log('🎨 Switching to BRAND POST mode - generating non-menu content')
+      // Set flag to modify prompt behavior below
+      var isBrandPostMode = true
+    } else {
+      var isBrandPostMode = false
+      console.log(`✅ Generation window valid (current: ${windowCheck.currentTime})`)
     }
     
-    console.log(`✅ Generation window valid (current: ${windowCheck.currentTime})`)
     // ────────────────────────────────────────────────────────────────────────
 
     // Source 1.5: key_offerings (FREE TIER - user-entered simple list from profile form)
@@ -3256,6 +3250,40 @@ serve(async (req) => {
       ? buildFreeSharedRules(promptContext, neverSayBlock)
       : buildSharedRules(promptContext, neverSayBlock)
 
+    // ── BRAND POST MODE Instructions ──
+    const brandPostModeBlock = isBrandPostMode ? `
+
+──────────────────────────────────────────────────────────────────────────
+🎨 BRAND POST MODE — Atmosfære & Oplevelse
+──────────────────────────────────────────────────────────────────────────
+Køkkenet lukker snart / det er for sent til menu-fokuserede opslag.
+
+I stedet for at fremhæve specifikke retter, skal du generere BRAND-OPBYGGENDE indhold:
+
+✅ FOKUSÉR PÅ:
+• Atmosfære og stemning på stedet (interiør, belysning, musik, miljø)
+• Teamet bag stedet (dedikerede medarbejdere, håndværk, service)
+• Unikke oplevelser (hyggelige stunder, traditioner, lokale forbindelser)
+• Stedet som helhed (historie, værdier, hvad der gør det særligt)
+• Kundetestimonials eller historier (hvis tilgængelige)
+• Forberedelse til næste dag / morgendagens tilbud
+
+🚫 UNDGÅ:
+• Specifikke retter eller menupunkter til NU
+• "Kom forbi i dag" / "Bestil nu" / tidsfølsomme call-to-actions
+• Prisfokus eller tilbudsframing
+
+📝 TONE:
+• Reflekterende og indbydende
+• Fortæl historier om stedet
+• Byg langvarig relation, ikke øjeblikkelig trafik
+
+🎯 MÅL:
+Skab følelsesmæssig forbindelse og brand awareness for fremtidige besøg.
+
+────────────────────────────────────────────────────────────────────────── 
+` : ''
+
     // ── GEMINI_API_KEY ──
     const GEMINI_API_KEY = getGeminiApiKey()
 
@@ -3531,6 +3559,18 @@ serve(async (req) => {
     }
     const activeSlotTypes = plannerResult.slot_types.slice(0, effectiveSlotCount)
     
+    // ── BRAND POST MODE Override (when too late for menu posts) ──
+    if (isBrandPostMode) {
+      console.log('🎨 Overriding slot types for brand post mode')
+      // Focus on brand-building content instead of menu items
+      activeSlotTypes.splice(0, activeSlotTypes.length, 
+        'atmosphere', 
+        effectiveSlotCount > 1 ? 'behind_scenes' : 'atmosphere',
+        effectiveSlotCount > 2 ? 'experience' : 'atmosphere'
+      )
+      console.log(`   New slot types: ${activeSlotTypes.join(', ')}`)
+    }
+    
     // ── Generate timing rationale (tier-specific) ──
     let plannerRationale = ''
     
@@ -3690,10 +3730,10 @@ serve(async (req) => {
       sharedRules,
       menuBlock,
       recentSlotASection,
-      avoidSection + lateNightFraming + slotATimeHint
+      avoidSection + lateNightFraming + slotATimeHint + brandPostModeBlock
     )
 
-    console.log(`🤖 Generating Slot A [${slotAType}] via Gemini${isLateNightMode ? ' (late-night framing)' : ''}`)
+    console.log(`🤖 Generating Slot A [${slotAType}] via Gemini${isLateNightMode ? ' (late-night framing)' : ''}${isBrandPostMode ? ' [BRAND POST MODE]' : ''}`)
     const rawSlotA = await callGemini({
       apiKey: GEMINI_API_KEY,
       systemInstruction,
@@ -3802,7 +3842,7 @@ serve(async (req) => {
           confirmedFactsSlotBBlock,
           confirmedFactsSlotCBlock,
           menuIntelligenceBlock,
-          avoidSection + sessionAvoidB + smartSlotBTimeHint,
+          avoidSection + sessionAvoidB + smartSlotBTimeHint + brandPostModeBlock,
           slotB ? {
             targetPostTime: slotB.postAt,
             targetSegmentTime: audienceTextForSlotB,
@@ -3849,7 +3889,7 @@ serve(async (req) => {
           menuBlockForB,
           recentSlotASection,
           confirmedFactsSlotBBlock,
-          avoidSection + sessionAvoidB + smartSlotBTimeHint,
+          avoidSection + sessionAvoidB + smartSlotBTimeHint + brandPostModeBlock,
           slotB?.postAt,
           audienceTextForSlotB,
           slotB?.serviceWindow ? {
@@ -3859,7 +3899,7 @@ serve(async (req) => {
           } : undefined
         )
 
-        console.log(`🤖 Generating Slot B [${slotBType}] via Gemini`)
+        console.log(`🤖 Generating Slot B [${slotBType}] via Gemini${isBrandPostMode ? ' [BRAND POST MODE]' : ''}`)
         rawSlotB = await callGemini({
           apiKey: GEMINI_API_KEY,
           systemInstruction,
@@ -3880,7 +3920,7 @@ serve(async (req) => {
           menuBlockForB,
           recentSlotASection,
           confirmedFactsSlotBBlock,
-          avoidSection + sessionAvoidB + smartSlotBTimeHint,
+          avoidSection + sessionAvoidB + smartSlotBTimeHint + brandPostModeBlock,
           slotB?.postAt,
           audienceTextForSlotB,
           slotB?.serviceWindow ? {
@@ -3890,7 +3930,7 @@ serve(async (req) => {
           } : undefined
         )
 
-        console.log(`🤖 Generating Slot B [${slotBType}] via Gemini`)
+        console.log(`🤖 Generating Slot B [${slotBType}] via Gemini${isBrandPostMode ? ' [BRAND POST MODE]' : ''}`)
         rawSlotB = await callGemini({
           apiKey: GEMINI_API_KEY,
           systemInstruction,
