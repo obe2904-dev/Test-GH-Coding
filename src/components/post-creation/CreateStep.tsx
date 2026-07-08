@@ -1274,23 +1274,20 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
   } : null
 
   return (
-    <>
-      <div className="flex flex-col h-full">
-        {/* Scrollable content area */}
-        <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+    <div className="space-y-4">
 
-        {/* ── Weekly Plan idea tab strip ── */}
-        {weeklyContentPlan && onSwitchIdea && weeklyContentPlan.posts.length > 1 && (
-          <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 shadow-sm overflow-x-auto">
-            <div className="flex items-center gap-2 min-w-max">
-              <span className="text-xs text-gray-400 font-medium shrink-0 mr-1">{t('create.ideasInPlan')}</span>
-              {weeklyContentPlan.posts.map((post, idx) => {
-                const isCurrent = idx === weeklyPlanPostIndex
-                const hasDraft = !isCurrent && draftMap[idx] != null
-                const isDone = weeklyPlanSessionDone.includes(idx)
-                const day = post.timing.day.slice(0, 3)
-                const dish = post.contentSubject.dish
-                const label = `${day} · ${dish.length > 20 ? dish.slice(0, 20) + '…' : dish}`
+      {/* ── Weekly Plan idea tab strip ── */}
+      {weeklyContentPlan && onSwitchIdea && weeklyContentPlan.posts.length > 1 && (
+        <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 shadow-sm overflow-x-auto">
+          <div className="flex items-center gap-2 min-w-max">
+            <span className="text-xs text-gray-400 font-medium shrink-0 mr-1">{t('create.ideasInPlan')}</span>
+            {weeklyContentPlan.posts.map((post, idx) => {
+              const isCurrent = idx === weeklyPlanPostIndex
+              const hasDraft = !isCurrent && draftMap[idx] != null
+              const isDone = weeklyPlanSessionDone.includes(idx)
+              const day = post.timing.day.slice(0, 3)
+              const dish = post.contentSubject.dish
+              const label = `${day} · ${dish.length > 20 ? dish.slice(0, 20) + '…' : dish}`
               return (
                 <button
                   key={idx}
@@ -1606,28 +1603,27 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
             </div>
         </div>
       </div>
-      </div>
 
-      {/* Fixed Bottom Bar */}
-      <div className="flex-shrink-0 border-t border-[#D1D5DB] pt-4 pb-4 bg-white">
-        <div className="flex items-center justify-between gap-3">
-          <button
-            onClick={onBack}
-            className="px-4 py-2 text-xs font-medium text-[#374151] bg-white border border-[#D1D5DB] rounded-lg hover:bg-[#F9FAFB] transition-colors flex items-center gap-1.5"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span>{t('create.back', 'Tilbage')}</span>
-          </button>
+      {/* Separator line */}
+      <div className="border-t border-[#D1D5DB] mt-4"></div>
 
-          <PostCreationFooter
-            hasUnsavedChanges={Boolean(hasUnsavedChanges)}
-            hasPersistedDraft={hasPersistedDraft}
-            onSaveDraft={handleSaveDraft}
-            onNext={onNext}
-            nextLabel={t('create.continue', 'Fortsæt til Publish')}
-          />
-        </div>
-      </div>
+      {/* Sticky Bottom Bar */}
+      <div className="flex items-center justify-between pt-2 pb-4 gap-3">
+        <button
+          onClick={onBack}
+          className="px-4 py-2 text-xs font-medium text-[#374151] bg-white border border-[#D1D5DB] rounded-lg hover:bg-[#F9FAFB] transition-colors flex items-center gap-1.5"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <span>{t('create.back', 'Tilbage')}</span>
+        </button>
+
+        <PostCreationFooter
+          hasUnsavedChanges={Boolean(hasUnsavedChanges)}
+          hasPersistedDraft={hasPersistedDraft}
+          onSaveDraft={handleSaveDraft}
+          onNext={onNext}
+          nextLabel={t('create.continue', 'Fortsæt til Publish')}
+        />
       </div>
 
       {showCropOverlay && currentPhoto && (currentPhoto.adjustedUrl || currentPhoto.originalUrl) && (
@@ -1681,6 +1677,6 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         />
       )}
 
-    </>
+    </div>
   )
 }
