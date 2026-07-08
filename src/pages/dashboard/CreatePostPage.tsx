@@ -1886,7 +1886,6 @@ export function CreatePostPage() {
                       </span>
                     </div>
                   ) : null}
-                  {createLocked && <div className="absolute inset-0 z-10 cursor-not-allowed bg-slate-100 bg-opacity-40" />}
                   <CreateStep 
                     onNext={handleCreateNext}
                     onBack={handleCreateBack}
