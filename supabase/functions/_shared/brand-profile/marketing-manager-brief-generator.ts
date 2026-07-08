@@ -24,6 +24,7 @@
  */
 
 import OpenAI from 'https://deno.land/x/openai@v4.28.0/mod.ts'
+import type { CustomerSegmentKey, OccasionSegmentKey, NeedSegmentKey, ProductSegmentKey, ChannelSegmentKey } from './audience-profile.ts'
 
 export interface MarketingManagerBriefInput {
   businessIdentityPersona: string  // From Layer 0 - business facts
@@ -48,7 +49,17 @@ export interface MarketingManagerBriefInput {
     positioning_angles: string[]
     content_triggers: string[]
     competitive_gap: string | null
-    reachable_demographics: string[]
+    reachable_location_contexts: string[]  // Phase 3: renamed from reachable_demographics
+  }
+  strategicSegments?: {  // Phase 3: NEW - Strategic audience segments for "who"
+    primary: Array<{ id: string; name: string }> | null  // FIXED: Can have multiple primary targets across programmes
+    secondary: Array<{ id: string; name: string }> | null
+  }
+  segmentContext?: {  // Phase 6: NEW - Segment decomposition dimensions
+    occasions: OccasionSegmentKey[]        // WHEN they visit (from audience segments)
+    needs: NeedSegmentKey[]                // WHY they choose us (from audience segments)
+    productCategories: ProductSegmentKey[] // WHAT we offer (from menu items)
+    channels: ChannelSegmentKey[]          // HOW they access us (from operations)
   }
   programmes?: Array<{  // NEW V5.3: Per-programme pricing for tone calibration
     programme_name: string
@@ -61,6 +72,7 @@ export interface MarketingManagerBriefInput {
       max: number | null
     }
   }>
+  selectedPlatforms?: string[]  // Phase 6: Selected social platforms (e.g., ["facebook", "instagram"])
   businessName: string
   businessCategory: string
   language?: string  // ISO 639-1 code (da, sv, no, de, en) - defaults to 'da'
@@ -343,10 +355,57 @@ function buildMarketingBriefPrompt(input: MarketingManagerBriefInput, language: 
     parts.push(``)
   }
   
-  // NEW V5.7: Location strategy
+  // Phase 3: Strategic audience segments (WHO we target)
+  if (input.strategicSegments) {
+    parts.push(`=== STRATEGISKE MÅLGRUPPER ===`)
+    if (input.strategicSegments.primary && input.strategicSegments.primary.length > 0) {
+      // FIXED: Handle multiple primary targets
+      if (input.strategicSegments.primary.length === 1) {
+        parts.push(`Primær målgruppe: ${input.strategicSegments.primary[0].name}`)
+      } else {
+        parts.push(`Primære målgrupper: ${input.strategicSegments.primary.map(s => s.name).join(', ')}`)
+      }
+    }
+    if (input.strategicSegments.secondary && input.strategicSegments.secondary.length > 0) {
+      parts.push(`Sekundære: ${input.strategicSegments.secondary.map(s => s.name).join(', ')}`)
+    }
+    parts.push(``)
+    parts.push(`VIGTIGT: Disse er de strategiske målgrupper - brug dem til "hvem vi taler til".`)
+    parts.push(``)
+  }
+  
+  // Phase 6: Segment dimensions (WHEN, WHY, WHAT, HOW)
+  if (input.segmentContext) {
+    parts.push(`=== SEGMENT DIMENSIONER ===`)
+    
+    if (input.segmentContext.occasions.length > 0) {
+      parts.push(`Lejligheder vi serverer: ${input.segmentContext.occasions.join(', ')}`)
+    }
+    
+    if (input.segmentContext.needs.length > 0) {
+      parts.push(`Behov vi opfylder: ${input.segmentContext.needs.join(', ')}`)
+    }
+    
+    if (input.segmentContext.productCategories.length > 0) {
+      parts.push(`Produktkategorier: ${input.segmentContext.productCategories.join(', ')}`)
+    }
+    
+    if (input.segmentContext.channels.length > 0) {
+      parts.push(`Tilgængelige kanaler: ${input.segmentContext.channels.join(', ')}`)
+    }
+    
+    parts.push(``)
+    parts.push(`VIGTIGT: Disse dimensioner definerer hvornår (occasions), hvorfor (needs), hvad (products) og hvordan (channels) vi betjener gæster.`)
+    parts.push(``)
+  }
+  
+  // NEW V5.7: Location strategy (WHERE context - geographic reach, not people)
   if (input.locationStrategy) {
     parts.push(`=== LOKATIONSPOSITIONERING ===`)
-    parts.push(`Målgrupper der KAN nås: ${input.locationStrategy.reachable_demographics.join(', ')}`)
+    // Phase 3: reachable_location_contexts describes WHERE, not WHO
+    if (input.locationStrategy.reachable_location_contexts.length > 0) {
+      parts.push(`Geografisk tilgængelighed: ${input.locationStrategy.reachable_location_contexts.join(', ')}`)
+    }
     if (input.locationStrategy.positioning_angles.length > 0) {
       parts.push(`Positioneringsvinkler:`)
       input.locationStrategy.positioning_angles.forEach(angle => {
@@ -378,7 +437,17 @@ function buildMarketingBriefPrompt(input: MarketingManagerBriefInput, language: 
   parts.push(`[1-2 sætninger - kort reference til business_identity_persona, IKKE fuld gentagelse]`)
   parts.push(``)
   parts.push(`DIN OPGAVE:`)
-  parts.push(`[Klar rolledefinition - hvad skal dine posts opnå? Hvem taler du til?]`)
+  
+  // Phase 6: Platform-aware task description
+  if (input.selectedPlatforms && input.selectedPlatforms.length > 0) {
+    const platformNames = input.selectedPlatforms
+      .map(p => p.charAt(0).toUpperCase() + p.slice(1))  // Capitalize first letter
+      .join(' og ')  // "Facebook og Instagram"
+    parts.push(`[Klar rolledefinition - hvad skal dine ${platformNames}-posts opn\u00e5? Hvem taler du til?]`)
+  } else {
+    parts.push(`[Klar rolledefinition - hvad skal dine posts opn\u00e5? Hvem taler du til?]`)
+  }
+  
   parts.push(``)
   parts.push(`FREMHÆV ALTID:`)
   parts.push(`[Primære USP'er der skal nævnes ofte - hvad gør jer unikke?]`)

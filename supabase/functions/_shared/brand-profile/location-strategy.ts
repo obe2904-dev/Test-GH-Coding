@@ -79,19 +79,22 @@ export interface DemographicProximitySignal {
   caveat?: string;
 }
 
-export interface ReachableDemographic {
-  demographic: string;
+// Phase 3: Renamed from ReachableDemographic → more semantically accurate
+export interface ReachableLocationContext {
+  demographic: string;  // Legacy field name kept for backward compatibility in data structure
   proximity_score: number;
   is_reachable: boolean;
   filter_reason?: string;
 }
 
 export interface LocationStrategyOutput {
-  // Proximity signals for AI reasoning (replacing pre-filtered reachable_demographics)
-  demographic_proximity_signals: DemographicProximitySignal[];
+  // Phase 3: Renamed from demographic_proximity_signals for semantic clarity
+  // Proximity signals for AI reasoning (replacing pre-filtered reachable_location_contexts)
+  location_context_proximity_signals: DemographicProximitySignal[];
   
-  // Legacy field for backward compatibility (still computed and stored)
-  reachable_demographics: ReachableDemographic[];
+  // Phase 3: Renamed from reachable_demographics for semantic clarity
+  // Legacy structure preserved for backward compatibility (still computed and stored)
+  reachable_location_contexts: ReachableLocationContext[];
   
   // Positioning angles — how to frame the business in content
   positioning_angles: string[];
@@ -161,8 +164,8 @@ function deriveReachableDemographics(
   demographicProximity: Record<string, number>,
   business: LocationStrategyInput['business'],
   config: LocationStrategyConfig
-): ReachableDemographic[] {
-  const results: ReachableDemographic[] = [];
+): ReachableLocationContext[] {
+  const results: ReachableLocationContext[] = [];
 
   for (const [dbDemographic, score] of Object.entries(demographicProximity)) {
     // Map database name to filter logic name
@@ -199,7 +202,7 @@ function deriveReachableDemographics(
  */
 function generatePositioningAngles(
   locationScores: Record<string, number>,
-  reachableDemographics: ReachableDemographic[],
+  reachableDemographics: ReachableLocationContext[],
   locationRef: string,
   config: LocationStrategyConfig
 ): string[] {
@@ -252,7 +255,7 @@ function generatePositioningAngles(
 function generateContentTriggers(
   physicalContext: LocationStrategyInput['physical_context'],
   programmes: LocationStrategyInput['business']['programmes'],
-  reachableDemographics: ReachableDemographic[],
+  reachableDemographics: ReachableLocationContext[],
   waterfrontScore: number,
   hasOutdoorSeating: boolean
 ): string[] {
@@ -412,8 +415,8 @@ export async function generateLocationStrategy(
   }
 
   return {
-    demographic_proximity_signals: demographicProximitySignals,
-    reachable_demographics: reachableDemographics,
+    location_context_proximity_signals: demographicProximitySignals,  // Phase 3: renamed field
+    reachable_location_contexts: reachableDemographics,               // Phase 3: renamed field
     positioning_angles: positioningAngles,
     content_triggers: contentTriggers,
     physical_opportunities: physicalOpportunities,

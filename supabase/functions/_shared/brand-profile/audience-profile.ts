@@ -21,6 +21,87 @@
 import OpenAI from "https://deno.land/x/openai@v4.20.1/mod.ts";
 import { getV5Prompt } from './v5-prompts.ts';
 
+// ===== SEGMENT DECOMPOSITION ENUMS (Phase 1) =====
+
+/**
+ * Customer Segment Taxonomy
+ * Canonical WHO classification - stable keys for cross-programme deduplication.
+ * Based on bilingual Food & Beverage Segmentation Structure.
+ */
+export type CustomerSegmentKey =
+  | "solo_guests"
+  | "couples"
+  | "friends_small_groups"
+  | "families_with_children"
+  | "students"
+  | "professionals"
+  | "neighbourhood_locals"
+  | "city_residents"
+  | "domestic_visitors"
+  | "tourists"
+  | "large_groups";
+
+/**
+ * Occasion Segment Taxonomy
+ * Canonical WHEN/WHY classification - distinct from time slots.
+ * Occasions are visit purposes, not just dayparts.
+ */
+export type OccasionSegmentKey =
+  | "breakfast"
+  | "lunch_break"
+  | "coffee_break"
+  | "after_work"
+  | "dinner"
+  | "weekend_visit"
+  | "date_night"
+  | "celebration"
+  | "business_meeting"
+  | "takeaway_at_home"
+  | "pre_post_event"
+  | "spontaneous_stop";
+
+/**
+ * Need Segment Taxonomy
+ * Canonical WHAT-DRIVES-CHOICE classification - guest motivations.
+ */
+export type NeedSegmentKey =
+  | "quick_and_easy"
+  | "affordable"
+  | "treat_indulgence"
+  | "healthy_light"
+  | "social_experience"
+  | "comfort_food"
+  | "premium_quality"
+  | "dietary_fit"
+  | "local_authentic"
+  | "atmosphere_experience";
+
+/**
+ * Product Segment Taxonomy
+ * Canonical WHAT-PRODUCT classification - menu item categorization.
+ * Used for menu extraction and content targeting.
+ */
+export type ProductSegmentKey =
+  | "drinks"
+  | "snacks"
+  | "main_meals"
+  | "sharing_food"
+  | "desserts"
+  | "specials"
+  | "takeaway_items"
+  | "gifting_and_addons";
+
+/**
+ * Channel Segment Taxonomy
+ * Canonical HOW-TO-ACCESS classification - distribution channels.
+ * Derived from business_operations flags, not stored directly.
+ */
+export type ChannelSegmentKey =
+  | "walk_in"
+  | "booking"
+  | "takeaway"
+  | "delivery";
+
 // ===== UNIVERSAL PEOPLE TAXONOMY =====
 
 /**
@@ -124,16 +205,26 @@ export const VALID_PEOPLE_TYPE_LABELS = Object.values(PEOPLE_TYPES).map(t => t.l
 // ===== TYPES =====
 
 export interface AudienceSegment {
-  people_type: string;           // Must match VALID_PEOPLE_TYPE_LABELS
-  people_type_id?: PeopleTypeId; // Derived from people_type lookup
+  // === NEW: Enum-Constrained Identity Fields (Phase 1) ===
+  customer_segment: CustomerSegmentKey;       // Stable key for deduplication (e.g., "families_with_children")
+  people_type_label: string;                   // Free-text display label (e.g., "Familier med børn")
+  occasion_segment: OccasionSegmentKey[];      // WHEN/WHY they visit (e.g., ["brunch", "weekend_visit"])
+  need_segment: NeedSegmentKey[];              // WHAT drives their choice (e.g., ["social_experience", "comfort_food"])
+  
+  // === LEGACY: Preserved for Backward Compatibility ===
+  people_type: string;           // DEPRECATED - use customer_segment for matching, people_type_label for display
+  people_type_id?: PeopleTypeId; // DEPRECATED - kept for old code compatibility
+  
+  // === SHARED: Core Segment Fields ===
   segment_size: string;          // "primary" | "secondary" | "niche"
-  motivation: string;            // "social_gathering" | "convenience" | "experience_seeking" | "routine"
+  motivation: string;            // Free-text rationale (not used for matching)
   decision_timing: string;       // "spontaneous" | "planned" | "mixed"
   content_angles: string[];      // 2-3 framing hints for content generation
-  location_occasions: string[];  // What this location makes possible for this segment
-                                 // e.g. ["shopping pause", "destination visit fra hele byen"]
-                                 // AI-derived from format + location character — NOT validated
-                                 // against raw location scores (that would recreate constraint bugs)
+  
+  // === DEPRECATED: To be replaced by occasion_segment ===
+  location_occasions: string[];  // DEPRECATED - use occasion_segment instead
+                                 // AI-derived context (e.g., ["shopping pause", "destination visit"])
+  
   concept_fit_reason: string;    // Why this segment fits this business (REQUIRED, min 20 chars)
   evidence: string[];            // Grounded in actual business data (menu items, hours, etc.)
 }
@@ -151,6 +242,7 @@ interface BusinessData {
   business_category: string;
   city: string;
   establishment_type?: string;
+  business_archetype?: string;  // NEW Phase 0: Business type/concept for audience segmentation context
 }
 
 interface MenuData {
@@ -204,15 +296,17 @@ interface LocationData {
   local_location_reference?: string;  // How locals refer to location (e.g., "ved åen")
   tourist_context?: string;
   landmarks?: string[];
-  // Phase 2C: Reachable demographics from location strategy (brand-profile-generator-v5)
-  reachable_demographics?: Array<{
-    demographic: string;              // "local_resident" | "tourist" | "student" | "business_professional"
+  // Phase 3: Renamed from reachable_demographics for semantic clarity
+  // Location contexts from location strategy (brand-profile-generator-v5)
+  reachable_location_contexts?: Array<{
+    demographic: string;              // Legacy field name: "local_resident" | "tourist" | "student" | "business_professional"
     proximity_score: number;          // 0-100 (from location intelligence)
-    is_reachable: boolean;            // Can business actually serve this demographic?
+    is_reachable: boolean;            // Can business actually serve this location context?
     filter_reason?: string;           // Why filtered if not reachable (e.g., "price too high for students")
   }>;
-  // NEW: Proximity signals for AI reasoning (replacing constraints)
-  demographic_proximity_signals?: Array<{
+  // Phase 3: Renamed from demographic_proximity_signals for semantic clarity
+  // Proximity signals for AI reasoning (replacing constraints)
+  location_context_proximity_signals?: Array<{
     demographic: string;
     proximity_score: number;
     signal_source: string;
@@ -374,9 +468,10 @@ function buildDemographicProximitySignalsSection(
     return lines.join('\n');
   }
 
-  // Legacy fallback: if only reachable_demographics exists (old architecture)
-  if (location.reachable_demographics && location.reachable_demographics.length > 0) {
-    const signals = location.reachable_demographics;
+  // Legacy fallback: if only reachable_location_contexts exists (or old reachable_demographics)
+  const locationContexts = location.reachable_location_contexts || location.reachable_demographics;
+  if (locationContexts && locationContexts.length > 0) {
+    const signals = locationContexts;
 
     if (language === 'da') {
       const lines = [
@@ -896,7 +991,7 @@ Hvad tilbyder forretningen, til hvilken pris, og i hvilket format?
 
 Forretning: ${business.business_name}
 Type: ${business.establishment_type || business.business_category}
-Beliggenhed: ${location.local_location_reference || location.neighborhood || business.city}
+${business.business_archetype ? `Koncepttype: ${business.business_archetype} (forretningsarketype)\n` : ''}Beliggenhed: ${location.local_location_reference || location.neighborhood || business.city}
 ${location.local_location_reference ? `
 🎯 LOKALT STEDNAVN (KRITISK):
 Brug præcis dette udtryk i content_angles og location_occasions der refererer
@@ -979,7 +1074,52 @@ Erhverv / Forretningsgæster må KUN bruges hvis mindst ét af disse er sandt:
 ✓ Beliggenhed er i eller tæt på et erhvervsdistrikt (kontorhuse, CBD)
 ✓ Forretningens koncept signalerer formel eller professionel atmosfære
 
-FELTKRAV (alle felter SKAL udfyldes):
+═══════════════════════════════════════════════════════════════════════
+NYE ENUM-FELTER (KRITISK — SKAL UDFYLDES FOR HVERT SEGMENT)
+═══════════════════════════════════════════════════════════════════════
+
+For hvert segment SKAL du nu udfylde disse tre enum-felter med præcise værdier:
+
+🔹 customer_segment (PÅKRÆVET)
+Vælg PRÆCIS ÉN værdi fra denne liste:
+solo_guests, couples, friends_small_groups, families_with_children, students,
+professionals, neighbourhood_locals, city_residents, domestic_visitors,
+tourists, large_groups
+
+⚠️ Forskellen mellem lokale kategorier:
+• neighbourhood_locals = bor/arbejder tæt på stedet (f.eks. samme kvarter)
+• city_residents = fra samme by men ikke nabolaget (f.eks. københavner fra anden bydel)
+• domestic_visitors = fra andre danske byer (f.eks. Aarhusianer i København)
+• tourists = udenlandske gæster eller rejsende med sightseeing-kontekst
+
+Kollaps IKKE disse til "lokale" eller "turister" — brug den præcise kategori.
+
+🔹 occasion_segment (PÅKRÆVET — array med 1-3 værdier)
+Vælg 1-3 værdier fra denne liste (de vigtigste anledninger for dette segment):
+breakfast, lunch_break, coffee_break, after_work, dinner, weekend_visit,
+date_night, celebration, business_meeting, takeaway_at_home, pre_post_event,
+spontaneous_stop
+
+Eksempel for Par ved en casual restaurant:
+["dinner", "date_night", "weekend_visit"]
+
+🔹 need_segment (PÅKRÆVET — array med 1-3 værdier)  
+Vælg 1-3 værdier fra denne liste (hvad der driver deres valg):
+quick_and_easy, affordable, treat_indulgence, healthy_light, social_experience,
+comfort_food, premium_quality, dietary_fit, local_authentic, atmosphere_experience
+
+Eksempel for Familier ved AYCE restaurant:
+["affordable", "social_experience", "comfort_food"]
+
+🔹 people_type_label (PÅKRÆVET — fri tekst)
+En naturlig dansk label til visning (f.eks. "Familier med børn", "Par på date", "Lokale stamgæster").
+Dette felt bruges KUN til visning — IKKE til matching.
+
+⚠️ Opfind IKKE nye kategori-værdier. Brug kun værdierne fra listerne ovenfor.
+
+═══════════════════════════════════════════════════════════════════════
+FELTKRAV (alle felter SKAL udfyldes)
+═══════════════════════════════════════════════════════════════════════
 
 SEGMENT_SIZE KALIBRERING (relativ rangering — IKKE absolut vurdering):
 Tildel segment_size baseret på RANGERING inden for dette sæt segmenter:
@@ -1104,7 +1244,52 @@ CHOOSE FROM THESE 7 TYPES:
 • Turister — travelers seeking local experience or familiar comfort
 • Lokale / Stamgæster — neighborhood residents or nearby workers with repeat visits
 
-FIELD REQUIREMENTS (all fields MUST be populated):
+═══════════════════════════════════════════════════════════════════════
+NEW ENUM FIELDS (CRITICAL — MUST BE FILLED FOR EACH SEGMENT)
+═══════════════════════════════════════════════════════════════════════
+
+For each segment you MUST now fill these three enum fields with precise values:
+
+🔹 customer_segment (REQUIRED)
+Select EXACTLY ONE value from this list:
+solo_guests, couples, friends_small_groups, families_with_children, students,
+professionals, neighbourhood_locals, city_residents, domestic_visitors,
+tourists, large_groups
+
+⚠️ The distinction between local categories:
+• neighbourhood_locals = live/work close to the venue (e.g., same neighborhood)
+• city_residents = from same city but not the immediate neighborhood (e.g., Copenhagener from another district)
+• domestic_visitors = from other Danish cities (e.g., Aarhusian visiting Copenhagen)
+• tourists = foreign guests or travelers with sightseeing as context
+
+Do NOT collapse these into "locals" or "tourists" — use the precise category.
+
+🔹 occasion_segment (REQUIRED — array with 1-3 values)
+Select 1-3 values from this list (the main occasions for this segment):
+breakfast, lunch_break, coffee_break, after_work, dinner, weekend_visit,
+date_night, celebration, business_meeting, takeaway_at_home, pre_post_event,
+spontaneous_stop
+
+Example for Couples at a casual restaurant:
+["dinner", "date_night", "weekend_visit"]
+
+🔹 need_segment (REQUIRED — array with 1-3 values)
+Select 1-3 values from this list (what drives their choice):
+quick_and_easy, affordable, treat_indulgence, healthy_light, social_experience,
+comfort_food, premium_quality, dietary_fit, local_authentic, atmosphere_experience
+
+Example for Families at AYCE restaurant:
+["affordable", "social_experience", "comfort_food"]
+
+🔹 people_type_label (REQUIRED — free text)
+A natural display label (e.g., "Families with children", "Couples on dates", "Local regulars").
+This field is used ONLY for display — NOT for matching.
+
+⚠️ Do NOT invent new category values. Use only the values from the lists above.
+
+═══════════════════════════════════════════════════════════════════════
+FIELD REQUIREMENTS (all fields MUST be populated)
+═══════════════════════════════════════════════════════════════════════
 
 SEGMENT_SIZE CALIBRATION (relative ranking — NOT absolute judgment):
 Assign segment_size based on RANKING within this segment set:
@@ -1203,6 +1388,67 @@ function validateAudienceProfile(
 
   // Validate each segment
   profile.audience_segments.forEach((segment, index) => {
+    // === NEW: Enum Validation (Phase 1) ===
+    
+    // Validate customer_segment (required enum)
+    const validCustomerSegments = new Set<CustomerSegmentKey>([
+      "solo_guests", "couples", "friends_small_groups", "families_with_children",
+      "students", "professionals", "neighbourhood_locals", "city_residents",
+      "domestic_visitors", "tourists", "large_groups",
+    ]);
+    
+    if (segment.customer_segment && !validCustomerSegments.has(segment.customer_segment as CustomerSegmentKey)) {
+      errors.push(`Segment ${index + 1}: invalid customer_segment "${segment.customer_segment}"`);
+    }
+    
+    // Validate occasion_segment (required array of enums)
+    const validOccasionSegments = new Set<OccasionSegmentKey>([
+      "breakfast", "lunch_break", "coffee_break", "after_work", "dinner",
+      "weekend_visit", "date_night", "celebration", "business_meeting",
+      "takeaway_at_home", "pre_post_event", "spontaneous_stop",
+    ]);
+    
+    if (segment.occasion_segment) {
+      if (!Array.isArray(segment.occasion_segment)) {
+        errors.push(`Segment ${index + 1}: occasion_segment must be an array`);
+      } else if (!segment.occasion_segment.every(o => validOccasionSegments.has(o as OccasionSegmentKey))) {
+        const invalidOccasions = segment.occasion_segment.filter(o => !validOccasionSegments.has(o as OccasionSegmentKey));
+        errors.push(`Segment ${index + 1}: invalid occasion_segment value(s): ${invalidOccasions.join(', ')}`);
+      }
+    }
+    
+    // Validate need_segment (required array of enums)
+    const validNeedSegments = new Set<NeedSegmentKey>([
+      "quick_and_easy", "affordable", "treat_indulgence", "healthy_light",
+      "social_experience", "comfort_food", "premium_quality", "dietary_fit",
+      "local_authentic", "atmosphere_experience",
+    ]);
+    
+    if (segment.need_segment) {
+      if (!Array.isArray(segment.need_segment)) {
+        errors.push(`Segment ${index + 1}: need_segment must be an array`);
+      } else if (!segment.need_segment.every(n => validNeedSegments.has(n as NeedSegmentKey))) {
+        const invalidNeeds = segment.need_segment.filter(n => !validNeedSegments.has(n as NeedSegmentKey));
+        errors.push(`Segment ${index + 1}: invalid need_segment value(s): ${invalidNeeds.join(', ')}`);
+      }
+    }
+    
+    // Detect duplicate customer_segment within same programme (data error)
+    const customerSegmentCounts = new Map<string, number>();
+    profile.audience_segments.forEach(seg => {
+      if (seg.customer_segment) {
+        const count = customerSegmentCounts.get(seg.customer_segment) || 0;
+        customerSegmentCounts.set(seg.customer_segment, count + 1);
+      }
+    });
+    customerSegmentCounts.forEach((count, key) => {
+      if (count > 1) {
+        errors.push(`Duplicate customer_segment within programme: "${key}" appears ${count} times`);
+      }
+    });
+    
+    // === LEGACY: Erhverv gate ===
+    
     // Erhverv gate: business segment requires explicit evidence
     if (
       segment.people_type === 'Erhverv / Forretningsgæster' &&
@@ -1275,8 +1521,9 @@ function validateAudienceProfile(
 // ===== DEMOGRAPHIC FILTER VALIDATION =====
 
 /**
- * Validate segments respect reachable_demographics constraints
+ * Validate segments respect location context constraints
  * Catches AI hallucinations where it ignores the guard
+ * Phase 3: Updated to use reachable_location_contexts (with backward compatibility)
  */
 function validateDemographicFiltering(
   profile: ProgrammeAudienceProfile,
@@ -1284,11 +1531,13 @@ function validateDemographicFiltering(
 ): { valid: boolean; warnings: string[] } {
   const warnings: string[] = [];
 
-  if (!location.reachable_demographics || location.reachable_demographics.length === 0) {
+  // Phase 3: Check new field first, fall back to old field for backward compatibility
+  const locationContexts = location.reachable_location_contexts || location.reachable_demographics;
+  if (!locationContexts || locationContexts.length === 0) {
     return { valid: true, warnings }; // No guard data - skip validation
   }
 
-  const filteredDemographics = location.reachable_demographics
+  const filteredDemographics = locationContexts
     .filter(d => !d.is_reachable)
     .map(d => d.demographic.toLowerCase());
 
@@ -1315,13 +1564,13 @@ function validateDemographicFiltering(
       demoPatterns.forEach(pattern => {
         if (labelLower.includes(pattern)) {
           warnings.push(
-            `⚠️  Segment ${index + 1} "${segment.people_type}" references filtered demographic "${demo}" (reason: ${location.reachable_demographics?.find(d => d.demographic === demo)?.filter_reason})`
+            `⚠️  Segment ${index + 1} "${segment.people_type}" references filtered demographic "${demo}" (reason: ${locationContexts?.find(d => d.demographic === demo)?.filter_reason})`
           );
         }
 
         if (contentAnglesLower.includes(pattern)) {
           warnings.push(
-            `⚠️  Segment ${index + 1} content_angles reference filtered demographic "${demo}" (reason: ${location.reachable_demographics?.find(d => d.demographic === demo)?.filter_reason})`
+            `⚠️  Segment ${index + 1} content_angles reference filtered demographic "${demo}" (reason: ${locationContexts?.find(d => d.demographic === demo)?.filter_reason})`
           );
         }
       });
@@ -1349,11 +1598,12 @@ export async function generateAudienceSegments(
   businessId?: string,   // NEW: Business ID for excluding self from benchmarks
   language: string = 'da'  // Multi-language support (default Danish)
 ): Promise<ProgrammeAudienceProfile> {
-  // Log demographic guard status
-  if (location.reachable_demographics && location.reachable_demographics.length > 0) {
-    const reachable = location.reachable_demographics.filter(d => d.is_reachable);
-    const filtered = location.reachable_demographics.filter(d => !d.is_reachable);
-    console.log(`🛡️  Demographic guard active: ${reachable.length} reachable, ${filtered.length} filtered`);
+  // Log demographic guard status (Phase 3: use new field with backward compatibility)
+  const locationContextsForLog = location.reachable_location_contexts || location.reachable_demographics;
+  if (locationContextsForLog && locationContextsForLog.length > 0) {
+    const reachable = locationContextsForLog.filter(d => d.is_reachable);
+    const filtered = locationContextsForLog.filter(d => !d.is_reachable);
+    console.log(`🛡️  Location context guard active: ${reachable.length} reachable, ${filtered.length} filtered`);
     if (reachable.length > 0) {
       console.log(`   ✓ Reachable: ${reachable.map(d => `${d.demographic} (${d.proximity_score})`).join(', ')}`);
     }

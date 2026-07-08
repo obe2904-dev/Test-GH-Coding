@@ -88,6 +88,10 @@ import { generateMarketingManagerBrief, extractCommercialMode } from '../_shared
 // Phase 2: Location Strategy (Geography × Business Facts)
 import { generateLocationStrategy } from '../_shared/brand-profile/location-strategy.ts'
 
+// Phase 5: Channel Segment Helpers
+import { deriveChannelSegments } from '../_shared/channel-segment-helpers.ts'
+import type { CustomerSegmentKey, OccasionSegmentKey, NeedSegmentKey, ProductSegmentKey, ChannelSegmentKey } from '../_shared/brand-profile/audience-profile.ts'
+
 // V5 ARCHITECTURE (June 2026):
 // - Strategic segments extracted from Layer 4 and saved to strategic_audience_segments
 // - business_identity_persona contains core business facts only (FORRETNING, LOKATION, TILBUD, KULINARISK)
@@ -162,19 +166,46 @@ function determinePricePositioning(avgPrice?: number): 'budget' | 'value' | 'mod
  * Extract strategic audience segments for persona generation
  * Flattens primary + secondary segments from verbose audience_segments JSON
  * 
- * @param segments - Full audience segments array from audienceProfile
+ * NEW Phase 2: Deduplicates by customer_segment key to fix duplicate strategic segments bug.
+ * When the same segment (e.g. "families_with_children") appears in multiple programmes,
+ * only the highest-priority occurrence is kept.
+ * 
+ * @param segments - Full audience segments array from ALL programmes (already flattened)
  * @returns Compact strategic segments object or null
  */
 function extractStrategicSegments(segments: Array<{ 
-  label: string; 
+  people_type?: string;              // DEPRECATED: for backward compat
+  customer_segment?: string;         // NEW: stable enum key
+  people_type_label?: string;        // NEW: display label
   segment_size?: 'primary' | 'secondary' | 'niche';
+  occasion_segment?: string[];       // NEW: occasion enum keys
   timing_preference?: string;
   timing_windows?: string[];
 }>): any {
   if (!segments || segments.length === 0) return null;
   
-  const primary = segments.find(seg => seg.segment_size === 'primary');
-  const secondary = segments.filter(seg => seg.segment_size === 'secondary');
+  // NEW Phase 2: Deduplicate by customer_segment key across ALL programmes
+  // This fixes the bug where same segment from different programmes creates duplicates
+  const byKey = new Map<string, typeof segments[number]>();
+  
+  for (const seg of segments) {
+    // Use customer_segment if available (new format), otherwise fall back to people_type (legacy)
+    const key = seg.customer_segment || seg.people_type;
+    if (!key) continue;
+    
+    const existing = byKey.get(key);
+    
+    // Prefer primary over secondary if same segment appears in multiple programmes
+    if (!existing || (existing.segment_size !== 'primary' && seg.segment_size === 'primary')) {
+      byKey.set(key, seg);
+    }
+  }
+  
+  const deduped = Array.from(byKey.values());
+  console.log(`📊 Deduplication: ${segments.length} raw segments → ${deduped.length} unique segments`);
+  
+  const primary = deduped.filter(seg => seg.segment_size === 'primary');  // FIXED: Use filter() to capture ALL primary segments
+  const secondary = deduped.filter(seg => seg.segment_size === 'secondary');
   
   const formatTiming = (seg: typeof segments[0]) => {
     // NOTE: As of June 28, 2026 - timing_windows removed from AudienceSegment interface
@@ -182,17 +213,23 @@ function extractStrategicSegments(segments: Array<{
     return null;
   };
   
-  return {
-    primary: primary ? {
-      id: primary.people_type?.toLowerCase().replace(/\s+/g, '_').replace(/æ/g, 'ae').replace(/ø/g, 'o').replace(/å/g, 'aa'),
-      name: primary.people_type,
-      timing: formatTiming(primary)
-    } : null,
-    secondary: secondary.length > 0 ? secondary.map(seg => ({
-      id: seg.people_type?.toLowerCase().replace(/\s+/g, '_').replace(/æ/g, 'ae').replace(/ø/g, 'o').replace(/å/g, 'aa'),
-      name: seg.people_type,
+  const formatSegment = (seg: typeof segments[0]) => {
+    // NEW Phase 2: Use customer_segment as ID (stable enum key), people_type_label for display
+    // FALLBACK: If new fields don't exist, use legacy people_type with slugification
+    const id = seg.customer_segment || 
+               seg.people_type?.toLowerCase().replace(/\s+/g, '_').replace(/æ/g, 'ae').replace(/ø/g, 'o').replace(/å/g, 'aa');
+    const name = seg.people_type_label || seg.people_type;
+    
+    return {
+      id,
+      name,
       timing: formatTiming(seg)
-    })) : null
+    };
+  };
+  
+  return {
+    primary: primary.length > 0 ? primary.map(formatSegment) : null,  // FIXED: primary is now an array
+    secondary: secondary.length > 0 ? secondary.map(formatSegment) : null
   };
 }
 
@@ -300,6 +337,7 @@ async function fetchBusinessData(
   location: any
   operations: any
   openingHours: any[]
+  selectedPlatforms: string[] | null
 }> {
   const [
     { data: businessData, error: businessError },
@@ -369,6 +407,20 @@ async function fetchBusinessData(
     console.warn('⚠️ Menu fetch error:', menuFetchError)
   }
 
+  // Phase 6: Fetch selected platforms (must be after businessData is available)
+  const { data: profileData } = await supabaseClient
+    .from('profiles')
+    .select('selected_platforms')
+    .eq('id', businessData.owner_id)
+    .maybeSingle()
+
+  // Extract and normalize selected_platforms
+  const selectedPlatforms = profileData?.selected_platforms 
+    ? (Array.isArray(profileData.selected_platforms) 
+        ? profileData.selected_platforms 
+        : JSON.parse(profileData.selected_platforms))
+    : null
+
   return {
     business: businessData,
     primaryLocation: businessData.business_locations?.[0] || null,
@@ -379,7 +431,8 @@ async function fetchBusinessData(
     menuResultsWithDishes: menuResultsWithDishes || [],
     location: location || null,
     operations: operations || null,
-    openingHours: openingHours || []
+    openingHours: openingHours || [],
+    selectedPlatforms
   }
 }
 
@@ -558,6 +611,7 @@ serve(async (req) => {
     const location = fetchedData.location
     const operations = fetchedData.operations
     const openingHours = fetchedData.openingHours
+    const selectedPlatforms = fetchedData.selectedPlatforms
 
     // Extract additional data from fetched results
     const omOsText = businessProfile?.long_description || ''
@@ -621,7 +675,8 @@ serve(async (req) => {
                   currency: item.currency || 'DKK',
                   category: category.name,
                   service_periods: menuResult.service_periods || [],
-                  menu_title: structuredData.menuTitle
+                  menu_title: structuredData.menuTitle,
+                  productSegment: item.productSegment || null  // Phase 4: Product segment from AI extraction
                 })
               })
             }
@@ -976,8 +1031,8 @@ serve(async (req) => {
         });
 
         if (locationStrategy) {
-          const reachable = locationStrategy.reachable_demographics.filter(d => d.is_reachable);
-          const filtered = locationStrategy.reachable_demographics.filter(d => !d.is_reachable);
+          const reachable = locationStrategy.reachable_location_contexts.filter(d => d.is_reachable);
+          const filtered = locationStrategy.reachable_location_contexts.filter(d => !d.is_reachable);
 
           console.log(`[${requestId}] ✅ Location strategy:`);
           console.log(`[${requestId}]    Reachable: ${reachable.map(d => d.demographic).join(', ') || 'none'}`);
@@ -996,7 +1051,7 @@ serve(async (req) => {
       console.log(`[${requestId}]    Continuing without location strategy`);
       // Use empty default
       locationStrategy = {
-        reachable_demographics: [],
+        reachable_location_contexts: [],  // Phase 3: renamed field
         positioning_angles: [],
         content_triggers: [],
         physical_opportunities: [],
@@ -1108,7 +1163,8 @@ serve(async (req) => {
           business_name: business.name,
           business_category: business.category || business.business_category || '',
           city: businessCity || '',
-          establishment_type: business.establishment_type
+          establishment_type: business.establishment_type,
+          business_archetype: inferredArchetype  // NEW Phase 0: Pass business type for audience context
         },
         {
           items: normalizedMenuItems ? normalizedMenuItems.map(m => ({
@@ -1141,8 +1197,8 @@ serve(async (req) => {
           local_location_reference: business.local_location_reference || location?.local_location_reference,  // Source of truth: businesses table
           tourist_context: location?.tourist_context,
           landmarks: location?.landmarks,
-          // V5.7: Pass reachable_demographics from location strategy (generated in Step 2.7)
-          reachable_demographics: locationStrategy?.reachable_demographics,
+          // Phase 3: Renamed field from reachable_demographics (from location strategy, generated in Step 2.7)
+          reachable_location_contexts: locationStrategy?.reachable_location_contexts,
           physical_context: location?.physical_context
         },
         {
@@ -1549,6 +1605,42 @@ serve(async (req) => {
     console.log(`[${requestId}]    Commercial mode: ${commercialMode} (from ${dedupedProgrammesEnriched.length} programmes)`)
     console.log(`[${requestId}]    Goal split: ${JSON.stringify(normalizedGoalSplit)}`)
     
+    // Phase 6: Extract segment dimensions for marketing brief
+    console.log(`[${requestId}] 📊 Extracting segment dimensions for marketing brief...`)
+    
+    // Extract unique occasions and needs from all audience segments
+    const allOccasions = new Set<OccasionSegmentKey>()
+    const allNeeds = new Set<NeedSegmentKey>()
+    
+    programmesWithLayer4.forEach(p => {
+      p.audienceProfile.audience_segments.forEach(seg => {
+        seg.occasion_segment?.forEach(occ => allOccasions.add(occ))
+        seg.need_segment?.forEach(need => allNeeds.add(need))
+      })
+    })
+    
+    // Extract unique product categories from menu items (Phase 4 data)
+    const productCategories = new Set<ProductSegmentKey>(
+      normalizedMenuItems
+        .map(item => item.productSegment)
+        .filter((seg): seg is ProductSegmentKey => seg != null)
+    )
+    
+    // Derive channels from operations (Phase 5)
+    const channels = deriveChannelSegments({
+      accepts_walk_ins: operations?.accepts_walk_ins,
+      has_booking_link: !!bookingUrl,
+      reservation_required: operations?.reservation_required,
+      has_takeaway: operations?.has_takeaway,
+      has_delivery: operations?.has_delivery
+    })
+    
+    console.log(`[${requestId}]    Occasions: ${Array.from(allOccasions).join(', ') || 'none'}`)
+    console.log(`[${requestId}]    Needs: ${Array.from(allNeeds).join(', ') || 'none'}`)
+    console.log(`[${requestId}]    Product categories: ${Array.from(productCategories).join(', ') || 'none (not yet extracted)'}`)
+    console.log(`[${requestId}]    Channels: ${channels.join(', ')}`)
+    console.log(`[${requestId}]    Selected platforms: ${selectedPlatforms?.join(', ') || 'none'}`)
+    
     const marketingManagerBrief = await generateMarketingManagerBrief(
       {
         businessIdentityPersona: businessIdentityPersona.system_persona,
@@ -1564,13 +1656,21 @@ serve(async (req) => {
         contentStrategy: {
           goal_blend: normalizedGoalSplit
         },
+        strategicSegments,  // Phase 3: Add strategic segments for "who" context
+        segmentContext: {  // Phase 6: Add segment decomposition dimensions
+          occasions: Array.from(allOccasions),
+          needs: Array.from(allNeeds),
+          productCategories: Array.from(productCategories),
+          channels
+        },
         locationStrategy: locationStrategy ? {  // V5.7: Add location strategy context
           positioning_angles: locationStrategy.positioning_angles,
           content_triggers: locationStrategy.content_triggers,
           competitive_gap: typeof locationStrategy.competitive_gap === 'string' 
             ? locationStrategy.competitive_gap 
             : locationStrategy.competitive_gap?.gap_summary || null,
-          reachable_demographics: locationStrategy.reachable_demographics
+          // Phase 3: Renamed field, but kept for backward compatibility
+          reachable_location_contexts: locationStrategy.reachable_location_contexts
             .filter(d => d.is_reachable)
             .map(d => d.demographic)
         } : undefined,
@@ -1588,6 +1688,7 @@ serve(async (req) => {
             }
           }
         }),
+        selectedPlatforms: selectedPlatforms || undefined,  // Phase 6: Platform-aware brief
         businessName: business.name,
         businessCategory: business.category || business.business_category || '',
         language  // Multi-language support: da, sv, no, de, en
@@ -1840,7 +1941,7 @@ serve(async (req) => {
         usps: extractedUSPs,
         // Phase 2: Location strategy (crossing geography × business facts)
         location_strategy: locationStrategy ? {
-          reachable_demographics: locationStrategy.reachable_demographics,
+          reachable_location_contexts: locationStrategy.reachable_location_contexts,  // Phase 3: renamed field
           positioning_angles: locationStrategy.positioning_angles,
           content_triggers: locationStrategy.content_triggers,
           physical_opportunities: locationStrategy.physical_opportunities,

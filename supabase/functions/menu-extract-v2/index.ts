@@ -700,7 +700,7 @@ EXPECTED OUTPUT:
       "timeRange": null,
       "availabilityDays": "onsdag-lørdag",
       "items": [
-        {"name": "TAPAS", "description": "Serrano skinke reserva, Oliven, Paté med cornichoner, Aioli", "price": "199", "currency": "DKK"}
+        {"name": "TAPAS", "description": "Serrano skinke reserva, Oliven, Paté med cornichoner, Aioli", "price": "199", "currency": "DKK", "productSegment": "sharing_food"}
       ]
     },
     {
@@ -709,8 +709,8 @@ EXPECTED OUTPUT:
       "timeRange": null,
       "availabilityDays": null,
       "items": [
-        {"name": "NACHOS UDEN KYLLING", "description": "Sprøde majschips med salsa, guacamole, creme fraiche", "price": "125", "currency": "DKK"},
-        {"name": "NACHOS MED KYLLING", "description": "Sprøde majschips med salsa, guacamole, creme fraiche", "price": "149", "currency": "DKK"}
+        {"name": "NACHOS UDEN KYLLING", "description": "Sprøde majschips med salsa, guacamole, creme fraiche", "price": "125", "currency": "DKK", "productSegment": "snacks"},
+        {"name": "NACHOS MED KYLLING", "description": "Sprøde majschips med salsa, guacamole, creme fraiche", "price": "149", "currency": "DKK", "productSegment": "snacks"}
       ]
     }
   ]
@@ -743,6 +743,17 @@ Return one value in "menu_type":
 - "all_day"    → Single menu covering full opening hours, no meal-period distinction
 - "other"      → Cannot determine from content
 
+PRODUCT SEGMENT CLASSIFICATION (REQUIRED FOR EACH ITEM):
+Classify each menu item into exactly ONE product segment based on its name, description, and category:
+- "drinks" → All beverages: coffee, tea, wine, beer, cocktails, soft drinks, juices, etc.
+- "snacks" → Small bites, appetizers, tapas (individual), chips, nuts, olives, bread baskets
+- "main_meals" → Full meals, main courses, entrées, mains, burgers, pasta, steaks, fish dishes
+- "sharing_food" → Platters, sharing boards, tapas boards, mixed grills, family-style dishes
+- "desserts" → Desserts, sweets, cakes, ice cream, pastries
+- "specials" → Chef specials, seasonal dishes, dagens ret, dagens tilbud, limited-time offers
+- "takeaway_items" → Items explicitly marked as takeaway/to-go or in takeaway section
+- "gifting_and_addons" → Gift cards, merchandise, extras (e.g., "ekstra bacon +20")
+
 Return ONLY valid JSON in this schema:
 {
   "detected_language": "da" | "en" | "de" | "fr" | "es",  ← REQUIRED FIELD
@@ -762,7 +773,8 @@ Return ONLY valid JSON in this schema:
           "name": "string",
           "description": "string|null",
           "price": "string|null",
-          "currency": "string|null"
+          "currency": "string|null",
+          "productSegment": "drinks" | "snacks" | "main_meals" | "sharing_food" | "desserts" | "specials" | "takeaway_items" | "gifting_and_addons"  ← REQUIRED FIELD
         }
       ]
     }
@@ -871,6 +883,17 @@ MENU TYPE CLASSIFICATION (REQUIRED):
 Classify what this menu primarily serves based on category names and content — NOT the business name.
 Return one value in "menu_type": coffee | wine | cocktail | beer | bakery | bar_snacks | drinks | brunch | lunch | dinner | all_day | other
 
+PRODUCT SEGMENT CLASSIFICATION (REQUIRED FOR EACH ITEM):
+Classify each menu item into exactly ONE product segment based on its name, description, and category:
+- "drinks" → All beverages: coffee, tea, wine, beer, cocktails, soft drinks, juices, etc.
+- "snacks" → Small bites, appetizers, tapas (individual), chips, nuts, olives, bread baskets
+- "main_meals" → Full meals, main courses, entrées, mains, burgers, pasta, steaks, fish dishes
+- "sharing_food" → Platters, sharing boards, tapas boards, mixed grills, family-style dishes
+- "desserts" → Desserts, sweets, cakes, ice cream, pastries
+- "specials" → Chef specials, seasonal dishes, dagens ret, dagens tilbud, limited-time offers
+- "takeaway_items" → Items explicitly marked as takeaway/to-go or in takeaway section
+- "gifting_and_addons" → Gift cards, merchandise, extras (e.g., "ekstra bacon +20")
+
 Return ONLY valid JSON in this schema:
 {
   "menu_type": "lunch" | "brunch" | "dinner" | "all_day" | "coffee" | "wine" | "cocktail" | "beer" | "bakery" | "bar_snacks" | "drinks" | "other",
@@ -885,7 +908,13 @@ Return ONLY valid JSON in this schema:
       "timeRange": "string|null",
       "availabilityDays": "string|null",
       "items": [
-        { "name": "string", "description": "string|null", "price": "string|null", "currency": "string|null" }
+        {
+          "name": "string",
+          "description": "string|null",
+          "price": "string|null",
+          "currency": "string|null",
+          "productSegment": "drinks" | "snacks" | "main_meals" | "sharing_food" | "desserts" | "specials" | "takeaway_items" | "gifting_and_addons"  ← REQUIRED FIELD
+        }
       ]
     }
   ]
