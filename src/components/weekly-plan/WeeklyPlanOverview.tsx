@@ -806,13 +806,8 @@ export function WeeklyPlanOverview({
                       <button
                         onClick={(e) => { 
                           e.stopPropagation()
-                          const isFullyPublished = hasCreatedPost && (createdPostInfo?.scheduledFor || createdPostInfo?.postedAt)
-                          
-                          if (isFullyPublished) {
-                            // Post is scheduled or published -> go to calendar
-                            navigate('/dashboard/calendar')
-                          } else if (!isLocked) {
-                            // Post is not complete or doesn't exist -> go to create/design
+                          if (!isLocked) {
+                            // Navigate to create page - will auto-advance to design stage if text exists
                             onCreatePost(post)
                           }
                         }}
@@ -820,19 +815,15 @@ export function WeeklyPlanOverview({
                         className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
                           isLocked
                             ? 'text-slate-500 bg-slate-200 cursor-not-allowed'
-                            : hasCreatedPost && (createdPostInfo?.scheduledFor || createdPostInfo?.postedAt)
-                            ? 'text-white bg-green-600 hover:bg-green-700'
                             : hasCreatedPost && createdPostInfo?.hasCaption
-                            ? 'text-white bg-blue-600 hover:bg-blue-700'
+                            ? 'text-white bg-green-600 hover:bg-green-700'
                             : 'text-white bg-cta hover:bg-cta-hover'
                         }`}
                       >
                         {isLocked 
                           ? t('weeklyPlan.overview.lockedButton', { defaultValue: 'Låst' })
-                          : hasCreatedPost && (createdPostInfo?.scheduledFor || createdPostInfo?.postedAt)
-                          ? t('weeklyPlan.overview.goToPost', { defaultValue: 'Gå til opslag →' })
                           : hasCreatedPost && createdPostInfo?.hasCaption
-                          ? t('weeklyPlan.overview.goToDesign', { defaultValue: 'Gå til design →' })
+                          ? t('weeklyPlan.overview.goToPost', { defaultValue: 'Gå til opslag →' })
                           : t('weeklyPlan.overview.createPost')
                         }
                       </button>
