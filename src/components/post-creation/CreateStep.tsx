@@ -1606,6 +1606,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
             </div>
         </div>
       </div>
+      </div>
 
       {/* Fixed Bottom Bar */}
       <div className="flex-shrink-0 border-t border-[#D1D5DB] pt-4 pb-4 bg-white">
