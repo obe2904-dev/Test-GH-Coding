@@ -357,29 +357,34 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
           ? 'quick_suggestions'
           : 'manual'
 
-      const draftData = {
-        businessId: business.id,
-        platform: selectedPlatforms[0]?.toLowerCase() ?? 'facebook',
-        postText: postContent?.text ?? '',
-        photoUrl: photoContent?.uploadedMedia?.[0]?.url ?? null,
-        ideaSource,
-        weeklyPlanIdeaId: weeklyPlanPost?.idea_id ?? null,
-        suggestionId: selectedSuggestionData?.id ?? null,
-        weeklyPlanId: null,
-        weeklyPlanSlotDate: weeklyPlanPost?.timing?.date ?? null,
-        status: 'draft' as const,
-        scheduledFor: selectedDateTime,
-        postedAt: new Date(),
-        menuItemId: weeklyPlanPost?.contentSubject?.menuItemId ?? selectedSuggestionData?.menuItemId ?? null,
-        menuItemName: weeklyPlanPost?.contentSubject?.menuItemName ?? selectedSuggestionData?.menuItemName ?? null,
-        contentType: weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType ?? null,
-      }
+      // Save draft for EACH selected platform
+      const saveTasks = selectedPlatforms.map(async (platform) => {
+        const draftData = {
+          businessId: business.id,
+          platform: platform.toLowerCase(),
+          postText: postContent?.text ?? '',
+          photoUrl: photoContent?.uploadedMedia?.[0]?.url ?? null,
+          ideaSource,
+          weeklyPlanIdeaId: weeklyPlanPost?.idea_id ?? null,
+          suggestionId: selectedSuggestionData?.id ?? null,
+          weeklyPlanId: null,
+          weeklyPlanSlotDate: weeklyPlanPost?.timing?.date ?? null,
+          status: 'draft' as const,
+          scheduledFor: selectedDateTime,
+          postedAt: new Date(),
+          menuItemId: weeklyPlanPost?.contentSubject?.menuItemId ?? selectedSuggestionData?.menuItemId ?? null,
+          menuItemName: weeklyPlanPost?.contentSubject?.menuItemName ?? selectedSuggestionData?.menuItemName ?? null,
+          contentType: weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType ?? null,
+        }
+
+        return savePublishedPost(draftData)
+      })
 
       try {
-        await savePublishedPost(draftData)
+        await Promise.all(saveTasks)
         lastAutoSaveRef.current = contentHash
-        console.log('[Auto-save] Draft saved successfully')
-        // Refresh timeline to show the new draft
+        console.log(`[Auto-save] Saved drafts for ${selectedPlatforms.length} platform(s)`)
+        // Refresh timeline to show the new drafts
         await loadTimelineData()
       } catch (error) {
         console.error('[Auto-save] Failed to save draft:', error)
