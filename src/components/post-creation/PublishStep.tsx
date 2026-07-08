@@ -18,6 +18,9 @@ import { ScheduleTimeline } from './publish/ScheduleTimeline'
 import { PostActionModal } from './publish/PostActionModal'
 import { usePublishTimeline } from './publish/usePublishTimeline'
 import { useScheduleData } from './publish/useScheduleData'
+import { DateTimePicker } from './publish/DateTimePicker'
+import { IdeaPostsFrame } from './publish/IdeaPostsFrame'
+import { DatePostsFrame } from './publish/DatePostsFrame'
 import { Calendar, Send, TrendingUp, ChevronLeft, ChevronRight, Sun, Users, Link2, Sparkles } from './publish/icons'
 import {
   formatPlatformList,
@@ -233,6 +236,9 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
   const [selectedPost, setSelectedPost] = useState<any | null>(null)
   const [isLoadingTimeline, setIsLoadingTimeline] = useState(true)
 
+  // ── Calendar Browsing State (separate from post scheduled date) ──
+  const [calendarBrowseDate, setCalendarBrowseDate] = useState<Date | null>(() => new Date())
+
   // Load all posts for the timeline (drafts + scheduled + published)
   const loadTimelineData = useCallback(async () => {
     if (!business?.id) return
@@ -248,10 +254,162 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     }
   }, [business?.id]) // Removed 'posts' from deps - it's a stable hook reference
 
+  // ── Frame 1: Posts for current idea ──
+  const ideaPosts = useMemo(() => {
+    if (!business?.id) return []
+    
+    // Determine idea identifier based on mode
+    const ideaKey =
+      activePath === 'weekly-plan' && weeklyPlanPost?.idea_id
+        ? { type: 'weekly_plan' as const, ideaId: weeklyPlanPost.idea_id }
+        : activePath === 'ai-ideas' && selectedSuggestionData?.id
+        ? { type: 'quick_suggestions' as const, suggestionId: selectedSuggestionData.id }
+        : activePath === 'write'
+        ? { type: 'write' as const }
+        : null
+
+    if (!ideaKey) return []
+
+    // Filter posts for current idea
+    return allPosts.filter((post) => {
+      if (ideaKey.type === 'weekly_plan') {
+        return post.ideaSource === 'weekly_plan' && post.weeklyPlanIdeaId === ideaKey.ideaId
+      }
+      if (ideaKey.type === 'quick_suggestions') {
+        return post.ideaSource === 'quick_suggestions' && post.suggestionId === ideaKey.suggestionId
+      }
+      if (ideaKey.type === 'write') {
+        return post.ideaSource === 'write'
+      }
+      return false
+    }).sort((a, b) => {
+      // Sort by created date (newest first)
+      const dateA = a.createdAt ?? new Date(0)
+      const dateB = b.createdAt ?? new Date(0)
+      return dateB.getTime() - dateA.getTime()
+    })
+  }, [allPosts, activePath, weeklyPlanPost?.idea_id, selectedSuggestionData?.id, business?.id])
+
+  // ── Frame 2: Posts for selected calendar date ──
+  const datePosts = useMemo(() => {
+    if (!calendarBrowseDate) return []
+
+    const targetDate = new Date(calendarBrowseDate)
+    targetDate.setHours(0, 0, 0, 0)
+    const nextDate = new Date(targetDate)
+    nextDate.setDate(nextDate.getDate() + 1)
+
+    return allPosts.filter((post) => {
+      // Only show scheduled and published posts (not drafts)
+      if (post.status === 'draft') return false
+
+      const postDate = post.scheduledFor ?? post.postedAt
+      if (!postDate) return false
+
+      const postTime = postDate.getTime()
+      return postTime >= targetDate.getTime() && postTime < nextDate.getTime()
+    }).sort((a, b) => {
+      // Sort by scheduled/posted time (earliest first)
+      const dateA = (a.scheduledFor ?? a.postedAt)?.getTime() ?? 0
+      const dateB = (b.scheduledFor ?? b.postedAt)?.getTime() ?? 0
+      return dateA - dateB
+    })
+  }, [allPosts, calendarBrowseDate])
+
   // Load timeline on mount
   useEffect(() => {
     loadTimelineData()
   }, [loadTimelineData])
+
+  // ── Auto-save Draft to DB ──
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastAutoSaveRef = useRef<string>('')
+
+  useEffect(() => {
+    // Only auto-save if we have content and a selected date/time
+    if (!selectedDateTime || !business?.id) return
+    if (!postContent && !photoContent?.uploadedMedia?.length) return
+
+    // Create a hash of the current content to avoid duplicate saves
+    const contentHash = JSON.stringify({
+      text: postContent?.text,
+      headline: postContent?.headline,
+      photo: photoContent?.uploadedMedia?.[0]?.url,
+      date: selectedDateTime.toISOString(),
+    })
+
+    // Skip if content hasn't changed
+    if (contentHash === lastAutoSaveRef.current) return
+
+    // Clear existing timeout
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current)
+    }
+
+    // Set new timeout (2 second debounce)
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      console.log('[Auto-save] Saving draft to DB...')
+      
+      const ideaSource =
+        activePath === 'weekly-plan'
+          ? 'weekly_plan'
+          : activePath === 'ai-ideas'
+          ? 'quick_suggestions'
+          : 'write'
+
+      const draftData = {
+        businessId: business.id,
+        platform: selectedPlatforms[0]?.toLowerCase() ?? 'facebook',
+        postText: getFormattedContent(selectedPlatforms[0] ?? 'facebook'),
+        photoUrl: photoContent?.uploadedMedia?.[0]?.url ?? null,
+        ideaSource,
+        weeklyPlanIdeaId: weeklyPlanPost?.idea_id ?? null,
+        suggestionId: selectedSuggestionData?.id ?? null,
+        weeklyPlanId: null,
+        weeklyPlanSlotDate: weeklyPlanPost?.timing?.date ?? null,
+        status: 'draft' as const,
+        scheduledFor: selectedDateTime,
+        menuItemId: weeklyPlanPost?.contentSubject?.menuItemId ?? selectedSuggestionData?.menuItemId ?? null,
+        menuItemName: weeklyPlanPost?.contentSubject?.menuItemName ?? selectedSuggestionData?.menuItemName ?? null,
+        contentType: weeklyPlanPost?.postType?.category ?? selectedSuggestionData?.contentType ?? null,
+      }
+
+      try {
+        await savePublishedPost(draftData)
+        lastAutoSaveRef.current = contentHash
+        console.log('[Auto-save] Draft saved successfully')
+        // Refresh timeline to show the new draft
+        await loadTimelineData()
+      } catch (error) {
+        console.error('[Auto-save] Failed to save draft:', error)
+      }
+    }, 2000)
+
+    // Cleanup on unmount
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current)
+      }
+    }
+  }, [
+    postContent,
+    photoContent,
+    selectedDateTime,
+    business?.id,
+    selectedPlatforms,
+    activePath,
+    weeklyPlanPost?.idea_id,
+    weeklyPlanPost?.timing?.date,
+    weeklyPlanPost?.contentSubject?.menuItemId,
+    weeklyPlanPost?.contentSubject?.menuItemName,
+    weeklyPlanPost?.postType?.category,
+    selectedSuggestionData?.id,
+    selectedSuggestionData?.menuItemId,
+    selectedSuggestionData?.menuItemName,
+    selectedSuggestionData?.contentType,
+    getFormattedContent,
+    loadTimelineData,
+  ])
 
   // Determine sibling post (other platform) for "Apply to both" checkbox
   const getSiblingPost = useCallback((post: any) => {
@@ -381,6 +539,20 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     const parsed = Number(resource)
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 30
   }, [i18n, i18n.language])
+
+  // Current idea title for Frame 1 header
+  const currentIdeaTitle = useMemo(() => {
+    if (activePath === 'weekly-plan' && weeklyPlanPost?.contentSubject?.dish) {
+      return weeklyPlanPost.contentSubject.dish
+    }
+    if (activePath === 'ai-ideas' && selectedSuggestionData?.menuItemName) {
+      return selectedSuggestionData.menuItemName
+    }
+    if (activePath === 'write') {
+      return 'Skriv Selv'
+    }
+    return 'Nuværende idé'
+  }, [activePath, weeklyPlanPost?.contentSubject?.dish, selectedSuggestionData?.menuItemName])
 
   const updateSelectedSuggestionStatus = useCallback(async (status: 'selected' | 'consumed' | 'published') => {
     if (!selectedSuggestionData?.id || !business?.id) return
@@ -1115,13 +1287,42 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
             )}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* NEW 3-SECTION LAYOUT */}
+          <div className="space-y-4">
+            {/* SECTION 1: Date & Time Picker for Post Scheduling */}
+            <DateTimePicker
+              selectedDate={selectedDate}
+              selectedHour={selectedHour}
+              selectedMinute={selectedMinute}
+              timeInterval={timeInterval}
+              locale={locale}
+              dateLabel="Dato"
+              timeLabel="Tidspunkt"
+              hourLabel="Time"
+              minuteLabel="Min"
+              onSelectDate={setSelectedDate}
+              onSelectHour={setSelectedHour}
+              onSelectMinute={setSelectedMinute}
+              showTimeNote={activePath === 'write'}
+              timeNote="Nuværende tid brugt som standard"
+            />
 
-            {/* LEFT: Calendar & Time Selection */}
-            <div>
-              {/* AI-Recommended Time Indicator */}
-              {selectedSuggestionData?.suggestedTime && (
-                <div className="mb-3 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg">
+            {/* AI Recommendation Banner */}
+            {selectedSuggestionData?.suggestedTime && (() => {
+              const [aiHours, aiMinutes] = selectedSuggestionData.suggestedTime.split(':')
+              const isUsingAiTime = selectedHour === aiHours && selectedMinute === aiMinutes
+              
+              if (isUsingAiTime) {
+                return (
+                  <div className="flex items-center gap-1.5 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span className="font-medium">Bruger AI anbefaling · kl. {selectedSuggestionData.suggestedTime}</span>
+                  </div>
+                )
+              }
+              
+              return (
+                <div className="flex items-center justify-between px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-purple-600 flex-shrink-0" />
                     <div className="flex-1">
@@ -1133,104 +1334,75 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                       </p>
                     </div>
                   </div>
-                </div>
-              )}
-
-              {/* Quick-select AI Time Chip */}
-              {selectedSuggestionData?.suggestedTime && (() => {
-                const [aiHours, aiMinutes] = selectedSuggestionData.suggestedTime.split(':')
-                const isUsingAiTime = selectedHour === aiHours && selectedMinute === aiMinutes
-                
-                if (isUsingAiTime) {
-                  return (
-                    <div className="mb-3 flex items-center gap-1.5 text-xs text-purple-600">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span className="font-medium">Bruger AI anbefaling</span>
-                    </div>
-                  )
-                }
-                
-                return (
                   <button
                     onClick={() => {
                       setSelectedHour(aiHours)
                       setSelectedMinute(aiMinutes)
                     }}
-                    className="mb-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 border border-purple-300 rounded-lg text-xs font-semibold text-purple-700 hover:bg-purple-100 active:bg-purple-200 transition-colors"
+                    className="flex-shrink-0 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 transition-colors"
                   >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Brug AI anbefaling: kl. {selectedSuggestionData.suggestedTime}</span>
+                    Brug anbefaling
                   </button>
-                )
-              })()}
-
-              {restoredDbDraft && (
-                <div className="mb-3 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-slate-600 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-xs font-semibold text-slate-900">
-                        {restoredDraftTimeLabel}
-                      </p>
-                      <p className="text-xs text-slate-700">
-                        Kladde tidspunkt
-                      </p>
-                    </div>
-                  </div>
                 </div>
-              )}
+              )
+            })()}
 
-              <ScheduleCalendarPicker
-                selectedDate={selectedDate}
-                selectedHour={selectedHour}
-                selectedMinute={selectedMinute}
-                selectedTime={selectedTime}
-                timeInterval={timeInterval}
-                monthNames={monthNames}
-                dayNames={dayNames}
-                locale={locale}
-                selectTimeLabel={tPublish('selectTime', 'Time')}
-                hourLabel={tPublish('hour', 'Hour')}
-                minuteLabel={tPublish('minute', 'Min')}
-                timeInPastLabel={tPublish('timeInPast', 'Time is in the past')}
-                dayPosts={calendarDayPosts}
-                onSelectDate={(date) => setSelectedDate(date)}
-                onSelectHour={(hour) => setSelectedHour(hour)}
-                onSelectMinute={(minute) => setSelectedMinute(minute)}
-              />
-            </div>
-
-            {/* RIGHT: Posts Timeline */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-700">
-                  {tPublish('postsTimeline', 'Opslags Tidslinje')}
-                </p>
-                <p className="text-xs text-slate-500">
-                  ⏰ {tPublish('chronological', 'Kronologisk')}
-                </p>
+            {/* SECTION 2 & 3: Calendar (left) + Frames (right) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              
+              {/* LEFT: Calendar Grid (for browsing dates) */}
+              <div>
+                <div className="mb-2">
+                  <h4 className="text-xs font-semibold text-slate-700">Kalender</h4>
+                  <p className="text-xs text-slate-500">Klik på datoer for at se opslag</p>
+                </div>
+                <ScheduleCalendarPicker
+                  selectedDate={calendarBrowseDate}
+                  selectedHour={selectedHour}
+                  selectedMinute={selectedMinute}
+                  selectedTime={`${selectedHour}:${selectedMinute}`}
+                  timeInterval={timeInterval}
+                  monthNames={monthNames}
+                  dayNames={dayNames}
+                  locale={locale}
+                  selectTimeLabel=""
+                  hourLabel=""
+                  minuteLabel=""
+                  timeInPastLabel=""
+                  dayPosts={calendarDayPosts}
+                  onSelectDate={(date) => setCalendarBrowseDate(date)}
+                  onSelectHour={() => {}}
+                  onSelectMinute={() => {}}
+                />
               </div>
 
-              <ScheduleTimeline
-                items={successInfo ? timelineItems.filter(i => i.type !== 'selected') : timelineItems}
-                selectedPlatforms={selectedPlatforms}
-                postPreview={successInfo ? null : postPreview}
-                selectedPlatformPreviews={successInfo ? undefined : selectedPlatformPreviews}
-                locale={locale}
-                isPlatformConnected={isPlatformConnected}
-                unconnectedPlatforms={unconnectedPlatformLabels}
-                manualPostingRequiredLabel={manualPostingRequiredLabel}
-                selectedMediaUrl={selectedMediaUrl ?? undefined}
-                onPublishNow={successInfo ? undefined : handlePublishNow}
-                onSave={successInfo ? undefined : handlePublish}
-                isPublishing={isPublishing}
-                canSave={selectedPublishMode === 'schedule' ? canPublish && !selectedTimeIsTooOldForSchedule : canPublish}
-                saveDisabledReason={scheduleDisabledReason}
-                saveLabel={tPublish('scheduleCta', 'Planlæg')}
-                publishNowLabel={tPublish('publishNowCta', 'Udgiv nu')}
-                onScheduledPostClick={handleScheduledPostClick}
-                onSelectedPostClick={successInfo ? undefined : handleSelectedPostClick}
-              />
+              {/* RIGHT: Two Fixed-Height Frames */}
+              <div className="space-y-4">
+                
+                {/* Frame 1: Posts for Current Idea */}
+                <IdeaPostsFrame
+                  ideaPosts={ideaPosts}
+                  currentIdeaTitle={currentIdeaTitle}
+                  onPostClick={(post) => {
+                    console.log('[PublishStep] Idea post clicked:', post.id)
+                    // TODO: Open post modal
+                  }}
+                  isLoading={isLoadingTimeline}
+                />
+
+                {/* Frame 2: Posts for Selected Calendar Date */}
+                <DatePostsFrame
+                  datePosts={datePosts}
+                  selectedDate={calendarBrowseDate}
+                  locale={locale}
+                  onPostClick={(post) => {
+                    console.log('[PublishStep] Date post clicked:', post.id)
+                    // TODO: Open post modal
+                  }}
+                  isLoading={isLoadingTimeline}
+                />
+
+              </div>
             </div>
           </div>
         </div>
