@@ -39,8 +39,10 @@ export interface PostKey {
   weeklyPlanId?: string | null
   /** Zero-based post index within weekly plan (legacy) */
   weeklyPlanSlotIndex?: number | null
-  /** ISO date "YYYY-MM-DD" of weekly plan slot (preferred key) */
+  /** ISO date "YYYY-MM-DD" of weekly plan slot (fallback key) */
   weeklyPlanSlotDate?: string | null
+  /** Idea ID from weekly_plan_ideas (PREFERRED - stable across plan regeneration) */
+  weeklyPlanIdeaId?: number | null
 }
 
 /** Data payload for saving posts */
@@ -157,8 +159,10 @@ export function usePosts() {
       q = q.is('suggestion_id', null)
     }
 
-    // Weekly plan filter (prefer slot_date over legacy plan_id + index)
-    if (key.weeklyPlanSlotDate != null) {
+    // Weekly plan filter (prefer idea_id > slot_date > legacy plan_id + index)
+    if (key.weeklyPlanIdeaId != null) {
+      q = q.eq('weekly_plan_idea_id', key.weeklyPlanIdeaId)
+    } else if (key.weeklyPlanSlotDate != null) {
       q = q.eq('weekly_plan_slot_date', key.weeklyPlanSlotDate)
     } else if (key.weeklyPlanId != null) {
       q = q.eq('weekly_plan_id', key.weeklyPlanId)

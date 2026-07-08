@@ -263,13 +263,11 @@ export function CreatePostPage() {
   const buildDbDraftKey = useCallback((): DbPostKey | null => {
     const businessId = businessData.business?.id
     if (!businessId) return null
-    if (activePath === 'weekly-plan' && weeklyPlanPost?.timing?.date) {
+    if (activePath === 'weekly-plan' && weeklyPlanPost?.idea_id != null) {
       return { 
         businessId, 
         ideaSource: 'weekly_plan', 
-        weeklyPlanSlotDate: weeklyPlanPost.timing.date,
-        weeklyPlanId: weeklyContentPlan?.id ?? null,
-        weeklyPlanSlotIndex: weeklyPlanPostIndex ?? null
+        weeklyPlanIdeaId: Number(weeklyPlanPost.idea_id)
       }
     }
     if (activePath === 'ai-ideas' && selectedSuggestionData?.id != null && !isCommittedAiSuggestion) {
@@ -277,7 +275,7 @@ export function CreatePostPage() {
     }
     if (activePath === 'write') return { businessId, ideaSource: 'write' }
     return null
-  }, [businessData.business?.id, activePath, selectedSuggestionData?.id, weeklyPlanPost?.timing?.date, weeklyContentPlan?.id, weeklyPlanPostIndex, isCommittedAiSuggestion])
+  }, [businessData.business?.id, activePath, selectedSuggestionData?.id, weeklyPlanPost?.idea_id, isCommittedAiSuggestion])
 
   // Enable read-only mode for committed suggestions instead of clearing them
   useEffect(() => {
@@ -318,17 +316,18 @@ export function CreatePostPage() {
     // Guard: only run for weekly-plan path to prevent interference with other paths
     if (activePath !== 'weekly-plan') return
     
+    const ideaId = weeklyPlanPost?.idea_id
     console.log('[WeeklyPlanEffect] fired', {
       hasWeeklyContentPlan: !!weeklyContentPlan,
       hasWeeklyPlanPost: !!weeklyPlanPost,
+      ideaId,
       currentStep,
-      weeklyPlanPostIndex,
-      hasDraftText: !!(draftMap[weeklyPlanPostIndex] as any)?.text,
+      hasDraftText: !!(ideaId != null && draftMap[ideaId] as any)?.text,
       hasBusinessId: !!businessData.business?.id,
     })
-    if (weeklyContentPlan && weeklyPlanPost) {
-      const savedContent = draftMap[weeklyPlanPostIndex]
-      const savedPhotos = photoDraftMap[weeklyPlanPostIndex]
+    if (weeklyContentPlan && weeklyPlanPost && ideaId != null) {
+      const savedContent = draftMap[ideaId]
+      const savedPhotos = photoDraftMap[ideaId]
       const hasSavedPhotoUrl = !!savedPhotos?.uploadedMedia?.[0] && (() => {
         const media = savedPhotos.uploadedMedia[0]
         const url = media.selectedVersionForPost === 'adjusted'
@@ -347,9 +346,7 @@ export function CreatePostPage() {
         const dbKey: DbPostKey = {
           businessId,
           ideaSource: 'weekly_plan',
-          weeklyPlanSlotDate: weeklyPlanPost.timing.date,
-          weeklyPlanId: weeklyContentPlan?.id ?? null,
-          weeklyPlanSlotIndex: weeklyPlanPostIndex ?? null,
+          weeklyPlanIdeaId: ideaId,
         }
 
         const dbDraft = await posts.loadPost(dbKey).catch((err) => {
@@ -373,7 +370,7 @@ export function CreatePostPage() {
             carouselMode: false,
           }
           setPhotoContent(restoredPhotoContent)
-          setPhotoDraftMapEntry(weeklyPlanPostIndex, restoredPhotoContent)
+          setPhotoDraftMapEntry(ideaId, restoredPhotoContent)
         } else {
           setPhotoContent(null)
         }
@@ -415,7 +412,7 @@ export function CreatePostPage() {
           const dbKey: DbPostKey = {
             businessId,
             ideaSource: 'weekly_plan',
-            weeklyPlanSlotDate: weeklyPlanPost.timing.date,
+            weeklyPlanIdeaId: ideaId,
           }
           console.log('[WeeklyPlanEffect] Checking DB for draft:', dbKey)
           const dbDraft = await posts.loadPost(dbKey).catch((err) => { console.error('[WeeklyPlanEffect] DB load error:', err); return null })
@@ -437,7 +434,7 @@ export function CreatePostPage() {
               setPhotoIdea(briefParts.join(' — '))
             }
             setPostContent(dbContent)
-            setDraftMapEntry(weeklyPlanPostIndex, dbContent)  // populate in-memory map too
+            setDraftMapEntry(ideaId, dbContent)  // populate in-memory map too
             if (dbDraft!.photoUrl) {
               const restoredPhotoContent = {
                 uploadedMedia: [{
@@ -454,7 +451,7 @@ export function CreatePostPage() {
                 carouselMode: false,
               }
               setPhotoContent(restoredPhotoContent)
-              setPhotoDraftMapEntry(weeklyPlanPostIndex, restoredPhotoContent)  // populate in-memory photo cache
+              setPhotoDraftMapEntry(ideaId, restoredPhotoContent)  // populate in-memory photo cache
             } else {
               setPhotoContent(null)
             }
@@ -474,7 +471,7 @@ export function CreatePostPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weeklyPlanPost, businessData.business?.id, currentStep, weeklyPlanPostIndex])
+  }, [weeklyPlanPost, businessData.business?.id, currentStep])
 
   // AI Ideas should not auto-restore into Design on mount.
   // The cached draft is picked up later after the user selects a suggestion
@@ -1156,8 +1153,8 @@ export function CreatePostPage() {
       console.log('[handleCreateNext] activeContent:', activeContent)
       
       // Save current text to draftMap so it survives idea switching (weekly plan only)
-      if (weeklyContentPlan && activeContent) {
-        setDraftMapEntry(weeklyPlanPostIndex, activeContent)
+      if (weeklyContentPlan && weeklyPlanPost?.idea_id != null && activeContent) {
+        setDraftMapEntry(weeklyPlanPost.idea_id, activeContent)
       }
 
       // Compute suggested posting datetime from AI suggestion
@@ -1494,13 +1491,15 @@ export function CreatePostPage() {
     // Prevent rapid switching with loading state
     setIsLoadingWeeklyPlanSwitch(true)
 
-    // Persist current edits before leaving
-    if (postContent) {
-      setDraftMapEntry(weeklyPlanPostIndex, postContent)
-    }
-    // Persist current photos before leaving
-    if (photoContent) {
-      setPhotoDraftMapEntry(weeklyPlanPostIndex, photoContent)
+    // Persist current edits before leaving (using current idea_id)
+    if (weeklyPlanPost?.idea_id != null) {
+      if (postContent) {
+        setDraftMapEntry(weeklyPlanPost.idea_id, postContent)
+      }
+      // Persist current photos before leaving
+      if (photoContent) {
+        setPhotoDraftMapEntry(weeklyPlanPost.idea_id, photoContent)
+      }
     }
 
     const newStrategicIdea = {
