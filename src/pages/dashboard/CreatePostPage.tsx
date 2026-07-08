@@ -1145,18 +1145,19 @@ export function CreatePostPage() {
   }
 
   const handleCreateNext = async () => {
-    console.log('[handleCreateNext] Advancing from Design → Udgiv')
-    console.log('[handleCreateNext] activePath:', activePath)
-    console.log('[handleCreateNext] selectedPlatforms:', selectedPlatforms)
-    console.log('[handleCreateNext] activeContent:', activeContent)
-    
-    // Save current text to draftMap so it survives idea switching (weekly plan only)
-    if (weeklyContentPlan && activeContent) {
-      setDraftMapEntry(weeklyPlanPostIndex, activeContent)
-    }
+    try {
+      console.log('[handleCreateNext] Advancing from Design → Udgiv')
+      console.log('[handleCreateNext] activePath:', activePath)
+      console.log('[handleCreateNext] selectedPlatforms:', selectedPlatforms)
+      console.log('[handleCreateNext] activeContent:', activeContent)
+      
+      // Save current text to draftMap so it survives idea switching (weekly plan only)
+      if (weeklyContentPlan && activeContent) {
+        setDraftMapEntry(weeklyPlanPostIndex, activeContent)
+      }
 
-    // Compute suggested posting datetime from AI suggestion
-    const suggestedPostDatetime = computeSuggestedPostDatetime()
+      // Compute suggested posting datetime from AI suggestion
+      const suggestedPostDatetime = computeSuggestedPostDatetime()
 
     // Update suggestion status to 'consumed' when entering Udgiv stage
     if (selectedSuggestionData?.id && businessData?.business?.id) {
@@ -1276,8 +1277,12 @@ export function CreatePostPage() {
       console.log('[handleCreateNext] ✅ Write draft deleted after posts DB persistence')
     }
     
-    console.log('[handleCreateNext] Advancing to Udgiv step')
-    setCurrentStep('publish')
+      console.log('[handleCreateNext] Advancing to Udgiv step')
+      setCurrentStep('publish')
+    } catch (error) {
+      console.error('[handleCreateNext] Error advancing to Udgiv:', error)
+      alert('Der opstod en fejl. Prøv igen.')
+    }
   }
 
   // Direct transfer from Weekly Plan: call generate-text-from-idea with strategy data.
