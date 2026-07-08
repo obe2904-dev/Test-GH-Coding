@@ -298,9 +298,8 @@ export function ScheduleCalendarPicker({
   )
 
   return (
-    <div className="grid grid-cols-3 gap-3">
-      <div className="col-span-2 space-y-2">
-        <div className="flex items-center justify-between">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
           <button
             onClick={handlePreviousMonth}
             className="p-1 hover:bg-slate-100 rounded-lg transition-colors"
@@ -383,88 +382,6 @@ export function ScheduleCalendarPicker({
             )
           })}
         </div>
-      </div>
-
-      <div className="col-span-1 space-y-2">
-        <div className="flex items-center gap-1">
-          <Clock className="w-3 h-3 text-cta" />
-          <p className="text-xs font-semibold text-slate-700">
-            {selectTimeLabel}
-          </p>
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1">
-            {hourLabel}
-          </label>
-          <select
-            value={selectedHour}
-            onChange={(event) => onSelectHour(event.target.value)}
-            className="w-full px-2 py-1 border border-slate-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-transparent text-xs bg-white"
-          >
-            {hours.map((hour) => (
-              <option key={hour} value={hour}>
-                {hour}:00
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1">
-            {minuteLabel}
-          </label>
-          <select
-            value={selectedMinute}
-            onChange={(event) => onSelectMinute(event.target.value)}
-            className="w-full px-2 py-1 border border-slate-300 rounded focus:ring-1 focus:ring-purple-500 focus:border-transparent text-xs bg-white"
-          >
-            {minutes.map((minute) => (
-              <option key={minute} value={minute}>
-                :{minute}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {selectedDate && (
-          <>
-            <div
-              className={`p-1.5 rounded border ${
-                isDateTimeInPast
-                  ? 'bg-amber-50 border-amber-300'
-                  : 'bg-purple-50 border-purple-200'
-              }`}
-            >
-              <p
-                className={`text-xs font-bold leading-tight ${
-                  isDateTimeInPast ? 'text-amber-900' : 'text-purple-900'
-                }`}
-              >
-                📅{' '}
-                {selectedDate.toLocaleDateString(locale, {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric'
-                })}
-              </p>
-              <p
-                className={`text-xs ${
-                  isDateTimeInPast ? 'text-amber-800' : 'text-purple-800'
-                }`}
-              >
-                🕐 {selectedTime}
-              </p>
-            </div>
-            {isDateTimeInPast && (
-              <div className="p-1.5 bg-red-50 border border-red-200 rounded">
-                <p className="text-xs text-red-700 font-semibold">
-                  ⚠️ {timeInPastLabel}
-                </p>
-              </div>
-            )}
-          </>
-        )}
       </div>
     </div>
   )
