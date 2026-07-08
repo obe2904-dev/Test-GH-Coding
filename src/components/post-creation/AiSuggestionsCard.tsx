@@ -98,7 +98,26 @@ function normalizeQuickSuggestionWeatherForecast(
   if (!forecast) return null
   return {
     ...forecast,
-    until: 'Gælder i dag',
+    until: forecast.until || 'Gælder i dag',
+  }
+}
+
+function formatWeatherConditionLabel(condition: string): string {
+  switch (condition.toLowerCase()) {
+    case 'sunny':
+      return 'Sol'
+    case 'partly_cloudy':
+      return 'Let skyet'
+    case 'cloudy':
+      return 'Skyet'
+    case 'rain':
+      return 'Regn'
+    case 'snow':
+      return 'Sne'
+    case 'fog':
+      return 'Tåge'
+    default:
+      return condition
   }
 }
 const _suggestionsCache = new Map<string, SuggestionsSnapshot>()
@@ -638,8 +657,8 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
   
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
+        <div className="min-w-0 flex-1">
           <p className="text-base font-semibold text-[#0F172A]">
             {t('dashboard.suggestionsReady')}
           </p>
@@ -648,15 +667,15 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
           </p>
         </div>
         {weatherForecast && (
-          <div className="text-right flex-shrink-0">
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">
+          <div className="flex-shrink-0 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-right shadow-sm md:w-[220px]">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
               {t('dashboard.weatherIn')} {weatherForecast.city}
             </p>
-            <p className="text-[10px] text-gray-400 uppercase tracking-wide mb-1">
-              {t('dashboard.weatherValidUntil')} Gælder i dag
+            <p className="mt-1 text-sm font-medium text-slate-800">
+              {weatherForecast.temperature} · {formatWeatherConditionLabel(weatherForecast.conditions)}
             </p>
-            <p className="text-sm font-medium text-gray-700">
-              {weatherForecast.temperature}, {weatherForecast.conditions}
+            <p className="mt-1 text-[10px] uppercase tracking-wide text-sky-600">
+              {weatherForecast.until}
             </p>
           </div>
         )}
