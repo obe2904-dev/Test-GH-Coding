@@ -197,7 +197,16 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isInitialLoad, setIsInitialLoad] = useState(!isCacheValid)
-  const [weatherForecast, setWeatherForecast] = useState<{ city: string; until: string; temperature: string; conditions: string } | null>(isCacheValid ? normalizeQuickSuggestionWeatherForecast(memCache!.weatherForecast) : null)
+  const [weatherForecast, setWeatherForecast] = useState<{ 
+    city: string
+    until: string
+    summary?: string
+    temperature: string
+    conditions: string
+    rainRisk?: string
+    outdoor?: string
+    windRange?: string
+  } | null>(isCacheValid ? normalizeQuickSuggestionWeatherForecast(memCache!.weatherForecast) : null)
   const [plannerRationale, setPlannerRationale] = useState<string>('')
   const [openPhotoIdeas, setOpenPhotoIdeas] = useState<Set<number>>(new Set())
   const togglePhotoIdea = (id: number) => setOpenPhotoIdeas(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
