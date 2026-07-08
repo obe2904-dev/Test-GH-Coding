@@ -517,6 +517,182 @@ function repairSuggestions(suggestions: any[], confirmedFacts: string[]): any[] 
   })
 }
 
+// ── Helper: Map WMO Weather Code to Condition ────────────────────────────────
+function mapWMOToCondition(wmo: number): { condition: string; description: string } {
+  if (wmo === 0) return { condition: 'sunny', description: 'klar himmel' }
+  if (wmo === 1) return { condition: 'sunny', description: 'overvejende klart' }
+  if (wmo === 2) return { condition: 'partly_cloudy', description: 'delvist skyet' }
+  if (wmo === 3) return { condition: 'cloudy', description: 'overskyet' }
+  if (wmo === 45 || wmo === 48) return { condition: 'fog', description: 'tåge' }
+  if (wmo >= 51 && wmo <= 55) return { condition: 'rain', description: 'let regn' }
+  if (wmo >= 56 && wmo <= 57) return { condition: 'rain', description: 'frysende støvregn' }
+  if (wmo >= 61 && wmo <= 65) return { condition: 'rain', description: 'regn' }
+  if (wmo >= 66 && wmo <= 67) return { condition: 'rain', description: 'frysende regn' }
+  if (wmo >= 71 && wmo <= 75) return { condition: 'snow', description: 'sne' }
+  if (wmo === 77) return { condition: 'snow', description: 'snefnug' }
+  if (wmo >= 80 && wmo <= 82) return { condition: 'rain', description: 'regnbyger' }
+  if (wmo >= 85 && wmo <= 86) return { condition: 'snow', description: 'snebyger' }
+  if (wmo >= 95) return { condition: 'rain', description: 'tordenvejr' }
+  return { condition: 'cloudy', description: 'skyet' }
+}
+
+// ── Helper: Fetch Hourly Weather Until End of Day ────────────────────────────
+async function fetchHourlyWeatherUntilEOD(
+  lat: number,
+  lon: number,
+  city: string,
+  hasOutdoorSeating: boolean,
+  clientNow: Date
+): Promise<{
+  weatherForecast: string
+  weatherInfo: string
+  currentTemp: number
+  windSpeedMs: number
+  isSunny: boolean
+  isRaining: boolean
+}> {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?` +
+      `latitude=${lat}&longitude=${lon}` +
+      `&hourly=temperature_2m,precipitation_probability,weathercode,cloudcover,windspeed_10m` +
+      `&timezone=Europe/Copenhagen` +
+      `&forecast_days=1`
+    
+    const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`Open-Meteo API failed: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    const hourly = data.hourly
+    
+    if (!hourly || !hourly.time) {
+      throw new Error('No hourly data from Open-Meteo')
+    }
+    
+    // Find current hour index
+    const currentHour = clientNow.getHours()
+    const currentIndex = hourly.time.findIndex((time: string) => {
+      const hour = new Date(time).getHours()
+      return hour === currentHour
+    })
+    
+    if (currentIndex === -1) {
+      throw new Error('Could not find current hour in forecast')
+    }
+    
+    // Get remaining hours until end of day (23:59)
+    const remainingHours = hourly.time
+      .slice(currentIndex, hourly.time.length)
+      .map((time: string, idx: number) => ({
+        hour: new Date(time).getHours(),
+        temp: Math.round(hourly.temperature_2m[currentIndex + idx]),
+        wmo: hourly.weathercode[currentIndex + idx],
+        precipProb: hourly.precipitation_probability[currentIndex + idx] || 0,
+        clouds: hourly.cloudcover[currentIndex + idx],
+        wind: Math.round(hourly.windspeed_10m[currentIndex + idx])
+      }))
+    
+    if (remainingHours.length === 0) {
+      throw new Error('No remaining hours in forecast')
+    }
+    
+    // Current weather
+    const current = remainingHours[0]
+    const currentWeather = mapWMOToCondition(current.wmo)
+    
+    // Calculate ranges for remaining day
+    const temps = remainingHours.map(h => h.temp)
+    const winds = remainingHours.map(h => h.wind)
+    const minTemp = Math.min(...temps)
+    const maxTemp = Math.max(...temps)
+    const minWind = Math.min(...winds)
+    const maxWind = Math.max(...winds)
+    
+    // Dominant condition (most frequent WMO code)
+    const wmoFreq = new Map<number, number>()
+    remainingHours.forEach(h => {
+      wmoFreq.set(h.wmo, (wmoFreq.get(h.wmo) || 0) + 1)
+    })
+    const dominantWMO = Array.from(wmoFreq.entries()).reduce((a, b) => a[1] > b[1] ? a : b)[0]
+    const dominantCondition = mapWMOToCondition(dominantWMO)
+    
+    // Check for rain risk
+    const rainHours = remainingHours.filter(h => h.precipProb > 30)
+    let rainRisk = ''
+    if (rainHours.length > 0) {
+      const highestPrecip = Math.max(...rainHours.map(h => h.precipProb))
+      const firstRainHour = rainHours[0].hour
+      if (highestPrecip > 50) {
+        rainRisk = `Regn fra kl. ${firstRainHour.toString().padStart(2, '0')} (${highestPrecip}%)`
+      } else {
+        rainRisk = `Risiko for regn efter kl. ${firstRainHour.toString().padStart(2, '0')}`
+      }
+    }
+    
+    // Build summary
+    const tempRange = minTemp === maxTemp ? `${current.temp}°C` : `${current.temp}°C → ${maxTemp}°C`
+    const windRange = minWind === maxWind ? `${current.wind} m/s` : `${minWind}-${maxWind} m/s`
+    
+    let summary = `${tempRange} • ${dominantCondition.description} • Vind ${windRange}`
+    if (rainRisk) {
+      summary += ` • ${rainRisk}`
+    }
+    
+    // Outdoor seating assessment
+    let outdoorNote = ''
+    if (hasOutdoorSeating) {
+      // Find best outdoor hours (temp >= 15, precip < 30%, wind <= 5, clouds < 75%)
+      const goodHours = remainingHours.filter(h => 
+        h.temp >= 15 && h.precipProb < 30 && h.wind <= 5 && h.clouds < 75
+      )
+      
+      if (goodHours.length > 0) {
+        const startHour = goodHours[0].hour
+        const endHour = goodHours[goodHours.length - 1].hour
+        const bestTemp = Math.max(...goodHours.map(h => h.temp))
+        
+        if (goodHours.length === remainingHours.length) {
+          outdoorNote = `Perfekt til udeservering (${bestTemp}°C)`
+        } else if (goodHours.length >= 3) {
+          outdoorNote = `Udeservering: Bedst kl. ${startHour.toString().padStart(2, '0')}-${endHour.toString().padStart(2, '0')} (${bestTemp}°C)`
+        } else {
+          outdoorNote = `Udeservering mulig omkring kl. ${startHour.toString().padStart(2, '0')}`
+        }
+      }
+    }
+    
+    // Build weather forecast JSON
+    const weatherForecast = JSON.stringify({
+      city,
+      until: 'Gælder til kl. 23:59',
+      summary,
+      temperature: tempRange,
+      conditions: dominantCondition.condition,
+      rainRisk: rainRisk || undefined,
+      outdoor: outdoorNote || undefined,
+      windRange,
+    })
+    
+    const weatherInfo = `${summary}${outdoorNote ? ` • ${outdoorNote}` : ''}`
+    
+    console.log('✅ Open-Meteo hourly forecast:', weatherInfo)
+    
+    return {
+      weatherForecast,
+      weatherInfo,
+      currentTemp: current.temp,
+      windSpeedMs: current.wind,
+      isSunny: current.wmo === 0 || current.wmo === 1,
+      isRaining: current.wmo >= 51 && current.wmo <= 82
+    }
+    
+  } catch (e) {
+    console.error('❌ Hourly weather fetch failed:', e)
+    throw e
+  }
+}
+
 // ── Request handler ──────────────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -1392,71 +1568,95 @@ serve(async (req) => {
       }
     }
 
-    // ── Fetch weather (same-day Open-Meteo snapshot) ──
+    // ── Fetch weather (hourly Open-Meteo until end of day) ──
     let weatherInfo = 'Ingen vejrdata'
     let weatherForecast = ''
     let currentTemp = 0
     let windSpeedMs = 0
     let isSunny = false
     let isRaining = false
-    console.log('🌤️ Attempting weather fetch for city:', location?.city || 'NO CITY')
+    console.log('🌤️ Attempting hourly weather fetch for city:', location?.city || 'NO CITY')
     if (locationIntelCoords?.latitude && locationIntelCoords?.longitude) {
       try {
-        const todayDate = clientNow.toISOString().split('T')[0]
-        const weatherWeek = await fetchWeatherFromCoordinates(
+        const result = await fetchHourlyWeatherUntilEOD(
           Number(locationIntelCoords.latitude),
           Number(locationIntelCoords.longitude),
-          [todayDate],
+          location?.city || '',
           hasOutdoorSeating,
-          undefined
+          clientNow
         )
-
-        const todayWeather = weatherWeek.days?.[0]
-        if (todayWeather) {
-          currentTemp = todayWeather.temp_max
-          windSpeedMs = todayWeather.wind_speed || 0
-          isSunny = todayWeather.condition === 'sunny' || todayWeather.condition === 'partly_cloudy'
-          isRaining = todayWeather.condition === 'rain' || todayWeather.condition === 'snow'
-
-          const currentAssessment = assessOutdoorComfort(todayWeather)
-          weatherInfo = `${currentAssessment.emoji} ${currentAssessment.label} (${todayWeather.temp_min}°C til ${todayWeather.temp_max}°C, ${todayWeather.condition}, vind ${windSpeedMs.toFixed(1)} m/s)`
-          weatherForecast = JSON.stringify({
-            city: location?.city || '',
-            until: 'Gælder i dag',
-            temperature: `${todayWeather.temp_min}°C til ${todayWeather.temp_max}°C`,
-            conditions: todayWeather.condition,
-            tier: currentAssessment.tier,
-            score: currentAssessment.score,
-            recommendation: currentAssessment.recommendation,
-          })
-          console.log('✅ Open-Meteo day snapshot:', weatherInfo, { todayDate, todayWeather, currentAssessment })
-        } else {
-          throw new Error('No Open-Meteo day data returned')
-        }
+        
+        weatherForecast = result.weatherForecast
+        weatherInfo = result.weatherInfo
+        currentTemp = result.currentTemp
+        windSpeedMs = result.windSpeedMs
+        isSunny = result.isSunny
+        isRaining = result.isRaining
+        
       } catch (e) {
-        console.warn('Weather fetch failed:', e)
-        const todayDate = clientNow.toISOString().split('T')[0]
-        const fallbackWeather = createSeasonalFallbackWeather([todayDate], hasOutdoorSeating)
-        const fallbackDay = fallbackWeather.days?.[0]
-        if (fallbackDay) {
-          currentTemp = fallbackDay.temp_max
-          windSpeedMs = fallbackDay.wind_speed || 0
-          isSunny = fallbackDay.condition === 'sunny' || fallbackDay.condition === 'partly_cloudy'
-          isRaining = fallbackDay.condition === 'rain' || fallbackDay.condition === 'snow'
-          const fallbackAssessment = assessOutdoorComfort(fallbackDay)
-          weatherInfo = `${fallbackAssessment.emoji} ${fallbackAssessment.label} (${fallbackDay.temp_min}°C til ${fallbackDay.temp_max}°C, ${fallbackDay.condition}, vind ${windSpeedMs.toFixed(1)} m/s)`
-          weatherForecast = JSON.stringify({
-            city: location?.city || '',
-            until: 'Gælder i dag',
-            temperature: `${fallbackDay.temp_min}°C til ${fallbackDay.temp_max}°C`,
-            conditions: fallbackDay.condition,
-            tier: fallbackAssessment.tier,
-            score: fallbackAssessment.score,
-            recommendation: fallbackAssessment.recommendation,
-          })
-        } else {
-          weatherInfo = 'Skønt vejr'
-          weatherForecast = 'Varieret vejr'
+        console.warn('⚠️ Hourly weather fetch failed, using daily fallback:', e)
+        // Fallback to daily forecast if hourly fails
+        try {
+          const todayDate = clientNow.toISOString().split('T')[0]
+          const weatherWeek = await fetchWeatherFromCoordinates(
+            Number(locationIntelCoords.latitude),
+            Number(locationIntelCoords.longitude),
+            [todayDate],
+            hasOutdoorSeating,
+            undefined
+          )
+
+          const todayWeather = weatherWeek.days?.[0]
+          if (todayWeather) {
+            currentTemp = todayWeather.temp_max
+            windSpeedMs = todayWeather.wind_speed || 0
+            isSunny = todayWeather.condition === 'sunny' || todayWeather.condition === 'partly_cloudy'
+            isRaining = todayWeather.condition === 'rain' || todayWeather.condition === 'snow'
+
+            const currentAssessment = assessOutdoorComfort(todayWeather)
+            weatherInfo = `${todayWeather.temp_min}°C til ${todayWeather.temp_max}°C • ${todayWeather.condition}`
+            weatherForecast = JSON.stringify({
+              city: location?.city || '',
+              until: 'Gælder i dag',
+              summary: weatherInfo,
+              temperature: `${todayWeather.temp_min}°C til ${todayWeather.temp_max}°C`,
+              conditions: todayWeather.condition,
+              tier: currentAssessment.tier,
+              score: currentAssessment.score,
+              recommendation: currentAssessment.recommendation,
+            })
+            console.log('✅ Daily weather fallback:', weatherInfo)
+          } else {
+            throw new Error('No weather data available')
+          }
+        } catch (fallbackError) {
+          console.warn('⚠️ Daily fallback also failed, using seasonal defaults')
+          const todayDate = clientNow.toISOString().split('T')[0]
+          const fallbackWeather = createSeasonalFallbackWeather([todayDate], hasOutdoorSeating)
+          const fallbackDay = fallbackWeather.days?.[0]
+          if (fallbackDay) {
+            currentTemp = fallbackDay.temp_max
+            windSpeedMs = fallbackDay.wind_speed || 0
+            isSunny = fallbackDay.condition === 'sunny' || fallbackDay.condition === 'partly_cloudy'
+            isRaining = fallbackDay.condition === 'rain' || fallbackDay.condition === 'snow'
+            weatherInfo = `${fallbackDay.temp_min}°C til ${fallbackDay.temp_max}°C • ${fallbackDay.condition}`
+            weatherForecast = JSON.stringify({
+              city: location?.city || '',
+              until: 'Gælder i dag',
+              summary: weatherInfo,
+              temperature: `${fallbackDay.temp_min}°C til ${fallbackDay.temp_max}°C`,
+              conditions: fallbackDay.condition,
+            })
+          } else {
+            weatherInfo = 'Skønt vejr'
+            weatherForecast = JSON.stringify({
+              city: location?.city || '',
+              until: 'Gælder i dag',
+              summary: 'Varieret vejr',
+              temperature: '15°C',
+              conditions: 'partly_cloudy',
+            })
+          }
         }
       }
     } else {
@@ -1473,18 +1673,19 @@ serve(async (req) => {
     // ── Outdoor seating conditions ──
     // Outdoor is suitable when: warm enough (15°C+), low wind (<5 m/s), and no precipitation.
     // isSunny (clear/few clouds) is NOT required — scattered/broken clouds are fine for Danish outdoor dining.
-    const weatherSuitabilityTier = weatherForecast ? (() => {
+    const outdoorInfo = weatherForecast ? (() => {
       try {
         const parsed = JSON.parse(weatherForecast)
-        return parsed?.tier as string | undefined
+        return parsed?.outdoor as string | undefined
       } catch {
         return undefined
       }
     })() : undefined
-    const outdoorSuitability = hasOutdoorSeating && (weatherSuitabilityTier === 'premium' || weatherSuitabilityTier === 'viable')
+    
+    const outdoorSuitability = hasOutdoorSeating && !!outdoorInfo
     const outdoorNote = hasOutdoorSeating
       ? (outdoorSuitability 
-          ? `Vi har udeservering - GODT VEJR til outdoor-opslag (${weatherInfo})` 
+          ? `Vi har udeservering - GODT VEJR til outdoor-opslag: ${outdoorInfo} (${weatherInfo})` 
           : `Vi har udeservering - men vejret passer IKKE til outdoor-opslag (${weatherInfo})`)
       : 'Ingen udeservering'
     // When weather is unsuitable OR business doesn't have outdoor seating, add an explicit hard prohibition

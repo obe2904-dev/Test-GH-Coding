@@ -87,18 +87,42 @@ const CONTENT_TYPE_ICONS: Record<string, string> = {
 // Keyed by businessId so multi-account setups stay isolated.
 interface SuggestionsSnapshot {
   suggestions: PostSuggestion[]
-  weatherForecast: { city: string; until: string; temperature: string; conditions: string } | null
+  weatherForecast: { 
+    city: string
+    until: string
+    summary?: string
+    temperature: string
+    conditions: string
+    rainRisk?: string
+    outdoor?: string
+    windRange?: string
+  } | null
   fetchedAt: number // ms timestamp — used to decide whether to silently refresh
   fetchedDate: string // ISO date (YYYY-MM-DD) — used to invalidate cache at midnight
 }
 
 function normalizeQuickSuggestionWeatherForecast(
-  forecast: { city: string; until: string; temperature: string; conditions: string } | null,
-): { city: string; until: string; temperature: string; conditions: string } | null {
+  forecast: any | null,
+): { 
+  city: string
+  until: string
+  summary?: string
+  temperature: string
+  conditions: string
+  rainRisk?: string
+  outdoor?: string
+  windRange?: string
+} | null {
   if (!forecast) return null
   return {
-    ...forecast,
+    city: forecast.city || '',
     until: forecast.until || 'Gælder i dag',
+    summary: forecast.summary,
+    temperature: forecast.temperature || '',
+    conditions: forecast.conditions || 'partly_cloudy',
+    rainRisk: forecast.rainRisk,
+    outdoor: forecast.outdoor,
+    windRange: forecast.windRange,
   }
 }
 
@@ -667,13 +691,35 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
           </p>
         </div>
         {weatherForecast && (
-          <div className="flex-shrink-0 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-right shadow-sm md:w-[220px]">
+          <div className="flex-shrink-0 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 shadow-sm md:min-w-[280px]">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
               {t('dashboard.weatherIn')} {weatherForecast.city}
             </p>
-            <p className="mt-1 text-sm font-medium text-slate-800">
-              {weatherForecast.temperature} · {formatWeatherConditionLabel(weatherForecast.conditions)}
-            </p>
+            
+            {weatherForecast.summary ? (
+              <p className="mt-1 text-xs leading-relaxed text-slate-800">
+                {weatherForecast.summary}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm font-medium text-slate-800">
+                {weatherForecast.temperature} · {formatWeatherConditionLabel(weatherForecast.conditions)}
+              </p>
+            )}
+            
+            {weatherForecast.rainRisk && (
+              <p className="mt-1 text-xs text-blue-700 flex items-center gap-1">
+                <span>💧</span>
+                <span>{weatherForecast.rainRisk}</span>
+              </p>
+            )}
+            
+            {weatherForecast.outdoor && (
+              <p className="mt-1 text-xs text-green-700 font-medium flex items-center gap-1">
+                <span>☀️</span>
+                <span>{weatherForecast.outdoor}</span>
+              </p>
+            )}
+            
             <p className="mt-1 text-[10px] uppercase tracking-wide text-sky-600">
               {weatherForecast.until}
             </p>
