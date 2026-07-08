@@ -1660,7 +1660,13 @@
     "emojiEngagementNote": "+29% engagement",
     "primary": "primær",
     "secondary": "sekundær",
-    "niche": "niche"
+    "niche": "niche",
+    "motivations": {
+      "social_gathering": "Socialt samvær",
+      "convenience": "Bekvemmelighed",
+      "experience_seeking": "Oplevelses-søgende",
+      "routine": "Rutine"
+    }
   },
   "onboarding": {
     "welcome": "Velkommen! 👋",

@@ -346,7 +346,16 @@ export function BrandProfileDisplay({ profile, businessId, onRegenerate, onArche
                     {(seg.mindset_description || seg.who) && (
                       <p className="text-sm text-text">{seg.mindset_description ?? seg.who}</p>
                     )}
-                    {seg.motivation && <p className="text-xs text-info italic">{seg.motivation}</p>}
+                    {seg.motivation && (
+                      <p className="text-xs text-info italic">
+                        {t('brandProfile.motivation')} {
+                          // Translate motivation if it's a known enum value, otherwise show as-is
+                          ['social_gathering', 'convenience', 'experience_seeking', 'routine'].includes(seg.motivation)
+                            ? t(`brandProfile.motivations.${seg.motivation}`)
+                            : seg.motivation
+                        }
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
