@@ -156,7 +156,6 @@ export function CreatePostPage() {
   // and the create phase can be locked.
   const {
     committedSuggestionIds,
-    isCommittedForWrite,
     committedWeeklyPlanIdeaIds,
     committedWeeklyPlanDates,
     refresh: refreshCommitted,
@@ -177,9 +176,12 @@ export function CreatePostPage() {
   // Lifted success state — survives step-nav back to Udgiv without remounting PublishStep
   const [publishedInfo, setPublishedInfo] = useState<PublishSuccessInfo | null>(null)
 
-  // ── Navigation Lock: Idea + Design become read-only after entering Udgiv ──
-  const [hasEnteredUdgiv, setHasEnteredUdgiv] = useState(false)
-  const [isReadOnlyMode, setIsReadOnlyMode] = useState(false)
+  // ── Read-only is driven ONLY by PUBLISHED state (never by navigation) ──
+  // The old "idea locks after entering Udgiv" navigation lock has been removed so
+  // the user can move freely Forslag ↔ Design ↔ Udgiv. A PUBLISHED post is still
+  // read-only; a SCHEDULED post stays fully editable (see useCommittedSuggestions,
+  // which now treats only 'published' as committed).
+  const isPublishedReadOnly = Boolean(publishedInfo) || isCommittedAiSuggestion || isCommittedWeeklyPlanIdea
 
   // ── AI Generation Success State ──
   const [showGenerationSuccess, setShowGenerationSuccess] = useState(false)
@@ -206,8 +208,6 @@ export function CreatePostPage() {
       setPostCta(null)
     }
     // Note: Don't reset weeklyPlanStep here - let WeeklyPlanEffect handle it based on draft existence
-    setHasEnteredUdgiv(false)
-    setIsReadOnlyMode(false)
     setPublishedInfo(null)
   }, [
     urlDerivedPath,
@@ -276,22 +276,6 @@ export function CreatePostPage() {
     if (activePath === 'write') return { businessId, ideaSource: 'write' }
     return null
   }, [businessData.business?.id, activePath, selectedSuggestionData?.id, weeklyPlanPost?.idea_id, isCommittedAiSuggestion])
-
-  // Enable read-only mode for committed suggestions instead of clearing them
-  useEffect(() => {
-    if (!isCommittedAiSuggestion) {
-      // Not committed - ensure read-only mode is off
-      setIsReadOnlyMode(false)
-      return
-    }
-    
-    // Suggestion is committed (published/scheduled) - enable read-only viewing
-    // User can see the content but cannot edit it
-    console.log('[CreatePostPage] Committed suggestion detected - enabling read-only mode')
-    setIsReadOnlyMode(true)
-  }, [
-    isCommittedAiSuggestion,
-  ])
 
   // No-ops kept for backward compat with child component props
   const markAsChanged = () => {}
@@ -550,11 +534,12 @@ export function CreatePostPage() {
     return null
   }, [activePath, selectedSuggestionData, weeklyPlanPost])
 
-  // Auto-save postContent + photo URLs whenever they change (Skriv Selv, Weekly Plan).
-  // AI Ideer uses daily_suggestions table exclusively until publish.
-  // Skip auto-save in Udgiv step to avoid recreating combined draft after platform split.
+  // Auto-save postContent + photo URLs whenever they change (all idea paths).
+  // AI Ideer now also persists its design to the posts table (status='draft') so the
+  // work survives logout / device switch — matching Skriv Selv and Weekly Plan.
+  // Skip auto-save in Udgiv step to avoid recreating the combined draft after the platform split.
   useEffect(() => {
-    if (!activeContent || activePath === 'ai-ideas' || currentStep === 'publish') return
+    if (!activeContent || currentStep === 'publish') return
 
     // 1. Save text + blob: URL stubs to localStorage (fast, synchronous-feel)
     const photoMedia = photoContent?.uploadedMedia?.map(m => ({
@@ -666,10 +651,44 @@ export function CreatePostPage() {
     if (selectedSuggestionData && selectedSuggestionData.id !== 0) {
       console.log('[CreatePostPage] ✨ AI suggestion detected, checking for cached content...')
 
-      // 1️⃣ Check localStorage draft first — this contains any user edits on top of the
-      //    original AI output, so it takes priority over the daily_suggestions DB cache.
-      //    Drafts are automatically expired after 7 days by useContextDraft, so we don't
-      //    need to worry about restoring stale drafts from previous sessions.
+      // 1️⃣ Check the DB draft FIRST (cross-device authoritative). The posts table now
+      //    receives AI design edits via autosave, has the real Storage photo URL, and is
+      //    reachable from any device/browser for the same business owner. localStorage is
+      //    only an offline fallback (step 1b) when there is no DB draft.
+      if (selectedSuggestionData.id != null) {
+        const dbKey: DbPostKey = { businessId: businessData.business?.id ?? '', ideaSource: 'quick_suggestions', suggestionId: selectedSuggestionData.id }
+        if (dbKey.businessId) {
+          const dbDraft = await posts.loadPost(dbKey).catch(() => null)
+          const dbDraftContent = dbDraft?.contentJson as PostContent | undefined
+          if (dbDraftContent?.text?.trim()) {
+            console.log('✅ Restoring draft from DB for suggestion:', selectedSuggestionData.id)
+            draftDbIdRef.current = dbDraft!.id
+            setActiveContent(dbDraftContent)
+            if (selectedSuggestionData.photoIdea) setActivePhotoIdea(selectedSuggestionData.photoIdea)
+            if (dbDraft!.photoUrl) {
+              setPhotoContent({
+                uploadedMedia: [{
+                  id: 'db-draft-photo',
+                  file: null as any, // No File object when restoring from DB - will use URL instead
+                  url: dbDraft!.photoUrl,
+                  originalUrl: dbDraft!.photoUrl,
+                  type: 'image' as const,
+                  selectedVersionForPost: 'original' as const,
+                }],
+                selectedMedia: null,
+                isOriginal: true,
+                photoAdjustments: null,
+                carouselMode: false,
+              })
+            }
+            // Restore from DB draft - advance immediately without success delay
+            setCurrentStep('create')
+            return
+          }
+        }
+      }
+
+      // 1b️⃣ Fallback: localStorage draft (offline / same-device fast path).
       const localDraft = restoreNow() as any
       // Support both old format (PostContent directly) and new format ({ content, photoMedia })
       const localDraftContent = localDraft?.content ?? localDraft
@@ -704,40 +723,6 @@ export function CreatePostPage() {
         return
       }
 
-      // 1b️⃣ Check DB draft — has the real Storage photo URL (unlike localStorage blob: stubs)
-      if (selectedSuggestionData.id != null) {
-        const dbKey: DbPostKey = { businessId: businessData.business?.id ?? '', ideaSource: 'quick_suggestions', suggestionId: selectedSuggestionData.id }
-        if (dbKey.businessId) {
-          const dbDraft = await posts.loadPost(dbKey).catch(() => null)
-          const dbDraftContent = dbDraft?.contentJson as PostContent | undefined
-          if (dbDraftContent?.text?.trim()) {
-            console.log('✅ Restoring draft from DB for suggestion:', selectedSuggestionData.id)
-            draftDbIdRef.current = dbDraft!.id
-            setActiveContent(dbDraftContent)
-            if (selectedSuggestionData.photoIdea) setActivePhotoIdea(selectedSuggestionData.photoIdea)
-            if (dbDraft!.photoUrl) {
-              setPhotoContent({
-                uploadedMedia: [{
-                  id: 'db-draft-photo',
-                  file: null as any, // No File object when restoring from DB - will use URL instead
-                  url: dbDraft!.photoUrl,
-                  originalUrl: dbDraft!.photoUrl,
-                  type: 'image' as const,
-                  selectedVersionForPost: 'original' as const,
-                }],
-                selectedMedia: null,
-                isOriginal: true,
-                photoAdjustments: null,
-                carouselMode: false,
-              })
-            }
-            // Restore from DB draft - advance immediately without success delay
-            setCurrentStep('create')
-            return
-          }
-        }
-      }
-      
       try {
         const currentBusinessId = businessData.business?.id
         if (!currentBusinessId) {
@@ -1619,9 +1604,7 @@ export function CreatePostPage() {
     if (dbKey) {
       await posts.deleteByKey(dbKey).catch(() => {})
     }
-    // Reset navigation locks
-    setHasEnteredUdgiv(false)
-    setIsReadOnlyMode(false)
+    // Clear published state so the flow is editable again
     setPublishedInfo(null)
     refreshCommitted()
     // Return to Design stage for editing
@@ -1637,17 +1620,9 @@ export function CreatePostPage() {
     const currentStepIndex = steps.indexOf(currentStep)
     const targetStepIndex = step - 1
 
-    // Track when user first enters Udgiv (step 3)
-    if (targetStepIndex === 2) {
-      setHasEnteredUdgiv(true)
-    }
-
-    // Enable read-only mode when going back after entering Udgiv
-    if (hasEnteredUdgiv && targetStepIndex < 2) {
-      setIsReadOnlyMode(true)
-    } else if (targetStepIndex === 2) {
-      setIsReadOnlyMode(false)
-    }
+    // NOTE: The old navigation lock (idea/design became read-only after visiting
+    // Udgiv) has been removed. The user can now move freely between all three
+    // stages. Read-only is driven solely by PUBLISHED state (isPublishedReadOnly).
 
     // For weekly-plan: if clicking back to Generate from Design/Publish, navigate to weekly plan page
     if (activePath === 'weekly-plan' && targetStepIndex === 0 && currentStepIndex > 0) {
@@ -1716,20 +1691,6 @@ export function CreatePostPage() {
           />
         )}
 
-        {/* Read-Only Mode Banner (shown when viewing locked stages) */}
-        {isReadOnlyMode && (
-          <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-4 mb-4">
-            <div className="flex items-start gap-3">
-              <div className="text-2xl">🔒</div>
-              <div className="flex-1">
-                <p className="text-sm text-amber-900">
-                  Idé er låst, en du kan stadig ændre tekst i Design
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-        
         {/* 3-Stage Progress Bar */}
         <div className="bg-white rounded-lg border border-gray-200 p-3 shadow-sm">
           <div className="flex items-center justify-between gap-2">
@@ -1842,24 +1803,22 @@ export function CreatePostPage() {
           )}
           <Suspense fallback={<StepLoader />}>
             {currentStep === 'generate' && activePath !== 'weekly-plan' && (() => {
-              const generateLocked = isReadOnlyMode ? false : !!publishedInfo
+              // Only a PUBLISHED post locks the Forslag stage (scheduled stays editable)
+              const generateLocked = !!publishedInfo
               return (
                 <div key="generate" className="relative">
-                  {generateLocked && !isReadOnlyMode && (
+                  {generateLocked && (
                     <>
                       <div className="mb-3 p-3 bg-green-50 border border-green-300 rounded-lg flex items-center gap-2 text-sm text-green-800">
                         <span>✓</span>
                         <span>
-                          Opslaget er planlagt — forslagene er låst. Tryk <strong>Opret nyt opslag</strong> for at starte forfra.
+                          Opslaget er udgivet — forslagene er låst. Tryk <strong>Opret nyt opslag</strong> for at starte forfra.
                         </span>
                       </div>
                       <div className="absolute inset-0 z-10 cursor-not-allowed" style={{top: '48px'}} />
                     </>
                   )}
-                  {isReadOnlyMode && (
-                    <div className="absolute inset-0 z-10 cursor-not-allowed bg-slate-100 bg-opacity-40" />
-                  )}
-                  <GenerateStep 
+                  <GenerateStep
                     activePath={activePath}
                     onNext={handleGenerateNext}
                     onDirectTransfer={handleDirectTransfer}
@@ -1867,24 +1826,25 @@ export function CreatePostPage() {
                     markAsSaved={markAsSaved}
                     hasUnsavedChanges={hasUnsavedChanges}
                     committedSuggestionIds={committedSuggestionIds}
-                    isReadOnly={isReadOnlyMode}
+                    isReadOnly={isPublishedReadOnly}
                   />
                 </div>
               )
             })()}
             
             {currentStep === 'create' && (() => {
-              const createLocked = isReadOnlyMode || activePath === 'weekly-plan'
-                ? isCommittedWeeklyPlanIdea || committedWeeklyPlanDates.has(weeklyPlanPost?.timing?.date ?? '')
+              // Design locks only when the post is PUBLISHED (scheduled stays editable).
+              const createLocked = activePath === 'weekly-plan'
+                ? isCommittedWeeklyPlanIdea
                 : !!publishedInfo
               return (
                 <div key="create" className="relative">
-                  {createLocked && !isReadOnlyMode ? (
+                  {createLocked ? (
                     <div className="mb-3 p-3 bg-green-50 border border-green-300 rounded-lg flex items-center gap-2 text-sm text-green-800">
                       <span>✓</span>
                       <span>
                         {activePath === 'weekly-plan'
-                          ? 'Design er låst — dette opslag er allerede planlagt. Vælg et andet opslag i ugeplanen.'
+                          ? 'Design er låst — dette opslag er allerede udgivet.'
                           : 'Design er låst efter publicering. Tryk Opret nyt opslag for at starte forfra.'}
                       </span>
                     </div>
