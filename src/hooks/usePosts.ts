@@ -195,8 +195,9 @@ export function usePosts() {
       business_id:              key.businessId,
       user_id:                  user?.id ?? null,
       idea_source:              key.ideaSource,
-      platform:                 data.platform ?? key.platform ?? null,
-      platforms:                data.platforms ?? (key.platform ? [key.platform] : []),
+      // platform CHECK allows only lowercase 'facebook'/'instagram'
+      platform:                 (data.platform ?? key.platform)?.toLowerCase() ?? null,
+      platforms:                (data.platforms ?? (key.platform ? [key.platform] : [])).map((p) => p.toLowerCase()),
       suggestion_id:            data.suggestionId ?? key.suggestionId ?? null,
       weekly_plan_id:           data.weeklyPlanId || key.weeklyPlanId || null, // UUID: "" → null
       weekly_plan_idea_id:      data.weeklyPlanIdeaId ?? null,

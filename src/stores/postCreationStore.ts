@@ -353,7 +353,12 @@ export const usePostCreationStore = create<PostCreationState>((set) => ({
 
   // Platform selection
   selectedPlatforms: [],
-  setSelectedPlatforms: (platforms) => set({ selectedPlatforms: platforms }),
+  setSelectedPlatforms: (platforms) => set({
+    // Normalize to lowercase + dedupe. The `posts.platform` CHECK constraint only
+    // allows lowercase 'facebook'/'instagram', and display-cased values (e.g. 'Facebook')
+    // can otherwise leak in and break inserts / create duplicate per-platform drafts.
+    selectedPlatforms: Array.from(new Set(platforms.map((p) => p.toLowerCase()))) as any,
+  }),
 
   // Ideas step
   ideas: [],
