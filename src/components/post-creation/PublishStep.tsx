@@ -1379,37 +1379,18 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
               const [aiHours, aiMinutes] = selectedSuggestionData.suggestedTime.split(':')
               const isUsingAiTime = selectedHour === aiHours && selectedMinute === aiMinutes
               
-              if (isUsingAiTime) {
-                return (
-                  <div className="flex items-center gap-1.5 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span className="font-medium">Bruger AI anbefaling · kl. {selectedSuggestionData.suggestedTime}</span>
-                  </div>
-                )
-              }
+              // Format date in Danish
+              const formattedDate = selectedDate.toLocaleDateString('da-DK', {
+                weekday: 'short',
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric'
+              })
               
               return (
-                <div className="flex items-center justify-between px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-xs font-semibold text-purple-900">
-                        AI anbefaler kl. {selectedSuggestionData.suggestedTime}
-                      </p>
-                      <p className="text-xs text-purple-700">
-                        Optimalt tidspunkt for engagement
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setSelectedHour(aiHours)
-                      setSelectedMinute(aiMinutes)
-                    }}
-                    className="flex-shrink-0 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 transition-colors"
-                  >
-                    Brug anbefaling
-                  </button>
+                <div className="flex items-center gap-1.5 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span className="font-medium">{formattedDate} · Bruger AI anbefaling · kl. {selectedSuggestionData.suggestedTime}</span>
                 </div>
               )
             })()}
@@ -1484,7 +1465,12 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                       setSelectedMinute(String(scheduledDate.getMinutes()).padStart(2, '0'))
                     }
 
-                    setSelectedPost(post)
+                    // Transform LoadedPost to match PostModal interface
+                    setSelectedPost({
+                      ...post,
+                      text: post.postText ?? '', // Map postText to text
+                      scheduledAt: post.scheduledFor ?? post.postedAt ?? null
+                    })
                   }}
                   isLoading={isLoadingTimeline}
                 />
@@ -1528,7 +1514,12 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                       setSelectedMinute(String(scheduledDate.getMinutes()).padStart(2, '0'))
                     }
 
-                    setSelectedPost(post)
+                    // Transform LoadedPost to match PostModal interface
+                    setSelectedPost({
+                      ...post,
+                      text: post.postText ?? '', // Map postText to text
+                      scheduledAt: post.scheduledFor ?? post.postedAt ?? null
+                    })
                   }}
                   isLoading={isLoadingTimeline}
                 />
