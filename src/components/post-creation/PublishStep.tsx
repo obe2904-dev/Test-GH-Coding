@@ -1373,7 +1373,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
               return (
                 <div className="flex items-center gap-1.5 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-700">
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span className="font-medium">{formattedDate} · Bruger AI anbefaling · kl. {selectedSuggestionData.suggestedTime}</span>
+                  <span className="font-medium">Bruger AI anbefaling: {formattedDate} · kl. {selectedSuggestionData.suggestedTime}. Ret tidpunkt ved at klikke på opslaget</span>
                 </div>
               )
             })()}
