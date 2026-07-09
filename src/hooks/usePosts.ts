@@ -198,7 +198,7 @@ export function usePosts() {
       platform:                 data.platform ?? key.platform ?? null,
       platforms:                data.platforms ?? (key.platform ? [key.platform] : []),
       suggestion_id:            data.suggestionId ?? key.suggestionId ?? null,
-      weekly_plan_id:           data.weeklyPlanId ?? key.weeklyPlanId ?? null,
+      weekly_plan_id:           data.weeklyPlanId || key.weeklyPlanId || null, // UUID: "" → null
       weekly_plan_idea_id:      data.weeklyPlanIdeaId ?? null,
       weekly_plan_slot_date:    data.weeklyPlanSlotDate ?? key.weeklyPlanSlotDate ?? null,
       weekly_plan_slot_index:   data.weeklyPlanSlotIndex ?? key.weeklyPlanSlotIndex ?? null,
@@ -213,7 +213,7 @@ export function usePosts() {
       
       // Classification
       content_type:             data.contentType ?? null,
-      menu_item_id:             data.menuItemId ?? null,
+      menu_item_id:             data.menuItemId || null, // UUID: "" → null
       menu_item_name:           data.menuItemName ?? null,
       
       // Timing
@@ -343,9 +343,9 @@ export function usePosts() {
         post_text:             data.postText,
         photo_url:             persistedPhotoUrl,
         content_type:          normalizedContentType,
-        menu_item_id:          data.menuItemId ?? null,
+        menu_item_id:          data.menuItemId || null, // UUID: "" → null
         menu_item_name:        data.menuItemName ?? null,
-        weekly_plan_id:        data.weeklyPlanId ?? null,
+        weekly_plan_id:        data.weeklyPlanId || null, // UUID: "" → null
         weekly_plan_idea_id:   data.weeklyPlanIdeaId ?? null,
         weekly_plan_slot_date: data.weeklyPlanSlotDate ?? null,
         scheduled_for:         data.scheduledFor ? data.scheduledFor.toISOString() : null,
@@ -743,9 +743,10 @@ export async function savePublishedPost(data: {
     media_metadata:        data.mediaMetadata ?? (persistedPhotoUrl ? { thumbnail_url: persistedPhotoUrl } : null),
     source:                'manual_copy_paste' as const,
     content_type:          normalizedContentType,
-    menu_item_id:          data.menuItemId ?? null,
+    // UUID columns: coerce empty string → null (AI suggestions can supply "").
+    menu_item_id:          data.menuItemId || null,
     menu_item_name:        data.menuItemName ?? null,
-    weekly_plan_id:        data.weeklyPlanId ?? null,
+    weekly_plan_id:        data.weeklyPlanId || null,
     weekly_plan_idea_id:   data.weeklyPlanIdeaId ?? null,
     weekly_plan_slot_date: data.weeklyPlanSlotDate ?? null,
     posted_at:             data.postedAt.toISOString(),
