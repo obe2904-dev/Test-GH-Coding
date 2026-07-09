@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { supabase } from '../../lib/supabase'
-import { usePostCreationStore, type PlatformContent } from '../../stores/postCreationStore'
+import { usePostCreationStore, type PlatformContent, type PlatformHashtag, type PostContent } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { useTierStore } from '../../stores/tierStore'
 import { TIER_QUOTAS } from '../../config/quotas'
@@ -486,9 +486,127 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
   }, [loadTimelineData])
 
   const handleUpdateText = useCallback(async (postId: string, newText: string, applyToBoth: boolean) => {
-    // TODO: Implement update text logic
-    console.log('[PublishStep] Update text:', postId, 'newText:', newText, 'applyToBoth:', applyToBoth)
-    await loadTimelineData()
+    try {
+      // Update the post in database
+      const { data: post, error } = await supabase
+        .from('posts')
+        .select('*')
+        .eq('id', postId)
+        .single()
+      
+      if (error || !post) {
+        console.error('[PublishStep] Failed to load post for update:', error)
+        return
+      }
+
+      // Update contentJson with new text
+      const contentJson = post.content_json as PostContent | null
+      if (contentJson) {
+        contentJson.text = newText
+      }
+
+      // Update post_text and content_json
+      await supabase
+        .from('posts')
+        .update({
+          post_text: newText,
+          content_json: contentJson,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', postId)
+
+      // If applyToBoth, update sibling post
+      if (applyToBoth && post.idea_source && post.business_id) {
+        const siblingPlatform = post.platform === 'facebook' ? 'instagram' : 'facebook'
+        
+        // Find sibling post with same idea source
+        const { data: siblingPost } = await supabase
+          .from('posts')
+          .select('*')
+          .eq('business_id', post.business_id)
+          .eq('idea_source', post.idea_source)
+          .eq('platform', siblingPlatform)
+          .maybeSingle()
+        
+        if (siblingPost) {
+          const siblingContentJson = siblingPost.content_json as PostContent | null
+          if (siblingContentJson) {
+            siblingContentJson.text = newText
+          }
+
+          await supabase
+            .from('posts')
+            .update({
+              post_text: newText,
+              content_json: siblingContentJson,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', siblingPost.id)
+        }
+      }
+
+      await loadTimelineData()
+    } catch (error) {
+      console.error('[PublishStep] Error updating text:', error)
+    }
+  }, [loadTimelineData])
+
+  const handleUpdateHashtags = useCallback(async (postId: string, newHashtags: PlatformHashtag[], applyToBoth: boolean) => {
+    try {
+      // Update the post in database
+      const { data: post, error } = await supabase
+        .from('posts')
+        .select('*')
+        .eq('id', postId)
+        .single()
+      
+      if (error || !post) {
+        console.error('[PublishStep] Failed to load post for hashtag update:', error)
+        return
+      }
+
+      // Update contentJson with new hashtags
+      const contentJson = (post.content_json as PostContent | null) || { headline: '', text: post.post_text || '', adjustments: { headline: '', text: '' } }
+      contentJson.hashtags = newHashtags
+
+      await supabase
+        .from('posts')
+        .update({
+          content_json: contentJson,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', postId)
+
+      // If applyToBoth, update sibling post
+      if (applyToBoth && post.idea_source && post.business_id) {
+        const siblingPlatform = post.platform === 'facebook' ? 'instagram' : 'facebook'
+        
+        const { data: siblingPost } = await supabase
+          .from('posts')
+          .select('*')
+          .eq('business_id', post.business_id)
+          .eq('idea_source', post.idea_source)
+          .eq('platform', siblingPlatform)
+          .maybeSingle()
+        
+        if (siblingPost) {
+          const siblingContentJson = (siblingPost.content_json as PostContent | null) || { headline: '', text: siblingPost.post_text || '', adjustments: { headline: '', text: '' } }
+          siblingContentJson.hashtags = newHashtags
+
+          await supabase
+            .from('posts')
+            .update({
+              content_json: siblingContentJson,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', siblingPost.id)
+        }
+      }
+
+      await loadTimelineData()
+    } catch (error) {
+      console.error('[PublishStep] Error updating hashtags:', error)
+    }
   }, [loadTimelineData])
 
   const selectedPublishMode: 'now' | 'schedule' = selectedTimeIsTooOldForSchedule ? 'now' : 'schedule'
@@ -1449,10 +1567,12 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                     }
 
                     // Transform LoadedPost to match PostModal interface
+                    const contentJson = post.contentJson as PostContent | undefined
                     setSelectedPost({
                       ...post,
                       text: post.postText ?? '', // Map postText to text
-                      scheduledAt: post.scheduledFor ?? post.postedAt ?? null
+                      scheduledAt: post.scheduledFor ?? post.postedAt ?? null,
+                      hashtags: contentJson?.hashtags || []
                     })
                   }}
                   isLoading={isLoadingTimeline}
@@ -1498,10 +1618,12 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                     }
 
                     // Transform LoadedPost to match PostModal interface
+                    const contentJson = post.contentJson as PostContent | undefined
                     setSelectedPost({
                       ...post,
                       text: post.postText ?? '', // Map postText to text
-                      scheduledAt: post.scheduledFor ?? post.postedAt ?? null
+                      scheduledAt: post.scheduledFor ?? post.postedAt ?? null,
+                      hashtags: contentJson?.hashtags || []
                     })
                   }}
                   isLoading={isLoadingTimeline}
@@ -1720,6 +1842,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
           onReschedule={handleReschedule}
           onDelete={handleDeletePost}
           onUpdateText={handleUpdateText}
+          onUpdateHashtags={handleUpdateHashtags}
         />
       )}
         </>

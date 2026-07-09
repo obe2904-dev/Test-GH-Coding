@@ -8,8 +8,9 @@
  */
 
 import { useState } from 'react'
-import { X, Calendar, Send, Trash2 } from 'lucide-react'
+import { X, Calendar, Send, Trash2, Hash } from 'lucide-react'
 import type { PostStatus, Platform } from './PostFrame'
+import type { PlatformHashtag } from '../../stores/postCreationStore'
 
 interface PostModalProps {
   isOpen: boolean
@@ -24,6 +25,7 @@ interface PostModalProps {
     scheduledAt?: string | null
     ideaSource?: string
     suggestionId?: number | null
+    hashtags?: PlatformHashtag[]
   }
   // If there's a sibling post on the other platform (for "Apply to both")
   siblingPost?: {
@@ -34,6 +36,7 @@ interface PostModalProps {
   onReschedule: (postId: string, newTime: string, applyToBoth: boolean) => Promise<void>
   onDelete: (postId: string, applyToBoth: boolean) => Promise<void>
   onUpdateText: (postId: string, newText: string, applyToBoth: boolean) => Promise<void>
+  onUpdateHashtags?: (postId: string, newHashtags: PlatformHashtag[], applyToBoth: boolean) => Promise<void>
 }
 
 const PLATFORM_COLORS: Record<Platform, { primary: string; bg: string }> = {
@@ -50,9 +53,12 @@ export function PostModal({
   onReschedule,
   onDelete,
   onUpdateText,
+  onUpdateHashtags,
 }: PostModalProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editedText, setEditedText] = useState(post.text)
+  const [isEditingHashtags, setIsEditingHashtags] = useState(false)
+  const [editedHashtags, setEditedHashtags] = useState<PlatformHashtag[]>(post.hashtags || [])
   const [applyToBoth, setApplyToBoth] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isPosting, setIsPosting] = useState(false)
@@ -69,6 +75,13 @@ export function PostModal({
   const handleSaveText = async () => {
     await onUpdateText(post.id, editedText, applyToBoth)
     setIsEditing(false)
+  }
+
+  const handleSaveHashtags = async () => {
+    if (onUpdateHashtags) {
+      await onUpdateHashtags(post.id, editedHashtags, applyToBoth)
+      setIsEditingHashtags(false)
+    }
   }
 
   const handlePostNow = async () => {
@@ -177,6 +190,96 @@ export function PostModal({
                   className="mt-2 text-sm text-cta hover:underline font-medium"
                 >
                   Rediger tekst
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Hashtags Section */}
+          {isEditingHashtags ? (
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Hashtags (# tilføjes automatisk)
+              </label>
+              <div className="space-y-2">
+                {editedHashtags.map((tag, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={tag.text}
+                      onChange={(e) => {
+                        const newHashtags = [...editedHashtags]
+                        newHashtags[idx] = { ...tag, text: e.target.value }
+                        setEditedHashtags(newHashtags)
+                      }}
+                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                      placeholder="hashtag"
+                    />
+                    <button
+                      onClick={() => {
+                        setEditedHashtags(editedHashtags.filter((_, i) => i !== idx))
+                      }}
+                      className="px-3 py-2 bg-white border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50"
+                    >
+                      Slet
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => {
+                    setEditedHashtags([...editedHashtags, { text: '', source: 'manual' }])
+                  }}
+                  className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  + Tilføj hashtag
+                </button>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={handleSaveHashtags}
+                  className="px-4 py-2 bg-cta text-white rounded-lg text-sm font-semibold hover:bg-cta-hover"
+                >
+                  Gem
+                </button>
+                <button
+                  onClick={() => {
+                    setEditedHashtags(post.hashtags || [])
+                    setIsEditingHashtags(false)
+                  }}
+                  className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Annuller
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-4">
+              {(post.hashtags && post.hashtags.length > 0) ? (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Hash className="w-4 h-4 text-slate-500" />
+                    <span className="text-sm font-semibold text-slate-700">Hashtags</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {post.hashtags.map((tag, idx) => (
+                      <span
+                        key={idx}
+                        className="px-2 py-1 bg-slate-100 text-slate-700 text-xs rounded"
+                      >
+                        #{tag.text}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500 italic">Ingen hashtags</p>
+              )}
+              {canEdit && !isPublished && onUpdateHashtags && (
+                <button
+                  onClick={() => setIsEditingHashtags(true)}
+                  className="mt-2 text-sm text-cta hover:underline font-medium"
+                >
+                  Rediger hashtags
                 </button>
               )}
             </div>
