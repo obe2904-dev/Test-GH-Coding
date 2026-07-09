@@ -58,13 +58,13 @@ export function DateTimePicker({
   const formattedTime = `${selectedHour}:${selectedMinute}`
 
   return (
-    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5 text-purple-700">
+        <div className="flex items-center gap-1.5 text-slate-700">
           <Calendar className="w-4 h-4" />
           <span className="text-sm font-semibold">{formattedDate}</span>
         </div>
-        <div className="flex items-center gap-1.5 text-purple-700">
+        <div className="flex items-center gap-1.5 text-slate-700">
           <Clock className="w-4 h-4" />
           <span className="text-sm font-semibold">{formattedTime}</span>
         </div>
