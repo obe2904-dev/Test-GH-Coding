@@ -510,7 +510,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
         .from('posts')
         .update({
           post_text: newText,
-          content_json: contentJson,
+          content_json: contentJson as any,
           updated_at: new Date().toISOString()
         })
         .eq('id', postId)
@@ -538,7 +538,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
             .from('posts')
             .update({
               post_text: newText,
-              content_json: siblingContentJson,
+              content_json: siblingContentJson as any,
               updated_at: new Date().toISOString()
             })
             .eq('id', siblingPost.id)
@@ -572,7 +572,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
       await supabase
         .from('posts')
         .update({
-          content_json: contentJson,
+          content_json: contentJson as any,
           updated_at: new Date().toISOString()
         })
         .eq('id', postId)
@@ -596,7 +596,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
           await supabase
             .from('posts')
             .update({
-              content_json: siblingContentJson,
+              content_json: siblingContentJson as any,
               updated_at: new Date().toISOString()
             })
             .eq('id', siblingPost.id)

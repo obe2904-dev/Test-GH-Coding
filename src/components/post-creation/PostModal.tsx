@@ -206,10 +206,10 @@ export function PostModal({
                   <div key={idx} className="flex items-center gap-2">
                     <input
                       type="text"
-                      value={tag.text}
+                      value={tag.tag}
                       onChange={(e) => {
                         const newHashtags = [...editedHashtags]
-                        newHashtags[idx] = { ...tag, text: e.target.value }
+                        newHashtags[idx] = { ...tag, tag: e.target.value }
                         setEditedHashtags(newHashtags)
                       }}
                       className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm"
@@ -227,7 +227,7 @@ export function PostModal({
                 ))}
                 <button
                   onClick={() => {
-                    setEditedHashtags([...editedHashtags, { text: '', source: 'manual' }])
+                    setEditedHashtags([...editedHashtags, { tag: '', enabled: true }])
                   }}
                   className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
@@ -266,7 +266,7 @@ export function PostModal({
                         key={idx}
                         className="px-2 py-1 bg-slate-100 text-slate-700 text-xs rounded"
                       >
-                        #{tag.text}
+                        #{tag.tag}
                       </span>
                     ))}
                   </div>
