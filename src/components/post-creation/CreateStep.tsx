@@ -1618,20 +1618,6 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         </div>
       </div>
 
-      {/* Separator line */}
-      <div className="border-t border-[#D1D5DB] mt-4"></div>
-
-      {/* Sticky Bottom Bar */}
-      <div className="flex items-center justify-start pt-2 pb-4">
-        <button
-          onClick={onBack}
-          className="px-4 py-2 text-xs font-medium text-[#374151] bg-white border border-[#D1D5DB] rounded-lg hover:bg-[#F9FAFB] transition-colors flex items-center gap-1.5"
-        >
-          <ChevronLeft className="w-4 h-4" />
-          <span>{t('create.back', 'Tilbage')}</span>
-        </button>
-      </div>
-
       {showCropOverlay && currentPhoto && (currentPhoto.adjustedUrl || currentPhoto.originalUrl) && (
         <CropOverlay
           imageUrl={currentPhoto.adjustedUrl || currentPhoto.originalUrl!}
