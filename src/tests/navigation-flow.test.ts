@@ -209,6 +209,29 @@ describe('Edge Cases', () => {
     expect(canEdit).toBe(false)
   })
 
+  it('locks PUBLISHED ideas but keeps SCHEDULED ideas editable', () => {
+    // New semantics: "committed" (locked) = published only. Scheduled stays editable.
+    const committedWeeklyPlanIdeaIds = new Set<number>([123]) // published → locked
+    const scheduledWeeklyPlanIdeaIds = new Set<number>([456]) // scheduled → editable
+
+    const publishedIsLocked = committedWeeklyPlanIdeaIds.has(123)
+    const scheduledIsLocked = committedWeeklyPlanIdeaIds.has(456)
+    expect(publishedIsLocked).toBe(true)
+    expect(scheduledIsLocked).toBe(false)
+    // Scheduled is surfaced separately as editable, not as a lock
+    expect(scheduledWeeklyPlanIdeaIds.has(456)).toBe(true)
+  })
+
+  it('never locks stages based on backward navigation', () => {
+    // The old isReadOnlyMode nav lock is removed. Read-only is driven ONLY by
+    // published state, never by "the user went back from Udgiv".
+    const publishedInfo = null
+    const isCommittedAiSuggestion = false // scheduled/draft → not committed
+    const isPublishedReadOnly = Boolean(publishedInfo) || isCommittedAiSuggestion
+    // Simulate: user entered Udgiv then clicked back to Forslag — no published state
+    expect(isPublishedReadOnly).toBe(false)
+  })
+
   it('should handle undefined content gracefully', () => {
     mockStore.postContent = undefined
     

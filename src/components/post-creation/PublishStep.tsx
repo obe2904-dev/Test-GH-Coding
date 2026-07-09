@@ -985,7 +985,35 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     // Save to DB for every platform the user has kept enabled
     for (const platform of publishPlatforms) {
       const platformKey = platform.toLowerCase()
-      const existingId = savedPostIds.current[platformKey]
+      let existingId = savedPostIds.current[platformKey]
+
+      // ── Duplicate guard (scheduled posts are now editable) ──
+      // If we don't already have an id cached (e.g. the user re-opened a SCHEDULED
+      // post via Forslag on another device), look one up for this idea+platform so
+      // we UPDATE the existing row instead of inserting a duplicate.
+      if (!existingId) {
+        let ideaQuery = supabase
+          .from('posts')
+          .select('id')
+          .eq('business_id', business.id)
+          .eq('platform', platformKey)
+          .in('status', ['scheduled', 'published'])
+        if (activePath === 'ai-ideas' && selectedSuggestionData?.id != null) {
+          ideaQuery = ideaQuery.eq('suggestion_id', selectedSuggestionData.id)
+        } else if (activePath === 'weekly-plan' && weeklyPlanPost?.idea_id != null) {
+          ideaQuery = ideaQuery.eq('weekly_plan_idea_id', weeklyPlanPost.idea_id)
+        } else {
+          ideaQuery = null as any // write-self has no idea key — skip lookup
+        }
+        if (ideaQuery) {
+          const { data: existingRow } = await ideaQuery.order('updated_at', { ascending: false }).limit(1).maybeSingle()
+          if (existingRow?.id) {
+            existingId = existingRow.id as string
+            savedPostIds.current[platformKey] = existingId
+            console.log(`[handlePublish] Reusing existing ${platform} post ${existingId} (avoids duplicate)`)
+          }
+        }
+      }
 
       if (existingId) {
         // Already saved — just update the time/status
