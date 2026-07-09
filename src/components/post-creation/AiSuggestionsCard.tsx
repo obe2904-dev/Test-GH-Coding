@@ -486,25 +486,26 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
     fetchUsageStats()
     const todayISO = toLocalISODate()
     
-    // Load most recent suggestions regardless of date
+    // Load suggestions from today or future dates (resets at midnight 00:00 local time)
     // Show all suggestions in any active status (available, selected, consumed, published)
-    // Suggestions remain visible even after their suggested time has passed
+    // Suggestions remain visible even after their suggested time has passed during the day
     supabase
       .from('daily_suggestions')
       .select('*')
       .eq('business_id', businessId)
+      .gte('date', todayISO)  // Only show suggestions from today onwards (resets at midnight)
       .in('status', ['available', 'selected', 'consumed', 'published'])
       .eq('source', 'quick_suggestions')
-      .order('date', { ascending: false })
+      .order('date', { ascending: true })
       .order('position', { ascending: true })
       .limit(3)
       .then(async ({ data, error }) => {
-        // Load suggestions even if from previous days (time doesn't matter)
+        // Load suggestions from today or future (resets at midnight local time)
         if (!error && data && data.length > 0) {
           // Suggestions exist — map directly, no edge function call
           const isFromToday = data[0]?.date === todayISO
           console.log('[AiSuggestionsCard] Suggestions loaded from DB:', data.length, 
-            isFromToday ? '(today)' : `(from ${data[0]?.date})`)
+            isFromToday ? '(today)' : `(scheduled for ${data[0]?.date})`)
           const mapped: PostSuggestion[] = data.map((row: any) => ({
             id: row.id,
             title: row.title,
@@ -545,8 +546,8 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
           setIsInitialLoad(false)
           setIsLoading(false)
         } else if (!error && data && data.length === 0) {
-          // No suggestions available — show the gate
-          console.log('[AiSuggestionsCard] No suggestions available, showing gate')
+          // No suggestions for today (resets at midnight) — show the gate
+          console.log('[AiSuggestionsCard] No suggestions for today, showing gate')
           setShowGate(true)
           setIsInitialLoad(false)
         } else {
