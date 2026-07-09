@@ -566,7 +566,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
       }
 
       // Update contentJson with new hashtags
-      const contentJson = (post.content_json as PostContent | null) || { headline: '', text: post.post_text || '', adjustments: { headline: '', text: '' } }
+      const contentJson = (post.content_json as PostContent | null) || { headline: '', text: post.post_text || '', adjustments: { headline: '', text: '' }, hashtags: [] }
       contentJson.hashtags = newHashtags
 
       await supabase
@@ -590,7 +590,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
           .maybeSingle()
         
         if (siblingPost) {
-          const siblingContentJson = (siblingPost.content_json as PostContent | null) || { headline: '', text: siblingPost.post_text || '', adjustments: { headline: '', text: '' } }
+          const siblingContentJson = (siblingPost.content_json as PostContent | null) || { headline: '', text: siblingPost.post_text || '', adjustments: { headline: '', text: '' }, hashtags: [] }
           siblingContentJson.hashtags = newHashtags
 
           await supabase
