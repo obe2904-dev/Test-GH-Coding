@@ -53,6 +53,10 @@ const BusinessProfilePage = lazy(() =>
   import('./pages/dashboard/BusinessProfilePage').then((module) => ({ default: module.default }))
 )
 
+const BrandProfilePage = lazy(() =>
+  import('./pages/dashboard/BrandProfilePage').then((module) => ({ default: module.default }))
+)
+
 const CalendarPage = lazy(() =>
   import('./pages/dashboard/CalendarPage').then((module) => ({ default: module.CalendarPage }))
 )
@@ -163,6 +167,7 @@ function App() {
               <Route index element={<DashboardOverviewPage />} />
               <Route path="create" element={<CreatePostPage />} />
               <Route path="profile" element={<BusinessProfilePage />} />
+              <Route path="brand-profile" element={<BrandProfilePage />} />
               <Route path="my-profile" element={<MyProfilePage />} />
               <Route path="calendar" element={<CalendarPage />} />
               <Route path="posts" element={<AllPostsPage />} />

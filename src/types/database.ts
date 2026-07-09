@@ -191,6 +191,15 @@ export interface Database {
           values: string[] | null
           certifications: string[] | null
           do_not_say: Json | null
+          has_alcohol: boolean
+          price_level: 'low' | 'medium' | 'high' | null
+          dietary_options: string[]
+          signature_items: string[]
+          dominant_usage_mode: 'breakfast' | 'lunch' | 'dinner' | 'evening' | 'night' | 'allday' | null
+          opens_early: boolean
+          closes_late: boolean
+          weekend_focused: boolean
+          target_audiences: string[]
           created_at: string
           updated_at: string
         }
@@ -201,6 +210,15 @@ export interface Database {
           values?: string[] | null
           certifications?: string[] | null
           do_not_say?: Json | null
+          has_alcohol?: boolean
+          price_level?: 'low' | 'medium' | 'high' | null
+          dietary_options?: string[]
+          signature_items?: string[]
+          dominant_usage_mode?: 'breakfast' | 'lunch' | 'dinner' | 'evening' | 'night' | 'allday' | null
+          opens_early?: boolean
+          closes_late?: boolean
+          weekend_focused?: boolean
+          target_audiences?: string[]
           created_at?: string
           updated_at?: string
         }
@@ -211,6 +229,15 @@ export interface Database {
           values?: string[] | null
           certifications?: string[] | null
           do_not_say?: Json | null
+          has_alcohol?: boolean
+          price_level?: 'low' | 'medium' | 'high' | null
+          dietary_options?: string[]
+          signature_items?: string[]
+          dominant_usage_mode?: 'breakfast' | 'lunch' | 'dinner' | 'evening' | 'night' | 'allday' | null
+          opens_early?: boolean
+          closes_late?: boolean
+          weekend_focused?: boolean
+          target_audiences?: string[]
           created_at?: string
           updated_at?: string
         }

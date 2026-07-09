@@ -22,6 +22,7 @@ import {
   makeRandomId,
   isBusinessSectorValue
 } from './businessProfile/utils'
+import { extractBrandSignals } from '../../features/BrandProfileExtractor'
 
 const DEFAULT_COUNTRY = 'Danmark'
 
@@ -606,6 +607,53 @@ function BusinessProfilePage() {
         console.error('Failed to save business profile:', error.message)
         alert(t('businessProfile.saveFailed', 'Kunne ikke gemme profilen. Prøv igen.'))
         return
+      }
+
+      // Extract brand signals from profile data
+      const brandSignals = extractBrandSignals({
+        businessOfferings,
+        openingHours,
+        businessSector,
+        city,
+        keywords
+      })
+
+      // Get business_id to save brand signals
+      const { data: businessData, error: businessError } = await supabase
+        .from('businesses')
+        .select('id')
+        .eq('owner_id', user.id)
+        .maybeSingle()
+
+      if (businessError) {
+        console.error('Failed to retrieve business_id:', businessError.message)
+        console.warn('⚠️ Brand signals not saved - business record not found')
+      } else if (!businessData) {
+        console.warn('⚠️ No business record found for user. Brand signals not saved.')
+        console.info('This usually means onboarding was incomplete. Business should be created during signup.')
+      } else {
+        // Save extracted brand signals to business_brand_profile
+        const { error: brandError } = await supabase
+          .from('business_brand_profile')
+          .upsert({
+            business_id: businessData.id,
+            has_alcohol: brandSignals.has_alcohol,
+            dietary_options: brandSignals.dietary_options,
+            signature_items: brandSignals.signature_items,
+            dominant_usage_mode: brandSignals.dominant_usage_mode,
+            opens_early: brandSignals.opens_early,
+            closes_late: brandSignals.closes_late,
+            weekend_focused: brandSignals.weekend_focused,
+            target_audiences: brandSignals.target_audiences,
+            updated_at: new Date().toISOString()
+          })
+
+        if (brandError) {
+          console.error('Failed to save brand signals:', brandError.message)
+          // Don't fail the whole save if brand signals fail
+        } else {
+          console.log('✅ Brand signals extracted and saved:', brandSignals)
+        }
       }
 
       const snapshot = buildStateSnapshot()
