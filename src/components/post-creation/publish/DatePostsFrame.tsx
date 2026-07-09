@@ -47,8 +47,8 @@ export function DatePostsFrame({
         </span>
       </div>
 
-      {/* Fixed height frame with scroll */}
-      <div className="h-[280px] overflow-y-auto space-y-2 pr-1">
+      {/* Fixed height frame with scroll - Compact to balance with idea frame */}
+      <div className="h-[160px] overflow-y-auto space-y-2 pr-1">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-8 h-8 border-4 border-cta border-t-transparent rounded-full animate-spin" />
