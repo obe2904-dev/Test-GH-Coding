@@ -45,7 +45,7 @@ export function IdeaPostsFrame({
       )}
 
       {/* Fixed height frame with scroll - Taller to show more idea versions */}
-      <div className="h-[300px] overflow-y-auto space-y-2 pr-1">
+      <div className="h-[250px] overflow-y-auto space-y-2 pr-1">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="w-8 h-8 border-4 border-cta border-t-transparent rounded-full animate-spin" />
