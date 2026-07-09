@@ -1563,10 +1563,10 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
           {/* Continue to Udgiv Button */}
           <button
             onClick={onNext}
-            className="w-full px-6 py-3 bg-cta text-text-inverse rounded-lg hover:bg-cta-hover transition-all font-semibold text-sm shadow-md flex items-center justify-center gap-2"
+            className="w-full px-3 py-2.5 bg-cta text-text-inverse rounded-xl hover:bg-cta-hover transition-all font-semibold text-xs shadow-sm flex items-center justify-center gap-2"
           >
             <span>{t('create.continue', 'Fortsæt til Udgiv')}</span>
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="w-4 h-4" />
           </button>
 
           <PlatformSelector
