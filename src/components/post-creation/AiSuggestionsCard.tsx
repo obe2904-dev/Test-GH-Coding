@@ -484,20 +484,21 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
     fetchUsageStats()
     const todayISO = toLocalISODate()
     
-    // First try today's suggestions, then fall back to most recent batch
+    // Load most recent suggestions regardless of date
     // Show all suggestions in 'available' or 'selected' status (consumed_at filter removed
     // so suggestions remain visible after selection until user moves to Udgiv stage)
+    // Suggestions remain visible even after their suggested time has passed
     supabase
       .from('daily_suggestions')
       .select('*')
       .eq('business_id', businessId)
-      .eq('date', todayISO)
       .in('status', ['available', 'selected', 'consumed'])
       .eq('source', 'quick_suggestions')
+      .order('date', { ascending: false })
       .order('position', { ascending: true })
       .limit(3)
       .then(async ({ data, error }) => {
-        // Only load suggestions if they're from today — no fallback to yesterday
+        // Load suggestions even if from previous days (time doesn't matter)
         if (!error && data && data.length > 0) {
           // Suggestions exist — map directly, no edge function call
           const isFromToday = data[0]?.date === todayISO
@@ -542,8 +543,8 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
           setIsInitialLoad(false)
           setIsLoading(false)
         } else if (!error && data && data.length === 0) {
-          // Nothing yet today — show the gate
-          console.log('[AiSuggestionsCard] No suggestions yet today, showing gate')
+          // No suggestions available — show the gate
+          console.log('[AiSuggestionsCard] No suggestions available, showing gate')
           setShowGate(true)
           setIsInitialLoad(false)
         } else {
