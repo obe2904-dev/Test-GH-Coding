@@ -60,6 +60,7 @@ interface PostSuggestion {
   suggestedDate?: string  // ISO date (YYYY-MM-DD) the suggestion was generated for
   icon: string
   generatedText?: string | null  // AI-generated text if it exists
+  status?: string  // Status from database (available, selected, consumed, published)
   // Paid tier features
   contextReasoning?: string   // Contextual explanation with day/time/weather
   alternativeTimings?: Array<{
@@ -416,6 +417,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
             suggestedDate: s.suggestion_date || s.suggestedDate || '',
             icon: CONTENT_TYPE_ICONS[s.content_type || s.contentType || 'menu_item'] || '📸',
             generatedText: s.generated_text || null,
+            status: s.status || 'available',
             contextReasoning: s.context_reasoning || undefined,
             alternativeTimings: s.alternative_timings || []
           }))
@@ -523,6 +525,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
             suggestedDate: row.suggestion_date || row.date || todayISO,
             icon: CONTENT_TYPE_ICONS[row.content_type] || '📸',
             generatedText: row.generated_text || null,
+            status: row.status || 'available',
             contextReasoning: row.context_reasoning || undefined,
             alternativeTimings: row.alternative_timings || []
           }))
@@ -749,21 +752,36 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
         {visibleSuggestions.map((suggestion, idx) => {
           const isSelected = selectedIdea === suggestion.id.toString()
           const isCommitted = committedSuggestionIds?.has(suggestion.id) ?? false
+          const isPublished = suggestion.status === 'published'
           return (
           <div
             key={suggestion.id}
             className={`relative p-4 border-2 rounded-lg transition-all ${
-              isCommitted
+              isPublished
+                ? 'border-blue-300 bg-blue-50/50 cursor-default'
+                : isCommitted
                 ? 'border-green-300 bg-green-50/50 cursor-default'
                 : isSelected 
                   ? 'border-mint bg-mint/10 shadow-lg cursor-pointer' 
                   : 'border-gray-200 hover:border-mint hover:bg-mint/5 cursor-pointer'
             }`}
             onClick={() => {
-              if (!isSelected && !isCommitted) onSelectSuggestion(suggestion)
+              if (!isSelected && !isCommitted && !isPublished) onSelectSuggestion(suggestion)
             }}
           >
-            {isCommitted && (
+            {isPublished && (
+              <a
+                href="/dashboard/calendar"
+                className="absolute top-3 right-3 text-xs font-medium text-blue-700 bg-blue-100 border border-blue-300 px-2 py-0.5 rounded flex items-center gap-1 hover:bg-blue-200 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                Udgivet - se det i Indholdskalender
+              </a>
+            )}
+            {!isPublished && isCommitted && (
               <span className="absolute top-3 right-3 text-xs font-medium text-green-700 bg-green-100 border border-green-300 px-2 py-0.5 rounded flex items-center gap-1">
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -771,7 +789,7 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
                 Planlagt/Publiceret
               </span>
             )}
-            {!isCommitted && idx > 0 && (
+            {!isPublished && !isCommitted && idx > 0 && (
               <span className="absolute top-3 right-3 text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
                 Alternativt forslag
               </span>
