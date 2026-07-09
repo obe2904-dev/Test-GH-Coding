@@ -485,14 +485,13 @@ export function AiSuggestionsCard({ onSelectSuggestion, onGenerate, businessId, 
     const todayISO = toLocalISODate()
     
     // Load most recent suggestions regardless of date
-    // Show all suggestions in 'available' or 'selected' status (consumed_at filter removed
-    // so suggestions remain visible after selection until user moves to Udgiv stage)
+    // Show all suggestions in any active status (available, selected, consumed, published)
     // Suggestions remain visible even after their suggested time has passed
     supabase
       .from('daily_suggestions')
       .select('*')
       .eq('business_id', businessId)
-      .in('status', ['available', 'selected', 'consumed'])
+      .in('status', ['available', 'selected', 'consumed', 'published'])
       .eq('source', 'quick_suggestions')
       .order('date', { ascending: false })
       .order('position', { ascending: true })
