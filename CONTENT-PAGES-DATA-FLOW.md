@@ -529,3 +529,146 @@ Cross-referencing [DASHBOARD-UI-VS-DB-INVENTORY.md](DASHBOARD-UI-VS-DB-INVENTORY
 | Business menu metadata | `business_menu_metadata.*` | Not used in any AI prompt |
 | Specials | `specials.*` | Not used in any AI prompt |
 | Business goals | `business_goals.*` | Not used in any AI prompt |
+
+---
+
+## 6. Live Site Flow Mapping
+
+This mapping is for the live deployment at [https://social-media-saas-psi.vercel.app/](https://social-media-saas-psi.vercel.app/). It is not interchangeable with localhost, which is a separate environment.
+
+Udgiv is the shared publish stage used by all three dashboard entry points below:
+
+- [https://social-media-saas-psi.vercel.app/dashboard/create?mode=write](https://social-media-saas-psi.vercel.app/dashboard/create?mode=write)
+- [https://social-media-saas-psi.vercel.app/dashboard/create?mode=ai](https://social-media-saas-psi.vercel.app/dashboard/create?mode=ai)
+- [https://social-media-saas-psi.vercel.app/dashboard/ai-weekly-plan](https://social-media-saas-psi.vercel.app/dashboard/ai-weekly-plan)
+
+The important point is that Udgiv is not its own route. It is the shared publish stage inside the create flow, and the weekly-plan page hands off into that same flow.
+
+### 6.1 Route Map
+
+The app routes the relevant pages here:
+
+- [src/App.tsx](src/App.tsx#L193) mounts the shared create flow at `/dashboard/create`
+- [src/App.tsx](src/App.tsx#L204) mounts the weekly plan page at `/dashboard/ai-weekly-plan`
+- [src/pages/dashboard/CreatePostPage.tsx](src/pages/dashboard/CreatePostPage.tsx#L53) derives the active mode from the `mode` query string
+
+That means:
+
+- `mode=write` = manual post creation
+- `mode=ai` = AI ideas / Dagens Forslag
+- `mode=weekly-plan` = weekly-plan handoff into the same create flow
+
+### 6.2 Shared Create Flow
+
+The controller for all three paths is [src/pages/dashboard/CreatePostPage.tsx](src/pages/dashboard/CreatePostPage.tsx#L53).
+
+It uses the URL to decide which path is active, then selects one of three internal step states:
+
+- `generate`
+- `create`
+- `publish`
+
+The publish stage is rendered only when [currentStep === 'publish'](src/pages/dashboard/CreatePostPage.tsx#L1906).
+
+### 6.3 `/dashboard/create?mode=write`
+
+On the live deployment, this route opens with a prefilled draft-like post and takes the user into the design flow. It is not a blank editor in the state we verified.
+
+Verified on live site: the page showed generated copy, hashtags, and a CTA to continue to Design.
+
+1. User starts in the generate step, but no AI generation is involved.
+2. The live page shows generated copy, hashtags, and a CTA to continue to Design.
+3. The user continues to Design.
+4. When the user clicks forward from Design, [handleCreateNext](src/pages/dashboard/CreatePostPage.tsx#L1148) persists the draft state and moves the page into Udgiv by calling [setCurrentStep('publish')](src/pages/dashboard/CreatePostPage.tsx#L1282).
+5. Inside Udgiv, [PublishStep.handlePublish](src/components/post-creation/PublishStep.tsx#L940) performs the final publish or schedule action.
+
+What Udgiv does here:
+
+- It checks whether the post can be published or scheduled.
+- It writes one `published_posts` row per enabled platform.
+- It can also open the manual-post modal if the user has unconnected platforms and is trying to publish now.
+- It saves uploaded media to the gallery after a successful publish or schedule.
+- It calls back to the page so the UI can show success and update locks.
+
+### 6.4 `/dashboard/create?mode=ai`
+
+This is the AI idea path, but it still uses the same shared create and publish machinery.
+
+Verified on live site: the page showed an AI suggestion card, a design step, and Udgiv as the next stage.
+
+1. The page loads in AI mode.
+2. The user selects one of the suggestion cards.
+3. The selected suggestion is transferred into the design step.
+4. Clicking forward from Design again runs [handleCreateNext](src/pages/dashboard/CreatePostPage.tsx#L1148).
+5. That handler updates suggestion state, persists the draft, and advances to Udgiv with [setCurrentStep('publish')](src/pages/dashboard/CreatePostPage.tsx#L1282).
+6. The actual publish action is still [PublishStep.handlePublish](src/components/post-creation/PublishStep.tsx#L940).
+
+What is different in AI mode:
+
+- The selected suggestion is marked as consumed when entering Udgiv.
+- The page locks the earlier steps after Udgiv has been entered so the user cannot silently change the idea after publish flow has started.
+- The final publish code path is still shared with write mode.
+
+### 6.5 `/dashboard/ai-weekly-plan`
+
+This page is the planning entry point, not the publishing endpoint.
+
+Verified on live site: the page showed the weekly-plan stage, an empty-state message, and a generate button when no plan existed.
+
+1. The weekly-plan page builds or shows the weekly plan.
+2. When the user chooses a post to work on, it navigates into the shared create flow with `mode=weekly-plan`.
+3. That handoff happens in [src/app/content/ai-weekly-plan/page.tsx](src/app/content/ai-weekly-plan/page.tsx#L908) and related stage buttons in the same file.
+4. Once inside the create flow, Design and Udgiv work the same way as the other modes.
+5. After publish, the flow can send the user back to the weekly plan page.
+
+What Udgiv does here:
+
+- It publishes the selected weekly-plan item using the same shared publish step.
+- It marks the weekly-plan slot as completed.
+- It can route back to [src/app/content/ai-weekly-plan/page.tsx](src/app/content/ai-weekly-plan/page.tsx#L908) after success.
+
+### 6.6 The Udgiv Button Itself
+
+The visible Udgiv button lives inside [src/components/post-creation/PublishStep.tsx](src/components/post-creation/PublishStep.tsx#L940).
+
+The button label changes depending on state:
+
+- `Udgiv opslag nu`
+- `Planlæg opslag`
+- `Forbered manual post` when a platform requires manual posting
+
+When clicked, it calls the shared publish handler, which decides:
+
+- publish now
+- schedule later
+- open the manual-post modal instead of writing direct publish rows
+
+### 6.7 Data and State Changes at Udgiv
+
+At a high level, Udgiv touches these things:
+
+- draft state in the create page
+- published state in the publish step
+- `published_posts` rows in the database
+- media gallery storage for uploaded files
+- suggestion status / commitment state
+- weekly-plan completion state for the weekly-plan path
+
+The create page also keeps publish success state lifted so the success screen survives navigation back into Udgiv. That is managed in [src/pages/dashboard/CreatePostPage.tsx](src/pages/dashboard/CreatePostPage.tsx#L1574) and passed down into [src/components/post-creation/PublishStep.tsx](src/components/post-creation/PublishStep.tsx#L99).
+
+### 6.8 Control Summary
+
+If you want the shortest possible mental model, it is this:
+
+- `/dashboard/create?mode=write` currently loads a prefilled draft-like flow on the live site, then enters Udgiv after design work.
+- `/dashboard/create?mode=ai` enters Udgiv after AI suggestion selection and design work.
+- `/dashboard/ai-weekly-plan` only routes into the shared create flow; it does not publish directly.
+- The actual publish logic lives in [src/components/post-creation/PublishStep.tsx](src/components/post-creation/PublishStep.tsx#L940).
+
+### 6.9 Related Files
+
+- [src/pages/dashboard/CreatePostPage.tsx](src/pages/dashboard/CreatePostPage.tsx)
+- [src/components/post-creation/PublishStep.tsx](src/components/post-creation/PublishStep.tsx)
+- [src/app/content/ai-weekly-plan/page.tsx](src/app/content/ai-weekly-plan/page.tsx)
+- [src/App.tsx](src/App.tsx)
+- [CONTENT-PAGES-DATA-FLOW.md](CONTENT-PAGES-DATA-FLOW.md)

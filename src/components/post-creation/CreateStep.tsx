@@ -13,7 +13,6 @@ import { PlatformSelector } from './shared/PlatformSelector'
 import { PlatformPreview, CaptionEditModal, HashtagEditModal, PhotoUploadManager, CarouselActivationBanner, CarouselSetup } from './design'
 import { useCarouselOrganise } from '../../hooks/useCarouselOrganise'
 import { buildPlatformPreviewContent } from './publish/utils'
-import { PostCreationFooter } from './shared/PostCreationFooter'
 import { usePhotoAnalysis } from '../../hooks/usePhotoAnalysis'
 import { usePhotoEdit } from '../../hooks/usePhotoEdit'
 import { useBusinessData } from '../../hooks/useBusinessData'
@@ -42,6 +41,12 @@ interface CreateStepProps {
 const ChevronLeft = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
     <polyline points="15 18 9 12 15 6"/>
+  </svg>
+)
+
+const ChevronRight = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+    <polyline points="9 18 15 12 9 6"/>
   </svg>
 )
 
@@ -1555,6 +1560,15 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
 
         {/* RIGHT: Platform Preview */}
         <div className="space-y-3 sticky top-4 self-start">
+          {/* Continue to Udgiv Button */}
+          <button
+            onClick={onNext}
+            className="w-full px-6 py-3 bg-cta text-text-inverse rounded-lg hover:bg-cta-hover transition-all font-semibold text-sm shadow-md flex items-center justify-center gap-2"
+          >
+            <span>{t('create.continue', 'Fortsæt til Udgiv')}</span>
+            <ChevronRight className="w-5 h-5" />
+          </button>
+
           <PlatformSelector
             currentTier={currentTier}
             selectedPlatforms={selectedPlatforms}
@@ -1608,7 +1622,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
       <div className="border-t border-[#D1D5DB] mt-4"></div>
 
       {/* Sticky Bottom Bar */}
-      <div className="flex items-center justify-between pt-2 pb-4 gap-3">
+      <div className="flex items-center justify-start pt-2 pb-4">
         <button
           onClick={onBack}
           className="px-4 py-2 text-xs font-medium text-[#374151] bg-white border border-[#D1D5DB] rounded-lg hover:bg-[#F9FAFB] transition-colors flex items-center gap-1.5"
@@ -1616,14 +1630,6 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
           <ChevronLeft className="w-4 h-4" />
           <span>{t('create.back', 'Tilbage')}</span>
         </button>
-
-        <PostCreationFooter
-          hasUnsavedChanges={Boolean(hasUnsavedChanges)}
-          hasPersistedDraft={hasPersistedDraft}
-          onSaveDraft={handleSaveDraft}
-          onNext={onNext}
-          nextLabel={t('create.continue', 'Fortsæt til Publish')}
-        />
       </div>
 
       {showCropOverlay && currentPhoto && (currentPhoto.adjustedUrl || currentPhoto.originalUrl) && (
