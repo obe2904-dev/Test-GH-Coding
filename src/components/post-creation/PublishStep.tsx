@@ -1357,23 +1357,6 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
           {/* NEW 3-SECTION LAYOUT */}
           <div className="space-y-4">
             {/* SECTION 1: Date & Time Picker for Post Scheduling */}
-            <DateTimePicker
-              selectedDate={selectedDate}
-              selectedHour={selectedHour}
-              selectedMinute={selectedMinute}
-              timeInterval={timeInterval}
-              locale={locale}
-              dateLabel="Dato"
-              timeLabel="Tidspunkt"
-              hourLabel="Time"
-              minuteLabel="Min"
-              onSelectDate={setSelectedDate}
-              onSelectHour={setSelectedHour}
-              onSelectMinute={setSelectedMinute}
-              showTimeNote={activePath === 'write'}
-              timeNote="Nuværende tid brugt som standard"
-            />
-
             {/* AI Recommendation Banner */}
             {selectedSuggestionData?.suggestedTime && selectedDate && (() => {
               const [aiHours, aiMinutes] = selectedSuggestionData.suggestedTime.split(':')
