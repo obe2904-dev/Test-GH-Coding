@@ -1455,6 +1455,8 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                       setSelectedHour(String(scheduledDate.getHours()).padStart(2, '0'))
                       setSelectedMinute(String(scheduledDate.getMinutes()).padStart(2, '0'))
                     }
+
+                    setSelectedPost(post)
                   }}
                   isLoading={isLoadingTimeline}
                 />
@@ -1497,6 +1499,8 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                       setSelectedHour(String(scheduledDate.getHours()).padStart(2, '0'))
                       setSelectedMinute(String(scheduledDate.getMinutes()).padStart(2, '0'))
                     }
+
+                    setSelectedPost(post)
                   }}
                   isLoading={isLoadingTimeline}
                 />
