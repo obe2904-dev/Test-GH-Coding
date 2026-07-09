@@ -1561,7 +1561,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         {/* RIGHT: Platform Preview */}
         <div className="space-y-3 sticky top-4 self-start">
           {/* Platform Selector and Continue Button - Same Line */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between">
             <PlatformSelector
               currentTier={currentTier}
               selectedPlatforms={selectedPlatforms}
