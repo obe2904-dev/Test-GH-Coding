@@ -1164,77 +1164,107 @@ export function CreatePostPage() {
       const baseKey = buildDbDraftKey()
       console.log('[handleCreateNext] baseKey:', baseKey)
       if (baseKey) {
-        // Load the current combined draft
-        const combinedDraft = await posts.loadPost(baseKey).catch(() => null)
-        console.log('[handleCreateNext] combinedDraft:', combinedDraft)
-        
-        if (combinedDraft && combinedDraft.contentJson) {
-          console.log('[handleCreateNext] Splitting draft into platform-specific drafts:', selectedPlatforms)
-          console.log('[handleCreateNext] Combined draft platforms:', combinedDraft.platforms)
-          
-          // Create a platform-specific draft for each selected platform
-          for (const platform of selectedPlatforms) {
-            console.log(`[handleCreateNext] Processing platform: ${platform}`)
-            
-            // Extract platform-specific content using helper
-            const { postText, contentJson } = buildPlatformDraftContent(
-              combinedDraft.contentJson,
-              platform,
-              selectedPlatforms
-            )
-            
-            // Save platform-specific draft
+        // Check if platform-specific drafts already exist to avoid duplicates
+        const platformDraftsExist = await Promise.all(
+          selectedPlatforms.map(async (platform) => {
             const platformKey = { ...baseKey, platform }
-            const savedId = await posts.saveDraft(platformKey, {
-              platforms: [platform], // Single platform for this draft
-              postText,
-              contentJson,
-              photoUrl: combinedDraft.photoUrl,
-              suggestedPostDatetime,
-            })
-            
-            if (savedId) {
-              console.log(`✅ Saved ${platform} draft with ${postText.length} chars, ID: ${savedId}`)
-            } else {
-              console.error(`❌ FAILED to save ${platform} draft! Check console for database errors.`)
-              alert(`Failed to save ${platform} draft. Check browser console for details.`)
+            const existing = await posts.loadPost(platformKey).catch(() => null)
+            return !!existing
+          })
+        )
+        
+        const allPlatformDraftsExist = platformDraftsExist.every(exists => exists)
+        
+        if (allPlatformDraftsExist) {
+          console.log('[handleCreateNext] ✅ Platform drafts already exist, skipping creation')
+          // Update existing drafts with latest suggested datetime only
+          for (const platform of selectedPlatforms) {
+            const platformKey = { ...baseKey, platform }
+            const existingDraft = await posts.loadPost(platformKey).catch(() => null)
+            if (existingDraft && suggestedPostDatetime) {
+              await posts.saveDraft(platformKey, {
+                platforms: existingDraft.platforms,
+                postText: existingDraft.postText,
+                photoUrl: existingDraft.photoUrl,
+                contentJson: existingDraft.contentJson,
+                suggestedPostDatetime,
+              })
             }
           }
-          
-          // Delete the original combined draft
-          await posts.deleteByKey(baseKey)
-          console.log('[handleCreateNext] ✅ Platform split complete, unified draft deleted')
         } else {
-          console.warn('[handleCreateNext] No combined draft or contentJson found for split')
-          console.warn('[handleCreateNext] combinedDraft:', combinedDraft)
-          console.warn('[handleCreateNext] Will attempt to create platform drafts from activeContent')
+          // Platform drafts don't all exist yet, proceed with creation/split
+          // Load the current combined draft
+          const combinedDraft = await posts.loadPost(baseKey).catch(() => null)
+          console.log('[handleCreateNext] combinedDraft:', combinedDraft)
           
-          // Fallback: create platform drafts from current activeContent
-          if (activeContent) {
+          if (combinedDraft && combinedDraft.contentJson) {
+            console.log('[handleCreateNext] Splitting draft into platform-specific drafts:', selectedPlatforms)
+            console.log('[handleCreateNext] Combined draft platforms:', combinedDraft.platforms)
+            
+            // Create a platform-specific draft for each selected platform
             for (const platform of selectedPlatforms) {
+              console.log(`[handleCreateNext] Processing platform: ${platform}`)
+              
+              // Extract platform-specific content using helper
               const { postText, contentJson } = buildPlatformDraftContent(
-                activeContent,
+                combinedDraft.contentJson,
                 platform,
                 selectedPlatforms
               )
               
+              // Save platform-specific draft
               const platformKey = { ...baseKey, platform }
               const savedId = await posts.saveDraft(platformKey, {
-                platforms: [platform],
+                platforms: [platform], // Single platform for this draft
                 postText,
                 contentJson,
-                photoUrl: photoContent?.uploadedMedia?.[0]?.url ?? null,
+                photoUrl: combinedDraft.photoUrl,
                 suggestedPostDatetime,
               })
               
               if (savedId) {
-                console.log(`✅ [Fallback] Saved ${platform} draft with ${postText.length} chars, ID: ${savedId}`)
+                console.log(`✅ Saved ${platform} draft with ${postText.length} chars, ID: ${savedId}`)
               } else {
-                console.error(`❌ [Fallback] FAILED to save ${platform} draft!`)
+                console.error(`❌ FAILED to save ${platform} draft! Check console for database errors.`)
                 alert(`Failed to save ${platform} draft. Check browser console for details.`)
               }
             }
-            console.log('[handleCreateNext] ✅ Platform split complete (fallback)')
+            
+            // Delete the original combined draft
+            await posts.deleteByKey(baseKey)
+            console.log('[handleCreateNext] ✅ Platform split complete, unified draft deleted')
+          } else {
+            console.warn('[handleCreateNext] No combined draft or contentJson found for split')
+            console.warn('[handleCreateNext] combinedDraft:', combinedDraft)
+            console.warn('[handleCreateNext] Will attempt to create platform drafts from activeContent')
+            
+            // Fallback: create platform drafts from current activeContent
+            if (activeContent) {
+              for (const platform of selectedPlatforms) {
+                const { postText, contentJson } = buildPlatformDraftContent(
+                  activeContent,
+                  platform,
+                  selectedPlatforms
+                )
+                
+                const platformKey = { ...baseKey, platform }
+                const savedId = await posts.saveDraft(platformKey, {
+                  platforms: [platform],
+                  postText,
+                  contentJson,
+                  photoUrl: photoContent?.uploadedMedia?.[0]?.url ?? null,
+                  suggestedPostDatetime,
+                })
+                
+                if (savedId) {
+                  console.log(`✅ [Fallback] Saved ${platform} draft with ${postText.length} chars, ID: ${savedId}`)
+                } else {
+                  console.error(`❌ [Fallback] FAILED to save ${platform} draft!`)
+                  alert(`Failed to save ${platform} draft. Check browser console for details.`)
+                }
+              }
+              console.log('[handleCreateNext] ✅ Platform split complete (fallback)')
+            }
           }
         }
       }
