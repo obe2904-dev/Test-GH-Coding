@@ -3,10 +3,36 @@
 > **Purpose:** Complete mapping of what data is used by the three content creation pages — what is read from the database, what is passed to AI models, and how the user flows through each page.
 >
 > **Last reviewed:** April 2026  
+> **Last updated:** 2026-07-09  
 > **Pages covered:**
 > - `/dashboard/create?mode=write` — manual post creation
 > - `/dashboard/create?mode=ai` — AI idea-based post creation (Dagens Forslag)
 > - `/dashboard/ai-weekly-plan` — AI weekly content plan
+
+---
+
+## Recent Updates
+
+### 2026-07-09 — Design → Udgiv UI & Flow Documentation
+
+**Changes:**
+1. **UI Layout Update:**
+   - Moved "Fortsæt til Udgiv" button from bottom to top of preview column (right side)
+   - Removed "Tilbage" button from Design step for cleaner UX
+   - Button styling now matches "📷 Medieidé" section height and font size
+
+2. **Documentation Added:**
+   - Section 6.9: Complete Design → Udgiv transition flow
+   - Platform selection & database split behavior
+   - Database schema for `posts` table
+   - Navigation lock behavior
+   - UI component structure
+
+**Files Modified:**
+- `src/components/post-creation/CreateStep.tsx` — Button repositioning and styling
+- `CONTENT-PAGES-DATA-FLOW.md` — Added section 6.9 and this changelog
+
+**Deployed:** https://social-media-saas-psi.vercel.app/
 
 ---
 
@@ -665,10 +691,116 @@ If you want the shortest possible mental model, it is this:
 - `/dashboard/ai-weekly-plan` only routes into the shared create flow; it does not publish directly.
 - The actual publish logic lives in [src/components/post-creation/PublishStep.tsx](src/components/post-creation/PublishStep.tsx#L940).
 
-### 6.9 Related Files
+### 6.9 Design → Udgiv Transition Flow
+
+**Last updated:** 2026-07-09
+
+#### UI Layout (Design Step)
+
+The Design step uses a two-column layout:
+
+**Left Column:**
+- Photo upload/management
+- Media idea suggestions (collapsible)
+- Photo analysis tools
+- Carousel setup
+
+**Right Column (Sticky):**
+- **"Fortsæt til Udgiv" button** (top position)
+- Platform selector (Facebook/Instagram toggles)
+- Platform preview with post content
+- No back button (removed for cleaner UX)
+
+**Button Styling:**
+- Matches "📷 Medieidé" section height: `px-3 py-2.5`
+- Font size: `text-xs`
+- Rounded: `rounded-xl`
+- Shadow: `shadow-sm`
+- Icon: `ChevronRight w-4 h-4`
+
+#### Platform Selection & Database Split
+
+When "Fortsæt til Udgiv" is clicked, [handleCreateNext()](src/pages/dashboard/CreatePostPage.tsx#L1148) executes:
+
+**1. Single Platform Selected (Facebook OR Instagram):**
+```typescript
+// Creates 1 row in posts table
+{
+  platform: 'facebook' | 'instagram',  // Single value
+  platforms: ['facebook'] | ['instagram'],  // Array with one item
+  post_text: "...",
+  photo_url: "...",
+  content_json: { facebook: {...} } | { instagram: {...} },
+  status: 'draft',
+  business_id: UUID
+}
+```
+- Result: 1 post card in Udgiv
+
+**2. Multiple Platforms Selected (Facebook AND Instagram):**
+```typescript
+// Creates 2 separate rows in posts table
+
+// Row 1: Facebook
+{
+  platform: 'facebook',
+  platforms: ['facebook'],
+  post_text: "Facebook-specific text",
+  content_json: { facebook: {...} },
+  ...
+}
+
+// Row 2: Instagram
+{
+  platform: 'instagram',
+  platforms: ['instagram'],
+  post_text: "Instagram-specific text",
+  content_json: { instagram: {...} },
+  ...
+}
+```
+- Result: 2 post cards in Udgiv (one per platform)
+- Platform-specific content extracted via `buildPlatformDraftContent()`
+- Original combined draft deleted after split
+
+**Database Table:** `posts` (Supabase project: `oadwluspjlsnxhgakral`)
+
+**Key Columns Written:**
+- `platform` (text): 'facebook' | 'instagram' | NULL
+- `platforms` (text[]): Array of selected platforms
+- `post_text` (text): Post content
+- `photo_url` (text): Media URL
+- `content_json` (jsonb): Platform-specific content structure
+- `status` (text): 'draft' | 'scheduled' | 'published'
+- `suggestion_id` (uuid): Link to daily_suggestions (AI mode)
+- `weekly_plan_idea_id` (integer): Link to weekly plan post
+- `scheduled_for` (timestamp): When post should be published
+- `created_at`, `updated_at` (timestamp): Audit timestamps
+
+**Implementation:**
+- Platform split: [CreatePostPage.tsx#L1177-L1256](src/pages/dashboard/CreatePostPage.tsx#L1177-L1256)
+- Database save: [usePosts.ts#L188-L259](src/hooks/usePosts.ts#L188-L259)
+- Draft key builder: [usePosts.ts buildDbDraftKey()](src/hooks/usePosts.ts)
+
+#### Navigation Lock Behavior
+
+After entering Udgiv:
+- `hasEnteredUdgiv` flag set to `true`
+- Design step becomes read-only when navigating back
+- Prevents editing after platform split has occurred
+- User can delete draft to unlock editing
+
+#### Translation Keys
+
+- Button label: `create.continue` = "Fortsæt til Udgiv" ([da.json#L927](src/lib/locales/da.json#L927))
+- Back button (removed): `create.back` = "Tilbage"
+
+### 6.10 Related Files
 
 - [src/pages/dashboard/CreatePostPage.tsx](src/pages/dashboard/CreatePostPage.tsx)
+- [src/components/post-creation/CreateStep.tsx](src/components/post-creation/CreateStep.tsx)
 - [src/components/post-creation/PublishStep.tsx](src/components/post-creation/PublishStep.tsx)
+- [src/hooks/usePosts.ts](src/hooks/usePosts.ts)
 - [src/app/content/ai-weekly-plan/page.tsx](src/app/content/ai-weekly-plan/page.tsx)
 - [src/App.tsx](src/App.tsx)
 - [CONTENT-PAGES-DATA-FLOW.md](CONTENT-PAGES-DATA-FLOW.md)
