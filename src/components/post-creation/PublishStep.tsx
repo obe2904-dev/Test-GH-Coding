@@ -1375,7 +1375,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
             />
 
             {/* AI Recommendation Banner */}
-            {selectedSuggestionData?.suggestedTime && (() => {
+            {selectedSuggestionData?.suggestedTime && selectedDate && (() => {
               const [aiHours, aiMinutes] = selectedSuggestionData.suggestedTime.split(':')
               const isUsingAiTime = selectedHour === aiHours && selectedMinute === aiMinutes
               
