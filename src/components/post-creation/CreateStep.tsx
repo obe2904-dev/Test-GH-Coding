@@ -1560,23 +1560,25 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
 
         {/* RIGHT: Platform Preview */}
         <div className="space-y-3 sticky top-4 self-start">
-          {/* Continue to Udgiv Button */}
-          <button
-            onClick={onNext}
-            className="w-full px-3 py-2.5 bg-cta text-text-inverse rounded-xl hover:bg-cta-hover transition-all font-semibold text-xs shadow-sm flex items-center justify-center gap-2"
-          >
-            <span>{t('create.continue', 'Fortsæt til Udgiv')}</span>
-            <ChevronRight className="w-4 h-4" />
-          </button>
-
-          <PlatformSelector
-            currentTier={currentTier}
-            selectedPlatforms={selectedPlatforms}
-            onSelectPlatforms={(platforms: string[]) => setSelectedPlatforms(platforms as ('facebook' | 'instagram')[])}
-            activePlatform={previewPlatform}
-            onActivePlatformChange={(platform: string) => setPreviewPlatform(platform as 'facebook' | 'instagram')}
-            availablePlatforms={enabledPlatforms as ('facebook' | 'instagram')[]}
-          />
+          {/* Platform Selector and Continue Button - Same Line */}
+          <div className="flex items-center gap-3">
+            <PlatformSelector
+              currentTier={currentTier}
+              selectedPlatforms={selectedPlatforms}
+              onSelectPlatforms={(platforms: string[]) => setSelectedPlatforms(platforms as ('facebook' | 'instagram')[])}
+              activePlatform={previewPlatform}
+              onActivePlatformChange={(platform: string) => setPreviewPlatform(platform as 'facebook' | 'instagram')}
+              availablePlatforms={enabledPlatforms as ('facebook' | 'instagram')[]}
+            />
+            
+            <button
+              onClick={onNext}
+              className="px-3 py-2.5 bg-cta text-text-inverse rounded-xl hover:bg-cta-hover transition-all font-semibold text-xs shadow-sm flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              <span>{t('create.continue', 'Fortsæt til Udgiv')}</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
 
             <div className="relative">
               {hasPhoto && currentPhoto && currentPhoto.type !== 'video' && (
