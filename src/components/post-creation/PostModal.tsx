@@ -7,12 +7,31 @@
  * - Published (udgivet): Read-only preview in Facebook/Instagram style
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { X, Calendar, Send, Trash2, Download, Copy, ExternalLink } from 'lucide-react'
 import type { PostStatus, Platform } from './PostFrame'
 import type { PlatformHashtag } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
 import { QuarterHourTimePicker } from '../ui/QuarterHourTimePicker'
+
+// Helper: Get current time rounded to next 15-minute interval
+function getNearest15MinInterval() {
+  const now = new Date()
+  const minutes = now.getMinutes()
+  const roundedMinutes = Math.ceil(minutes / 15) * 15
+  
+  if (roundedMinutes === 60) {
+    now.setHours(now.getHours() + 1)
+    now.setMinutes(0)
+  } else {
+    now.setMinutes(roundedMinutes)
+  }
+  
+  return {
+    hour: String(now.getHours()).padStart(2, '0'),
+    minute: String(now.getMinutes()).padStart(2, '0')
+  }
+}
 
 interface PostModalProps {
   isOpen: boolean
@@ -58,6 +77,7 @@ export function PostModal({
   onUpdateHashtags,
 }: PostModalProps) {
   const { isConnected } = useConnectionsStore()
+  const nearestTime = useMemo(() => getNearest15MinInterval(), [])
   const [isEditing, setIsEditing] = useState(false)
   const [editedText, setEditedText] = useState(post.text)
   const [isEditingHashtags, setIsEditingHashtags] = useState(false)
@@ -69,8 +89,8 @@ export function PostModal({
   const [showManualPosting, setShowManualPosting] = useState(false)
   const [copiedText, setCopiedText] = useState(false)
   const [confirmedPosted, setConfirmedPosted] = useState(false)
-  const [selectedHour, setSelectedHour] = useState('14')
-  const [selectedMinute, setSelectedMinute] = useState('00')
+  const [selectedHour, setSelectedHour] = useState(nearestTime.hour)
+  const [selectedMinute, setSelectedMinute] = useState(nearestTime.minute)
 
   if (!isOpen) return null
 
@@ -125,6 +145,10 @@ export function PostModal({
   }
 
   const handleDelete = async () => {
+    if (!confirm('Sikker på sletning af opslag?')) {
+      return
+    }
+    
     setIsDeleting(true)
     try {
       await onDelete(post.id, false)
@@ -246,11 +270,6 @@ export function PostModal({
               )}
             </div>
           )}
-
-          {/* Hashtags Section */}
-          <div className="mb-4">
-            <p className="text-sm text-slate-500 italic">Ingen hashtags</p>
-          </div>
 
           {/* Scheduled Time */}
           {post.scheduledAt && (
