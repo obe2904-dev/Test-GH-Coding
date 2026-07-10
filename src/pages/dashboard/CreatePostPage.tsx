@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, lazy, Suspense, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, lazy, Suspense, useRef, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useConnectionsStore } from '../../stores/connectionsStore'
@@ -7,7 +7,7 @@ import { usePostCreationStore } from '../../stores/postCreationStore'
 import type { WeeklyPlanSuggestion, PostContent } from '../../stores/postCreationStore'
 import { useContextDraft } from '../../hooks/useContextDraft'
 import { usePosts } from '../../hooks/usePosts'
-import type { PostKey as DbPostKey } from '../../hooks/usePosts'
+import type { PostKey as DbPostKey, LoadedPost } from '../../hooks/usePosts'
 import { useCommittedSuggestions } from '../../hooks/useCommittedSuggestions'
 import type { SuccessInfo as PublishSuccessInfo } from '../../components/post-creation/PublishStep'
 import { useBusinessData } from '../../hooks/useBusinessData'
@@ -261,7 +261,7 @@ export function CreatePostPage() {
   const [isLoadingWeeklyPlanSwitch, setIsLoadingWeeklyPlanSwitch] = useState(false)
 
   // ── Load all posts for idea tracking ──
-  const [allPosts, setAllPosts] = useState<any[]>([])
+  const [allPosts, setAllPosts] = useState<LoadedPost[]>([])
   useEffect(() => {
     const loadAllPosts = async () => {
       if (!businessData.business?.id) return

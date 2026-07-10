@@ -71,15 +71,7 @@ interface GenerateStepProps {
   activePath?: 'write' | 'ai-ideas' | 'weekly-plan'
   isReadOnly?: boolean
   /** Existing posts for current idea (to show in Forslag step) */
-  existingPosts?: Array<{
-    id: string
-    platform: string
-    status: string
-    postText: string | null
-    photoUrl: string | null
-    scheduledFor: Date | null
-    postedAt: Date | null
-  }>
+  existingPosts?: any[]
   /** Current idea title for the frame */
   currentIdeaTitle?: string
   /** Handler to jump to Udgiv and edit an existing post */
