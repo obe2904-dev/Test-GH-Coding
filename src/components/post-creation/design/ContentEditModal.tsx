@@ -125,7 +125,7 @@ export function ContentEditModal({
 
   // ── Text handlers ───────────────────────────────────────────────────────────
   const handleTextChange = useCallback((value: string) => {
-    setEditedText(prev => ({ ...prev, [activePlatform]: value }))
+    setEditedText(prev => ({ ...prev, [activePlatform]: value as string }))
     setIsEdited(true)
     setIsSpellingChecked(false)
   }, [activePlatform])
@@ -140,7 +140,7 @@ export function ContentEditModal({
     })
 
     if (result?.text) {
-      setEditedText(prev => ({ ...prev, [activePlatform]: result.text }))
+      setEditedText(prev => ({ ...prev, [activePlatform]: result.text as string }))
       setIsSpellingChecked(true)
       setIsEdited(false)
     }
@@ -175,7 +175,7 @@ export function ContentEditModal({
 
       const data = await response.json()
       if (data?.text) {
-        setEditedText(prev => ({ ...prev, [activePlatform]: data.text }))
+        setEditedText(prev => ({ ...prev, [activePlatform]: data.text as string }))
         setIsEdited(true)
         setIsSpellingChecked(false)
         setLengthAdjust(null)

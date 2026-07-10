@@ -1507,7 +1507,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
                     mediaType={currentPhoto?.type}
                     onUndo={handleUndoEdit}
                     canUndo={!!(currentPhoto?.adjustedUrlHistory?.length) || !!(currentPhoto?.adjustedUrl)}
-                    onEditText={() => setCaptionEditOpen(true)}
+                    onEditText={() => setContentEditOpen(true)}
                     onChangePhoto={() => changePhotoInputRef.current?.click()}
                   />
                   <input
