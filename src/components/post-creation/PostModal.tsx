@@ -370,10 +370,9 @@ export function PostModal({
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Left: Preview */}
-                <div className="space-y-3">
-                  <h4 className="text-sm font-semibold text-slate-700">Indhold</h4>
-                  
-                  {post.photoUrl && (
+                {post.photoUrl && (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-slate-700">Billede</h4>
                     <div className="rounded-lg overflow-hidden border-2 border-amber-200">
                       <img
                         src={post.photoUrl}
@@ -381,15 +380,11 @@ export function PostModal({
                         className="w-full h-auto"
                       />
                     </div>
-                  )}
-
-                  <div className="bg-white rounded-lg border-2 border-amber-200 p-3">
-                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{post.text}</p>
                   </div>
-                </div>
+                )}
 
                 {/* Right: Actions */}
-                <div className="space-y-3">
+                <div className={`space-y-3 ${!post.photoUrl ? 'lg:col-span-2' : ''}`}>
                   <h4 className="text-sm font-semibold text-slate-700">Trin til at poste</h4>
 
                   {post.photoUrl && (
