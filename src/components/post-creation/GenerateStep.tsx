@@ -27,6 +27,7 @@ import { EditorPane } from './EditorPane'
 import { ValidationBanner } from './ValidationBanner'
 import { StrategyGeneratedDisplay } from '../StrategyGeneratedDisplay'
 import { AiSuggestionsCard } from './AiSuggestionsCard'
+import { IdeaPostsFrame } from './publish/IdeaPostsFrame'
 
 interface GeneratedPost {
   ideaId: number
@@ -69,6 +70,20 @@ interface GenerateStepProps {
   /** Override activePath from parent (for URL-derived path to prevent flash) */
   activePath?: 'write' | 'ai-ideas' | 'weekly-plan'
   isReadOnly?: boolean
+  /** Existing posts for current idea (to show in Forslag step) */
+  existingPosts?: Array<{
+    id: string
+    platform: string
+    status: string
+    postText: string | null
+    photoUrl: string | null
+    scheduledFor: Date | null
+    postedAt: Date | null
+  }>
+  /** Current idea title for the frame */
+  currentIdeaTitle?: string
+  /** Handler to jump to Udgiv and edit an existing post */
+  onEditExistingPost?: (post: any) => void
 }
 
 export function GenerateStep({ 
@@ -83,6 +98,9 @@ export function GenerateStep({
   committedSuggestionIds,
   activePath: activePathProp,
   isReadOnly = false,
+  existingPosts = [],
+  currentIdeaTitle,
+  onEditExistingPost,
 }: GenerateStepProps) {
   const { t, i18n } = useTranslation(undefined, { keyPrefix: 'createPost' })
   const navigate = useNavigate()
@@ -1045,15 +1063,29 @@ export function GenerateStep({
             </div>
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <AiSuggestionsCard
-              onSelectSuggestion={handleSelectSuggestion}
-              onGenerate={handleValidatedNext}
-              businessId={businessId}
-              selectedIdea={selectedIdea}
-              committedSuggestionIds={committedSuggestionIds}
-            />
-          </div>
+          <>
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <AiSuggestionsCard
+                onSelectSuggestion={handleSelectSuggestion}
+                onGenerate={handleValidatedNext}
+                businessId={businessId}
+                selectedIdea={selectedIdea}
+                committedSuggestionIds={committedSuggestionIds}
+              />
+            </div>
+            
+            {/* Show existing posts for the selected idea */}
+            {existingPosts.length > 0 && onEditExistingPost && (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-4">
+                <IdeaPostsFrame
+                  ideaPosts={existingPosts}
+                  currentIdeaTitle={currentIdeaTitle || ''}
+                  onPostClick={onEditExistingPost}
+                  isLoading={false}
+                />
+              </div>
+            )}
+          </>
         )
       ) : showAiSuggestions ? (
         /* Show content locked to the active path — no tab switching */
@@ -1061,15 +1093,29 @@ export function GenerateStep({
           {/* AI Forslag path */}
           <div className={(activePathProp ?? storeActivePath) === 'ai-ideas' ? 'block' : 'hidden'}>
             {businessId ? (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <AiSuggestionsCard
-                  onSelectSuggestion={handleSelectSuggestion}
-                  onGenerate={handleValidatedNext}
-                  businessId={businessId}
-                  selectedIdea={selectedIdea}
-                  committedSuggestionIds={committedSuggestionIds}
-                />
-              </div>
+              <>
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <AiSuggestionsCard
+                    onSelectSuggestion={handleSelectSuggestion}
+                    onGenerate={handleValidatedNext}
+                    businessId={businessId}
+                    selectedIdea={selectedIdea}
+                    committedSuggestionIds={committedSuggestionIds}
+                  />
+                </div>
+                
+                {/* Show existing posts for the selected idea */}
+                {existingPosts.length > 0 && onEditExistingPost && (
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-4">
+                    <IdeaPostsFrame
+                      ideaPosts={existingPosts}
+                      currentIdeaTitle={currentIdeaTitle || ''}
+                      onPostClick={onEditExistingPost}
+                      isLoading={false}
+                    />
+                  </div>
+                )}
+              </>
             ) : (
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 text-center text-gray-500">
                 {t('generate.loading', 'Indlæser...')}

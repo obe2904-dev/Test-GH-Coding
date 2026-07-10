@@ -260,6 +260,67 @@ export function CreatePostPage() {
   // Loading state for weekly plan idea switching to prevent race conditions
   const [isLoadingWeeklyPlanSwitch, setIsLoadingWeeklyPlanSwitch] = useState(false)
 
+  // ── Load all posts for idea tracking ──
+  const [allPosts, setAllPosts] = useState<any[]>([])
+  useEffect(() => {
+    const loadAllPosts = async () => {
+      if (!businessData.business?.id) return
+      try {
+        const postsData = await posts.loadAllPosts(businessData.business.id, ['draft', 'scheduled', 'published'])
+        setAllPosts(postsData)
+      } catch (error) {
+        console.error('[CreatePostPage] Error loading posts:', error)
+      }
+    }
+    loadAllPosts()
+  }, [businessData.business?.id, currentStep]) // Reload when changing steps
+  
+  // Calculate posts for current idea (for showing in GenerateStep)
+  const ideaPosts = useMemo(() => {
+    if (!businessData.business?.id) return []
+    
+    const ideaKey =
+      activePath === 'weekly-plan' && weeklyPlanPost?.idea_id
+        ? { type: 'weekly_plan' as const, ideaId: weeklyPlanPost.idea_id }
+        : activePath === 'ai-ideas' && selectedSuggestionData?.id
+        ? { type: 'quick_suggestions' as const, suggestionId: selectedSuggestionData.id }
+        : activePath === 'write'
+        ? { type: 'write' as const }
+        : null
+
+    if (!ideaKey) return []
+
+    return allPosts.filter((post) => {
+      if (ideaKey.type === 'weekly_plan') {
+        return post.ideaSource === 'weekly_plan' && post.weeklyPlanIdeaId === ideaKey.ideaId
+      }
+      if (ideaKey.type === 'quick_suggestions') {
+        return post.ideaSource === 'quick_suggestions' && post.suggestionId === ideaKey.suggestionId
+      }
+      if (ideaKey.type === 'write') {
+        return post.ideaSource === 'write'
+      }
+      return false
+    }).sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt) : new Date(0)
+      const dateB = b.createdAt ? new Date(b.createdAt) : new Date(0)
+      return dateB.getTime() - dateA.getTime()
+    })
+  }, [allPosts, activePath, weeklyPlanPost?.idea_id, selectedSuggestionData?.id, businessData.business?.id])
+  
+  const currentIdeaTitle = useMemo(() => {
+    if (activePath === 'ai-ideas' && selectedSuggestionData) {
+      return selectedSuggestionData.title || selectedSuggestionData.whyExplanation?.split(/[.!?]\s+/)[0] || 'AI forslag'
+    }
+    if (activePath === 'weekly-plan' && weeklyPlanPost) {
+      return weeklyPlanPost.contentSubject?.dish || 'Ugeplan'
+    }
+    if (activePath === 'write') {
+      return 'Skriv selv'
+    }
+    return ''
+  }, [activePath, selectedSuggestionData, weeklyPlanPost])
+
   const buildDbDraftKey = useCallback((): DbPostKey | null => {
     const businessId = businessData.business?.id
     if (!businessId) return null
@@ -1177,6 +1238,14 @@ export function CreatePostPage() {
         
         if (allPlatformDraftsExist) {
           console.log('[handleCreateNext] ✅ Platform drafts already exist, skipping creation')
+          
+          // Delete any stray unified draft (created by auto-save when user went back to Design)
+          const unifiedDraft = await posts.loadPost(baseKey).catch(() => null)
+          if (unifiedDraft) {
+            await posts.deleteByKey(baseKey)
+            console.log('[handleCreateNext] 🗑️ Deleted stray unified draft to prevent future duplicates')
+          }
+          
           // Update existing drafts with latest suggested datetime only
           for (const platform of selectedPlatforms) {
             const platformKey = { ...baseKey, platform }
@@ -1641,6 +1710,46 @@ export function CreatePostPage() {
     setCurrentStep('create')
   }, [buildDbDraftKey, posts, refreshCommitted])
 
+  /** Called when user clicks on an existing post in GenerateStep to edit it */
+  const handleEditExistingPost = useCallback((post: any) => {
+    console.log('[CreatePostPage] Loading existing post into editor:', post.id)
+    
+    // Load the post data into the editor
+    usePostCreationStore.setState({
+      postContent: {
+        text: post.postText ?? '',
+        headline: '',
+        hashtags: [],
+        aiGeneratedHashtags: [],
+        adjustments: {
+          length: 'current',
+          tone: 'brand',
+          includeHashtags: false,
+          includeEmojis: false,
+          includeBookingLink: false,
+        },
+      },
+      photoContent: post.photoUrl ? {
+        uploadedMedia: [{
+          id: 'existing-post-photo',
+          file: null as any,
+          url: post.photoUrl,
+          originalUrl: post.photoUrl,
+          type: 'image' as const,
+          selectedVersionForPost: 'original' as const,
+        }],
+        selectedMedia: null,
+        isOriginal: true,
+        photoAdjustments: null,
+        carouselMode: false,
+      } : null,
+      selectedPlatforms: post.platform ? [post.platform.charAt(0).toUpperCase() + post.platform.slice(1)] : [],
+    })
+    
+    // Navigate directly to Udgiv step
+    setCurrentStep('publish')
+  }, [])
+
   const handlePublishBack = () => {
     setCurrentStep('create')
   }
@@ -1857,6 +1966,9 @@ export function CreatePostPage() {
                     hasUnsavedChanges={hasUnsavedChanges}
                     committedSuggestionIds={committedSuggestionIds}
                     isReadOnly={isPublishedReadOnly}
+                    existingPosts={ideaPosts}
+                    currentIdeaTitle={currentIdeaTitle}
+                    onEditExistingPost={handleEditExistingPost}
                   />
                 </div>
               )
