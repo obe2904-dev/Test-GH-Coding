@@ -1164,12 +1164,14 @@ export function CreatePostPage() {
     const baseKey = buildDbDraftKey()
     if (baseKey && activeContent && selectedPlatforms.length > 0) {
       console.log('[handleGenerateNext] Creating per-platform drafts in DB:', selectedPlatforms)
+      console.log('[handleGenerateNext] baseKey:', JSON.stringify(baseKey, null, 2))
       
       try {
         // Check if drafts already exist (user might be navigating back from Design)
         const existingDrafts = await Promise.all(
           selectedPlatforms.map(async (platform) => {
             const platformKey = { ...baseKey, platform }
+            console.log(`[handleGenerateNext] Checking for existing ${platform} draft, key:`, JSON.stringify(platformKey, null, 2))
             return await posts.loadPost(platformKey).catch(() => null)
           })
         )
@@ -1186,6 +1188,7 @@ export function CreatePostPage() {
             }
             
             console.log(`[handleGenerateNext] Creating draft for platform: ${platform}`)
+            console.log(`[handleGenerateNext] platformKey:`, JSON.stringify({ ...baseKey, platform }, null, 2))
             
             // Extract platform-specific content
             const { postText, contentJson } = buildPlatformDraftContent(
@@ -1330,9 +1333,12 @@ export function CreatePostPage() {
       const baseKey = buildDbDraftKey()
       if (baseKey && selectedPlatforms.length > 0) {
         console.log('[handleCreateNext] Updating existing drafts with latest content')
+        console.log('[handleCreateNext] baseKey:', JSON.stringify(baseKey, null, 2))
+        console.log('[handleCreateNext] selectedPlatforms:', selectedPlatforms)
         
         for (const platform of selectedPlatforms) {
           const platformKey = { ...baseKey, platform }
+          console.log(`[handleCreateNext] Loading draft for ${platform}, key:`, JSON.stringify(platformKey, null, 2))
           const existingDraft = await posts.loadPost(platformKey).catch(() => null)
           
           if (existingDraft && activeContent) {
