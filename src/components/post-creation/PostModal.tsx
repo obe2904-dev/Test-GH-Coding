@@ -79,7 +79,8 @@ export function PostModal({
 
   const handleSaveHashtags = async () => {
     if (onUpdateHashtags) {
-      await onUpdateHashtags(post.id, editedHashtags, applyToBoth)
+      // Hashtags are always platform-specific - never apply to both
+      await onUpdateHashtags(post.id, editedHashtags, false)
       setIsEditingHashtags(false)
     }
   }
@@ -342,7 +343,7 @@ export function PostModal({
                   className="w-4 h-4 text-cta border-slate-300 rounded focus:ring-cta"
                 />
                 <span className="text-sm font-medium text-slate-700">
-                  📋 Anvend ændringer på begge platforme (Facebook + Instagram)
+                  📋 Anvend ændringer på begge platforme (Facebook + Instagram). Gælder ikke hashtags
                 </span>
               </label>
             </div>
