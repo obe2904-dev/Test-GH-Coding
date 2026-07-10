@@ -8,7 +8,7 @@
  */
 
 import { useState, useMemo } from 'react'
-import { X, Calendar, Send, Trash2, Download, Copy, ExternalLink } from 'lucide-react'
+import { X, Calendar, Send, Trash2, Download, Copy, ExternalLink, AlertTriangle } from 'lucide-react'
 import type { PostStatus, Platform } from './PostFrame'
 import type { PlatformHashtag } from '../../stores/postCreationStore'
 import { useConnectionsStore } from '../../stores/connectionsStore'
@@ -84,6 +84,7 @@ export function PostModal({
   const [editedHashtags, setEditedHashtags] = useState<PlatformHashtag[]>(post.hashtags || [])
   const [isDeleting, setIsDeleting] = useState(false)
   const [isPosting, setIsPosting] = useState(false)
+  const [isConfirmingTime, setIsConfirmingTime] = useState(false)
   const [newScheduleTime, setNewScheduleTime] = useState('')
   const [showReschedule, setShowReschedule] = useState(false)
   const [showManualPosting, setShowManualPosting] = useState(false)
@@ -97,6 +98,13 @@ export function PostModal({
   const colors = PLATFORM_COLORS[post.platform]
   const isPublished = post.status === 'udgivet'
   const isDraft = post.status === 'udkast'
+  const isScheduled = post.status === 'planlagt'
+  
+  // Check if scheduled time is in the past
+  const scheduledTime = post.scheduledAt ? new Date(post.scheduledAt) : null
+  const isTimeInPast = scheduledTime ? scheduledTime < new Date() : false
+  const isTimeInFuture = scheduledTime ? scheduledTime > new Date() : false
+  
   // Text and hashtag editing now only happens in Design - Udgiv is read-only
   const canEditText = false
   const canSchedule = !isPublished
@@ -139,9 +147,29 @@ export function PostModal({
 
   const handleReschedule = async () => {
     if (!newScheduleTime) return
+    
+    const newScheduledTime = new Date(newScheduleTime)
+    if (newScheduledTime < new Date()) {
+      alert('Du kan ikke planlægge et opslag i fortiden.')
+      return
+    }
+    
     await onReschedule(post.id, newScheduleTime, false)
     setShowReschedule(false)
     onClose()
+  }
+  
+  const handleConfirmTime = async () => {
+    if (!post.scheduledAt) return
+    
+    setIsConfirmingTime(true)
+    try {
+      // Call onReschedule with the current time to change status from draft to scheduled
+      await onReschedule(post.id, post.scheduledAt, false)
+      onClose()
+    } finally {
+      setIsConfirmingTime(false)
+    }
   }
 
   const handleDelete = async () => {
@@ -273,18 +301,48 @@ export function PostModal({
 
           {/* Scheduled Time */}
           {post.scheduledAt && (
-            <div className="mb-4 p-3 bg-slate-50 rounded-lg flex items-center gap-2 text-sm">
-              <Calendar className="w-4 h-4 text-slate-500" />
-              <span className="text-slate-700">
-                {new Date(post.scheduledAt).toLocaleString('da-DK', {
-                  weekday: 'long',
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }).replace(',', ' kl.')}
-              </span>
+            <div className="mb-4 space-y-2">
+              <div className={`p-3 rounded-lg flex items-center justify-between ${
+                isTimeInPast ? 'bg-amber-50 border border-amber-200' : 'bg-slate-50'
+              }`}>
+                <div className="flex items-center gap-2 flex-1">
+                  <Calendar className="w-4 h-4 text-slate-500" />
+                  <div className="flex-1">
+                    <span className="text-sm text-slate-700 block">
+                      <span className="font-semibold">AI forslag til post:</span>{' '}
+                      {new Date(post.scheduledAt).toLocaleString('da-DK', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      }).replace(',', ' kl.')}
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Bekræft tid button - only show for drafts with future time */}
+                {isDraft && isTimeInFuture && (
+                  <button
+                    onClick={handleConfirmTime}
+                    disabled={isConfirmingTime}
+                    className="ml-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {isConfirmingTime ? 'Bekræfter...' : 'Bekræft tid'}
+                  </button>
+                )}
+              </div>
+              
+              {/* Warning if time is in the past */}
+              {isTimeInPast && (
+                <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  <span className="text-sm text-amber-800">
+                    Tidspunkt er i fortiden. Vælg Skift tidspunkt for at ændre
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
