@@ -847,51 +847,6 @@ function LocationIntelligencePage() {
         </div>
       )}
 
-      {/* Location Overview - Always show when analysis exists */}
-      {analysis && (
-        <div className="bg-surface rounded-lg border border-border p-6 mb-6">
-          <div className="flex items-start gap-4 mb-4">
-            <MapPinIcon className="w-10 h-10 text-[#0A7D5F]" />
-            <div className="flex-1">
-              <h3 className="text-xl font-medium text-brand mb-2">{t('location.basicDataTitle', 'Lokationsdata')}</h3>
-              
-              {analysis.city && (
-                <div className="mb-3">
-                  <p className="text-xs font-medium text-text-muted mb-1">{t('location.neighborhood', 'Neighborhood')}</p>
-                  <p className="text-sm text-brand font-medium">{analysis.city}</p>
-                </div>
-              )}
-              
-              {analysis.culturalContext?.description && (
-                <div className="mb-3">
-                  <p className="text-xs font-medium text-text-muted mb-1">{t('location.character', 'Area Character')}</p>
-                  <p className="text-sm text-text">{analysis.culturalContext.description}</p>
-                </div>
-              )}
-              
-              {analysis.matches && analysis.matches.length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-text-muted mb-2">{t('location.locationTypes', 'Location Types')}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {analysis.matches
-                      .filter(m => m.score >= 50)
-                      .sort((a, b) => b.score - a.score)
-                      .slice(0, 3)
-                      .map(match => (
-                        <div key={match.categoryId} className="inline-flex items-center gap-2 bg-surface-alt border border-border rounded-lg px-3 py-1.5">
-                          <LocationCategoryIcon categoryId={match.categoryId} className="w-4 h-4 text-text-secondary" />
-                          <span className="text-xs text-text">{match.categoryId.replace(/_/g, ' ')}</span>
-                          <span className="text-xs font-medium text-text-muted">{Math.round(match.score)}%</span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Concept Fit Results - Din Lokation hidden, only show final fit analysis */}
       {analysis && conceptFit && Object.keys(conceptFit).length > 0 && (
         <>
