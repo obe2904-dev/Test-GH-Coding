@@ -24,6 +24,7 @@ interface ScheduleCalendarPickerProps {
   onSelectHour: (hour: string) => void
   onSelectMinute: (minute: string) => void
   onManualDateSelection?: () => void
+  allowPastDates?: boolean // Allow clicking past dates for browsing historical posts
 }
 
 const getDaysInMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
@@ -94,7 +95,8 @@ export function ScheduleCalendarPicker({
   onSelectDate,
   onSelectHour,
   onSelectMinute,
-  onManualDateSelection
+  onManualDateSelection,
+  allowPastDates = false
 }: ScheduleCalendarPickerProps) {
   const initialMonth = useMemo(() => {
     if (!selectedDate) {
@@ -216,7 +218,8 @@ export function ScheduleCalendarPicker({
 
   const handleDayClick = useCallback(
     (date: Date) => {
-      if (isPastDate(date)) {
+      // Only prevent past date selection when not allowing past dates
+      if (!allowPastDates && isPastDate(date)) {
         return
       }
 
@@ -258,6 +261,7 @@ export function ScheduleCalendarPicker({
       }
     },
     [
+      allowPastDates,
       currentMonth,
       isPastDate,
       isToday,
@@ -345,10 +349,14 @@ export function ScheduleCalendarPicker({
               onClick={() => handleDayClick(dayObj.date)}
               onMouseEnter={() => setHoveredPastDayKey(pastDate ? key : null)}
               onMouseLeave={() => setHoveredPastDayKey((current) => (current === key ? null : current))}
-              aria-disabled={pastDate}
+              aria-disabled={pastDate && !allowPastDates}
               className={`relative aspect-square flex flex-col items-center justify-center text-xs font-medium rounded transition-all overflow-visible ${
-                pastDate
+                pastDate && !allowPastDates
                   ? 'bg-transparent text-slate-300 cursor-default'
+                  : pastDate && allowPastDates
+                  ? selected
+                    ? 'bg-slate-500 text-white shadow-md'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer'
                   : selected
                   ? timeInPast
                     ? 'bg-amber-500 text-white shadow-md'

@@ -1522,6 +1522,7 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
                   onSelectDate={(date) => setCalendarBrowseDate(date)}
                   onSelectHour={() => {}}
                   onSelectMinute={() => {}}
+                  allowPastDates={true}
                 />
               </div>
 
