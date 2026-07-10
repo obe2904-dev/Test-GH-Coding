@@ -1332,10 +1332,10 @@ ${contextFactors.length > 0 ? contextFactors.map(f => `• ${f}`).join('\n') : '
 
 Vigtigste påvirkninger:
 • Menu-temaer: ${signaturePreview}
-• Tone: ${parsed.formality_level === 'informal' ? 'uformel' : parsed.formality_level === 'formal' ? 'formel' : 'semi-formel'} med "${parsed.personality_traits.slice(0, 3).join(', ')}" personlighed
+• Tone: ${parsed.formality_level === 'informal' ? 'uformel' : parsed.formality_level === 'formal' ? 'formel' : 'semi-formel'}${parsed.personality_traits && parsed.personality_traits.length > 0 ? ` med "${parsed.personality_traits.slice(0, 3).join(', ')}" personlighed` : ''}
 ${input.geographicContext?.city_profile?.city ? `• Geografisk tilpasning: ${input.geographicContext.city_profile.city}` : ''}
 
-De ${parsed.tone_rules.length} voice rules sikrer konsistent stemme tilpasset specifik business-kontekst.`
+De ${toneRules.length} voice rules sikrer konsistent stemme tilpasset specifik business-kontekst.`
       : `AI-generated voice profile based on comprehensive business intelligence.
 
 Context factors analyzed:
@@ -1343,10 +1343,10 @@ ${contextFactors.length > 0 ? contextFactors.map(f => `• ${f}`).join('\n') : '
 
 Key influences:
 • Menu themes: ${signaturePreview}
-• Tone: ${parsed.formality_level} with "${parsed.personality_traits.slice(0, 3).join(', ')}" personality
+• Tone: ${parsed.formality_level}${parsed.personality_traits && parsed.personality_traits.length > 0 ? ` with "${parsed.personality_traits.slice(0, 3).join(', ')}" personality` : ''}
 ${input.geographicContext?.city_profile?.city ? `• Geographic adaptation: ${input.geographicContext.city_profile.city}` : ''}
 
-The ${parsed.tone_rules.length} voice rules ensure consistent voice adapted to specific business context.`
+The ${toneRules.length} voice rules ensure consistent voice adapted to specific business context.`
 
     // NEW V5.1: Categorize rules into structural vs style
     const categorized = categorizeRules(parsed.tone_rules || [])
