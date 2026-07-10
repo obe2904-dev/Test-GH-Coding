@@ -40,7 +40,7 @@ export function AudienceSegmentCard({ segment }: AudienceSegmentCardProps) {
             <span className="font-medium">{t('brandProfileV5.timing')}</span> {segment.timing_windows.join(', ')}
           </p>
         )}
-        {segment.motivation && (
+        {segment.motivation && segment.motivation !== 'social_gathering' && (
           <p>
             <span className="font-medium">{t('brandProfileV5.motivation')}</span> {segment.motivation}
           </p>
@@ -53,8 +53,8 @@ export function AudienceSegmentCard({ segment }: AudienceSegmentCardProps) {
           <p>
             <span className="font-medium">{t('brandProfileV5.decision')}</span>{' '}
             {segment.decision_timing === 'mixed' 
-              ? t('brandProfileV5.plannedAndFootfall', 'planned og footfall')
-              : segment.decision_timing
+              ? t('brandProfileV5.plannedAndSpontaneous')
+              : t(`brandProfileV5.decisionTiming.${segment.decision_timing}`, segment.decision_timing)
             }
           </p>
         )}

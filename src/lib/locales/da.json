@@ -1631,7 +1631,12 @@
     "timing": "Timing:",
     "motivation": "Motivation:",
     "decision": "Beslutning:",
-    "plannedAndFootfall": "planlagt og besøgstal",
+    "plannedAndSpontaneous": "planlagt og spontant",
+    "decisionTiming": {
+      "spontaneous": "spontant",
+      "planned": "planlagt",
+      "mixed": "planlagt og spontant"
+    },
     "goal": "Mål:",
     "contentAngles": "Content vinkler:",
     "locationOccasions": "Stedsanledninger:",
