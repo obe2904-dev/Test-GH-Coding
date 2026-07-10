@@ -1361,6 +1361,70 @@ function normalizeSegments(segments: AudienceSegment[]): AudienceSegment[] {
   });
 }
 
+// ===== PEOPLE_TYPE COERCION =====
+
+// Map common AI people_type variants → canonical labels. The model sometimes
+// returns a near-synonym (e.g. "Professionelle" instead of "Erhverv /
+// Forretningsgæster"); coercing here means one mislabelled segment never
+// hard-fails the entire brand profile. Unknown values fall back to a safe
+// default with a warning — we never throw over a label.
+const PEOPLE_TYPE_SYNONYMS: Record<string, string> = {
+  'professionelle': 'Erhverv / Forretningsgæster',
+  'professionel': 'Erhverv / Forretningsgæster',
+  'professional': 'Erhverv / Forretningsgæster',
+  'professionals': 'Erhverv / Forretningsgæster',
+  'erhverv': 'Erhverv / Forretningsgæster',
+  'forretningsgæster': 'Erhverv / Forretningsgæster',
+  'forretning': 'Erhverv / Forretningsgæster',
+  'business': 'Erhverv / Forretningsgæster',
+  'business professionals': 'Erhverv / Forretningsgæster',
+  'familier': 'Familier',
+  'familie': 'Familier',
+  'family': 'Familier',
+  'families': 'Familier',
+  'børnefamilier': 'Familier',
+  'par': 'Par',
+  'couple': 'Par',
+  'couples': 'Par',
+  'dates': 'Par',
+  'vennegrupper': 'Vennegrupper',
+  'venner': 'Vennegrupper',
+  'friends': 'Vennegrupper',
+  'friend groups': 'Vennegrupper',
+  'grupper': 'Vennegrupper',
+  'solo': 'Solo / Enkeltgæster',
+  'solo / enkeltgæster': 'Solo / Enkeltgæster',
+  'enkeltgæster': 'Solo / Enkeltgæster',
+  'single': 'Solo / Enkeltgæster',
+  'turister': 'Turister',
+  'tourist': 'Turister',
+  'tourists': 'Turister',
+  'lokale': 'Lokale / Stamgæster',
+  'lokale / stamgæster': 'Lokale / Stamgæster',
+  'stamgæster': 'Lokale / Stamgæster',
+  'locals': 'Lokale / Stamgæster',
+  'regulars': 'Lokale / Stamgæster',
+}
+
+function coercePeopleTypeLabel(raw: string | undefined): string {
+  if (!raw) return 'Lokale / Stamgæster'
+  const trimmed = raw.trim()
+  if (VALID_PEOPLE_TYPE_LABELS.includes(trimmed as any)) return trimmed
+  const key = trimmed.toLowerCase()
+  if (PEOPLE_TYPE_SYNONYMS[key]) {
+    console.warn(`[Audience] Coerced people_type "${trimmed}" → "${PEOPLE_TYPE_SYNONYMS[key]}"`)
+    return PEOPLE_TYPE_SYNONYMS[key]
+  }
+  for (const [syn, canonical] of Object.entries(PEOPLE_TYPE_SYNONYMS)) {
+    if (key.includes(syn)) {
+      console.warn(`[Audience] Coerced people_type "${trimmed}" → "${canonical}" (partial match)`)
+      return canonical
+    }
+  }
+  console.warn(`[Audience] Unknown people_type "${trimmed}" → default "Lokale / Stamgæster"`)
+  return 'Lokale / Stamgæster'
+}
+
 // ===== VALIDATION =====
 
 function validateAudienceProfile(
@@ -1700,7 +1764,12 @@ export async function generateAudienceSegments(
   const profile: ProgrammeAudienceProfile = {
     programme_type: programme.programme_type,
     programme_name: programme.programme_name,
-    audience_segments: result.audience_segments || [],
+    // Coerce AI people_type variants (e.g. "Professionelle") to canonical labels
+    // BEFORE validation so one mislabelled segment never hard-fails the profile.
+    audience_segments: (result.audience_segments || []).map((s: AudienceSegment) => ({
+      ...s,
+      people_type: coercePeopleTypeLabel(s.people_type),
+    })),
     segment_confidence: result.segment_confidence || 0,
     segment_reasoning: result.segment_reasoning || ""
   };
