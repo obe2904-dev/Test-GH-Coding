@@ -324,6 +324,25 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
     loadTimelineData()
   }, [loadTimelineData])
 
+  // ── Populate editingDraftIds with existing drafts for current idea ──
+  useEffect(() => {
+    // Find draft posts for the current idea
+    const draftPosts = ideaPosts.filter(post => post.status === 'draft')
+    
+    // Clear existing tracking
+    editingDraftIds.current = {}
+    
+    // Populate with existing draft IDs
+    draftPosts.forEach(post => {
+      if (post.platform) {
+        editingDraftIds.current[post.platform.toLowerCase()] = post.id
+        console.log(`[PublishStep] Found existing draft for ${post.platform}: ${post.id}`)
+      }
+    })
+    
+    console.log('[PublishStep] editingDraftIds initialized:', editingDraftIds.current)
+  }, [ideaPosts])
+
   // ── Auto-save Draft to DB ──
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastAutoSaveRef = useRef<string>('')
