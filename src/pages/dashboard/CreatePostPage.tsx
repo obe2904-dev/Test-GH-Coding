@@ -470,6 +470,13 @@ export function CreatePostPage() {
             console.log('[WeeklyPlanEffect] Restoring from DB draft, skipping generation')
             draftDbIdRef.current = dbDraft!.id
             setWeeklyPlanSuggestion(buildWeeklyPlanSuggestion(weeklyPlanPost, weeklyPlanPostIndex))
+            
+            // Restore selectedPlatforms from draft
+            if (dbDraft!.platforms && dbDraft!.platforms.length > 0) {
+              console.log('✅ Restoring platforms from draft:', dbDraft!.platforms)
+              setSelectedPlatforms(dbDraft!.platforms)
+            }
+            
             if (weeklyPlanPost.visualDirection) {
               const briefParts = [
                 weeklyPlanPost.visualDirection.subject,
@@ -725,6 +732,13 @@ export function CreatePostPage() {
             console.log('✅ Restoring draft from DB for suggestion:', selectedSuggestionData.id)
             draftDbIdRef.current = dbDraft!.id
             setActiveContent(dbDraftContent)
+            
+            // Restore selectedPlatforms from draft
+            if (dbDraft!.platforms && dbDraft!.platforms.length > 0) {
+              console.log('✅ Restoring platforms from draft:', dbDraft!.platforms)
+              setSelectedPlatforms(dbDraft!.platforms)
+            }
+            
             if (selectedSuggestionData.photoIdea) setActivePhotoIdea(selectedSuggestionData.photoIdea)
             if (dbDraft!.photoUrl) {
               setPhotoContent({
