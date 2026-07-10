@@ -70,7 +70,9 @@ export function PostModal({
   const colors = PLATFORM_COLORS[post.platform]
   const isPublished = post.status === 'udgivet'
   const isDraft = post.status === 'udkast'
-  const canEdit = !isPublished
+  // Text and hashtag editing now only happens in Design - Udgiv is read-only
+  const canEditText = false
+  const canSchedule = !isPublished
 
   const handleSaveText = async () => {
     await onUpdateText(post.id, editedText, applyToBoth)
@@ -185,13 +187,10 @@ export function PostModal({
               <p className="text-sm text-slate-700 whitespace-pre-wrap">
                 {post.text || <span className="italic text-slate-400">Ingen tekst</span>}
               </p>
-              {canEdit && !isPublished && (
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="mt-2 text-sm text-cta hover:underline font-medium"
-                >
-                  Rediger tekst
-                </button>
+              {canEditText && !isPublished && (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                  💡 Tip: Gå tilbage til Design for at redigere tekst
+                </div>
               )}
             </div>
           )}
@@ -275,13 +274,10 @@ export function PostModal({
               ) : (
                 <p className="text-sm text-slate-500 italic">Ingen hashtags</p>
               )}
-              {canEdit && !isPublished && onUpdateHashtags && (
-                <button
-                  onClick={() => setIsEditingHashtags(true)}
-                  className="mt-2 text-sm text-cta hover:underline font-medium"
-                >
-                  Rediger hashtags
-                </button>
+              {canEditText && !isPublished && onUpdateHashtags && (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                  💡 Tip: Gå tilbage til Design for at redigere hashtags
+                </div>
               )}
             </div>
           )}
@@ -303,7 +299,7 @@ export function PostModal({
           )}
 
           {/* Reschedule UI */}
-          {showReschedule && canEdit && (
+          {showReschedule && canSchedule && (
             <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Nyt tidspunkt
@@ -332,8 +328,8 @@ export function PostModal({
             </div>
           )}
 
-          {/* "Apply to Both" Checkbox (only if sibling exists and editing) */}
-          {siblingPost && canEdit && !isPublished && (
+          {/* "Apply to Both" Checkbox (only if sibling exists and can schedule) */}
+          {siblingPost && canSchedule && (
             <div className="mb-4 p-3 bg-purple-50 rounded-lg border border-purple-200">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -351,7 +347,7 @@ export function PostModal({
         </div>
 
         {/* Actions Footer */}
-        {canEdit && (
+        {canSchedule && (
           <div className="border-t border-slate-200 p-4 bg-slate-50 flex gap-3 flex-wrap">
             <button
               onClick={handlePostNow}

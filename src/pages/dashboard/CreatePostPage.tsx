@@ -320,6 +320,15 @@ export function CreatePostPage() {
     }
     return ''
   }, [activePath, selectedSuggestionData, weeklyPlanPost])
+  
+  // ── Step completion helpers (DB-based) ──
+  const hasDesignDrafts = useMemo(() => {
+    return ideaPosts.some(post => post.status === 'draft')
+  }, [ideaPosts])
+  
+  const hasPublishedPosts = useMemo(() => {
+    return ideaPosts.some(post => post.status === 'scheduled' || post.status === 'published')
+  }, [ideaPosts])
 
   const buildDbDraftKey = useCallback((): DbPostKey | null => {
     const businessId = businessData.business?.id
@@ -622,8 +631,7 @@ export function CreatePostPage() {
     saveDraft({ content: activeContent, photoMedia })
 
     // 2. Also save to DB draft with a real Storage photo URL.
-    //    If the photo is a blob: URL (from the file picker), upload it to Storage first
-    //    so the URL persists across page reloads.
+    //    Now saves to per-platform drafts to support Design-stage editing.
     const dbKey = buildDbDraftKey()
     if (!dbKey) return
 
@@ -664,18 +672,44 @@ export function CreatePostPage() {
         }
       }
 
-      const newId = await posts.saveDraft(dbKey, {
-        platforms: selectedPlatforms,
-        postText: activeContent.text,
-        photoUrl: persistedPhotoUrl,
-        contentJson: activeContent,
-        suggestedPostDatetime: computeSuggestedPostDatetime(),
-        // Include weekly plan IDs when saving weekly plan drafts
-        ...(activePath === 'weekly-plan' && weeklyPlanPost?.idea_id != null && {
-          weeklyPlanIdeaId: Number(weeklyPlanPost.idea_id)
+      // Update per-platform drafts (Design stage editing)
+      if (selectedPlatforms.length > 0 && currentStep === 'create') {
+        console.log('[AutoSave] Updating per-platform drafts:', selectedPlatforms)
+        for (const platform of selectedPlatforms) {
+          const platformKey = { ...dbKey, platform }
+          
+          // Extract platform-specific content
+          const { postText, contentJson } = buildPlatformDraftContent(
+            activeContent,
+            platform,
+            selectedPlatforms
+          )
+          
+          const newId = await posts.saveDraft(platformKey, {
+            platforms: [platform],
+            postText,
+            photoUrl: persistedPhotoUrl,
+            contentJson,
+            suggestedPostDatetime: computeSuggestedPostDatetime(),
+          })
+          
+          if (newId) draftDbIdRef.current = newId
+        }
+      } else {
+        // Fallback for other stages or when no platforms selected
+        const newId = await posts.saveDraft(dbKey, {
+          platforms: selectedPlatforms,
+          postText: activeContent.text,
+          photoUrl: persistedPhotoUrl,
+          contentJson: activeContent,
+          suggestedPostDatetime: computeSuggestedPostDatetime(),
+          // Include weekly plan IDs when saving weekly plan drafts
+          ...(activePath === 'weekly-plan' && weeklyPlanPost?.idea_id != null && {
+            weeklyPlanIdeaId: Number(weeklyPlanPost.idea_id)
+          })
         })
-      })
-      if (newId) draftDbIdRef.current = newId
+        if (newId) draftDbIdRef.current = newId
+      }
     }, 1500) // debounce: save 1.5s after the last change
 
     return () => clearTimeout(timer)
@@ -1126,6 +1160,65 @@ export function CreatePostPage() {
       console.log('[CreatePostPage] Keeping photos - same suggestion', currentSuggestionId)
     }
 
+    // ── NEW: Create per-platform draft posts in DB before advancing to Design ──
+    const baseKey = buildDbDraftKey()
+    if (baseKey && activeContent && selectedPlatforms.length > 0) {
+      console.log('[handleGenerateNext] Creating per-platform drafts in DB:', selectedPlatforms)
+      
+      try {
+        // Check if drafts already exist (user might be navigating back from Design)
+        const existingDrafts = await Promise.all(
+          selectedPlatforms.map(async (platform) => {
+            const platformKey = { ...baseKey, platform }
+            return await posts.loadPost(platformKey).catch(() => null)
+          })
+        )
+        
+        const allDraftsExist = existingDrafts.every(draft => draft !== null)
+        
+        if (!allDraftsExist) {
+          // Create drafts for platforms that don't have them yet
+          for (let i = 0; i < selectedPlatforms.length; i++) {
+            const platform = selectedPlatforms[i]
+            if (existingDrafts[i]) {
+              console.log(`[handleGenerateNext] Draft already exists for ${platform}, skipping`)
+              continue
+            }
+            
+            console.log(`[handleGenerateNext] Creating draft for platform: ${platform}`)
+            
+            // Extract platform-specific content
+            const { postText, contentJson } = buildPlatformDraftContent(
+              activeContent,
+              platform,
+              selectedPlatforms
+            )
+            
+            // Create platform-specific draft
+            const platformKey = { ...baseKey, platform }
+            const savedId = await posts.saveDraft(platformKey, {
+              platforms: [platform],
+              postText,
+              contentJson,
+              photoUrl: photoContent?.uploadedMedia?.[0]?.url || null,
+              suggestedPostDatetime: computeSuggestedPostDatetime(),
+            })
+            
+            console.log(`✅ Created ${platform} draft with ID: ${savedId}`)
+          }
+          
+          // Reload posts to update step indicators
+          const postsData = await posts.loadAllPosts(businessData.business!.id, ['draft', 'scheduled', 'published'])
+          setAllPosts(postsData)
+        } else {
+          console.log('[handleGenerateNext] All platform drafts already exist')
+        }
+      } catch (err) {
+        console.error('[handleGenerateNext] Failed to create platform drafts:', err)
+        // Non-fatal - user can still proceed to Design
+      }
+    }
+
     // Advance directly to Design step without success modal delay
     console.log('[CreatePostPage] Navigating to Design step')
     setCurrentStep('create')
@@ -1210,7 +1303,6 @@ export function CreatePostPage() {
       console.log('[handleCreateNext] Advancing from Design → Udgiv')
       console.log('[handleCreateNext] activePath:', activePath)
       console.log('[handleCreateNext] selectedPlatforms:', selectedPlatforms)
-      console.log('[handleCreateNext] activeContent:', activeContent)
       
       // Save current text to draftMap so it survives idea switching (weekly plan only)
       if (weeklyContentPlan && weeklyPlanPost?.idea_id != null && activeContent) {
@@ -1220,162 +1312,75 @@ export function CreatePostPage() {
       // Compute suggested posting datetime from AI suggestion
       const suggestedPostDatetime = computeSuggestedPostDatetime()
 
-    // Update suggestion status to 'consumed' when entering Udgiv stage
-    if (selectedSuggestionData?.id && businessData?.business?.id) {
-      try {
-        await updateSuggestionStatus(
-          selectedSuggestionData.id,
-          businessData.business.id,
-          'consumed'
-        )
-      } catch (err) {
-        console.error('[handleCreateNext] Failed to update suggestion status:', err)
-        // Non-blocking — continue with draft split even if status update fails
+      // Update suggestion status to 'consumed' when entering Udgiv stage
+      if (selectedSuggestionData?.id && businessData?.business?.id) {
+        try {
+          await updateSuggestionStatus(
+            selectedSuggestionData.id,
+            businessData.business.id,
+            'consumed'
+          )
+        } catch (err) {
+          console.error('[handleCreateNext] Failed to update suggestion status:', err)
+          // Non-blocking — continue even if status update fails
+        }
       }
-    }
 
-    // Split draft into per-platform drafts when moving to Publish with multiple platforms
-    if (selectedPlatforms.length > 1) {
+      // Update existing platform-specific drafts with latest content and photos
       const baseKey = buildDbDraftKey()
-      console.log('[handleCreateNext] baseKey:', baseKey)
-      if (baseKey) {
-        // Check if platform-specific drafts already exist to avoid duplicates
-        const platformDraftsExist = await Promise.all(
-          selectedPlatforms.map(async (platform) => {
-            const platformKey = { ...baseKey, platform }
-            const existing = await posts.loadPost(platformKey).catch(() => null)
-            return !!existing
-          })
-        )
+      if (baseKey && selectedPlatforms.length > 0) {
+        console.log('[handleCreateNext] Updating existing drafts with latest content')
         
-        const allPlatformDraftsExist = platformDraftsExist.every(exists => exists)
-        
-        if (allPlatformDraftsExist) {
-          console.log('[handleCreateNext] ✅ Platform drafts already exist, skipping creation')
+        for (const platform of selectedPlatforms) {
+          const platformKey = { ...baseKey, platform }
+          const existingDraft = await posts.loadPost(platformKey).catch(() => null)
           
-          // Delete any stray unified draft (created by auto-save when user went back to Design)
-          const unifiedDraft = await posts.loadPost(baseKey).catch(() => null)
-          if (unifiedDraft) {
-            await posts.deleteByKey(baseKey)
-            console.log('[handleCreateNext] 🗑️ Deleted stray unified draft to prevent future duplicates')
-          }
-          
-          // Update existing drafts with latest suggested datetime only
-          for (const platform of selectedPlatforms) {
-            const platformKey = { ...baseKey, platform }
-            const existingDraft = await posts.loadPost(platformKey).catch(() => null)
-            if (existingDraft && suggestedPostDatetime) {
-              await posts.saveDraft(platformKey, {
-                platforms: existingDraft.platforms,
-                postText: existingDraft.postText,
-                photoUrl: existingDraft.photoUrl,
-                contentJson: existingDraft.contentJson,
-                suggestedPostDatetime,
-              })
-            }
-          }
-        } else {
-          // Platform drafts don't all exist yet, proceed with creation/split
-          // Load the current combined draft
-          const combinedDraft = await posts.loadPost(baseKey).catch(() => null)
-          console.log('[handleCreateNext] combinedDraft:', combinedDraft)
-          
-          if (combinedDraft && combinedDraft.contentJson) {
-            console.log('[handleCreateNext] Splitting draft into platform-specific drafts:', selectedPlatforms)
-            console.log('[handleCreateNext] Combined draft platforms:', combinedDraft.platforms)
+          if (existingDraft && activeContent) {
+            // Extract latest platform-specific content
+            const { postText, contentJson } = buildPlatformDraftContent(
+              activeContent,
+              platform,
+              selectedPlatforms
+            )
             
-            // Create a platform-specific draft for each selected platform
-            for (const platform of selectedPlatforms) {
-              console.log(`[handleCreateNext] Processing platform: ${platform}`)
-              
-              // Extract platform-specific content using helper
-              const { postText, contentJson } = buildPlatformDraftContent(
-                combinedDraft.contentJson,
-                platform,
-                selectedPlatforms
-              )
-              
-              // Save platform-specific draft
-              const platformKey = { ...baseKey, platform }
-              const savedId = await posts.saveDraft(platformKey, {
-                platforms: [platform], // Single platform for this draft
-                postText,
-                contentJson,
-                photoUrl: combinedDraft.photoUrl,
-                suggestedPostDatetime,
-              })
-              
-              if (savedId) {
-                console.log(`✅ Saved ${platform} draft with ${postText.length} chars, ID: ${savedId}`)
-              } else {
-                console.error(`❌ FAILED to save ${platform} draft! Check console for database errors.`)
-                alert(`Failed to save ${platform} draft. Check browser console for details.`)
-              }
-            }
+            // Update draft with latest content, photo, and suggested datetime
+            await posts.saveDraft(platformKey, {
+              platforms: [platform],
+              postText,
+              contentJson,
+              photoUrl: photoContent?.uploadedMedia?.[0]?.url || existingDraft.photoUrl,
+              suggestedPostDatetime: suggestedPostDatetime || existingDraft.suggestedPostDatetime,
+            })
             
-            // Delete the original combined draft
-            await posts.deleteByKey(baseKey)
-            console.log('[handleCreateNext] ✅ Platform split complete, unified draft deleted')
-          } else {
-            console.warn('[handleCreateNext] No combined draft or contentJson found for split')
-            console.warn('[handleCreateNext] combinedDraft:', combinedDraft)
-            console.warn('[handleCreateNext] Will attempt to create platform drafts from activeContent')
+            console.log(`✅ Updated ${platform} draft`)
+          } else if (!existingDraft && activeContent) {
+            // Fallback: create draft if it doesn't exist (shouldn't happen normally)
+            console.warn(`[handleCreateNext] Draft missing for ${platform}, creating now`)
+            const { postText, contentJson } = buildPlatformDraftContent(
+              activeContent,
+              platform,
+              selectedPlatforms
+            )
             
-            // Fallback: create platform drafts from current activeContent
-            if (activeContent) {
-              for (const platform of selectedPlatforms) {
-                const { postText, contentJson } = buildPlatformDraftContent(
-                  activeContent,
-                  platform,
-                  selectedPlatforms
-                )
-                
-                const platformKey = { ...baseKey, platform }
-                const savedId = await posts.saveDraft(platformKey, {
-                  platforms: [platform],
-                  postText,
-                  contentJson,
-                  photoUrl: photoContent?.uploadedMedia?.[0]?.url ?? null,
-                  suggestedPostDatetime,
-                })
-                
-                if (savedId) {
-                  console.log(`✅ [Fallback] Saved ${platform} draft with ${postText.length} chars, ID: ${savedId}`)
-                } else {
-                  console.error(`❌ [Fallback] FAILED to save ${platform} draft!`)
-                  alert(`Failed to save ${platform} draft. Check browser console for details.`)
-                }
-              }
-              console.log('[handleCreateNext] ✅ Platform split complete (fallback)')
-            }
+            await posts.saveDraft(platformKey, {
+              platforms: [platform],
+              postText,
+              contentJson,
+              photoUrl: photoContent?.uploadedMedia?.[0]?.url || null,
+              suggestedPostDatetime,
+            })
+            
+            console.log(`✅ Created missing ${platform} draft`)
           }
         }
       }
-    } else {
-      // Single platform — update existing draft with suggested datetime
-      const baseKey = buildDbDraftKey()
-      if (baseKey) {
-        const existingDraft = await posts.loadPost(baseKey).catch(() => null)
-        if (existingDraft && suggestedPostDatetime) {
-          await posts.saveDraft(baseKey, {
-            platforms: existingDraft.platforms,
-            postText: existingDraft.postText,
-            photoUrl: existingDraft.photoUrl,
-            contentJson: existingDraft.contentJson,
-            suggestedPostDatetime,
-          })
-          console.log('[handleCreateNext] ✅ Single platform draft updated with suggested datetime')
-        }
+      
+      // Delete write_drafts AFTER successfully persisting to posts (write mode only)
+      if (activePath === 'write') {
+        await writeDraft.deleteDraft()
+        console.log('[handleCreateNext] ✅ Write draft deleted after posts DB persistence')
       }
-    }
-    
-    // Delete write_drafts AFTER successfully persisting to posts (write mode only)
-    // This ensures no data loss window - content is in posts before write_drafts is removed
-    if (activePath === 'write') {
-      await writeDraft.deleteDraft()
-      console.log('[handleCreateNext] ✅ Write draft deleted after posts DB persistence')
-    }
-    
+      
       console.log('[handleCreateNext] Advancing to Udgiv step')
       setCurrentStep('publish')
     } catch (error) {
@@ -1883,7 +1888,7 @@ export function CreatePostPage() {
               className={`flex items-center gap-2 px-4 py-2 rounded-lg flex-1 border-2 transition-all cursor-pointer ${
                 currentStep === 'create' 
                   ? 'bg-cta-surface border-cta' 
-                  : currentStep === 'publish'
+                  : hasDesignDrafts
                     ? 'bg-green-50 border-green-500 hover:border-green-600'
                     : 'bg-gray-50 border-gray-200 hover:border-gray-300'
               }`}
@@ -1891,25 +1896,25 @@ export function CreatePostPage() {
               <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white font-bold text-xs ${
                 currentStep === 'create' 
                   ? 'bg-cta' 
-                  : currentStep === 'publish'
+                  : hasDesignDrafts
                     ? 'bg-green-500'
                     : 'bg-gray-300'
               }`}>
-                {currentStep === 'publish' ? '✓' : '2'}
+                {hasDesignDrafts ? '✓' : '2'}
               </div>
               <div className="flex-1 text-left">
                 <div className={`text-sm font-semibold ${
                   currentStep === 'create' ? 'text-brand' : 
-                  currentStep === 'publish' ? 'text-green-900' : 
+                  hasDesignDrafts ? 'text-green-900' : 
                   'text-gray-500'
                 }`}>Design</div>
                 <div className={`text-xs ${
                   currentStep === 'create' ? 'text-cta-text' : 
-                  currentStep === 'publish' ? 'text-green-700' : 
+                  hasDesignDrafts ? 'text-green-700' : 
                   'text-gray-400'
                 }`}>
                   {currentStep === 'create' ? t('steps.choosePhoto') : 
-                   currentStep === 'publish' ? t('steps.photoReady') : 
+                   hasDesignDrafts ? t('steps.photoReady') : 
                    t('steps.pending')}
                 </div>
               </div>
@@ -1923,22 +1928,34 @@ export function CreatePostPage() {
               className={`flex items-center gap-2 px-4 py-2 rounded-lg flex-1 border-2 transition-all cursor-pointer ${
                 currentStep === 'publish' 
                   ? 'bg-cta-surface border-cta' 
-                  : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+                  : hasPublishedPosts
+                    ? 'bg-green-50 border-green-500 hover:border-green-600'
+                    : 'bg-gray-50 border-gray-200 hover:border-gray-300'
               }`}
             >
               <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white font-bold text-xs ${
-                currentStep === 'publish' ? 'bg-cta' : 'bg-gray-300'
+                currentStep === 'publish' 
+                  ? 'bg-cta' 
+                  : hasPublishedPosts
+                    ? 'bg-green-500'
+                    : 'bg-gray-300'
               }`}>
-                3
+                {hasPublishedPosts ? '✓' : '3'}
               </div>
               <div className="flex-1 text-left">
                 <div className={`text-sm font-semibold ${
-                  currentStep === 'publish' ? 'text-brand' : 'text-gray-500'
+                  currentStep === 'publish' ? 'text-brand' : 
+                  hasPublishedPosts ? 'text-green-900' : 
+                  'text-gray-500'
                 }`}>{t('steps.publish')}</div>
                 <div className={`text-xs ${
-                  currentStep === 'publish' ? 'text-cta-text' : 'text-gray-400'
+                  currentStep === 'publish' ? 'text-cta-text' : 
+                  hasPublishedPosts ? 'text-green-700' : 
+                  'text-gray-400'
                 }`}>
-                  {currentStep === 'publish' ? t('steps.schedule') : t('steps.pending')}
+                  {currentStep === 'publish' ? t('steps.schedule') : 
+                   hasPublishedPosts ? t('steps.published') : 
+                   t('steps.pending')}
                 </div>
               </div>
             </button>

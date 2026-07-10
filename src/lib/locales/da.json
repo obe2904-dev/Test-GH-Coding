@@ -659,7 +659,8 @@
       "choosePhoto": "Vælg billede",
       "photoReady": "Billede klar",
       "pending": "Afventer",
-      "schedule": "Planlæg"
+      "schedule": "Planlæg",
+      "published": "Udgivet"
     },
     "generate": {
       "title": "Lav Dit Opslag",
