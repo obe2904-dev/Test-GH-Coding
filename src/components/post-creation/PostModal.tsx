@@ -8,9 +8,11 @@
  */
 
 import { useState } from 'react'
-import { X, Calendar, Send, Trash2, Hash } from 'lucide-react'
+import { X, Calendar, Send, Trash2, Download, Copy, ExternalLink } from 'lucide-react'
 import type { PostStatus, Platform } from './PostFrame'
 import type { PlatformHashtag } from '../../stores/postCreationStore'
+import { useConnectionsStore } from '../../stores/connectionsStore'
+import { QuarterHourTimePicker } from '../ui/QuarterHourTimePicker'
 
 interface PostModalProps {
   isOpen: boolean
@@ -55,15 +57,20 @@ export function PostModal({
   onUpdateText,
   onUpdateHashtags,
 }: PostModalProps) {
+  const { isConnected } = useConnectionsStore()
   const [isEditing, setIsEditing] = useState(false)
   const [editedText, setEditedText] = useState(post.text)
   const [isEditingHashtags, setIsEditingHashtags] = useState(false)
   const [editedHashtags, setEditedHashtags] = useState<PlatformHashtag[]>(post.hashtags || [])
-  const [applyToBoth, setApplyToBoth] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isPosting, setIsPosting] = useState(false)
   const [newScheduleTime, setNewScheduleTime] = useState('')
   const [showReschedule, setShowReschedule] = useState(false)
+  const [showManualPosting, setShowManualPosting] = useState(false)
+  const [copiedText, setCopiedText] = useState(false)
+  const [confirmedPosted, setConfirmedPosted] = useState(false)
+  const [selectedHour, setSelectedHour] = useState('14')
+  const [selectedMinute, setSelectedMinute] = useState('00')
 
   if (!isOpen) return null
 
@@ -74,23 +81,36 @@ export function PostModal({
   const canEditText = false
   const canSchedule = !isPublished
 
+  const platformConnected = isConnected(post.platform.toLowerCase())
+
   const handleSaveText = async () => {
-    await onUpdateText(post.id, editedText, applyToBoth)
+    await onUpdateText(post.id, editedText, false)
     setIsEditing(false)
   }
 
   const handleSaveHashtags = async () => {
     if (onUpdateHashtags) {
-      // Hashtags are always platform-specific - never apply to both
       await onUpdateHashtags(post.id, editedHashtags, false)
       setIsEditingHashtags(false)
+    }
+  }
+
+  const handlePostNowClick = () => {
+    if (platformConnected) {
+      // Show confirmation for connected platforms
+      if (confirm('Bekræft post nu - Vil du udgive dette opslag nu?')) {
+        handlePostNow()
+      }
+    } else {
+      // Show manual posting UI for unconnected platforms
+      setShowManualPosting(true)
     }
   }
 
   const handlePostNow = async () => {
     setIsPosting(true)
     try {
-      await onPostNow(post.id, applyToBoth)
+      await onPostNow(post.id, false)
       onClose()
     } finally {
       setIsPosting(false)
@@ -99,7 +119,7 @@ export function PostModal({
 
   const handleReschedule = async () => {
     if (!newScheduleTime) return
-    await onReschedule(post.id, newScheduleTime, applyToBoth)
+    await onReschedule(post.id, newScheduleTime, false)
     setShowReschedule(false)
     onClose()
   }
@@ -107,11 +127,43 @@ export function PostModal({
   const handleDelete = async () => {
     setIsDeleting(true)
     try {
-      await onDelete(post.id, applyToBoth)
+      await onDelete(post.id, false)
       onClose()
     } finally {
       setIsDeleting(false)
     }
+  }
+
+  const handleCopyText = async () => {
+    await navigator.clipboard.writeText(post.text)
+    setCopiedText(true)
+    setTimeout(() => setCopiedText(false), 2000)
+  }
+
+  const handleDownloadPhoto = async () => {
+    if (!post.photoUrl) return
+    const link = document.createElement('a')
+    link.href = post.photoUrl
+    link.download = `post-${post.platform}-${Date.now()}.jpg`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const handleOpenPlatform = () => {
+    const urls: Record<string, string> = {
+      facebook: 'https://www.facebook.com/',
+      instagram: 'https://www.instagram.com/'
+    }
+    window.open(urls[post.platform.toLowerCase()] || urls.facebook, '_blank')
+  }
+
+  const handleConfirmPosted = async () => {
+    const [hours, minutes] = [parseInt(selectedHour), parseInt(selectedMinute)]
+    const postedAt = new Date()
+    postedAt.setHours(hours, minutes, 0, 0)
+    setConfirmedPosted(true)
+    await handlePostNow()
   }
 
   return (
@@ -196,91 +248,9 @@ export function PostModal({
           )}
 
           {/* Hashtags Section */}
-          {isEditingHashtags ? (
-            <div className="mb-4">
-              <label className="block text-sm font-semibold text-slate-700 mb-2">
-                Hashtags (# tilføjes automatisk)
-              </label>
-              <div className="space-y-2">
-                {editedHashtags.map((tag, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={tag.tag}
-                      onChange={(e) => {
-                        const newHashtags = [...editedHashtags]
-                        newHashtags[idx] = { ...tag, tag: e.target.value }
-                        setEditedHashtags(newHashtags)
-                      }}
-                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                      placeholder="hashtag"
-                    />
-                    <button
-                      onClick={() => {
-                        setEditedHashtags(editedHashtags.filter((_, i) => i !== idx))
-                      }}
-                      className="px-3 py-2 bg-white border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50"
-                    >
-                      Slet
-                    </button>
-                  </div>
-                ))}
-                <button
-                  onClick={() => {
-                    setEditedHashtags([...editedHashtags, { tag: '', enabled: true }])
-                  }}
-                  className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  + Tilføj hashtag
-                </button>
-              </div>
-              <div className="flex gap-2 mt-3">
-                <button
-                  onClick={handleSaveHashtags}
-                  className="px-4 py-2 bg-cta text-white rounded-lg text-sm font-semibold hover:bg-cta-hover"
-                >
-                  Gem
-                </button>
-                <button
-                  onClick={() => {
-                    setEditedHashtags(post.hashtags || [])
-                    setIsEditingHashtags(false)
-                  }}
-                  className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Annuller
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="mb-4">
-              {(post.hashtags && post.hashtags.length > 0) ? (
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Hash className="w-4 h-4 text-slate-500" />
-                    <span className="text-sm font-semibold text-slate-700">Hashtags</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {post.hashtags.map((tag, idx) => (
-                      <span
-                        key={idx}
-                        className="px-2 py-1 bg-slate-100 text-slate-700 text-xs rounded"
-                      >
-                        #{tag.tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500 italic">Ingen hashtags</p>
-              )}
-              {canEditText && !isPublished && onUpdateHashtags && (
-                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
-                  💡 Tip: Gå tilbage til Design for at redigere hashtags
-                </div>
-              )}
-            </div>
-          )}
+          <div className="mb-4">
+            <p className="text-sm text-slate-500 italic">Ingen hashtags</p>
+          </div>
 
           {/* Scheduled Time */}
           {post.scheduledAt && (
@@ -291,9 +261,10 @@ export function PostModal({
                   weekday: 'long',
                   day: 'numeric',
                   month: 'long',
+                  year: 'numeric',
                   hour: '2-digit',
                   minute: '2-digit',
-                })}
+                }).replace(',', ' kl.')}
               </span>
             </div>
           )}
@@ -327,30 +298,13 @@ export function PostModal({
               </div>
             </div>
           )}
-
-          {/* "Apply to Both" Checkbox (only if sibling exists and can schedule) */}
-          {siblingPost && canSchedule && (
-            <div className="mb-4 p-3 bg-purple-50 rounded-lg border border-purple-200">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={applyToBoth}
-                  onChange={(e) => setApplyToBoth(e.target.checked)}
-                  className="w-4 h-4 text-cta border-slate-300 rounded focus:ring-cta"
-                />
-                <span className="text-sm font-medium text-slate-700">
-                  📋 Anvend ændringer på begge platforme (Facebook + Instagram). Gælder ikke hashtags
-                </span>
-              </label>
-            </div>
-          )}
         </div>
 
         {/* Actions Footer */}
-        {canSchedule && (
+        {canSchedule && !showManualPosting && (
           <div className="border-t border-slate-200 p-4 bg-slate-50 flex gap-3 flex-wrap">
             <button
-              onClick={handlePostNow}
+              onClick={handlePostNowClick}
               disabled={isPosting}
               className="flex-1 px-4 py-2.5 bg-cta text-white rounded-lg text-sm font-semibold hover:bg-cta-hover disabled:opacity-50 flex items-center justify-center gap-2"
             >
@@ -376,6 +330,143 @@ export function PostModal({
               <Trash2 className="w-4 h-4" />
               {isDeleting ? 'Sletter...' : 'Slet'}
             </button>
+          </div>
+        )}
+
+        {/* Manual Posting Side-by-Side UI for Unconnected Platforms */}
+        {showManualPosting && (
+          <div className="border-t border-slate-200 bg-gradient-to-br from-amber-50 to-orange-50">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center">
+                  <span className="text-white text-lg">📋</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Manuel posting påkrævet</h3>
+                  <p className="text-sm text-slate-600">
+                    {post.platform.charAt(0).toUpperCase() + post.platform.slice(1)} er ikke tilsluttet - kopiér indholdet og post manuelt
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Left: Preview */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-semibold text-slate-700">Indhold</h4>
+                  
+                  {post.photoUrl && (
+                    <div className="rounded-lg overflow-hidden border-2 border-amber-200">
+                      <img
+                        src={post.photoUrl}
+                        alt="Post preview"
+                        className="w-full h-auto"
+                      />
+                    </div>
+                  )}
+
+                  <div className="bg-white rounded-lg border-2 border-amber-200 p-3">
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{post.text}</p>
+                  </div>
+                </div>
+
+                {/* Right: Actions */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-semibold text-slate-700">Trin til at poste</h4>
+
+                  {post.photoUrl && (
+                    <div className="bg-white rounded-lg border-2 border-slate-200 p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-6 h-6 rounded-full bg-cta text-white text-xs font-bold flex items-center justify-center">1</span>
+                        <span className="text-sm font-semibold text-slate-700">Gem billede</span>
+                      </div>
+                      <button
+                        onClick={handleDownloadPhoto}
+                        className="w-full px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 flex items-center justify-center gap-2"
+                      >
+                        <Download className="w-4 h-4" />
+                        Gem billede
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="bg-white rounded-lg border-2 border-slate-200 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-6 h-6 rounded-full bg-cta text-white text-xs font-bold flex items-center justify-center">{post.photoUrl ? '2' : '1'}</span>
+                      <span className="text-sm font-semibold text-slate-700">Kopiér tekst</span>
+                    </div>
+                    <button
+                      onClick={handleCopyText}
+                      className="w-full px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 flex items-center justify-center gap-2"
+                    >
+                      <Copy className="w-4 h-4" />
+                      {copiedText ? 'Kopieret!' : 'Kopiér tekst'}
+                    </button>
+                  </div>
+
+                  <div className="bg-white rounded-lg border-2 border-slate-200 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-6 h-6 rounded-full bg-cta text-white text-xs font-bold flex items-center justify-center">{post.photoUrl ? '3' : '2'}</span>
+                      <span className="text-sm font-semibold text-slate-700">Åbn {post.platform}</span>
+                    </div>
+                    <button
+                      onClick={handleOpenPlatform}
+                      className="w-full px-4 py-2 bg-cta text-white rounded-lg text-sm font-semibold hover:bg-cta-hover flex items-center justify-center gap-2"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Åbn {post.platform.charAt(0).toUpperCase() + post.platform.slice(1)}
+                    </button>
+                  </div>
+
+                  <div className="bg-white rounded-lg border-2 border-green-200 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center">{post.photoUrl ? '4' : '3'}</span>
+                      <span className="text-sm font-semibold text-slate-700">Bekræft at du har postet</span>
+                    </div>
+                    <div className="mb-3">
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Tidspunkt for post</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={selectedHour}
+                          onChange={(e) => setSelectedHour(e.target.value)}
+                          className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        >
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <option key={i} value={String(i).padStart(2, '0')}>
+                              {String(i).padStart(2, '0')}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={selectedMinute}
+                          onChange={(e) => setSelectedMinute(e.target.value)}
+                          className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        >
+                          {['00', '15', '30', '45'].map((min) => (
+                            <option key={min} value={min}>
+                              {min}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleConfirmPosted}
+                      disabled={confirmedPosted || isPosting}
+                      className="w-full px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      {confirmedPosted ? '✓ Bekræftet' : 'Bekræft postet'}
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => setShowManualPosting(false)}
+                    className="w-full px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50"
+                  >
+                    Tilbage
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
