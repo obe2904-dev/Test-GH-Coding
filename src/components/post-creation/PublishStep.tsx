@@ -487,21 +487,60 @@ export function PublishStep({ onNext, onBack, markAsSaved, hasUnsavedChanges, on
 
   // Modal action handlers
   const handleTimelinePostNow = useCallback(async (postId: string, applyToBoth: boolean) => {
-    // TODO: Implement post now logic
-    console.log('[PublishStep] Post now:', postId, 'applyToBoth:', applyToBoth)
-    await loadTimelineData()
+    console.log('[PublishStep] Publishing post now:', postId)
+    
+    const now = new Date()
+    const { error } = await updatePublishedPost(postId, {
+      postedAt: now,
+      status: 'published',
+      scheduledFor: null
+    })
+    
+    if (!error) {
+      console.log('[PublishStep] Post published successfully')
+      await loadTimelineData()
+    } else {
+      console.error('[PublishStep] Publish failed:', error)
+      alert('Kunne ikke udgive opslaget. Prøv igen.')
+    }
   }, [loadTimelineData])
 
   const handleReschedule = useCallback(async (postId: string, newTime: string, applyToBoth: boolean) => {
-    // TODO: Implement reschedule logic
-    console.log('[PublishStep] Reschedule:', postId, 'newTime:', newTime, 'applyToBoth:', applyToBoth)
-    await loadTimelineData()
+    console.log('[PublishStep] Rescheduling post:', postId, 'to', newTime)
+    
+    const newScheduledTime = new Date(newTime)
+    
+    if (newScheduledTime < new Date()) {
+      alert('Du kan ikke planlægge et opslag i fortiden.')
+      return
+    }
+    
+    const { error } = await updatePublishedPost(postId, {
+      postedAt: newScheduledTime,
+      status: 'scheduled',
+      scheduledFor: newScheduledTime
+    })
+    
+    if (!error) {
+      console.log('[PublishStep] Post rescheduled successfully')
+      await loadTimelineData()
+    } else {
+      console.error('[PublishStep] Reschedule failed:', error)
+      alert('Kunne ikke ændre tidspunkt. Prøv igen.')
+    }
   }, [loadTimelineData])
 
   const handleDeletePost = useCallback(async (postId: string, applyToBoth: boolean) => {
-    // TODO: Implement delete logic
-    console.log('[PublishStep] Delete:', postId, 'applyToBoth:', applyToBoth)
-    await loadTimelineData()
+    console.log('[PublishStep] Deleting post:', postId)
+    const { error, deleted } = await deletePublishedPost(postId)
+    
+    if (deleted && !error) {
+      console.log('[PublishStep] Post deleted successfully')
+      await loadTimelineData()
+    } else {
+      console.error('[PublishStep] Delete failed:', error)
+      alert(error || 'Kunne ikke slette opslaget. Prøv igen.')
+    }
   }, [loadTimelineData])
 
   const handleUpdateText = useCallback(async (postId: string, newText: string, applyToBoth: boolean) => {
