@@ -10,7 +10,7 @@ import { useVideoCover } from '../../hooks/useVideoCover'
 import { VideoCoverSelector } from '../media/VideoCoverSelector'
 import { UpgradeModal } from '../ui/UpgradeModal'
 import { PlatformSelector } from './shared/PlatformSelector'
-import { PlatformPreview, CaptionEditModal, HashtagEditModal, PhotoUploadManager, CarouselActivationBanner, CarouselSetup } from './design'
+import { PlatformPreview, ContentEditModal, PhotoUploadManager, CarouselActivationBanner, CarouselSetup } from './design'
 import { useCarouselOrganise } from '../../hooks/useCarouselOrganise'
 import { buildPlatformPreviewContent } from './publish/utils'
 import { usePhotoAnalysis } from '../../hooks/usePhotoAnalysis'
@@ -135,11 +135,8 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
   const changePhotoInputRef = useRef<HTMLInputElement>(null)
   const { organise, isOrganising, result: organiseResult, clearResult: clearOrganiseResult } = useCarouselOrganise()
 
-  // Caption edit modal state
-  const [captionEditOpen, setCaptionEditOpen] = useState(false)
-  
-  // Hashtag edit modal state
-  const [hashtagEditOpen, setHashtagEditOpen] = useState(false)
+  // Content edit modal state (unified text + hashtags)
+  const [contentEditOpen, setContentEditOpen] = useState(false)
 
   // Load storage quota on mount
   useEffect(() => {
@@ -230,6 +227,70 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
     }
     markAsChanged?.()
   }, [postContent, setPostContent, markAsChanged])
+
+  // Unified content save handler (text + hashtags)
+  const handleContentSave = useCallback(async (data: {
+    text: Record<string, string>
+    hashtags: Record<string, PlatformHashtag[]>
+    applyTextToBoth: boolean
+    saveAsExample?: boolean
+  }) => {
+    if (!postContent) return
+
+    // Handle text updates
+    if (postContent.platformSpecific && postContent.platformContent) {
+      // Platform-specific mode
+      const updatedPlatformContent: Record<string, PlatformContent> = {}
+      
+      for (const platform of Object.keys(postContent.platformContent)) {
+        const platformText = data.text[platform] || postContent.platformContent[platform].text
+        const platformHashtags = data.hashtags[platform] || postContent.platformContent[platform].hashtags || []
+        
+        updatedPlatformContent[platform] = {
+          ...postContent.platformContent[platform],
+          text: data.applyTextToBoth ? (data.text[previewPlatform] || platformText) : platformText,
+          hashtags: platformHashtags
+        }
+      }
+      
+      setPostContent({
+        ...postContent,
+        platformContent: updatedPlatformContent
+      })
+    } else {
+      // Shared mode - use text and hashtags from the first platform
+      const firstPlatform = Object.keys(data.text)[0]
+      setPostContent({
+        ...postContent,
+        text: data.text[firstPlatform] || postContent.text,
+        hashtags: data.hashtags[firstPlatform] || postContent.hashtags || []
+      })
+    }
+    
+    markAsChanged?.()
+
+    // Optionally save as voice example
+    if (data.saveAsExample && businessData.business?.id) {
+      try {
+        const { data: profileRow } = await supabase
+          .from('business_brand_profile')
+          .select('voice_examples')
+          .eq('business_id', businessData.business.id)
+          .single()
+        const existing = (profileRow?.voice_examples as Record<string, unknown>) ?? {}
+        const doSay: string[] = Array.isArray(existing.do_say) ? (existing.do_say as string[]) : []
+        const textToSave = data.text[previewPlatform] || Object.values(data.text)[0]
+        const deduplicated = [...new Set([...doSay, textToSave])].slice(-10)
+        await supabase
+          .from('business_brand_profile')
+          .update({ voice_examples: { ...existing, do_say: deduplicated } })
+          .eq('business_id', businessData.business.id)
+        console.log('[CreateStep] Saved edited text as voice example')
+      } catch (err) {
+        console.warn('[CreateStep] Failed to save voice example:', err)
+      }
+    }
+  }, [postContent, setPostContent, markAsChanged, previewPlatform, businessData.business?.id])
   
   // Load saved photo analysis and media when editing an existing suggestion
   useEffect(() => {
@@ -1611,8 +1672,8 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
                 onSelectVersionForPost={handleSelectVersionForPost}
                 currentTier={currentTier}
                 businessName={businessData.business?.name || undefined}
-                onEditCaption={() => setCaptionEditOpen(true)}
-                onEditHashtags={() => setHashtagEditOpen(true)}
+                onEditCaption={() => setContentEditOpen(true)}
+                onEditHashtags={() => setContentEditOpen(true)}
                 platformFormat={strategicIdea?.platformFormat}
                 carouselMode={photoContent?.carouselMode ?? false}
               />
@@ -1635,29 +1696,37 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
         feature={showUpgradeModal || 'photo-picker'}
       />
 
-      {/* Caption Edit Modal */}
-      <CaptionEditModal
-        isOpen={captionEditOpen}
-        onClose={() => setCaptionEditOpen(false)}
-        onSave={handleCaptionSave}
-        initialText={platformPreviewContent.text || ''}
+      {/* Content Edit Modal (unified text + hashtags) */}
+      <ContentEditModal
+        isOpen={contentEditOpen}
+        onClose={() => setContentEditOpen(false)}
+        onSave={handleContentSave}
+        selectedPlatforms={selectedPlatforms}
+        initialText={
+          postContent?.platformSpecific && postContent?.platformContent
+            ? {
+                facebook: postContent.platformContent['facebook']?.text || '',
+                instagram: postContent.platformContent['instagram']?.text || ''
+              }
+            : {
+                facebook: postContent?.text || '',
+                instagram: postContent?.text || ''
+              }
+        }
+        initialHashtags={
+          postContent?.platformSpecific && postContent?.platformContent
+            ? {
+                facebook: postContent.platformContent['facebook']?.hashtags || [],
+                instagram: postContent.platformContent['instagram']?.hashtags || []
+              }
+            : {
+                facebook: postContent?.hashtags || [],
+                instagram: postContent?.hashtags || []
+              }
+        }
         currentTier={currentTier}
         language={i18n.language}
         businessId={businessData.business?.id || undefined}
-      />
-
-      {/* Hashtag Edit Modal */}
-      <HashtagEditModal
-        isOpen={hashtagEditOpen}
-        onClose={() => setHashtagEditOpen(false)}
-        onSave={handleHashtagSave}
-        sharedHashtags={postContent?.hashtags || []}
-        platformHashtags={postContent?.platformContent ? {
-          facebook: postContent.platformContent['facebook']?.hashtags || [],
-          instagram: postContent.platformContent['instagram']?.hashtags || []
-        } : {}}
-        selectedPlatforms={selectedPlatforms}
-        isPlatformSpecific={postContent?.platformSpecific || false}
       />
 
       {/* Media Gallery Modal */}
