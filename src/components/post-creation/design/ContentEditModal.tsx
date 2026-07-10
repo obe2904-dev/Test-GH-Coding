@@ -54,7 +54,6 @@ export interface ContentEditModalProps {
     text: Record<string, string>
     hashtags: Record<string, PlatformHashtag[]>
     applyTextToBoth: boolean
-    saveAsExample?: boolean
   }) => void
   selectedPlatforms: string[]
   initialText: Record<string, string>
@@ -103,9 +102,6 @@ export function ContentEditModal({
   const [editedHashtags, setEditedHashtags] = useState<Record<string, PlatformHashtag[]>>({})
   const [newHashtag, setNewHashtag] = useState('')
 
-  // ── Voice example save option ───────────────────────────────────────────────
-  const [saveAsVoiceExample, setSaveAsVoiceExample] = useState(false)
-
   // ── Reset state when modal opens ────────────────────────────────────────────
   useEffect(() => {
     if (isOpen) {
@@ -117,7 +113,6 @@ export function ContentEditModal({
       setLengthAdjust(null)
       setToneAdjust(null)
       setIsAIAdjusting(false)
-      setSaveAsVoiceExample(false)
       setApplyToBoth(false)
       setNewHashtag('')
     }
@@ -233,10 +228,9 @@ export function ContentEditModal({
       text: editedText,
       hashtags: editedHashtags,
       applyTextToBoth: applyToBoth,
-      saveAsExample: saveAsVoiceExample,
     })
     onClose()
-  }, [editedText, editedHashtags, applyToBoth, saveAsVoiceExample, onSave, onClose])
+  }, [editedText, editedHashtags, applyToBoth, onSave, onClose])
 
   // ── Keyboard shortcuts ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -448,19 +442,6 @@ export function ContentEditModal({
                 </>
               )}
             </div>
-
-            {/* Voice Example Checkbox */}
-            {businessId && (
-              <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={saveAsVoiceExample}
-                  onChange={(e) => setSaveAsVoiceExample(e.target.checked)}
-                  className="w-4 h-4 text-cta border-gray-300 rounded focus:ring-cta"
-                />
-                {isDanish ? 'Gem som stemmeeksempel i din brandprofil' : 'Save as voice example in your brand profile'}
-              </label>
-            )}
           </div>
 
           {/* Divider */}

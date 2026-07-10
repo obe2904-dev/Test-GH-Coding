@@ -233,7 +233,6 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
     text: Record<string, string>
     hashtags: Record<string, PlatformHashtag[]>
     applyTextToBoth: boolean
-    saveAsExample?: boolean
   }) => {
     if (!postContent) return
 
@@ -268,29 +267,7 @@ export function CreateStep({ onNext, onBack, onStepClick: _onStepClick, markAsCh
     }
     
     markAsChanged?.()
-
-    // Optionally save as voice example
-    if (data.saveAsExample && businessData.business?.id) {
-      try {
-        const { data: profileRow } = await supabase
-          .from('business_brand_profile')
-          .select('voice_examples')
-          .eq('business_id', businessData.business.id)
-          .single()
-        const existing = (profileRow?.voice_examples as Record<string, unknown>) ?? {}
-        const doSay: string[] = Array.isArray(existing.do_say) ? (existing.do_say as string[]) : []
-        const textToSave = data.text[previewPlatform] || Object.values(data.text)[0]
-        const deduplicated = [...new Set([...doSay, textToSave])].slice(-10)
-        await supabase
-          .from('business_brand_profile')
-          .update({ voice_examples: { ...existing, do_say: deduplicated } })
-          .eq('business_id', businessData.business.id)
-        console.log('[CreateStep] Saved edited text as voice example')
-      } catch (err) {
-        console.warn('[CreateStep] Failed to save voice example:', err)
-      }
-    }
-  }, [postContent, setPostContent, markAsChanged, previewPlatform, businessData.business?.id])
+  }, [postContent, setPostContent, markAsChanged, previewPlatform])
   
   // Load saved photo analysis and media when editing an existing suggestion
   useEffect(() => {
