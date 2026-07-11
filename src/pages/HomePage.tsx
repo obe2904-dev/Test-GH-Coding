@@ -42,7 +42,7 @@ export function HomePage() {
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
             {t('home.heroBadge')}
           </div>
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight text-white">
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight text-white whitespace-pre-line">
             {t('home.heroTitle')}
           </h1>
           <p className="mt-6 text-lg sm:text-xl text-slate-200 max-w-3xl">
