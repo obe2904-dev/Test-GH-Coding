@@ -215,18 +215,22 @@ export function Sidebar({ className = '' }: SidebarProps) {
             onClick={() => navigate('/dashboard/plans')}
             className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all"
           >
-            <span>Gratis</span>
-            <span className="text-purple-400">•</span>
-            <span>Opgrader</span>
+            <span>Opgrader: Free</span>
           </button>
         ) : currentTier === 'standardplus' ? (
-          <div className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-[10px] font-semibold text-blue-700">
-            <span>Smart</span>
-          </div>
+          <button
+            onClick={() => navigate('/dashboard/plans')}
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-md text-[10px] font-semibold text-blue-700 hover:bg-blue-100 transition-all cursor-pointer"
+          >
+            <span>Opgrader: Smart</span>
+          </button>
         ) : currentTier === 'premium' ? (
-          <div className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-purple-50 border border-purple-200 rounded-md text-[10px] font-semibold text-purple-700">
+          <button
+            onClick={() => navigate('/dashboard/plans')}
+            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-purple-50 border border-purple-200 rounded-md text-[10px] font-semibold text-purple-700 hover:bg-purple-100 transition-all cursor-pointer"
+          >
             <span>Pro</span>
-          </div>
+          </button>
         ) : null}
       </div>
 
