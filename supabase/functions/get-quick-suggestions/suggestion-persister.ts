@@ -35,6 +35,68 @@ function slotForPosition(pos: number): string {
 }
 
 /**
+ * Determine intelligent CTA intent based on time, weather, and booking capability
+ * Prioritizes booking for prime dining times and good outdoor weather
+ * 
+ * @param slot - Slot type (offering/guest_moment/brand_behind)
+ * @param suggestedTime - Suggested posting time (HH:MM)
+ * @param weatherForecast - Weather forecast JSON string
+ * @param bookingUrl - Business booking URL (if available)
+ * @param hasOutdoorSeating - Whether business has outdoor seating
+ * @returns CTA intent: 'booking', 'visit', 'social', or 'engagement'
+ */
+function determineCtaIntent(
+  slot: string | undefined,
+  suggestedTime: string,
+  weatherForecast: string | null,
+  bookingUrl: string | null,
+  hasOutdoorSeating: boolean
+): string {
+  // Non-offering slots use fixed intents
+  if (slot === 'guest_moment') return 'social'
+  if (slot === 'brand_behind') return 'engagement'
+  
+  // No booking URL = can't use booking intent
+  if (!bookingUrl) return 'visit'
+  
+  // Parse suggested time
+  const [hours] = suggestedTime.split(':').map(Number)
+  
+  // Check for good outdoor weather
+  let hasGoodOutdoorWeather = false
+  if (hasOutdoorSeating && weatherForecast) {
+    try {
+      const weather = JSON.parse(weatherForecast)
+      hasGoodOutdoorWeather = !!(weather.outdoor && 
+        (weather.outdoor.includes('Perfekt') || weather.outdoor.includes('Bedst')))
+    } catch {
+      // Invalid JSON, ignore
+    }
+  }
+  
+  // BOOKING TRIGGERS:
+  // 1. Dinner hours (17:00-21:00) - prime reservation time
+  if (hours >= 17 && hours <= 21) {
+    return 'booking'
+  }
+  
+  // 2. Weekend brunch (Saturday/Sunday 10:00-14:00)
+  const now = new Date()
+  const isWeekend = now.getDay() === 0 || now.getDay() === 6
+  if (isWeekend && hours >= 10 && hours <= 14) {
+    return 'booking'
+  }
+  
+  // 3. Perfect outdoor weather + outdoor seating = booking opportunity
+  if (hasGoodOutdoorWeather && hours >= 11 && hours <= 20) {
+    return 'booking'
+  }
+  
+  // Default to casual visit for other times
+  return 'visit'
+}
+
+/**
  * Determine content angle based on weather and dish characteristics
  */
 export function determineContentAngle(
@@ -105,7 +167,9 @@ export async function persistAndAssemble(
     kitchenCloseTime?: string | null,
     programs?: Array<{ name: string; start: string; end: string }>,
     nowOverrideMins?: number
-  ) => string
+  ) => string,
+  bookingUrl?: string | null,
+  hasOutdoorSeating?: boolean
 ): Promise<any[]> {
   // Preserve Gemini-provided dish fields before the insert row-builder overwrites them
   const menuItemNames: Record<number, string> = {}
@@ -241,8 +305,13 @@ export async function persistAndAssemble(
         normalizedType === 'product'
           ? dishTextBriefs[idx] || menuItemDescriptions[idx] || ''
           : s.concrete_anchor || '',
-      cta_intent:
-        s.slot === 'guest_moment' ? 'social' : s.slot === 'brand_behind' ? 'engagement' : 'visit',
+      cta_intent: determineCtaIntent(
+        s.slot, 
+        row.suggested_time, 
+        weatherForecast, 
+        bookingUrl ?? null, 
+        hasOutdoorSeating ?? false
+      ),
       media_suggestion: s.media_suggestion || null,
       // Clear cached generation when regenerating - forces fresh text generation
       generated_text: null,

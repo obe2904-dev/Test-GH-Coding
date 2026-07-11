@@ -490,7 +490,7 @@ Type: ${ctx.effectiveVertical}${sanitizedBusinessCharacter ? ` — ${sanitizedBu
 Vejr: ${ctx.weatherInfo} | Sæson: ${ctx.season}
 Dag: ${ctx.dayName} (${ctx.dayBehavior.danishMode}) | Weekend: ${ctx.isWeekend ? 'ja' : 'nej'}
 Dagsstemning: ${ctx.dayBehavior.emphasis}
-Udeservering: ${ctx.outdoorNote}${ctx.outdoorProhibitionBlock}${locationNamingRule}${programConstraint}${(ctx.audienceBreadth !== 'broad' && ctx.businessModelType !== 'offer_led' && ctx.targetAudienceText) ? `\nAktiv målgruppe: ${ctx.targetAudienceText}` : ''}${(ctx.audienceBreadth !== 'broad' && ctx.businessModelType !== 'offer_led' && ctx.activeSegmentAngle) ? `\nAnbefalet vinkel: ${ctx.activeSegmentAngle}` : ''}${ctx.priceLevel ? `\nPrisniveau: ${['', 'Budget', 'Casual', 'Middelklasse', 'Premium'][ctx.priceLevel] || ''}` : ''}${ctx.identityKeywords ? `\nNøgleord: ${ctx.identityKeywords}` : ''}`
+Udeservering: ${ctx.outdoorNote}${ctx.outdoorProhibitionBlock}${ctx.outdoorNote?.includes('Perfekt') || ctx.outdoorNote?.includes('GODT VEJR') ? '\n🌤️ STRATEGISK ANBEFALING: Med perfekt udevejr SOM VI HAR I DAG skal mindst ÉT af de tre forslag fremhæve udeservering som central vinkel. Brug konkrete udtryk: "terrassen", "udenfor", "i solen", "frisk luft" — gør vejret til en del af forslaget, ikke bare en sidenote.' : ''}${locationNamingRule}${programConstraint}${(ctx.audienceBreadth !== 'broad' && ctx.businessModelType !== 'offer_led' && ctx.targetAudienceText) ? `\nAktiv målgruppe: ${ctx.targetAudienceText}` : ''}${(ctx.audienceBreadth !== 'broad' && ctx.businessModelType !== 'offer_led' && ctx.activeSegmentAngle) ? `\nAnbefalet vinkel: ${ctx.activeSegmentAngle}` : ''}${ctx.priceLevel ? `\nPrisniveau: ${['', 'Budget', 'Casual', 'Middelklasse', 'Premium'][ctx.priceLevel] || ''}` : ''}${ctx.identityKeywords ? `\nNøgleord: ${ctx.identityKeywords}` : ''}`
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -509,7 +509,7 @@ export function buildFreeSharedContext(ctx: DagensPromptContext): string {
   return `Forretning: ${ctx.businessName}${ctx.city ? `, ${ctx.city}` : ''}
 Type: ${ctx.effectiveVertical}${sanitizedBusinessCharacter ? ` — ${sanitizedBusinessCharacter}` : ''}${cuisineBlock}
 Vejr: ${ctx.weatherInfo} | Sæson: ${ctx.season}
-Udeservering: ${ctx.outdoorNote}${ctx.outdoorProhibitionBlock}${ctx.priceLevel ? `\nPrisniveau: ${['', 'Budget', 'Casual', 'Middelklasse', 'Premium'][ctx.priceLevel] || ''}` : ''}`
+Udeservering: ${ctx.outdoorNote}${ctx.outdoorProhibitionBlock}${ctx.outdoorNote?.includes('Perfekt') || ctx.outdoorNote?.includes('GODT VEJR') ? '\n🌤️ STRATEGISK ANBEFALING: Med perfekt udevejr SOM VI HAR I DAG skal mindst ÉT af de tre forslag fremhæve udeservering som central vinkel. Brug konkrete udtryk: "terrassen", "udenfor", "i solen", "frisk luft".' : ''}${ctx.priceLevel ? `\nPrisniveau: ${['', 'Budget', 'Casual', 'Middelklasse', 'Premium'][ctx.priceLevel] || ''}` : ''}`
 }
 
 // ────────────────────────────────────────────────────────────────────────────

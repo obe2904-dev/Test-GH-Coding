@@ -617,13 +617,13 @@ async function fetchHourlyWeatherUntilEOD(
     const dominantWMO = Array.from(wmoFreq.entries()).reduce((a, b) => a[1] > b[1] ? a : b)[0]
     const dominantCondition = mapWMOToCondition(dominantWMO)
     
-    // Check for rain risk
-    const rainHours = remainingHours.filter(h => h.precipProb > 30)
+    // Check for rain risk (threshold raised to 50% to reduce false positives)
+    const rainHours = remainingHours.filter(h => h.precipProb > 50)
     let rainRisk = ''
     if (rainHours.length > 0) {
       const highestPrecip = Math.max(...rainHours.map(h => h.precipProb))
       const firstRainHour = rainHours[0].hour
-      if (highestPrecip > 50) {
+      if (highestPrecip > 70) {
         rainRisk = `Regn fra kl. ${firstRainHour.toString().padStart(2, '0')} (${highestPrecip}%)`
       } else {
         rainRisk = `Risiko for regn efter kl. ${firstRainHour.toString().padStart(2, '0')}`
@@ -1927,7 +1927,10 @@ serve(async (req) => {
       .eq('business_id', businessId)
       .single()
     
-    console.log(`✅ V5 data loaded: ${v5Programmes?.length || 0} programmes, ops=${!!businessOps}`)
+    // Extract booking URL for CTA determination
+    const bookingUrl = businessProfile?.booking_url ?? null
+    
+    console.log(`✅ V5 data loaded: ${v5Programmes?.length || 0} programmes, ops=${!!businessOps}, bookingUrl=${!!bookingUrl}`)
 
     let brandProfile: any = null
     let rawAudienceSegments: any = null  // Declared here for broader scope access
@@ -4031,7 +4034,8 @@ Skab følelsesmæssig forbindelse og brand awareness for fremtidige besøg.
       suggestions, effectiveSlotCount, supabase, businessId, today, weatherForecast,
       menuDescriptionMap, slotExpectedContentTypes, todayOpenTime, todayCloseTime, kitchenCloseTime,
       regenerate, plannerRationale, programsFromMenu, clientNow, timeline.slots,
-      rotationQueue, currentServicePeriod, weatherInfo  // NEW: metadata parameters
+      rotationQueue, currentServicePeriod, weatherInfo,  // NEW: metadata parameters
+      bookingUrl, hasOutdoorSeating  // NEW: CTA intelligence parameters
     )
 
     // ── Query Weekly Plan ideas for today (cross-system awareness) ──────────
