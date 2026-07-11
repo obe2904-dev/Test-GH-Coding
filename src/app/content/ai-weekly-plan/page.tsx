@@ -1224,6 +1224,34 @@ export default function AIWeeklyPlanPage() {
           </div>
         </div>
 
+        {/* Week Toggle - Always show after initial load to prevent navigation trap */}
+        {!loading && !generating && (
+          <div className="bg-white border border-slate-200 rounded-lg px-4 py-3 mb-4 flex justify-end">
+            <div className="flex bg-slate-100 rounded-md p-0.5">
+              <button
+                onClick={() => handleViewingWeekChange('current')}
+                className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                  viewingWeek === 'current'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {t('weekToggle.current')}
+              </button>
+              <button
+                onClick={() => handleViewingWeekChange('next')}
+                className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                  viewingWeek === 'next'
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {t('weekToggle.next')}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Error Message */}
         {error && (
           <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
@@ -1407,34 +1435,6 @@ export default function AIWeeklyPlanPage() {
                   <span>{t('generating.footer')}</span>
                 </p>
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Week Toggle - Always show after initial load to prevent navigation trap */}
-        {!loading && !generating && (
-          <div className="bg-white border border-slate-200 rounded-lg px-4 py-3 mb-4 flex justify-end">
-            <div className="flex bg-slate-100 rounded-md p-0.5">
-              <button
-                onClick={() => handleViewingWeekChange('current')}
-                className={`px-3 py-1 rounded text-xs font-medium transition-all ${
-                  viewingWeek === 'current'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {t('weekToggle.current')}
-              </button>
-              <button
-                onClick={() => handleViewingWeekChange('next')}
-                className={`px-3 py-1 rounded text-xs font-medium transition-all ${
-                  viewingWeek === 'next'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                {t('weekToggle.next')}
-              </button>
             </div>
           </div>
         )}
