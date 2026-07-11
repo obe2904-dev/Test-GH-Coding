@@ -33,16 +33,11 @@ export function AudienceSegmentCard({ segment }: AudienceSegmentCardProps) {
         </span>
       </div>
 
-      {/* Timing & motivation */}
+      {/* Timing only (motivation removed per user request) */}
       <div className="text-sm text-gray-600 space-y-1">
         {segment.timing_windows && segment.timing_windows.length > 0 && (
           <p>
             <span className="font-medium">{t('brandProfileV5.timing')}</span> {segment.timing_windows.join(', ')}
-          </p>
-        )}
-        {segment.motivation && segment.motivation !== 'social_gathering' && (
-          <p>
-            <span className="font-medium">{t('brandProfileV5.motivation')}</span> {segment.motivation}
           </p>
         )}
       </div>

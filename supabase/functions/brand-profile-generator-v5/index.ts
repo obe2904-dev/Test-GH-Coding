@@ -187,11 +187,15 @@ function extractStrategicSegments(segments: Array<{
   // NEW Phase 2: Deduplicate by customer_segment key across ALL programmes
   // This fixes the bug where same segment from different programmes creates duplicates
   const byKey = new Map<string, typeof segments[number]>();
+  const segmentProgrammeCount = new Map<string, number>();  // Track how many programmes each segment appears in
   
   for (const seg of segments) {
     // Use customer_segment if available (new format), otherwise fall back to people_type (legacy)
     const key = seg.customer_segment || seg.people_type;
     if (!key) continue;
+    
+    // Count programme appearances
+    segmentProgrammeCount.set(key, (segmentProgrammeCount.get(key) || 0) + 1);
     
     const existing = byKey.get(key);
     
@@ -206,6 +210,17 @@ function extractStrategicSegments(segments: Array<{
   
   const primary = deduped.filter(seg => seg.segment_size === 'primary');  // FIXED: Use filter() to capture ALL primary segments
   const secondary = deduped.filter(seg => seg.segment_size === 'secondary');
+  
+  // NEW: Include niche segments that appear in MULTIPLE programmes (cross-programme importance)
+  // E.g., "Vennegrupper" appearing in both Frokost AND Aften = strategically important even if niche
+  const niche = deduped.filter(seg => {
+    if (seg.segment_size !== 'niche') return false;
+    const key = seg.customer_segment || seg.people_type;
+    const programmeCount = segmentProgrammeCount.get(key) || 0;
+    return programmeCount >= 2;  // Appears in 2+ programmes = include in strategic view
+  });
+  
+  console.log(`📊 Strategic segments: ${primary.length} primary, ${secondary.length} secondary, ${niche.length} cross-programme niche`);
   
   const formatTiming = (seg: typeof segments[0]) => {
     // NOTE: As of June 28, 2026 - timing_windows removed from AudienceSegment interface
@@ -229,7 +244,8 @@ function extractStrategicSegments(segments: Array<{
   
   return {
     primary: primary.length > 0 ? primary.map(formatSegment) : null,  // FIXED: primary is now an array
-    secondary: secondary.length > 0 ? secondary.map(formatSegment) : null
+    secondary: secondary.length > 0 ? secondary.map(formatSegment) : null,
+    niche: niche.length > 0 ? niche.map(formatSegment) : null  // NEW: Cross-programme niche segments
   };
 }
 

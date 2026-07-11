@@ -54,6 +54,7 @@ export interface MarketingManagerBriefInput {
   strategicSegments?: {  // Phase 3: NEW - Strategic audience segments for "who"
     primary: Array<{ id: string; name: string }> | null  // FIXED: Can have multiple primary targets across programmes
     secondary: Array<{ id: string; name: string }> | null
+    niche: Array<{ id: string; name: string }> | null  // NEW: Cross-programme niche segments (appear in 2+ programmes)
   }
   segmentContext?: {  // Phase 6: NEW - Segment decomposition dimensions
     occasions: OccasionSegmentKey[]        // WHEN they visit (from audience segments)
@@ -369,8 +370,12 @@ function buildMarketingBriefPrompt(input: MarketingManagerBriefInput, language: 
     if (input.strategicSegments.secondary && input.strategicSegments.secondary.length > 0) {
       parts.push(`Sekundære: ${input.strategicSegments.secondary.map(s => s.name).join(', ')}`)
     }
+    // NEW: Include cross-programme niche segments (appear in multiple programmes = strategically important)
+    if (input.strategicSegments.niche && input.strategicSegments.niche.length > 0) {
+      parts.push(`Niche (men på tværs af programmer): ${input.strategicSegments.niche.map(s => s.name).join(', ')}`)
+    }
     parts.push(``)
-    parts.push(`VIGTIGT: Disse er de strategiske målgrupper - brug dem til "hvem vi taler til".`)
+    parts.push(`VIGTIGT: Disse er de strategiske målgrupper - brug dem til "hvem vi taler til". Niche-segmenter der dukker op i flere programmer er også vigtige at nævne.`)
     parts.push(``)
   }
   

@@ -1145,8 +1145,13 @@ Brug IKKE "planned" som default for sociale segmenter. Spørg i stedet:
 Tommelfingerregel:
 • Walk-ins accepteret + moderat pris + casual format → "spontaneous" eller "mixed"
 • Reservation påkrævet ELLER premium pris → "planned"
-• Familier og vennegrupper koordinerer ofte lidt på forhånd → "mixed" er oftest korrekt
+• Familier og vennegrupper SKAL TYPISK koordinere → "mixed" eller "planned" (grupper på 4-8 personer kommer sjældent spontant)
 • Par ved casual AAYE → "spontaneous" eller "mixed" (ikke "planned" — de booker ikke bord til sushi)
+
+⚠️ VENNEGRUPPER SÆRREGEL:
+• Vennegrupper (3-8 personer) kræver social koordination og ofte borddisponering
+• Selv ved casual steder: brug "mixed" som default (nogle grupper planlægger, andre går spontant)
+• Brug KUN "spontaneous" hvis stedet er eksplicit walk-in fokuseret OG har stor bordkapacitet
 
 • people_type: Præcis én af de 7 typer ovenfor (eksakt dansk stavning)
 • segment_size: "primary", "secondary", eller "niche"
@@ -1315,8 +1320,13 @@ Do NOT default to "planned" for social segments. Instead ask:
 Rule of thumb:
 • Walk-ins accepted + moderate price + casual format → "spontaneous" or "mixed"
 • Reservation required OR premium price → "planned"
-• Families and friend groups often coordinate a little in advance → "mixed" is usually correct
+• Families and friend groups (Vennegrupper) USUALLY need coordination → "mixed" or "planned" (groups of 4-8 people rarely show up spontaneously)
 • Couples at casual AYCE → "spontaneous" or "mixed" (not "planned" — they don't book tables for sushi)
+
+⚠️ VENNEGRUPPER SPECIAL RULE:
+• Friend groups (3-8 people) require social coordination and often table availability
+• Even at casual venues: use "mixed" as default (some groups plan, some walk in)
+• Only use "spontaneous" if venue is explicitly walk-in focused AND has large table capacity
 
 • people_type: Exactly one of the 7 types above (exact spelling)
 • segment_size: "primary", "secondary", or "niche"
