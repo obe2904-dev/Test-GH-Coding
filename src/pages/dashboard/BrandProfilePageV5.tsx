@@ -797,24 +797,6 @@ export function BrandProfilePageV5() {
                         </div>
                       </div>
                     </div>
-
-                    {/* AI Reasoning for Layer 5 */}
-                    {profile.brand_profile_v5.voice.voice_reasoning && (
-                      <div className="bg-[#E6F4F1] rounded-lg p-[14px] border-[0.5px] border-[#88CDB9]">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-[11px] font-medium tracking-[0.07em] uppercase text-[#076B4E] flex items-center gap-2">
-                            <AiReasoningIcon className="w-4 h-4 flex-shrink-0 text-[#076B4E]" />
-                            <span>{t('brandProfileV5.aiReasoning')}</span>
-                          </p>
-                          {profile.brand_profile_v5.voice.voice_confidence !== undefined && (
-                            <span className="text-xs font-medium text-[#076B4E]">
-                              {(profile.brand_profile_v5.voice.voice_confidence * 100).toFixed(0)}% confidence
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[13px] text-[#076B4E] leading-[1.6]">{profile.brand_profile_v5.voice.voice_reasoning}</p>
-                      </div>
-                    )}
                   </div>
                 </div>
               )}
