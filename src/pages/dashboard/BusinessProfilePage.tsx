@@ -616,18 +616,22 @@ function BusinessProfilePage() {
       }
 
       // Business type/sector
-      if (analysis.businessType && !businessCategory.trim()) {
+      // Always update if analysis provides new type to handle website URL changes
+      if (analysis.businessType) {
         const businessTypeStr = getBusinessTypeLabel(analysis.businessType)
-        setBusinessCategory(businessTypeStr)
-        fieldsUpdated++
+        if (businessTypeStr !== businessCategory.trim()) {
+          setBusinessCategory(businessTypeStr)
+          fieldsUpdated++
 
-        const primaryType = getPrimaryType(analysis.businessType)
-        const guessedSector = guessBusinessSector(primaryType)
-        if (guessedSector) setBusinessSector(guessedSector)
+          const primaryType = getPrimaryType(analysis.businessType)
+          const guessedSector = guessBusinessSector(primaryType)
+          if (guessedSector) setBusinessSector(guessedSector)
+        }
       }
 
       // About text
-      if (analysis.shortDescription && !aboutText.trim()) {
+      // Always update if analysis provides new description to handle website URL changes
+      if (analysis.shortDescription && analysis.shortDescription.trim() !== aboutText.trim()) {
         setAboutText(analysis.shortDescription)
         fieldsUpdated++
       }
