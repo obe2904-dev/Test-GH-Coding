@@ -482,8 +482,12 @@ export function CreatePostPage() {
             
             // Restore selectedPlatforms from draft
             if (dbDraft!.platforms && dbDraft!.platforms.length > 0) {
-              console.log('✅ Restoring platforms from draft:', dbDraft!.platforms)
-              setSelectedPlatforms(dbDraft!.platforms)
+              // Normalize platform case to match store format (capitalize first letter)
+              const normalizedPlatforms = dbDraft!.platforms.map((p: string) => 
+                p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()
+              )
+              console.log('✅ Restoring platforms from draft:', normalizedPlatforms)
+              setSelectedPlatforms(normalizedPlatforms)
             }
             
             if (weeklyPlanPost.visualDirection) {
@@ -676,7 +680,8 @@ export function CreatePostPage() {
       if (selectedPlatforms.length > 0 && currentStep === 'create') {
         console.log('[AutoSave] Updating per-platform drafts:', selectedPlatforms)
         for (const platform of selectedPlatforms) {
-          const platformKey = { ...dbKey, platform }
+          // Normalize platform to lowercase to match database column constraint
+          const platformKey = { ...dbKey, platform: platform.toLowerCase() }
           
           // Extract platform-specific content
           const { postText, contentJson } = buildPlatformDraftContent(
@@ -769,8 +774,12 @@ export function CreatePostPage() {
             
             // Restore selectedPlatforms from draft
             if (dbDraft!.platforms && dbDraft!.platforms.length > 0) {
-              console.log('✅ Restoring platforms from draft:', dbDraft!.platforms)
-              setSelectedPlatforms(dbDraft!.platforms)
+              // Normalize platform case to match store format (capitalize first letter)
+              const normalizedPlatforms = dbDraft!.platforms.map((p: string) => 
+                p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()
+              )
+              console.log('✅ Restoring platforms from draft:', normalizedPlatforms)
+              setSelectedPlatforms(normalizedPlatforms)
             }
             
             if (selectedSuggestionData.photoIdea) setActivePhotoIdea(selectedSuggestionData.photoIdea)
@@ -1170,7 +1179,8 @@ export function CreatePostPage() {
         // Check if drafts already exist (user might be navigating back from Design)
         const existingDrafts = await Promise.all(
           selectedPlatforms.map(async (platform) => {
-            const platformKey = { ...baseKey, platform }
+            // Normalize platform to lowercase to match database column constraint
+            const platformKey = { ...baseKey, platform: platform.toLowerCase() }
             console.log(`[handleGenerateNext] Checking for existing ${platform} draft, key:`, JSON.stringify(platformKey, null, 2))
             return await posts.loadPost(platformKey).catch(() => null)
           })
@@ -1188,7 +1198,7 @@ export function CreatePostPage() {
             }
             
             console.log(`[handleGenerateNext] Creating draft for platform: ${platform}`)
-            console.log(`[handleGenerateNext] platformKey:`, JSON.stringify({ ...baseKey, platform }, null, 2))
+            console.log(`[handleGenerateNext] platformKey:`, JSON.stringify({ ...baseKey, platform: platform.toLowerCase() }, null, 2))
             
             // Extract platform-specific content
             const { postText, contentJson } = buildPlatformDraftContent(
@@ -1197,8 +1207,8 @@ export function CreatePostPage() {
               selectedPlatforms
             )
             
-            // Create platform-specific draft
-            const platformKey = { ...baseKey, platform }
+            // Create platform-specific draft with lowercase platform key
+            const platformKey = { ...baseKey, platform: platform.toLowerCase() }
             const savedId = await posts.saveDraft(platformKey, {
               platforms: [platform],
               postText,
@@ -1337,7 +1347,8 @@ export function CreatePostPage() {
         console.log('[handleCreateNext] selectedPlatforms:', selectedPlatforms)
         
         for (const platform of selectedPlatforms) {
-          const platformKey = { ...baseKey, platform }
+          // Normalize platform to lowercase to match database column constraint
+          const platformKey = { ...baseKey, platform: platform.toLowerCase() }
           console.log(`[handleCreateNext] Loading draft for ${platform}, key:`, JSON.stringify(platformKey, null, 2))
           const existingDraft = await posts.loadPost(platformKey).catch(() => null)
           
@@ -1775,7 +1786,27 @@ export function CreatePostPage() {
     setCurrentStep('publish')
   }, [])
 
-  const handlePublishBack = () => {
+  const handlePublishBack = async () => {
+    // When going back from Publish to Design, restore platforms from DB draft
+    // to ensure platform selectors are preserved
+    const dbKey = buildDbDraftKey()
+    if (dbKey) {
+      try {
+        // Try loading any existing draft to restore platforms
+        const existingDraft = await posts.loadPost(dbKey).catch(() => null)
+        if (existingDraft?.platforms && existingDraft.platforms.length > 0) {
+          // Normalize platform case to match connections store format
+          // Database stores lowercase, but store might expect capitalized
+          const normalizedPlatforms = existingDraft.platforms.map((p: string) => 
+            p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()
+          )
+          console.log('[handlePublishBack] Restoring platforms from draft:', normalizedPlatforms)
+          setSelectedPlatforms(normalizedPlatforms)
+        }
+      } catch (err) {
+        console.warn('[handlePublishBack] Could not restore platforms:', err)
+      }
+    }
     setCurrentStep('create')
   }
 
