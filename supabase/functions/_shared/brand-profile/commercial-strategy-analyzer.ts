@@ -3,6 +3,15 @@
  * 
  * Analyzes business characteristics and generates AI-powered recommendations
  * for commercial content strategy configuration.
+ * 
+ * ⚠️ STATUS (July 2026): Infrastructure exists but NOT integrated into AI generation.
+ * - commercial_baseline_mode: Analyzed and stored, but NOT consumed by:
+ *   - get-quick-suggestions (daily AI suggestions)
+ *   - generate-weekly-plan (weekly planning)
+ *   - generate-text-from-idea (text generation)
+ * - trigger_configuration: Stored but unused
+ * 
+ * TODO: Either integrate classifyCommercialMode() into AI generation OR deprecate field.
  */
 
 import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
@@ -17,9 +26,9 @@ export interface TriggerConfig {
 }
 
 export interface CommercialStrategyRecommendation {
-  commercial_baseline_mode: 'booking_push' | 'footfall_push' | 'balanced';
+  commercial_baseline_mode: 'booking_push' | 'footfall_push' | 'balanced';  // ⚠️ UNUSED: Not consumed by AI generation
   baseline_reasoning: string;
-  trigger_configuration: Record<string, TriggerConfig>;
+  trigger_configuration: Record<string, TriggerConfig>;  // ⚠️ UNUSED: Not consumed by AI generation
   summary_text: string;
   confidence_score: number;
   key_factors: string[];

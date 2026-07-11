@@ -9,6 +9,17 @@
 //
 // Priority Issue 1: Commercial Objective Governance
 // Generated: 5. maj 2026
+//
+// ⚠️ STATUS (July 2026): UNUSED INFRASTRUCTURE
+// This classifier exists and is tested, but is NOT called by:
+// - get-quick-suggestions/index.ts (daily suggestions)
+// - generate-weekly-plan/index.ts (weekly planning)
+// - generate-text-from-idea/index.ts (text generation)
+//
+// The field commercial_baseline_mode is stored in business_brand_profile
+// but never read during AI content generation.
+//
+// TODO: Integrate this classifier OR deprecate if not needed.
 // ============================================================
 
 import type {
@@ -22,7 +33,9 @@ import type {
 
 /**
  * Main classifier function.
- * Call this BEFORE running Phase 0/1/2 prompts.
+ * ⚠️ NOT CURRENTLY CALLED - see file header for details.
+ * 
+ * INTENDED USAGE: Call this BEFORE running Phase 0/1/2 prompts.
  * 
  * @param context - Complete context needed for classification
  * @returns Commercial mode directive with quotas and reasoning
