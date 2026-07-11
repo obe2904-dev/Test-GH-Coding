@@ -157,7 +157,15 @@ export default function AIWeeklyPlanPage() {
       if (goodDays >= Math.ceil(weatherDays.length / 2)) return 'strong'
       return 'neutral'
     })()
-    // Extract CTA mode and booking nudge status for FIX C
+    // Extract CTA mode and booking nudge status
+    // NOTE: This checks Phase 1 post_ideas, NOT the final WeeklyContentPlan.posts
+    // KNOWN ISSUE: bookingNudgeWarranted may be false (no dedicated booking_nudge post)
+    // but individual posts can still have strategicContext.cta_intent === 'booking'.
+    // This creates UI inconsistency where weekly summary says "Walk-in CTA" but
+    // individual post cards show "Booking" badge. Root cause: Phase 1 ideas vs Phase 2b
+    // final posts have different CTA assignment logic.
+    // DEPRECATED: Weekly context badges removed from UI (2026-07-11), but data still
+    // computed for potential future use.
     const ctaMode = ctx?.cta_rules?.mode as string | undefined
     const postIdeas = strat?.post_ideas as any[] | undefined
     const bookingNudgeWarranted = postIdeas?.some((idea: any) => 
@@ -1403,53 +1411,10 @@ export default function AIWeeklyPlanPage() {
           </div>
         )}
 
-        {/* Weekly Strategy Context Strip */}
+        {/* Week Toggle - moved from context strip */}
         {weeklyPlan && !generating && (
-          <div className="bg-white border border-slate-200 rounded-lg px-4 py-3 mb-4 flex flex-wrap gap-2 items-center">
-            {weeklyPlan.weekSummary && <span className="text-slate-400 text-xs font-medium uppercase tracking-wide mr-1">{t('context.label')}</span>}
-            {weeklyPlan.weekSummary?.primaryOccasion && (
-              <span className="bg-surface-alt text-text-muted border border-border rounded-full px-3 py-1 text-xs font-medium">
-                👥 {weeklyPlan.weekSummary.primaryOccasion}
-              </span>
-            )}
-            {weeklyPlan.weekSummary?.weatherOpportunity === 'strong' && (
-              <span className="bg-sky-50 text-sky-700 border border-sky-200 rounded-full px-3 py-1 text-xs font-medium">{t('context.outdoorOpportunity')}</span>
-            )}
-            {weeklyPlan.weekSummary?.weatherOpportunity === 'constrained' && (
-              <span className="bg-sky-50 text-sky-700 border border-sky-200 rounded-full px-3 py-1 text-xs font-medium">{t('context.indoorFocus')}</span>
-            )}
-            {weeklyPlan.weekSummary?.economicSignal === 'push' && (
-              <span className="bg-green-50 text-green-700 border border-green-200 rounded-full px-3 py-1 text-xs font-medium">{t('context.payPeriod')}</span>
-            )}
-{/* Only show topPriority chip when it doesn't contain banned/abstract phrases from the Phase 0 raw snapshot */}
-            {weeklyPlan.weekSummary?.topPriority && !/(hygge|fristed|oase|stemning|atmosf.re|refugium|ro og|forkælelse|terrasse)/i.test(weeklyPlan.weekSummary.topPriority) && (
-              <span className="bg-warning-surface text-warning-text border border-warning rounded-full px-3 py-1 text-xs font-medium">
-                🎯 {weeklyPlan.weekSummary.topPriority}
-              </span>
-            )}
-            {/* CTA Mode Badge (FIX C) */}
-            {weeklyPlan.weekSummary?.ctaMode && (() => {
-              const mode = weeklyPlan.weekSummary.ctaMode
-              const nudgeWarranted = weeklyPlan.weekSummary.bookingNudgeWarranted
-              
-              const badges: Record<string, string> = {
-                'reservation_only': '🔒 Kun booking denne uge',
-                'mixed': nudgeWarranted 
-                  ? '📅 Mixed CTA — booking nudge planlagt' 
-                  : '🚶 Walk-in CTA — booking nudge ikke relevant',
-                'walk_in_only': '🚶 Walk-in CTA — ingen booking link',
-              }
-              
-              const label = badges[mode]
-              if (!label) return null
-              
-              return (
-                <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-3 py-1 text-xs font-medium">
-                  {label}
-                </span>
-              )
-            })()}
-            <div className="ml-auto flex bg-slate-100 rounded-md p-0.5">
+          <div className="bg-white border border-slate-200 rounded-lg px-4 py-3 mb-4 flex justify-end">
+            <div className="flex bg-slate-100 rounded-md p-0.5">
               <button
                 onClick={() => handleViewingWeekChange('current')}
                 className={`px-3 py-1 rounded text-xs font-medium transition-all ${
