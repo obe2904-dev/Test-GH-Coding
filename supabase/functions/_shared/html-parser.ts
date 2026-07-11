@@ -12,7 +12,7 @@
 export function htmlToCleanText(html: string, isHomepage: boolean = false): string {
   let text = html
   
-  // 1. Remove scripts, styles, and non-content elements
+  // 1. Remove scripts, styles, non-content elements, AND COOKIE CONSENT DIALOGS
   text = text
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -20,6 +20,12 @@ export function htmlToCleanText(html: string, isHomepage: boolean = false): stri
     .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
+    
+  // 1b. Remove cookie consent dialogs and GDPR banners (common noise that confuses AI extractors)
+  // Pattern 1: Remove divs/sections with cookie/consent/gdpr in ID or class
+  text = text.replace(/<(?:div|section|aside|footer|header)[^>]*(?:id|class)=["'][^"']*(?:cookie|consent|gdpr|privacy|banner|modal)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section|aside|footer|header)>/gi, '')
+  // Pattern 2: Remove elements with data-cookieconsent or similar attributes
+  text = text.replace(/<[^>]+data-(?:cookie|consent|gdpr|privacy)[^>]*>[\s\S]*?<\/[^>]+>/gi, '')
   
   // 2. Preserve important semantic structure with markers
   text = text
@@ -48,6 +54,30 @@ export function htmlToCleanText(html: string, isHomepage: boolean = false): stri
     .replace(/\n[ \t]+/g, '\n')  // Remove leading spaces on lines
     .replace(/\n{4,}/g, '\n\n\n')  // Max 3 newlines
     .trim()
+  
+  // 4b. Filter out cookie consent and privacy policy text lines (removes noise that confuses AI)
+  const cookieNoisePatterns = [
+    /cookie information|cookieinformation\.com/i,
+    /du bestemmer over dine data/i,
+    /accepter alle|gem indstillinger/i,
+    /privatlivspolitik|privacy policy|privatliv og cookies/i,
+    /vi og vores.*?partnere.*?cookies/i,
+    /personoplysninger|gdpr|persondataforordningen/i,
+    /samtykke.*?formål|consent.*?purpose/i,
+    /powered by:?\s*cookie/i,
+    /om cookies|about cookies/i,
+  ]
+  
+  const lines = text.split('\n')
+  const filteredLines = lines.filter(line => {
+    const trimmed = line.trim()
+    // Keep lines that don't match cookie consent patterns and aren't too long (consent text is usually verbose)
+    if (trimmed.length > 200 && cookieNoisePatterns.some(pattern => pattern.test(trimmed))) {
+      return false  // Filter out cookie consent noise
+    }
+    return true
+  })
+  text = filteredLines.join('\n')
   
   // 5. More generous character limits
   const limit = isHomepage ? 120000 : 30000  // Increased for better menu extraction
