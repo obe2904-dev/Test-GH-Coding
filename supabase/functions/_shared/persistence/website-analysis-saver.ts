@@ -471,22 +471,44 @@ export async function saveWebsiteAnalysis(
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // 2.5 BUSINESSES - Local location reference
+    // 2.5 BUSINESSES - Business name, website URL, logo, local location reference
     // ═══════════════════════════════════════════════════════════════════════════
 
+    const businessUpdateData: Record<string, any> = {
+      updated_at: new Date().toISOString()
+    }
+
+    if (analysisResult.businessName) {
+      businessUpdateData.name = analysisResult.businessName
+      console.log('🏢 Updating business name:', analysisResult.businessName)
+    }
+
+    if (url) {
+      businessUpdateData.website_url = url
+      console.log('🌐 Updating website URL:', url)
+    }
+
+    if (analysisResult.logoUrl) {
+      businessUpdateData.logo_url = analysisResult.logoUrl
+      console.log('🖼️ Updating logo URL:', analysisResult.logoUrl)
+    }
+
     if (analysisResult.localLocationReference) {
+      businessUpdateData.local_location_reference = analysisResult.localLocationReference
+      console.log('📍 Updating local location reference:', analysisResult.localLocationReference)
+    }
+
+    // Only update if we have data beyond just the timestamp
+    if (Object.keys(businessUpdateData).length > 1) {
       const { error: businessError } = await supabase
         .from('businesses')
-        .update({ 
-          local_location_reference: analysisResult.localLocationReference,
-          updated_at: new Date().toISOString()
-        })
+        .update(businessUpdateData)
         .eq('id', businessId)
 
       if (businessError) {
-        console.warn('⚠️ Failed to save local_location_reference to businesses:', businessError.message)
+        console.warn('⚠️ Failed to update businesses table:', businessError.message)
       } else {
-        console.log('✅ Saved local_location_reference to businesses:', analysisResult.localLocationReference)
+        console.log('✅ Updated businesses table with', Object.keys(businessUpdateData).length - 1, 'fields')
       }
     }
 
