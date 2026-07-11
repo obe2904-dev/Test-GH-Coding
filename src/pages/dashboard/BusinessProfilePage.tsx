@@ -587,10 +587,12 @@ function BusinessProfilePage() {
 
       const { analyzeBusinessProfile } = await import('../../features/BusinessProfilerAI')
 
+      // Don't send businessName/businessType as hints - let AI extract fresh data from the website
+      // Hints can bias the extraction to use old values instead of actual website content
       const analysis = await analyzeBusinessProfile({
         url: sanitized,
-        businessName: businessName || undefined,
-        businessType: businessCategory || undefined,
+        businessName: undefined,
+        businessType: undefined,
         tier: currentTier,
         authToken,
         businessId: effectiveBusinessId
