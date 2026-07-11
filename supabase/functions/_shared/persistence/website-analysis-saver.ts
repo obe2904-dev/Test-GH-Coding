@@ -423,6 +423,7 @@ export async function saveWebsiteAnalysis(
 
     if (analysisResult.shortDescription) {
       profileData.long_description = analysisResult.shortDescription
+      profileData.user_about_text = analysisResult.shortDescription  // Frontend reads from here
     }
 
     if (menuExtraction?.menuStructure?.length > 0) {
@@ -496,6 +497,26 @@ export async function saveWebsiteAnalysis(
     if (analysisResult.localLocationReference) {
       businessUpdateData.local_location_reference = analysisResult.localLocationReference
       console.log('📍 Updating local location reference:', analysisResult.localLocationReference)
+    }
+
+    // Save businessType as business_type_hybrid
+    if (analysisResult.businessType) {
+      // Handle both string and hybrid businessType structures
+      let typeValue: string
+      if (typeof analysisResult.businessType === 'string') {
+        typeValue = analysisResult.businessType
+      } else if (analysisResult.businessType?.primary) {
+        typeValue = analysisResult.businessType.primary
+      } else {
+        typeValue = String(analysisResult.businessType)
+      }
+      
+      businessUpdateData.business_type_hybrid = {
+        primary: typeValue,
+        secondary: analysisResult.businessType?.secondary || [],
+        hybridLabel: analysisResult.businessTypeLabel || typeValue
+      }
+      console.log('🏷️ Updating business type:', typeValue)
     }
 
     // Only update if we have data beyond just the timestamp
