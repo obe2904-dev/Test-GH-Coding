@@ -1411,8 +1411,8 @@ export default function AIWeeklyPlanPage() {
           </div>
         )}
 
-        {/* Week Toggle - moved from context strip */}
-        {weeklyPlan && !generating && (
+        {/* Week Toggle - Always show after initial load to prevent navigation trap */}
+        {!loading && !generating && (
           <div className="bg-white border border-slate-200 rounded-lg px-4 py-3 mb-4 flex justify-end">
             <div className="flex bg-slate-100 rounded-md p-0.5">
               <button
