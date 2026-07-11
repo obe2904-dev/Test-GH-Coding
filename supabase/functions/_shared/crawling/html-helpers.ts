@@ -324,7 +324,8 @@ export function needsAdvancedScraping(url: string, html?: string): boolean {
   // Check URL patterns that typically indicate JavaScript-heavy sites
   const jsHeavyDomains = [
     'wolt.com', 'nemlig.com', 'hungry.dk', 'just-eat.dk',
-    'ubereats.com', 'deliveroo.', 'foodora.', 'bolt.eu'
+    'ubereats.com', 'deliveroo.', 'foodora.', 'bolt.eu',
+    'soukaarhus.dk'  // SPA with cookie consent blocking
   ]
 
   if (jsHeavyDomains.some(domain => url.includes(domain))) {
