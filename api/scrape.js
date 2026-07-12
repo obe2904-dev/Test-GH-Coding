@@ -44,11 +44,23 @@ export default async function handler(req, res) {
   const startTime = Date.now();
 
   try {
+    // Configure chromium for Vercel Lambda environment
+    chromium.setGraphicsMode = false;
+    
     // Launch optimized Chromium instance for serverless
     browser = await playwright.launch({
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-setuid-sandbox',
+        '--no-first-run',
+        '--no-sandbox',
+        '--no-zygote',
+        '--single-process'
+      ],
       executablePath: await chromium.executablePath(),
-      headless: true,
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
