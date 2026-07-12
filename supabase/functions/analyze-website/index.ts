@@ -260,10 +260,12 @@ serve(async (req: any) => {
           
           // ALWAYS re-scrape if cached content is from simple-fetch (to upgrade to Puppeteer)
           if (cachedResult.scraper_type === 'simple-fetch') {
-            console.log('⚠️ Cached from simple-fetch, upgrading to Puppeteer scraper')
+            console.log('⚠️ Cached from simple-fetch, forcing Puppeteer upgrade (bypass simple fetch)')
             try {
-              const scrapeResult = await scrapeWebsite(url)
-              if (scrapeResult.scraperType === 'cloud-run-puppeteer' || scrapeResult.scraperType === 'puppeteer-vercel') {
+              // Call Puppeteer DIRECTLY (don't go through scrapeWebsite which would check threshold again)
+              const { scrapeWithPuppeteer } = await import('../_shared/crawling/website-scraper.ts')
+              const scrapeResult = await scrapeWithPuppeteer(url)
+              if (scrapeResult && (scrapeResult.scraperType === 'cloud-run-puppeteer' || scrapeResult.scraperType === 'puppeteer-vercel')) {
                 console.log(`✅ Puppeteer re-scrape successful (${scrapeResult.scraperType}), using new content`)
                 homepageHtml = scrapeResult.html
                 cacheHit = false // Mark as fresh scrape to update cache

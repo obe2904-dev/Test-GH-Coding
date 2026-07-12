@@ -25,7 +25,7 @@ export interface ScrapeResult {
 }
 
 /**
- * Extract visible text length (strips scripts, styles, tags)
+ * Extract visible text length (strips scripts, styles, tags, CSS imports)
  * This detects JS-heavy SPAs that have large HTML but minimal visible content
  */
 function extractVisibleTextLength(html: string): number {
@@ -33,6 +33,9 @@ function extractVisibleTextLength(html: string): number {
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '')
+    // Remove CSS @import statements and comments that appear in HTML
+    .replace(/@import\s+url\([^)]+\);?/gi, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim().length
@@ -42,7 +45,7 @@ function extractVisibleTextLength(html: string): number {
  * Scrape using Puppeteer service (Vercel or Cloud Run)
  * Checks Vercel first, then falls back to Cloud Run
  */
-async function scrapeWithPuppeteer(url: string): Promise<ScrapeResult | null> {
+export async function scrapeWithPuppeteer(url: string): Promise<ScrapeResult | null> {
   // Try Vercel scraper first
   const vercelUrl = Deno.env.get('VERCEL_SCRAPER_URL')
   const vercelApiKey = Deno.env.get('VERCEL_SCRAPER_API_KEY')
@@ -169,15 +172,16 @@ export async function scrapeWebsite(
     console.log(`📝 Visible text: ${visibleTextLength} chars (raw HTML: ${html.length} chars)`)
     
     // If visible text is too thin, this is likely a JS-heavy SPA that needs rendering
-    if (visibleTextLength < 500) {
-      console.log('⚠️ Visible text too thin (< 500 chars) — likely JS-heavy SPA, escalating to Puppeteer')
+    // Threshold: 2000 chars (CSS imports/comments can easily be 500-1000 chars)
+    if (visibleTextLength < 2000) {
+      console.log('⚠️ Visible text too thin (< 2000 chars) — likely JS-heavy SPA, escalating to Puppeteer')
       const puppeteerResult = await scrapeWithPuppeteer(url)
       if (puppeteerResult) {
         return puppeteerResult
       }
       console.log('⚠️ Puppeteer unavailable, using simple fetch result anyway')
     } else {
-      console.log(`✅ Sufficient visible text (${visibleTextLength} chars) — using simple fetch`)
+      console.log(`✅ Sufficient visible text (${visibleTextLength} chars >= 2000 threshold) — using simple fetch`)
     }
     
     return {
