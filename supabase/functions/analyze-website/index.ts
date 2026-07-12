@@ -304,10 +304,15 @@ serve(async (req: any) => {
     
     if (!homepageHtml) {
       // Phase 1: Detect content signature (pre-flight analysis)
+      console.log('═══════════════════════════════════════════════════════════')
+      console.log('🚀 INTELLIGENT SCRAPING SYSTEM ACTIVATED')
+      console.log('═══════════════════════════════════════════════════════════')
       console.log('🔍 Phase 1: Detecting content signature...')
       try {
         contentSignature = await detectContentSignature(url)
         console.log('📊 Content signature:', contentSignature.classification, 'confidence:', contentSignature.confidence)
+        console.log('   Recommended scraper:', contentSignature.recommendedScraper)
+        console.log('   Evidence:', JSON.stringify(contentSignature.evidence))
       } catch (signatureError) {
         console.warn('⚠️ Content signature detection failed, using default routing:', signatureError)
         // Fallback to old scraping if signature detection fails
@@ -1071,7 +1076,9 @@ serve(async (req: any) => {
       console.log('🎤 Tone of voice extracted:', toneOfVoice ? '✅' : '❌')
 
       // Phase 4: Validate extraction quality & detect misclassifications
+      console.log('═══════════════════════════════════════════════════════════')
       console.log('🔍 Phase 4: Validating extraction quality...')
+      console.log('═══════════════════════════════════════════════════════════')
       
       try {
         // Update completeness with AI results if available
@@ -1151,16 +1158,22 @@ serve(async (req: any) => {
           
           // Log auto-corrections
           if (qualityReport.autoCorrections.length > 0) {
-            console.log(`🔧 Applied ${qualityReport.autoCorrections.length} auto-corrections:`)
+            console.log('═══════════════════════════════════════════════════════════')
+            console.log(`🔧 AUTO-CORRECTION APPLIED: ${qualityReport.autoCorrections.length} fix(es)`)
+            console.log('═══════════════════════════════════════════════════════════')
             for (const correction of qualityReport.autoCorrections) {
-              console.log(`   - ${correction.field}: "${correction.from}" → "${correction.to}"`)
+              console.log(`   ⚠️ ${correction.field}:`)
+              console.log(`      FROM: "${correction.from}"`)
+              console.log(`      TO:   "${correction.to}"`)
+              console.log(`      REASON: ${correction.reason}`)
               
               // Apply corrections to basicInfo
               if (correction.field === 'businessType' && basicInfo) {
                 basicInfo.businessType = correction.to
-                console.log(`✅ Auto-corrected business type to: ${correction.to}`)
+                console.log(`   ✅ Applied correction to basicInfo.businessType`)
               }
             }
+            console.log('═══════════════════════════════════════════════════════════')
           }
           
           // Log critical issues
