@@ -69,7 +69,7 @@ serve(async (req: any) => {
     const body = await req.json()
     console.log('📥 Received request:', body)
     
-    const { url, businessName, businessType, tier, debugMode, businessId } = body
+    const { url, businessName, businessType, tier, debugMode, businessId, forceRefresh } = body
 
     if (!url || typeof url !== 'string') {
       console.error('❌ Missing URL in request')
@@ -224,11 +224,11 @@ serve(async (req: any) => {
       },
     }) : null
     
-    // Check cache first (24-hour TTL)
+    // Check cache first (24-hour TTL) - unless forceRefresh is true
     let homepageHtml = ''
     let cacheHit = false
     
-    if (supabase) {
+    if (supabase && !forceRefresh) {
       const cacheCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       
       try {
@@ -246,24 +246,24 @@ serve(async (req: any) => {
           console.log('✅ Cache HIT - Using cached content from', cachedResult.scraped_at)
           console.log('🎯 Original scraper:', cachedResult.scraper_type)
           
-          // Re-scrape with Cloud Run if cached content is from simple-fetch and too short
-          if (cachedResult.scraper_type === 'simple-fetch' && cachedResult.raw_html.length < 5000) {
-            console.log('⚠️ Cached HTML too short, attempting Cloud Run re-scrape')
+          // ALWAYS re-scrape if cached content is from simple-fetch (to upgrade to Puppeteer)
+          if (cachedResult.scraper_type === 'simple-fetch') {
+            console.log('⚠️ Cached from simple-fetch, upgrading to Puppeteer scraper')
             try {
               const scrapeResult = await scrapeWebsite(url)
-              if (scrapeResult.scraperType === 'cloud-run-puppeteer') {
-                console.log('✅ Cloud Run re-scrape successful, using new content')
+              if (scrapeResult.scraperType === 'cloud-run-puppeteer' || scrapeResult.scraperType === 'puppeteer-vercel') {
+                console.log(`✅ Puppeteer re-scrape successful (${scrapeResult.scraperType}), using new content`)
                 homepageHtml = scrapeResult.html
                 cacheHit = false // Mark as fresh scrape to update cache
                 
-                // Update cache with new Cloud Run result
+                // Update cache with new Puppeteer result
                 await supabase
                   .from('scraped_cache')
                   .upsert({
                     url,
                     raw_html: scrapeResult.html,
                     raw_text: scrapeResult.html.replace(/<[^>]*>/g, '').trim(),
-                    scraper_type: 'cloud-run-puppeteer',
+                    scraper_type: scrapeResult.scraperType,
                     status: 'success',
                     scraped_at: new Date().toISOString()
                   }, {
@@ -271,7 +271,7 @@ serve(async (req: any) => {
                   })
               }
             } catch (rescrapeError) {
-              console.log('⚠️ Cloud Run re-scrape failed, using cached content:', rescrapeError)
+              console.log('⚠️ Puppeteer re-scrape failed, using cached content:', rescrapeError)
             }
           }
         } else {
@@ -281,6 +281,8 @@ serve(async (req: any) => {
         console.log('⚠️ Cache check failed:', cacheError)
         // Continue to scraping
       }
+    } else if (forceRefresh) {
+      console.log('🔄 Force refresh requested - bypassing cache')
     }
     
     // Scrape if not cached

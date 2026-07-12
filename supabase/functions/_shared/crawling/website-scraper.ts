@@ -21,7 +21,7 @@ export interface ScrapeOptions {
 export interface ScrapeResult {
   html: string
   usedAdvancedScraping: boolean
-  scraperType: 'simple-fetch' | 'cloud-run-puppeteer'
+  scraperType: 'simple-fetch' | 'cloud-run-puppeteer' | 'puppeteer-vercel'
 }
 
 /**
@@ -39,7 +39,7 @@ async function scrapeWithCloudRun(url: string): Promise<ScrapeResult | null> {
   console.log('🚀 Attempting Cloud Run Puppeteer scraper')
   
   try {
-    const response = await fetch(`${cloudRunUrl}/scrape`, {
+    const response = await fetch(cloudRunUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -55,17 +55,18 @@ async function scrapeWithCloudRun(url: string): Promise<ScrapeResult | null> {
     
     const data = await response.json()
     
-    if (!data.success || !data.html) {
-      console.error('❌ Cloud Run scraper returned failure:', data.error)
+    if (!data.html) {
+      console.error('❌ Puppeteer scraper returned no HTML:', data.error || 'unknown error')
       return null
     }
     
-    console.log('✅ Cloud Run scraper succeeded, HTML length:', data.html.length)
+    const scraperType = data.scraperType || 'cloud-run-puppeteer'
+    console.log(`✅ Puppeteer scraper succeeded (${scraperType}), HTML length:`, data.html.length)
     
     return {
       html: data.html,
       usedAdvancedScraping: true,
-      scraperType: 'cloud-run-puppeteer'
+      scraperType: scraperType as 'cloud-run-puppeteer' | 'puppeteer-vercel'
     }
     
   } catch (error: any) {

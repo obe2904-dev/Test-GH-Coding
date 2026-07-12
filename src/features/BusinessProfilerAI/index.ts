@@ -100,6 +100,7 @@ export interface BusinessProfileContext {
   authToken?: string
   tier?: string
   businessId?: string // Optional: enables server-side persistence
+  forceRefresh?: boolean // Optional: bypass cache and force fresh scraping
 }
 
 // Deterministic helpers so generated IDs stay stable between renders
@@ -203,6 +204,7 @@ class SupabaseBusinessProfilerAI {
           businessType: ctx.businessType,
           tier: ctx.tier,
           businessId: ctx.businessId, // For server-side persistence
+          forceRefresh: ctx.forceRefresh, // Force cache bypass if requested
         }),
       })
 

@@ -86,6 +86,7 @@ function BusinessProfilePage() {
   // UI state
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisCompleted, setAnalysisCompleted] = useState(false)
+  const [analysisAttempts, setAnalysisAttempts] = useState(0)
   const [justSaved, setJustSaved] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [isLoadingProfile, setIsLoadingProfile] = useState(true)
@@ -1337,7 +1338,7 @@ function BusinessProfilePage() {
               </div>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={handleWebsiteAnalysis}
+                  onClick={() => handleWebsiteAnalysis(false)}
                   disabled={!websiteUrl.trim()}
                   className={`inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-opacity
                     ${isAnalyzing
@@ -1348,6 +1349,21 @@ function BusinessProfilePage() {
                   <AnalyzeIcon className={isAnalyzing ? 'w-4 h-4 animate-spin motion-reduce:animate-none text-text-inverse' : 'w-4 h-4 text-text-inverse'} />
                   <span>{isAnalyzing ? t('businessProfile.analyzingWebsiteButton') : t('businessProfile.analyzeWebsiteButton')}</span>
                 </button>
+                
+                {analysisAttempts > 0 && !isAnalyzing && (
+                  <button
+                    onClick={() => handleWebsiteAnalysis(true)}
+                    disabled={!websiteUrl.trim()}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-medium border border-cta text-cta hover:bg-cta hover:text-text-inverse transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Genindlæs fra hjemmeside og ignorer cache"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Genindlæs</span>
+                  </button>
+                )}
+                
                 <span className="text-xs text-text-muted">
                   {analysisCompleted 
                     ? t('businessProfile.analyzeWebsiteHintCompleted')
