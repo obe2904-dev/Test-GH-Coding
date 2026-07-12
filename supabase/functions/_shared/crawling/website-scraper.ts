@@ -43,21 +43,42 @@ async function fetchWithScrapingBee(
   scrapingBeeUrl.searchParams.set('render_js', 'true')  // Execute JavaScript
   scrapingBeeUrl.searchParams.set('premium_proxy', 'false')  // Use standard proxy
   scrapingBeeUrl.searchParams.set('country_code', 'dk')  // Danish proxy
-  scrapingBeeUrl.searchParams.set('wait', '1000')  // Wait 1s for JS
-  scrapingBeeUrl.searchParams.set('wait_for', '.main-content,#root,#app')  // Wait for common content selectors
+  scrapingBeeUrl.searchParams.set('wait', '3000')  // Wait 3s for JS to render
+  scrapingBeeUrl.searchParams.set('wait_browser', 'networkidle')  // Wait for network idle
+  scrapingBeeUrl.searchParams.set('timeout', '60000')  // ScrapingBee timeout: 60s
+  
+  console.log('📡 ScrapingBee request URL:', scrapingBeeUrl.toString().replace(apiKey, 'API_KEY_HIDDEN'))
   
   const response = await fetch(scrapingBeeUrl.toString(), {
     method: 'GET',
     signal
   })
   
+  console.log('📡 ScrapingBee response status:', response.status)
+  console.log('📡 ScrapingBee cost:', response.headers.get('spb-cost') || 'unknown')
+  
   if (!response.ok) {
     const errorText = await response.text()
+    console.error('❌ ScrapingBee error:', errorText)
     throw new Error(`ScrapingBee failed: ${response.status} - ${errorText}`)
   }
   
   const html = await response.text()
   console.log('✅ ScrapingBee scraping successful:', html.length, 'chars')
+  
+  // Validate we got actual content, not just cookie dialog
+  const textContent = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                          .replace(/<[^>]*>/g, '')
+                          .trim()
+  
+  const cleanLines = textContent.split('\n').filter(line => line.trim().length > 0)
+  console.log('📄 ScrapingBee extracted text lines:', cleanLines.length)
+  
+  if (cleanLines.length < 10) {
+    console.warn('⚠️ ScrapingBee returned minimal content - might still be cookie dialog')
+    console.warn('First 5 lines:', cleanLines.slice(0, 5))
+  }
   
   return html
 }
@@ -102,7 +123,7 @@ export async function scrapeWebsite(
   
   // Create abort controller for timeout
   const controller = new AbortController()
-  const timeoutMs = useAdvancedScraper ? 30000 : 15000
+  const timeoutMs = useAdvancedScraper ? 90000 : 15000  // 90s for ScrapingBee, 15s for simple
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   
   let html = ''
@@ -122,7 +143,7 @@ export async function scrapeWebsite(
         
         // Fallback to simple fetch
         const newController = new AbortController()
-        const newTimeoutId = setTimeout(() => newController.abort(), 15000)
+        const newTimeoutId = setTimeout(() => newController.abort(), 20000)  // 20s for fallback
         
         try {
           html = await fetchWithSimpleRequest(url, newController.signal)
