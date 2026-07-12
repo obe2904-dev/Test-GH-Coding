@@ -558,7 +558,7 @@ function BusinessProfilePage() {
     // Trigger reload by letting useEffect dependency handle it
   }
 
-  const handleWebsiteAnalysis = async () => {
+  const handleWebsiteAnalysis = async (forceRefresh: boolean = false) => {
     const sanitized = websiteUrl.trim()
     if (!sanitized) {
       alert(t('businessProfile.alertEnterWebsite'))
@@ -596,7 +596,8 @@ function BusinessProfilePage() {
         businessType: undefined,
         tier: currentTier,
         authToken,
-        businessId: effectiveBusinessId
+        businessId: effectiveBusinessId,
+        forceRefresh // Pass force refresh parameter
       })
 
       if (analysis.error) {
@@ -604,6 +605,8 @@ function BusinessProfilePage() {
         return
       }
 
+      setAnalysisAttempts(prev => prev + 1)
+      
       setOpeningHoursReview({
         required: !!analysis.openingHoursReviewRequired,
         reasons: analysis.openingHoursReviewReasons || []
