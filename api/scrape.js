@@ -67,13 +67,82 @@ export default async function handler(req, res) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 });
     
+    // Wait for React/Vue/SPA frameworks to initialize and render navigation
+    await page.waitForTimeout(3000);
+    
     const html = await page.content();
+    
+    // Extract ALL navigation elements (including React Router, click handlers, etc.)
+    const navigationData = await page.evaluate(() => {
+      const extractText = (el) => {
+        // Try multiple text sources
+        return el.textContent?.trim() || 
+               el.getAttribute('aria-label') || 
+               el.getAttribute('title') || 
+               el.getAttribute('data-label') ||
+               el.querySelector('img')?.getAttribute('alt') || 
+               '';
+      };
+      
+      const elements = [];
+      
+      // 1. Traditional <a> links
+      document.querySelectorAll('a[href]').forEach(el => {
+        elements.push({
+          type: 'link',
+          href: el.getAttribute('href'),
+          text: extractText(el),
+          role: el.getAttribute('role'),
+          ariaLabel: el.getAttribute('aria-label')
+        });
+      });
+      
+      // 2. Buttons (might have navigation handlers)
+      document.querySelectorAll('button, [role="button"]').forEach(el => {
+        const text = extractText(el);
+        // Only include if text suggests navigation
+        const navKeywords = /menu|book|reservation|contact|about|gallery|events|order|delivery|takeaway/i;
+        if (navKeywords.test(text)) {
+          elements.push({
+            type: 'button',
+            text,
+            href: el.getAttribute('data-href') || el.getAttribute('data-link'),
+            onClick: !!el.onclick || !!el.getAttribute('onclick'),
+            role: el.getAttribute('role'),
+            ariaLabel: el.getAttribute('aria-label')
+          });
+        }
+      });
+      
+      // 3. Clickable divs/spans (React Router often uses these)
+      document.querySelectorAll('[onclick], [data-href], [data-link], [data-to]').forEach(el => {
+        if (el.tagName === 'A' || el.tagName === 'BUTTON') return; // Already captured
+        const text = extractText(el);
+        if (text) {
+          elements.push({
+            type: 'clickable',
+            text,
+            href: el.getAttribute('data-href') || el.getAttribute('data-link') || el.getAttribute('data-to'),
+            onClick: true,
+            role: el.getAttribute('role'),
+            ariaLabel: el.getAttribute('aria-label')
+          });
+        }
+      });
+      
+      return {
+        totalElements: elements.length,
+        elements: elements.slice(0, 100) // Limit to first 100
+      };
+    });
+    
     const duration = Date.now() - startTime;
     
-    console.log(`Scrape completed in ${duration}ms, HTML length: ${html.length}`);
+    console.log(`Scrape completed in ${duration}ms, HTML: ${html.length} chars, Nav elements: ${navigationData.totalElements}`);
     
     return res.status(200).json({
       html,
+      navigationData,
       scraperType: 'puppeteer-vercel',
       duration
     });

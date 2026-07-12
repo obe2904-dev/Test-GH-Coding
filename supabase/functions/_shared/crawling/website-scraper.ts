@@ -18,8 +18,23 @@ export interface ScrapeOptions {
   // Options reserved for future use
 }
 
+export interface NavigationElement {
+  type: 'link' | 'button' | 'clickable'
+  href?: string
+  text: string
+  onClick?: boolean
+  role?: string
+  ariaLabel?: string
+}
+
+export interface NavigationData {
+  totalElements: number
+  elements: NavigationElement[]
+}
+
 export interface ScrapeResult {
   html: string
+  navigationData?: NavigationData
   usedAdvancedScraping: boolean
   scraperType: 'simple-fetch' | 'cloud-run-puppeteer' | 'puppeteer-vercel'
 }
@@ -83,8 +98,14 @@ export async function scrapeWithPuppeteer(url: string): Promise<ScrapeResult | n
         } else {
           console.log(`✅ Vercel Puppeteer succeeded, HTML length:`, data.html.length)
           
+          // Log navigation data if available
+          if (data.navigationData) {
+            console.log(`   🔗 Extracted ${data.navigationData.totalElements} navigation elements`)
+          }
+          
           return {
             html: data.html,
+            navigationData: data.navigationData,
             usedAdvancedScraping: true,
             scraperType: 'puppeteer-vercel'
           }

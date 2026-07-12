@@ -268,6 +268,7 @@ serve(async (req: any) => {
               if (scrapeResult && (scrapeResult.scraperType === 'cloud-run-puppeteer' || scrapeResult.scraperType === 'puppeteer-vercel')) {
                 console.log(`✅ Puppeteer re-scrape successful (${scrapeResult.scraperType}), using new content`)
                 homepageHtml = scrapeResult.html
+                navigationData = scrapeResult.navigationData  // Capture navigation data
                 cacheHit = false // Mark as fresh scrape to update cache
                 
                 // Update cache with new Puppeteer result
@@ -301,6 +302,7 @@ serve(async (req: any) => {
     
     // Scrape if not cached - with intelligent routing
     let scraperType = 'unknown'
+    let navigationData: any = null  // Capture navigation data from Puppeteer
     let contentSignature: any = null
     let scrapingMetrics: any = null
     
@@ -320,6 +322,7 @@ serve(async (req: any) => {
         // Fallback to old scraping if signature detection fails
         const scrapeResult = await scrapeWebsite(url)
         homepageHtml = scrapeResult.html
+        navigationData = scrapeResult.navigationData
         scraperType = scrapeResult.scraperType
       }
       
@@ -354,6 +357,7 @@ serve(async (req: any) => {
           console.error('❌ Intelligent routing failed, falling back to legacy scraper:', routingError)
           const scrapeResult = await scrapeWebsite(url)
           homepageHtml = scrapeResult.html
+          navigationData = scrapeResult.navigationData
           scraperType = scrapeResult.scraperType
         }
       }
@@ -569,9 +573,64 @@ serve(async (req: any) => {
           .trim()
       }
       
-      // Extract links from homepage (improved regex captures nested content)
-      const linkMatches = homepageHtml.matchAll(/<a\s+([^>]*)>([\s\S]*?)<\/a>/gi)
+      // Extract links from homepage
       const links: { href: string; text: string; ariaLabel: string; title: string; hostname: string; isInternal: boolean }[] = []
+      
+      // STEP 1: Use Puppeteer navigation data if available (React Router, click handlers, etc.)
+      if (navigationData && navigationData.elements && navigationData.elements.length > 0) {
+        console.log(`🎯 Using Puppeteer navigation data (${navigationData.totalElements} elements)`)
+        
+        for (const element of navigationData.elements) {
+          let href = element.href
+          
+          // Skip if no href or text
+          if (!href || !element.text) continue
+          
+          // Skip anchors, mailto, tel, javascript
+          if (
+            href.startsWith('#') ||
+            href.startsWith('mailto:') ||
+            href.startsWith('tel:') ||
+            href.startsWith('javascript:')
+          ) {
+            continue
+          }
+          
+          try {
+            const linkUrl = new URL(href, url)
+            const isInternal = linkUrl.hostname === baseDomain
+            
+            // Skip homepage itself
+            if (isInternal && linkUrl.pathname === baseUrl.pathname) continue
+            
+            // Multi-business site handling
+            if (isInternal && baseUrl.pathname.length > 1) {
+              const basePath = baseUrl.pathname.split('/').filter(p => p)[0]
+              const linkPath = linkUrl.pathname.split('/').filter(p => p)[0]
+              
+              if (basePath && linkPath !== basePath && linkUrl.pathname !== '/') {
+                continue
+              }
+            }
+            
+            links.push({
+              href: linkUrl.href,
+              text: element.text,
+              ariaLabel: element.ariaLabel || '',
+              title: '',
+              hostname: linkUrl.hostname,
+              isInternal,
+            })
+          } catch {
+            // invalid URL, skip
+          }
+        }
+        
+        console.log(`  ✅ Extracted ${links.length} links from Puppeteer navigation data`)
+      }
+      
+      // STEP 2: Also extract traditional <a> tags from HTML (fallback + supplement)
+      const linkMatches = homepageHtml.matchAll(/<a\s+([^>]*)>([\s\S]*?)<\/a>/gi)
       
       for (const match of linkMatches) {
         const tagAttrs = match[1]
@@ -647,13 +706,20 @@ serve(async (req: any) => {
         }
       }
       
-      console.log('🔗 Found links (internal + external):', links.length)
+      // Deduplicate links by href
+      const uniqueLinks = Array.from(new Map(links.map(l => [l.href, l])).values())
+      
+      console.log('🔗 Found links:', {
+        total: uniqueLinks.length,
+        fromPuppeteer: navigationData?.elements?.length || 0,
+        fromHTML: links.length - (navigationData?.elements?.length || 0)
+      })
       
       // ══════════════════════════════════════════════════════════════════════════════
       // STEP 4: Classify links and extract special URLs
       // ══════════════════════════════════════════════════════════════════════════════
       
-      const linkClassificationResult = await classifyAndExtractLinks(links as Link[], {
+      const linkClassificationResult = await classifyAndExtractLinks(uniqueLinks as Link[], {
         allowAiClassification: tierConfig.allowAiLinkClassification,
         aiModel,
         openaiApiKey: Deno.env.get('OPENAI_API_KEY')
@@ -668,7 +734,7 @@ serve(async (req: any) => {
       console.log('🎯 Final detected URLs:', { menuUrl, bookingUrl, detectedPDFs: detectedPDFs.length })
       
       // Store homepage
-      const internalLinks = links.filter(l => l.isInternal)
+      const internalLinks = uniqueLinks.filter(l => l.isInternal)
       crawledPages.push({
         url: url,
         html: homepageHtml,
