@@ -45,6 +45,18 @@ import type { Link, ClassifiedLink } from '../_shared/crawling/link-classifier.t
 // Import website scraping
 import { scrapeWebsite } from '../_shared/crawling/website-scraper.ts'
 
+// Import intelligent scraping system
+import { detectContentSignature } from '../_shared/scraping/content-signature-detector.ts'
+import { routeToOptimalScraper } from '../_shared/scraping/intelligent-scraper-router.ts'
+import { 
+  stage1ZeroCostExtraction, 
+  stage2LowCostExtraction, 
+  calculateCompleteness, 
+  identifyFieldsForAI,
+  type ExtractionCompleteness 
+} from '../_shared/scraping/extraction-waterfall.ts'
+import { validateExtractionQuality } from '../_shared/scraping/extraction-validator.ts'
+
 // Import database persistence
 import { saveWebsiteAnalysis } from '../_shared/persistence/website-analysis-saver.ts'
 
@@ -285,14 +297,61 @@ serve(async (req: any) => {
       console.log('🔄 Force refresh requested - bypassing cache')
     }
     
-    // Scrape if not cached
+    // Scrape if not cached - with intelligent routing
+    let scraperType = 'unknown'
+    let contentSignature: any = null
+    let scrapingMetrics: any = null
+    
     if (!homepageHtml) {
-      const scrapeResult = await scrapeWebsite(url)
+      // Phase 1: Detect content signature (pre-flight analysis)
+      console.log('🔍 Phase 1: Detecting content signature...')
+      try {
+        contentSignature = await detectContentSignature(url)
+        console.log('📊 Content signature:', contentSignature.classification, 'confidence:', contentSignature.confidence)
+      } catch (signatureError) {
+        console.warn('⚠️ Content signature detection failed, using default routing:', signatureError)
+        // Fallback to old scraping if signature detection fails
+        const scrapeResult = await scrapeWebsite(url)
+        homepageHtml = scrapeResult.html
+        scraperType = scrapeResult.scraperType
+      }
       
-      homepageHtml = scrapeResult.html
-      const scraperType = scrapeResult.scraperType
+      // Phase 2: Route to optimal scraper
+      if (contentSignature) {
+        console.log('🚀 Phase 2: Routing to optimal scraper...')
+        try {
+          const routingResult = await routeToOptimalScraper(url, contentSignature)
+          homepageHtml = routingResult.html
+          scraperType = routingResult.scraperUsed.toLowerCase().replace('_', '-')
+          
+          // Log metrics
+          scrapingMetrics = {
+            classification: contentSignature.classification,
+            confidence: contentSignature.confidence,
+            scraperUsed: routingResult.scraperUsed,
+            attemptsMade: routingResult.attemptsMade,
+            upgradedFrom: routingResult.upgradedFrom,
+            validationQuality: routingResult.validation.quality,
+            executionTime: routingResult.executionTime,
+            estimatedCost: routingResult.estimatedCost
+          }
+          
+          console.log('📊 Scraping metrics:', scrapingMetrics)
+          
+          // Warn if validation failed
+          if (!routingResult.validation.isValid) {
+            console.warn('⚠️ Scraper validation failed:', routingResult.validation.issues)
+          }
+          
+        } catch (routingError) {
+          console.error('❌ Intelligent routing failed, falling back to legacy scraper:', routingError)
+          const scrapeResult = await scrapeWebsite(url)
+          homepageHtml = scrapeResult.html
+          scraperType = scrapeResult.scraperType
+        }
+      }
       
-      console.log('🎯 Scraper used:', scraperType)
+      console.log('🎯 Final scraper used:', scraperType)
       
       // Save to cache
       if (supabase && homepageHtml) {
@@ -902,7 +961,41 @@ serve(async (req: any) => {
       )
     }
 
-    // PHASE 2: Parallel AI Extraction with specialized extractors
+    // PHASE 2: Intelligent Extraction Waterfall
+    console.log('🚀 Phase 3: Starting extraction waterfall (zero-cost → low-cost → AI)...')
+    
+    let extractionCompleteness: ExtractionCompleteness | null = null
+    let fieldsRequiringAI: string[] = []
+    
+    try {
+      // Stage 1: Zero-cost extraction (JSON-LD + Meta tags)
+      const stage1Result = await stage1ZeroCostExtraction(homepageHtml, metadata)
+      
+      // Stage 2: Low-cost extraction (Regex + HTML semantic)
+      const stage2Result = await stage2LowCostExtraction(homepageHtml, url, stage1Result)
+      
+      // Calculate completeness
+      extractionCompleteness = calculateCompleteness(stage2Result)
+      
+      console.log(`📊 Extraction completeness: ${extractionCompleteness.overallScore}/100`)
+      console.log(`   Missing critical fields: ${extractionCompleteness.missingCriticalFields.join(', ') || 'none'}`)
+      
+      // Determine which fields need AI
+      fieldsRequiringAI = identifyFieldsForAI(extractionCompleteness)
+      
+      // Short-circuit if we have everything we need (90%+ complete)
+      if (extractionCompleteness.overallScore >= 90 && extractionCompleteness.missingCriticalFields.length === 0) {
+        console.log('✅ Extraction waterfall complete - no AI needed (90%+ complete)')
+      } else {
+        console.log(`🤖 AI extraction required for ${fieldsRequiringAI.length} fields`)
+      }
+      
+    } catch (waterfallError) {
+      console.error('❌ Extraction waterfall failed:', waterfallError)
+      // Continue with old AI extraction as fallback
+    }
+    
+    // PHASE 2 (continued): Parallel AI Extraction with specialized extractors
     console.log('🚀 Starting parallel AI extraction with specialized models...')
     
     let analysisResult: any = {}
@@ -976,6 +1069,120 @@ serve(async (req: any) => {
       console.log('✅ Parallel extraction complete (7/7 extractors)')
       console.log('🍽️ Menu signal extracted:', JSON.stringify(menuSignal, null, 2))
       console.log('🎤 Tone of voice extracted:', toneOfVoice ? '✅' : '❌')
+
+      // Phase 4: Validate extraction quality & detect misclassifications
+      console.log('🔍 Phase 4: Validating extraction quality...')
+      
+      try {
+        // Update completeness with AI results if available
+        if (extractionCompleteness && basicInfo) {
+          if (basicInfo.businessName) {
+            extractionCompleteness.businessName = {
+              value: basicInfo.businessName,
+              status: 'FOUND',
+              source: 'AI_CHEAP',
+              confidence: 0.8
+            }
+          }
+          
+          if (basicInfo.businessType) {
+            extractionCompleteness.businessType = {
+              value: basicInfo.businessType,
+              status: 'FOUND',
+              source: 'AI_CHEAP',
+              confidence: 0.8
+            }
+          }
+          
+          if (basicInfo.description) {
+            extractionCompleteness.description = {
+              value: basicInfo.description,
+              status: 'FOUND',
+              source: 'AI_CHEAP',
+              confidence: 0.75
+            }
+          }
+          
+          if (contactInfo?.phone) {
+            extractionCompleteness.phone = {
+              value: contactInfo.phone,
+              status: 'FOUND',
+              source: 'AI_CHEAP',
+              confidence: 0.7
+            }
+          }
+          
+          if (contactInfo?.email) {
+            extractionCompleteness.email = {
+              value: contactInfo.email,
+              status: 'FOUND',
+              source: 'AI_CHEAP',
+              confidence: 0.7
+            }
+          }
+          
+          if (contactInfo?.address) {
+            extractionCompleteness.address = {
+              value: contactInfo.address,
+              status: 'FOUND',
+              source: 'AI_CHEAP',
+              confidence: 0.7
+            }
+          }
+        }
+        
+        // Detect hospitality indicators
+        const hasMenuUrl = allMenuUrls.length > 0
+        const hasBookingUrl = /book|reserv|bord/i.test(websiteContent)
+        const jsonLdType = structuredData.length > 0 ? structuredData[0]['@type'] : null
+        
+        // Run validation
+        if (extractionCompleteness) {
+          const qualityReport = validateExtractionQuality(extractionCompleteness, {
+            hasMenuUrl,
+            hasBookingUrl,
+            websiteContent: websiteContent.substring(0, 5000), // First 5KB for validation
+            jsonLdType,
+            metaDescription: metadata?.description || null
+          })
+          
+          console.log(`📊 Quality report: ${qualityReport.overallQuality}`)
+          console.log(`   Requires manual review: ${qualityReport.requiresManualReview}`)
+          
+          // Log auto-corrections
+          if (qualityReport.autoCorrections.length > 0) {
+            console.log(`🔧 Applied ${qualityReport.autoCorrections.length} auto-corrections:`)
+            for (const correction of qualityReport.autoCorrections) {
+              console.log(`   - ${correction.field}: "${correction.from}" → "${correction.to}"`)
+              
+              // Apply corrections to basicInfo
+              if (correction.field === 'businessType' && basicInfo) {
+                basicInfo.businessType = correction.to
+                console.log(`✅ Auto-corrected business type to: ${correction.to}`)
+              }
+            }
+          }
+          
+          // Log critical issues
+          if (qualityReport.criticalIssues.length > 0) {
+            console.error('❌ Critical quality issues detected:')
+            for (const issue of qualityReport.criticalIssues) {
+              console.error(`   - ${issue}`)
+            }
+          }
+          
+          // Log warnings
+          for (const validation of qualityReport.validations) {
+            if (validation.warnings.length > 0) {
+              console.warn(`⚠️ ${validation.field} warnings:`, validation.warnings)
+            }
+          }
+        }
+        
+      } catch (validationError) {
+        console.error('❌ Validation failed:', validationError)
+        // Continue without validation
+      }
 
       // Normalize + merge venue hooks so downstream can rely on `.text`
       const normalizeVenueHooks = (payload: any): any => {
