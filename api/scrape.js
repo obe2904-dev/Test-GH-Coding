@@ -48,11 +48,19 @@ export default async function handler(req, res) {
   
   let browser = null;
   try {
+    const execPath = await chromium.executablePath();
+    console.log('Chromium executable path:', execPath);
+    
     browser = await puppeteer.launch({
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+      ],
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+      executablePath: execPath,
+      headless: 'new',
     });
 
     const page = await browser.newPage();
