@@ -17,70 +17,68 @@ const USER_AGENT_HEADERS = {
 }
 
 export interface ScrapeOptions {
-  scrapingBeeApiKey?: string
   forceAdvancedScraping?: boolean
+  vercelScraperUrl?: string
+  vercelScraperApiKey?: string
 }
 
 export interface ScrapeResult {
   html: string
   usedAdvancedScraping: boolean
+  scraperType?: 'vercel-playwright' | 'simple-fetch'
 }
 
 /**
- * Fetch HTML using ScrapingBee (JavaScript rendering + cookie auto-accept)
+ * Fetch HTML using Vercel Playwright serverless function
+ * PRIMARY SCRAPER - Free on Vercel Pro, 60s timeout, full JS rendering
  */
-async function fetchWithScrapingBee(
+async function fetchWithVercelPlaywright(
   url: string,
+  vercelScraperUrl: string,
   apiKey: string,
   signal?: AbortSignal
-): Promise<string> {
-  console.log('🚀 Using ScrapingBee (JavaScript rendering + cookie consent)')
+): Promise<{ html: string; meta: any }> {
+  console.log('🎭 Using Vercel Playwright (Primary scraper)')
   
-  // ScrapingBee API endpoint
-  const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/')
-  scrapingBeeUrl.searchParams.set('api_key', apiKey)
-  scrapingBeeUrl.searchParams.set('url', url)
-  scrapingBeeUrl.searchParams.set('render_js', 'true')  // Execute JavaScript
-  scrapingBeeUrl.searchParams.set('premium_proxy', 'false')  // Use standard proxy
-  scrapingBeeUrl.searchParams.set('country_code', 'dk')  // Danish proxy
-  scrapingBeeUrl.searchParams.set('wait', '3000')  // Wait 3s for JS to render
-  scrapingBeeUrl.searchParams.set('wait_browser', 'networkidle')  // Wait for network idle
-  scrapingBeeUrl.searchParams.set('timeout', '60000')  // ScrapingBee timeout: 60s
-  
-  console.log('📡 ScrapingBee request URL:', scrapingBeeUrl.toString().replace(apiKey, 'API_KEY_HIDDEN'))
-  
-  const response = await fetch(scrapingBeeUrl.toString(), {
-    method: 'GET',
+  const response = await fetch(vercelScraperUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ url }),
     signal
   })
   
-  console.log('📡 ScrapingBee response status:', response.status)
-  console.log('📡 ScrapingBee cost:', response.headers.get('spb-cost') || 'unknown')
+  console.log('📡 Vercel response status:', response.status)
   
   if (!response.ok) {
     const errorText = await response.text()
-    console.error('❌ ScrapingBee error:', errorText)
-    throw new Error(`ScrapingBee failed: ${response.status} - ${errorText}`)
+    console.error('❌ Vercel Playwright error:', errorText)
+    throw new Error(`Vercel Playwright failed: ${response.status} - ${errorText}`)
   }
   
-  const html = await response.text()
-  console.log('✅ ScrapingBee scraping successful:', html.length, 'chars')
+  const result = await response.json()
   
-  // Validate we got actual content, not just cookie dialog
-  const textContent = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-                          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-                          .replace(/<[^>]*>/g, '')
-                          .trim()
-  
-  const cleanLines = textContent.split('\n').filter(line => line.trim().length > 0)
-  console.log('📄 ScrapingBee extracted text lines:', cleanLines.length)
-  
-  if (cleanLines.length < 10) {
-    console.warn('⚠️ ScrapingBee returned minimal content - might still be cookie dialog')
-    console.warn('First 5 lines:', cleanLines.slice(0, 5))
+  if (!result.success || !result.data) {
+    throw new Error('Vercel Playwright returned invalid response')
   }
   
-  return html
+  const { html, text, links, headings } = result.data
+  
+  console.log('✅ Vercel scraping successful:', html.length, 'chars HTML,', text.length, 'chars text')
+  console.log('📊 Extracted:', links?.length || 0, 'links,', headings?.length || 0, 'headings')
+  
+  return { 
+    html, 
+    meta: { 
+      links, 
+      headings, 
+      text,
+      structuredData: result.data.structuredData,
+      durationMs: result.meta?.durationMs 
+    } 
+  }
 }
 
 /**
@@ -109,73 +107,89 @@ async function fetchWithSimpleRequest(
 
 /**
  * Main scraping function with automatic fallback and retry logic
+ * Priority: Vercel Playwright (primary) → Simple Fetch (fallback)
  */
 export async function scrapeWebsite(
   url: string,
   options: ScrapeOptions = {}
 ): Promise<ScrapeResult> {
-  const { scrapingBeeApiKey, forceAdvancedScraping = false } = options
+  const { 
+    forceAdvancedScraping = false,
+    vercelScraperUrl,
+    vercelScraperApiKey
+  } = options
   
   console.log('🌐 Fetching homepage:', url)
   
   // Check if we should use advanced browser-based scraping
   const useAdvancedScraper = forceAdvancedScraping || needsAdvancedScraping(url)
   
-  // Create abort controller for timeout
-  const controller = new AbortController()
-  const timeoutMs = useAdvancedScraper ? 90000 : 15000  // 90s for ScrapingBee, 15s for simple
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
-  
   let html = ''
   let usedAdvancedScraping = false
+  let scraperType: 'vercel-playwright' | 'simple-fetch' = 'simple-fetch'
   
-  try {
-    // Try ScrapingBee if conditions are met
-    if (useAdvancedScraper && scrapingBeeApiKey) {
-      try {
-        html = await fetchWithScrapingBee(url, scrapingBeeApiKey, controller.signal)
-        usedAdvancedScraping = true
-        clearTimeout(timeoutId)
-      } catch (scrapingBeeError) {
-        console.log('⚠️ ScrapingBee failed, falling back to simple fetch')
-        console.log('Error:', scrapingBeeError)
-        clearTimeout(timeoutId)
-        
-        // Fallback to simple fetch
-        const newController = new AbortController()
-        const newTimeoutId = setTimeout(() => newController.abort(), 20000)  // 20s for fallback
-        
-        try {
-          html = await fetchWithSimpleRequest(url, newController.signal)
-          clearTimeout(newTimeoutId)
-        } catch (fallbackError) {
-          clearTimeout(newTimeoutId)
-          throw fallbackError
-        }
-      }
-    } else {
-      // Use simple fetch
-      if (useAdvancedScraper && !scrapingBeeApiKey) {
-        console.log('⚠️ Advanced scraping recommended but SCRAPINGBEE_API_KEY not configured')
-      }
-      
-      html = await fetchWithSimpleRequest(url, controller.signal)
+  // PRIORITY 1: Try Vercel Playwright (if configured)
+  if (useAdvancedScraper && vercelScraperUrl && vercelScraperApiKey) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 70000)  // 70s (Vercel has 60s limit + buffer)
+    
+    try {
+      console.log('🎯 Attempting primary scraper: Vercel Playwright')
+      const result = await fetchWithVercelPlaywright(url, vercelScraperUrl, vercelScraperApiKey, controller.signal)
+      html = result.html
+      usedAdvancedScraping = true
+      scraperType = 'vercel-playwright'
       clearTimeout(timeoutId)
       
-      // Check if we should retry with ScrapingBee based on HTML content
-      if (!useAdvancedScraper && scrapingBeeApiKey && needsAdvancedScraping(url, html)) {
-        console.log('🔄 Detected SPA after initial fetch, retrying with ScrapingBee')
-        
+      console.log('✅ Vercel Playwright succeeded')
+      return { html, usedAdvancedScraping, scraperType }
+      
+    } catch (vercelError) {
+      clearTimeout(timeoutId)
+      console.log('⚠️ Vercel Playwright failed:', vercelError)
+      console.log('🔄 Falling back to simple fetch...')
+      // Continue to fallback below
+    }
+  } else if (useAdvancedScraper && !vercelScraperUrl) {
+    console.log('⚠️ Vercel scraper not configured (missing VERCEL_SCRAPER_URL or API_KEY)')
+  }
+  
+  // PRIORITY 2: Use simple fetch (fallback)
+  const controller = new AbortController()
+  const timeoutMs = 15000  // 15s for simple fetch
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  
+  try {
+    if (useAdvancedScraper && !vercelScraperUrl) {
+      console.log('⚠️ Advanced scraping recommended but Vercel scraper not configured')
+    }
+    
+    console.log('📄 Using simple fetch')
+    html = await fetchWithSimpleRequest(url, controller.signal)
+    scraperType = 'simple-fetch'
+    clearTimeout(timeoutId)
+    
+    // Check if we should retry with Vercel based on HTML content
+    if (!useAdvancedScraper && needsAdvancedScraping(url, html)) {
+      console.log('🔄 Detected SPA after initial fetch')
+      
+      // Try Vercel Playwright retry
+      if (vercelScraperUrl && vercelScraperApiKey) {
         try {
-          html = await fetchWithScrapingBee(url, scrapingBeeApiKey)
+          console.log('🎭 Retrying with Vercel Playwright...')
+          const result = await fetchWithVercelPlaywright(url, vercelScraperUrl, vercelScraperApiKey)
+          html = result.html
           usedAdvancedScraping = true
+          scraperType = 'vercel-playwright'
+          console.log('✅ Retry with Vercel succeeded')
+          return { html, usedAdvancedScraping, scraperType }
         } catch (retryError) {
-          console.log('⚠️ Retry with ScrapingBee failed, using initial content')
+          console.log('⚠️ Retry with Vercel failed, using initial content')
         }
       }
     }
     
-    return { html, usedAdvancedScraping }
+    return { html, usedAdvancedScraping, scraperType }
     
   } catch (fetchError: any) {
     clearTimeout(timeoutId)
@@ -187,20 +201,6 @@ export async function scrapeWebsite(
     
     // Handle connection errors with helpful messages
     const errorMsg = fetchError.message || String(fetchError)
-    
-    // If ScrapingBee failed and we haven't tried simple fetch yet, try it now
-    if (errorMsg.includes('ScrapingBee failed')) {
-      console.log('🔄 Falling back to simple fetch after ScrapingBee failure')
-      
-      try {
-        html = await fetchWithSimpleRequest(url)
-        console.log('📄 Fallback fetch succeeded:', html.length, 'chars')
-        return { html, usedAdvancedScraping: false }
-      } catch (fallbackError: any) {
-        const fallbackMsg = fallbackError.message || String(fallbackError)
-        throw new Error(provideFriendlyErrorMessage(fallbackMsg))
-      }
-    }
     
     // Provide friendly error message
     throw new Error(provideFriendlyErrorMessage(errorMsg))

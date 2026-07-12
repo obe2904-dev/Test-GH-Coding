@@ -209,15 +209,92 @@ serve(async (req: any) => {
       baseDomainForCrawl = baseDomain
       
       // ══════════════════════════════════════════════════════════════════════════════
-      // STEP 1: Fetch homepage HTML
-      // ══════════════════════════════════════════════════════════════════════════════
+    // STEP 1: Fetch homepage HTML (with cache + Vercel Playwright integration)
+    // ══════════════════════════════════════════════════════════════════════════════
+    
+    // Initialize Supabase client for cache operations
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
+    const supabaseKey = supabaseServiceKey || supabaseAnonKey
+    
+    const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey, {
+      global: {
+        headers: authHeader ? { Authorization: authHeader } : {},
+      },
+    }) : null
+    
+    // Check cache first (24-hour TTL)
+    let homepageHtml = ''
+    let cacheHit = false
+    
+    if (supabase) {
+      const cacheCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
       
-      const scrapingBeeApiKey = Deno.env.get('SCRAPINGBEE_API_KEY')
+      try {
+        const { data: cachedResult } = await supabase
+          .from('scraped_cache')
+          .select('raw_html, scraped_at, scraper_type')
+          .eq('url', url)
+          .gt('scraped_at', cacheCutoff)
+          .eq('status', 'success')
+          .maybeSingle()
+        
+        if (cachedResult?.raw_html) {
+          homepageHtml = cachedResult.raw_html
+          cacheHit = true
+          console.log('✅ Cache HIT - Using cached content from', cachedResult.scraped_at)
+          console.log('🎯 Original scraper:', cachedResult.scraper_type)
+        } else {
+          console.log('❌ Cache MISS - Will scrape fresh content')
+        }
+      } catch (cacheError) {
+        console.log('⚠️ Cache check failed:', cacheError)
+        // Continue to scraping
+      }
+    }
+    
+    // Scrape if not cached
+    if (!homepageHtml) {
+      const vercelScraperUrl = Deno.env.get('VERCEL_SCRAPER_URL')
+      const vercelScraperApiKey = Deno.env.get('VERCEL_SCRAPER_API_KEY')
       
-      let homepageHtml = (await scrapeWebsite(url, {
-        scrapingBeeApiKey
-      })).html
+      const scrapeResult = await scrapeWebsite(url, {
+        vercelScraperUrl,
+        vercelScraperApiKey
+      })
       
+      homepageHtml = scrapeResult.html
+      const scraperType = scrapeResult.scraperType || 'unknown'
+      
+      console.log('🎯 Scraper used:', scraperType)
+      
+      // Save to cache
+      if (supabase && homepageHtml) {
+        try {
+          const { error: cacheError } = await supabase
+            .from('scraped_cache')
+            .upsert({
+              url,
+              raw_html: homepageHtml,
+              raw_text: homepageHtml.replace(/<[^>]*>/g, '').trim(),
+              scraper_type: scraperType,
+              status: 'success',
+              scraped_at: new Date().toISOString()
+            }, {
+              onConflict: 'url'
+            })
+          
+          if (cacheError) {
+            console.log('⚠️ Failed to save to cache:', cacheError)
+          } else {
+            console.log('✅ Saved to cache for future requests')
+          }
+        } catch (saveError) {
+          console.log('⚠️ Cache save error:', saveError)
+        }
+      }
+    }
       // Detect login/authentication pages - prevent extracting password forms
       if (looksLikeLoginPage(homepageHtml, url)) {
         console.error('❌ Homepage appears to be a login/admin page')
