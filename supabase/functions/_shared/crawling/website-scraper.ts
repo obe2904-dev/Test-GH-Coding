@@ -21,18 +21,68 @@ export interface ScrapeOptions {
 export interface ScrapeResult {
   html: string
   usedAdvancedScraping: boolean
-  scraperType: 'simple-fetch'
+  scraperType: 'simple-fetch' | 'cloud-run-puppeteer'
 }
 
 /**
- * Main scraping function using simple HTTP fetch
+ * Scrape using Cloud Run Puppeteer service
+ */
+async function scrapeWithCloudRun(url: string): Promise<ScrapeResult | null> {
+  const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL')
+  const apiKey = Deno.env.get('CLOUD_RUN_API_KEY')
+  
+  if (!cloudRunUrl || !apiKey) {
+    console.log('⚠️ Cloud Run scraper not configured (missing URL or API key)')
+    return null
+  }
+  
+  console.log('🚀 Attempting Cloud Run Puppeteer scraper')
+  
+  try {
+    const response = await fetch(`${cloudRunUrl}/scrape`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey
+      },
+      body: JSON.stringify({ url })
+    })
+    
+    if (!response.ok) {
+      console.error('❌ Cloud Run scraper HTTP error:', response.status)
+      return null
+    }
+    
+    const data = await response.json()
+    
+    if (!data.success || !data.html) {
+      console.error('❌ Cloud Run scraper returned failure:', data.error)
+      return null
+    }
+    
+    console.log('✅ Cloud Run scraper succeeded, HTML length:', data.html.length)
+    
+    return {
+      html: data.html,
+      usedAdvancedScraping: true,
+      scraperType: 'cloud-run-puppeteer'
+    }
+    
+  } catch (error: any) {
+    console.error('❌ Cloud Run scraper error:', error.message)
+    return null
+  }
+}
+
+/**
+ * Main scraping function with Cloud Run fallback
  */
 export async function scrapeWebsite(
   url: string,
   options: ScrapeOptions = {}
 ): Promise<ScrapeResult> {
   console.log('🌐 Fetching homepage:', url)
-  console.log('📄 Using simple fetch')
+  console.log('📄 Trying simple fetch first')
   
   const controller = new AbortController()
   const timeoutMs = 15000  // 15s timeout
@@ -55,6 +105,16 @@ export async function scrapeWebsite(
     
     clearTimeout(timeoutId)
     
+    // Check if HTML is too short (likely JavaScript-heavy site)
+    if (html.length < 5000) {
+      console.log('⚠️ HTML too short, may be JavaScript-heavy site')
+      const cloudRunResult = await scrapeWithCloudRun(url)
+      if (cloudRunResult) {
+        return cloudRunResult
+      }
+      console.log('⚠️ Cloud Run unavailable, using simple fetch result anyway')
+    }
+    
     return {
       html,
       usedAdvancedScraping: false,
@@ -64,6 +124,15 @@ export async function scrapeWebsite(
   } catch (error: any) {
     clearTimeout(timeoutId)
     
+    console.error('❌ Simple fetch failed:', error.message)
+    
+    // Try Cloud Run as fallback
+    const cloudRunResult = await scrapeWithCloudRun(url)
+    if (cloudRunResult) {
+      return cloudRunResult
+    }
+    
+    // Both failed, throw original error
     if (error.name === 'AbortError') {
       throw new Error(`Website took too long to respond (timeout after ${timeoutMs / 1000} seconds)`)
     }
