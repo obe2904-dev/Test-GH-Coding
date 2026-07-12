@@ -39,14 +39,59 @@ function extractVisibleTextLength(html: string): number {
 }
 
 /**
- * Scrape using Cloud Run Puppeteer service
+ * Scrape using Puppeteer service (Vercel or Cloud Run)
+ * Checks Vercel first, then falls back to Cloud Run
  */
-async function scrapeWithCloudRun(url: string): Promise<ScrapeResult | null> {
-  const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL')
-  const apiKey = Deno.env.get('CLOUD_RUN_API_KEY')
+async function scrapeWithPuppeteer(url: string): Promise<ScrapeResult | null> {
+  // Try Vercel scraper first
+  const vercelUrl = Deno.env.get('VERCEL_SCRAPER_URL')
+  const vercelApiKey = Deno.env.get('VERCEL_SCRAPER_API_KEY')
   
-  if (!cloudRunUrl || !apiKey) {
-    console.log('⚠️ Cloud Run scraper not configured (missing URL or API key)')
+  if (vercelUrl && vercelApiKey) {
+    console.log('🚀 Attempting Vercel Puppeteer scraper')
+    
+    try {
+      const response = await fetch(vercelUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': vercelApiKey
+        },
+        body: JSON.stringify({ url })
+      })
+      
+      if (!response.ok) {
+        console.error('❌ Vercel scraper HTTP error:', response.status)
+        const text = await response.text()
+        console.error('   Response:', text)
+      } else {
+        const data = await response.json()
+        
+        if (!data.html) {
+          console.error('❌ Vercel scraper returned no HTML:', data.error || 'unknown error')
+        } else {
+          console.log(`✅ Vercel Puppeteer succeeded, HTML length:`, data.html.length)
+          
+          return {
+            html: data.html,
+            usedAdvancedScraping: true,
+            scraperType: 'puppeteer-vercel'
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Vercel scraper error:', error.message)
+    }
+    
+    console.log('⚠️ Vercel scraper failed, trying Cloud Run fallback...')
+  }
+  
+  // Fall back to Cloud Run scraper
+  const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL')
+  const cloudRunApiKey = Deno.env.get('CLOUD_RUN_API_KEY')
+  
+  if (!cloudRunUrl || !cloudRunApiKey) {
+    console.log('⚠️ No Puppeteer scraper configured (checked both Vercel and Cloud Run)')
     return null
   }
   
@@ -57,7 +102,7 @@ async function scrapeWithCloudRun(url: string): Promise<ScrapeResult | null> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey
+        'x-api-key': cloudRunApiKey
       },
       body: JSON.stringify({ url })
     })
@@ -70,17 +115,16 @@ async function scrapeWithCloudRun(url: string): Promise<ScrapeResult | null> {
     const data = await response.json()
     
     if (!data.html) {
-      console.error('❌ Puppeteer scraper returned no HTML:', data.error || 'unknown error')
+      console.error('❌ Cloud Run scraper returned no HTML:', data.error || 'unknown error')
       return null
     }
     
-    const scraperType = data.scraperType || 'cloud-run-puppeteer'
-    console.log(`✅ Puppeteer scraper succeeded (${scraperType}), HTML length:`, data.html.length)
+    console.log(`✅ Cloud Run Puppeteer succeeded, HTML length:`, data.html.length)
     
     return {
       html: data.html,
       usedAdvancedScraping: true,
-      scraperType: scraperType as 'cloud-run-puppeteer' | 'puppeteer-vercel'
+      scraperType: 'cloud-run-puppeteer'
     }
     
   } catch (error: any) {
@@ -126,12 +170,12 @@ export async function scrapeWebsite(
     
     // If visible text is too thin, this is likely a JS-heavy SPA that needs rendering
     if (visibleTextLength < 500) {
-      console.log('⚠️ Visible text too thin (< 500 chars) — likely JS-heavy SPA, escalating to Cloud Run')
-      const cloudRunResult = await scrapeWithCloudRun(url)
-      if (cloudRunResult) {
-        return cloudRunResult
+      console.log('⚠️ Visible text too thin (< 500 chars) — likely JS-heavy SPA, escalating to Puppeteer')
+      const puppeteerResult = await scrapeWithPuppeteer(url)
+      if (puppeteerResult) {
+        return puppeteerResult
       }
-      console.log('⚠️ Cloud Run unavailable, using simple fetch result anyway')
+      console.log('⚠️ Puppeteer unavailable, using simple fetch result anyway')
     } else {
       console.log(`✅ Sufficient visible text (${visibleTextLength} chars) — using simple fetch`)
     }
@@ -147,10 +191,10 @@ export async function scrapeWebsite(
     
     console.error('❌ Simple fetch failed:', error.message)
     
-    // Try Cloud Run as fallback
-    const cloudRunResult = await scrapeWithCloudRun(url)
-    if (cloudRunResult) {
-      return cloudRunResult
+    // Try Puppeteer as fallback
+    const puppeteerResult = await scrapeWithPuppeteer(url)
+    if (puppeteerResult) {
+      return puppeteerResult
     }
     
     // Both failed, throw original error
