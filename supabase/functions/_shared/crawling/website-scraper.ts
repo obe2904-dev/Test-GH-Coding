@@ -71,32 +71,3 @@ export async function scrapeWebsite(
     throw error
   }
 }
-    
-    // Handle connection errors with helpful messages
-    const errorMsg = fetchError.message || String(fetchError)
-    
-    // Provide friendly error message
-    throw new Error(provideFriendlyErrorMessage(errorMsg))
-  }
-}
-
-/**
- * Convert technical errors to friendly user messages
- */
-function provideFriendlyErrorMessage(errorMsg: string): string {
-  if (errorMsg.includes('Connection reset') || errorMsg.includes('ECONNRESET')) {
-    return 'Website refused connection. The site may be blocking automated requests or temporarily unavailable.'
-  }
-  if (errorMsg.includes('ETIMEDOUT') || errorMsg.includes('timeout')) {
-    return 'Website connection timed out. The site may be slow or temporarily unavailable.'
-  }
-  if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('getaddrinfo')) {
-    return 'Website not found. Please check the URL is correct.'
-  }
-  if (errorMsg.includes('Failed to fetch website:')) {
-    return errorMsg // Already friendly
-  }
-  
-  // Generic fallback
-  return `Failed to access website: ${errorMsg}`
-}
