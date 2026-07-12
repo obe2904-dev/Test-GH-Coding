@@ -60,7 +60,7 @@ export default async function handler(req, res) {
         '--single-process'
       ],
       executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+      headless: true,
     });
 
     const page = await browser.newPage();
