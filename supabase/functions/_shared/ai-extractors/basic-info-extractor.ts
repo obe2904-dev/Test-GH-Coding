@@ -24,27 +24,32 @@ export interface BasicBusinessInfo {
 const LANGUAGE_PROMPTS: Record<string, { system: string; descriptionInstruction: string }> = {
   da: {
     system: `Du er en virksomhedsinformationsekstraktor. Returner KUN gyldig JSON.
-KRITISK: Skriv ALTID beskrivelsen på DANSK. Oversæt ALDRIG til engelsk. Bevar originale danske vendinger og udtryk.`,
-    descriptionInstruction: 'Skriv en kort beskrivelse på 2-4 sætninger på DANSK der opsummerer hele virksomheden: hvad stedet er, hvad det serverer, hvilken stemning/oplevelse det tilbyder, og hvor det ligger hvis det er tydeligt. Bevar danske udtryk.'
+KRITISK: Udtræk ALTID beskrivelsen på DANSK. Oversæt ALDRIG til engelsk. Bevar originale danske vendinger og udtryk.
+FORBUD MOD OPDIGTNING: Opfind ALDRIG information. Udtræk KUN fakta der rent faktisk findes på hjemmesiden.`,
+    descriptionInstruction: 'Udtræk en kort beskrivelse på 2-4 sætninger på DANSK baseret UDELUKKENDE på information der faktisk står på hjemmesiden: hvad stedet er, hvad det serverer, hvilken stemning/oplevelse det tilbyder, og hvor det ligger hvis det er tydeligt. Brug de præcise udtryk fra hjemmesiden. Opfind IKKE information. Hvis information mangler, skriv NULL.'
   },
   no: {
     system: `Du er en virksomhetsinformasjonsekstraktor. Returner KUN gyldig JSON.
-KRITISK: Skriv ALLTID beskrivelsen på NORSK. Oversett ALDRI til engelsk. Bevar originale norske vendinger og uttrykk.`,
-    descriptionInstruction: 'Skriv en kort beskrivelse på 2-4 setninger på NORSK som oppsummerer hele virksomheten: hva stedet er, hva det serverer, hvilken stemning/opplevelse det tilbyr, og hvor det ligger hvis det er tydelig. Bevar norske uttrykk.'
+KRITISK: Trekk ut beskrivelsen ALLTID på NORSK. Oversett ALDRI til engelsk. Bevar originale norske vendinger og uttrykk.
+FORBUD MOT OPPFINNING: Finn ALDRI opp informasjon. Trekk KUN ut fakta som faktisk finnes på nettstedet.`,
+    descriptionInstruction: 'Trekk ut en kort beskrivelse på 2-4 setninger på NORSK basert UTELUKKENDE på informasjon som faktisk står på nettstedet: hva stedet er, hva det serverer, hvilken stemning/opplevelse det tilbyr, og hvor det ligger hvis det er tydelig. Bruk de presise uttrykkene fra nettstedet. IKKE finn opp informasjon. Hvis informasjon mangler, skriv NULL.'
   },
   sv: {
     system: `Du är en företagsinformationsextraktor. Returnera ENDAST giltig JSON.
-KRITISKT: Skriv ALLTID beskrivningen på SVENSKA. Översätt ALDRIG till engelska. Bevara svenska uttryck och fraser.`,
-    descriptionInstruction: 'Skriv en kort beskrivning på 2-4 meningar på SVENSKA som sammanfattar hela verksamheten: vad platsen är, vad den serverar, vilken känsla/upplevelse den erbjuder, och var den ligger om det framgår tydligt. Bevara svenska uttryck.'
+KRITISKT: Extrahera beskrivningen ALLTID på SVENSKA. Översätt ALDRIG till engelska. Bevara svenska uttryck och fraser.
+FÖRBUD MOT PÅHITT: Hitta ALDRIG på information. Extrahera ENDAST fakta som faktiskt finns på webbplatsen.`,
+    descriptionInstruction: 'Extrahera en kort beskrivning på 2-4 meningar på SVENSKA baserat UTESLUTANDE på information som faktiskt finns på webbplatsen: vad platsen är, vad den serverar, vilken känsla/upplevelse den erbjuder, och var den ligger om det framgår tydligt. Använd de exakta uttrycken från webbplatsen. Hitta INTE på information. Om information saknas, skriv NULL.'
   },
   de: {
     system: `Sie sind ein Geschäftsinformationsextraktor. Geben Sie NUR gültiges JSON zurück.
-KRITISCH: Schreiben Sie die Beschreibung IMMER auf DEUTSCH. Übersetzen Sie NIEMALS ins Englische. Bewahren Sie deutsche Ausdrücke und Redewendungen.`,
-    descriptionInstruction: 'Schreiben Sie eine kurze Beschreibung in 2-4 Sätzen auf DEUTSCH, die das gesamte Unternehmen zusammenfasst: was der Ort ist, was er serviert, welche Atmosphäre/Erfahrung er bietet und wo er liegt, falls das klar erkennbar ist. Bewahren Sie deutsche Ausdrücke.'
+KRITISCH: Extrahieren Sie die Beschreibung IMMER auf DEUTSCH. Übersetzen Sie NIEMALS ins Englische. Bewahren Sie deutsche Ausdrücke und Redewendungen.
+VERBOT VON ERFINDUNG: Erfinden Sie NIEMALS Informationen. Extrahieren Sie NUR Fakten, die tatsächlich auf der Website vorhanden sind.`,
+    descriptionInstruction: 'Extrahieren Sie eine kurze Beschreibung in 2-4 Sätzen auf DEUTSCH, basierend AUSSCHLIESSLICH auf Informationen, die tatsächlich auf der Website stehen: was der Ort ist, was er serviert, welche Atmosphäre/Erfahrung er bietet und wo er liegt, falls das klar erkennbar ist. Verwenden Sie die genauen Ausdrücke von der Website. Erfinden Sie KEINE Informationen. Wenn Informationen fehlen, schreiben Sie NULL.'
   },
   en: {
-    system: `You are a business information extractor. Return only valid JSON.`,
-    descriptionInstruction: 'Write a concise 2-4 sentence description that summarizes the whole business: what the place is, what it serves, the vibe/experience it offers, and where it is located if that is clear.'
+    system: `You are a business information extractor. Return only valid JSON.
+CRITICAL: NEVER invent information. Extract ONLY facts that actually exist on the website.`,
+    descriptionInstruction: 'Extract a concise 2-4 sentence description based EXCLUSIVELY on information actually found on the website: what the place is, what it serves, the vibe/experience it offers, and where it is located if that is clear. Use the exact phrases from the website. DO NOT invent information. If information is missing, write NULL.'
   }
 }
 
@@ -113,6 +118,8 @@ export async function extractBasicInfo(
   
   const prompt = `Extract basic business information from this website content.
 
+⚠️ CRITICAL INSTRUCTION: Extract ONLY factual information that actually appears on the website. Do NOT invent, assume, or hallucinate any details. If information is not present, return null for that field.
+
 ${hints.businessName ? `Hint - Business name: ${hints.businessName}\n` : ''}${hints.businessType ? `Hint - Business type: ${hints.businessType}\n` : ''}${metadata.title ? `Page title: ${metadata.title}\n` : ''}${metadata.description ? `Meta description: ${metadata.description}\n` : ''}${aboutSection}
 Content preview (first 3000 chars):
 ${content.slice(0, 3000)}
@@ -124,7 +131,7 @@ Extract:
    - If hybrid: { "primary": "cafe", "secondary": ["vinbar", "cocktailbar"], "hybridLabel": "Kaffebar & Vinbar", "cuisineType": "Dansk", "conceptTags": ["specialty-coffee"] }
    - Primary types: restaurant, cafe, bar, hotel, bakery, coffee_shop, retail, beauty, fitness, services, other
 3. description: ${hints.homepageAboutCandidate 
-  ? `${langPrompts.descriptionInstruction} Use ALL parts of the PRE-EXTRACTED HOMEPAGE SUMMARY above. The ABOUT BLOCK is only one signal, not the whole answer. Synthesize the business from the full homepage evidence. Prefer a fresh summary over copying the about sentence verbatim.`
+  ? `${langPrompts.descriptionInstruction} The PRE-EXTRACTED HOMEPAGE SUMMARY above contains key facts - extract and combine them with other visible information from the website. CRITICAL: Only include information that actually appears on the website. Do NOT invent or hallucinate details.`
     : langPrompts.descriptionInstruction}
 4. logoUrl: Include if an obvious logo image URL is visible in the content (or use the pre-extracted one)
 5. localLocationReference: Extract EXACT local place name phrase if business describes its location (e.g., "ved åen", "i Nyhavn", "ved stranden"). ONLY extract if explicitly mentioned. Return null if not found. Look for patterns: "ved [landmark]", "i [area]", "på [street/area]", "beliggende [where]".
