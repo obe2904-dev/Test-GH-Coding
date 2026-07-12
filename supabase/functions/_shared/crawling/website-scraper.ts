@@ -25,10 +25,10 @@ export interface ScrapeResult {
 }
 
 /**
- * Extract visible text length (strips scripts, styles, tags, CSS imports)
+ * Extract visible text (strips scripts, styles, tags, CSS imports)
  * This detects JS-heavy SPAs that have large HTML but minimal visible content
  */
-function extractVisibleTextLength(html: string): number {
+function extractVisibleText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -38,7 +38,15 @@ function extractVisibleTextLength(html: string): number {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim().length
+    .trim()
+}
+
+/**
+ * Count navigation links in HTML
+ * SPAs typically have 0-2 links in raw HTML (everything else is rendered by JS)
+ */
+function countLinks(html: string): number {
+  return (html.match(/<a\s+[^>]*href=/gi) || []).length
 }
 
 /**
@@ -167,21 +175,48 @@ export async function scrapeWebsite(
     
     clearTimeout(timeoutId)
     
-    // Check visible text content (not raw HTML bytes) to detect JS-heavy SPAs
-    const visibleTextLength = extractVisibleTextLength(html)
-    console.log(`📝 Visible text: ${visibleTextLength} chars (raw HTML: ${html.length} chars)`)
+    // Multi-signal SPA detection: check BOTH visible text AND navigation links
+    // SPAs have minimal visible text AND few/no links in raw HTML (everything renders via JS)
+    const visibleText = extractVisibleText(html)
+    const visibleTextLength = visibleText.length
+    const linkCount = countLinks(html)
     
-    // If visible text is too thin, this is likely a JS-heavy SPA that needs rendering
-    // Threshold: 2000 chars (CSS imports/comments can easily be 500-1000 chars)
-    if (visibleTextLength < 2000) {
-      console.log('⚠️ Visible text too thin (< 2000 chars) — likely JS-heavy SPA, escalating to Puppeteer')
+    console.log(`📝 Visible text: ${visibleTextLength} chars, ${linkCount} links (raw HTML: ${html.length} chars)`)
+    
+    // Log first 800 chars to diagnose what content we're actually seeing
+    if (visibleTextLength > 0) {
+      console.log('📄 Visible text sample (first 800 chars):')
+      console.log(visibleText.slice(0, 800))
+    }
+    
+    // Compound check: Need BOTH sufficient text AND navigation links
+    const hasSufficientText = visibleTextLength >= 800
+    const hasNavigation = linkCount >= 3
+    const isSufficient = hasSufficientText && hasNavigation
+    
+    // Zero links = auto-escalate (no legit business site has zero navigation)
+    if (linkCount === 0) {
+      console.log('🚨 Zero navigation links detected → SPA confirmed, escalating to Puppeteer')
       const puppeteerResult = await scrapeWithPuppeteer(url)
-      if (puppeteerResult) {
-        return puppeteerResult
-      }
+      if (puppeteerResult) return puppeteerResult
       console.log('⚠️ Puppeteer unavailable, using simple fetch result anyway')
-    } else {
-      console.log(`✅ Sufficient visible text (${visibleTextLength} chars >= 2000 threshold) — using simple fetch`)
+    }
+    // Suspiciously few links for large HTML
+    else if (linkCount < 3 && html.length > 500000) {
+      console.log(`⚠️ Large HTML (${Math.round(html.length / 1000)}KB) but only ${linkCount} links → likely SPA, escalating to Puppeteer`)
+      const puppeteerResult = await scrapeWithPuppeteer(url)
+      if (puppeteerResult) return puppeteerResult
+      console.log('⚠️ Puppeteer unavailable, using simple fetch result anyway')
+    }
+    // Insufficient text or navigation
+    else if (!isSufficient) {
+      console.log(`⚠️ Insufficient content (text: ${visibleTextLength} < 800 or links: ${linkCount} < 3) → escalating to Puppeteer`)
+      const puppeteerResult = await scrapeWithPuppeteer(url)
+      if (puppeteerResult) return puppeteerResult
+      console.log('⚠️ Puppeteer unavailable, using simple fetch result anyway')
+    } 
+    else {
+      console.log(`✅ Sufficient content (${visibleTextLength} chars, ${linkCount} links) — using simple fetch`)
     }
     
     return {
