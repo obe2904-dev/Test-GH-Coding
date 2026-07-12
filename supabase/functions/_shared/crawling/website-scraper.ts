@@ -25,6 +25,20 @@ export interface ScrapeResult {
 }
 
 /**
+ * Extract visible text length (strips scripts, styles, tags)
+ * This detects JS-heavy SPAs that have large HTML but minimal visible content
+ */
+function extractVisibleTextLength(html: string): number {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim().length
+}
+
+/**
  * Scrape using Cloud Run Puppeteer service
  */
 async function scrapeWithCloudRun(url: string): Promise<ScrapeResult | null> {
@@ -106,14 +120,20 @@ export async function scrapeWebsite(
     
     clearTimeout(timeoutId)
     
-    // Check if HTML is too short (likely JavaScript-heavy site)
-    if (html.length < 5000) {
-      console.log('⚠️ HTML too short, may be JavaScript-heavy site')
+    // Check visible text content (not raw HTML bytes) to detect JS-heavy SPAs
+    const visibleTextLength = extractVisibleTextLength(html)
+    console.log(`📝 Visible text: ${visibleTextLength} chars (raw HTML: ${html.length} chars)`)
+    
+    // If visible text is too thin, this is likely a JS-heavy SPA that needs rendering
+    if (visibleTextLength < 500) {
+      console.log('⚠️ Visible text too thin (< 500 chars) — likely JS-heavy SPA, escalating to Cloud Run')
       const cloudRunResult = await scrapeWithCloudRun(url)
       if (cloudRunResult) {
         return cloudRunResult
       }
       console.log('⚠️ Cloud Run unavailable, using simple fetch result anyway')
+    } else {
+      console.log(`✅ Sufficient visible text (${visibleTextLength} chars) — using simple fetch`)
     }
     
     return {
