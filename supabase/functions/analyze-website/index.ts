@@ -256,16 +256,10 @@ serve(async (req: any) => {
     
     // Scrape if not cached
     if (!homepageHtml) {
-      const vercelScraperUrl = Deno.env.get('VERCEL_SCRAPER_URL')
-      const vercelScraperApiKey = Deno.env.get('VERCEL_SCRAPER_API_KEY')
-      
-      const scrapeResult = await scrapeWebsite(url, {
-        vercelScraperUrl,
-        vercelScraperApiKey
-      })
+      const scrapeResult = await scrapeWebsite(url)
       
       homepageHtml = scrapeResult.html
-      const scraperType = scrapeResult.scraperType || 'unknown'
+      const scraperType = scrapeResult.scraperType
       
       console.log('🎯 Scraper used:', scraperType)
       
