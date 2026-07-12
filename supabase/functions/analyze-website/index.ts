@@ -245,6 +245,35 @@ serve(async (req: any) => {
           cacheHit = true
           console.log('✅ Cache HIT - Using cached content from', cachedResult.scraped_at)
           console.log('🎯 Original scraper:', cachedResult.scraper_type)
+          
+          // Re-scrape with Cloud Run if cached content is from simple-fetch and too short
+          if (cachedResult.scraper_type === 'simple-fetch' && cachedResult.raw_html.length < 5000) {
+            console.log('⚠️ Cached HTML too short, attempting Cloud Run re-scrape')
+            try {
+              const scrapeResult = await scrapeWebsite(url)
+              if (scrapeResult.scraperType === 'cloud-run-puppeteer') {
+                console.log('✅ Cloud Run re-scrape successful, using new content')
+                homepageHtml = scrapeResult.html
+                cacheHit = false // Mark as fresh scrape to update cache
+                
+                // Update cache with new Cloud Run result
+                await supabase
+                  .from('scraped_cache')
+                  .upsert({
+                    url,
+                    raw_html: scrapeResult.html,
+                    raw_text: scrapeResult.html.replace(/<[^>]*>/g, '').trim(),
+                    scraper_type: 'cloud-run-puppeteer',
+                    status: 'success',
+                    scraped_at: new Date().toISOString()
+                  }, {
+                    onConflict: 'url'
+                  })
+              }
+            } catch (rescrapeError) {
+              console.log('⚠️ Cloud Run re-scrape failed, using cached content:', rescrapeError)
+            }
+          }
         } else {
           console.log('❌ Cache MISS - Will scrape fresh content')
         }
