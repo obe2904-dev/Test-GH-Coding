@@ -954,20 +954,12 @@ serve(async (req: any) => {
       )
     }
 
-    // Get OpenAI API key
-    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
-    console.log('🔑 API Key present:', !!openaiApiKey)
-    
-    if (!openaiApiKey) {
-      console.error('❌ No OPENAI_API_KEY found')
-      return new Response(
-        JSON.stringify({ error: 'OPENAI_API_KEY not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // PHASE 2: Intelligent Extraction Waterfall
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PHASE 3: Intelligent Extraction Waterfall
+    // ═══════════════════════════════════════════════════════════════════════════
+    console.log('═══════════════════════════════════════════════════════════')
     console.log('🚀 Phase 3: Starting extraction waterfall (zero-cost → low-cost → AI)...')
+    console.log('═══════════════════════════════════════════════════════════')
     
     let extractionCompleteness: ExtractionCompleteness | null = null
     let fieldsRequiringAI: string[] = []
@@ -999,8 +991,20 @@ serve(async (req: any) => {
       console.error('❌ Extraction waterfall failed:', waterfallError)
       // Continue with old AI extraction as fallback
     }
+
+    // Get OpenAI API key
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
+    console.log('🔑 API Key present:', !!openaiApiKey)
     
-    // PHASE 2 (continued): Parallel AI Extraction with specialized extractors
+    if (!openaiApiKey) {
+      console.error('❌ No OPENAI_API_KEY found')
+      return new Response(
+        JSON.stringify({ error: 'OPENAI_API_KEY not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // PHASE 2: Parallel AI Extraction with specialized extractors
     console.log('🚀 Starting parallel AI extraction with specialized models...')
     
     let analysisResult: any = {}
