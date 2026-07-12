@@ -1,8 +1,8 @@
 import chromium from '@sparticuz/chromium';
-import { chromium as playwright } from 'playwright-core';
+import puppeteer from 'puppeteer-core';
 
 /**
- * Vercel Serverless Function: Web Scraper with Playwright
+ * Vercel Serverless Function: Web Scraper with Puppeteer
  * 
  * Scrapes websites with full JavaScript rendering, cookie consent handling,
  * and structured data extraction optimized for restaurant websites.
@@ -44,35 +44,25 @@ export default async function handler(req, res) {
   const startTime = Date.now();
 
   try {
-    // Configure chromium for Vercel Lambda environment
-    chromium.setGraphicsMode = false;
-    
-    // Launch optimized Chromium instance for serverless
-    browser = await playwright.launch({
-      args: [
-        ...chromium.args,
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--disable-setuid-sandbox',
-        '--no-first-run',
-        '--no-sandbox',
-        '--no-zygote',
-        '--single-process'
-      ],
+    // Launch Puppeteer with optimized Chromium for serverless
+    browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
       executablePath: await chromium.executablePath(),
-      headless: true,
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
     
     // Set viewport for consistent rendering
-    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.setViewport({ width: 1280, height: 720 });
 
     console.log(`[Scraper] Navigating to ${url}...`);
     
-    // Navigate with networkidle to wait for JS rendering
+    // Navigate with networkidle2 to wait for JS rendering
     await page.goto(url, { 
-      waitUntil: 'networkidle', 
+      waitUntil: 'networkidle2', 
       timeout: 30000 
     });
 
@@ -80,16 +70,14 @@ export default async function handler(req, res) {
 
     // Cookie consent handling - Try to click accept buttons
     const consentSelectors = [
-      'button:has-text("Accepter alle")',
-      'button:has-text("Accepter")',
-      'button:has-text("Accept all")',
-      'button:has-text("Accept")',
-      'button:has-text("Tillad alle")',
       '[id*="CookiebotWidget"] button',
       '.cookie-consent button',
       '#cookie-accept',
       '[class*="cookie"] button[class*="accept"]',
       '[class*="consent"] button[class*="accept"]',
+      'button[class*="cookie"]',
+      'button[id*="cookie"]',
+      'button[class*="consent"]',
     ];
 
     for (const selector of consentSelectors) {

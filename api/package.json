@@ -1,16 +1,13 @@
 {
   "name": "p2g-playwright-scraper",
   "version": "1.0.0",
-  "description": "Serverless web scraper using Playwright for P2G Social Media SaaS",
+  "description": "Serverless web scraper using Puppeteer for P2G Social Media SaaS",
   "type": "module",
   "dependencies": {
     "@sparticuz/chromium": "^131.0.0",
-    "playwright-core": "^1.49.0"
+    "puppeteer-core": "^23.9.0"
   },
   "engines": {
     "node": ">=18.x"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0"
   }
 }
