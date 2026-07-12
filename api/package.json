@@ -4,8 +4,8 @@
   "description": "Serverless web scraper using Puppeteer for P2G Social Media SaaS",
   "type": "module",
   "dependencies": {
-    "@sparticuz/chromium": "123.0.1",
-    "puppeteer-core": "21.11.0"
+    "chrome-aws-lambda": "^10.1.0",
+    "puppeteer-core": "^10.4.0"
   },
   "engines": {
     "node": ">=18.x"
