@@ -212,12 +212,10 @@ serve(async (req: any) => {
       // STEP 1: Fetch homepage HTML
       // ══════════════════════════════════════════════════════════════════════════════
       
-      const scraperWorkerUrl = Deno.env.get('SCRAPER_WORKER_URL')
-      const workerToken = Deno.env.get('WORKER_TRIGGER_TOKEN') || ''
+      const scrapingBeeApiKey = Deno.env.get('SCRAPINGBEE_API_KEY')
       
       let homepageHtml = (await scrapeWebsite(url, {
-        scraperWorkerUrl,
-        workerToken
+        scrapingBeeApiKey
       })).html
       
       // Detect login/authentication pages - prevent extracting password forms

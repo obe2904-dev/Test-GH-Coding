@@ -17,8 +17,7 @@ const USER_AGENT_HEADERS = {
 }
 
 export interface ScrapeOptions {
-  scraperWorkerUrl?: string
-  workerToken?: string
+  scrapingBeeApiKey?: string
   forceAdvancedScraping?: boolean
 }
 
@@ -28,38 +27,39 @@ export interface ScrapeResult {
 }
 
 /**
- * Fetch HTML using advanced browser-based scraping (Playwright worker)
+ * Fetch HTML using ScrapingBee (JavaScript rendering + cookie auto-accept)
  */
-async function fetchWithAdvancedScraper(
+async function fetchWithScrapingBee(
   url: string,
-  scraperWorkerUrl: string,
-  workerToken: string,
+  apiKey: string,
   signal?: AbortSignal
 ): Promise<string> {
-  console.log('🚀 Using advanced browser scraping (detected JavaScript/SPA)')
+  console.log('🚀 Using ScrapingBee (JavaScript rendering + cookie consent)')
   
-  const scraperResp = await fetch(`${scraperWorkerUrl}/scrape`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-worker-token': workerToken
-    },
-    body: JSON.stringify({
-      url: url,
-      useBrowser: true,
-      timeout: 25000
-    }),
+  // ScrapingBee API endpoint
+  const scrapingBeeUrl = new URL('https://app.scrapingbee.com/api/v1/')
+  scrapingBeeUrl.searchParams.set('api_key', apiKey)
+  scrapingBeeUrl.searchParams.set('url', url)
+  scrapingBeeUrl.searchParams.set('render_js', 'true')  // Execute JavaScript
+  scrapingBeeUrl.searchParams.set('premium_proxy', 'false')  // Use standard proxy
+  scrapingBeeUrl.searchParams.set('country_code', 'dk')  // Danish proxy
+  scrapingBeeUrl.searchParams.set('wait', '1000')  // Wait 1s for JS
+  scrapingBeeUrl.searchParams.set('wait_for', '.main-content,#root,#app')  // Wait for common content selectors
+  
+  const response = await fetch(scrapingBeeUrl.toString(), {
+    method: 'GET',
     signal
   })
   
-  if (!scraperResp.ok) {
-    throw new Error('Scraper worker failed')
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`ScrapingBee failed: ${response.status} - ${errorText}`)
   }
   
-  const scraperData = await scraperResp.json()
-  console.log('✅ Advanced scraping successful:', scraperData.html.length, 'chars')
+  const html = await response.text()
+  console.log('✅ ScrapingBee scraping successful:', html.length, 'chars')
   
-  return scraperData.html
+  return html
 }
 
 /**
@@ -93,7 +93,7 @@ export async function scrapeWebsite(
   url: string,
   options: ScrapeOptions = {}
 ): Promise<ScrapeResult> {
-  const { scraperWorkerUrl, workerToken = '', forceAdvancedScraping = false } = options
+  const { scrapingBeeApiKey, forceAdvancedScraping = false } = options
   
   console.log('🌐 Fetching homepage:', url)
   
@@ -109,14 +109,15 @@ export async function scrapeWebsite(
   let usedAdvancedScraping = false
   
   try {
-    // Try advanced scraping if conditions are met
-    if (useAdvancedScraper && scraperWorkerUrl) {
+    // Try ScrapingBee if conditions are met
+    if (useAdvancedScraper && scrapingBeeApiKey) {
       try {
-        html = await fetchWithAdvancedScraper(url, scraperWorkerUrl, workerToken, controller.signal)
+        html = await fetchWithScrapingBee(url, scrapingBeeApiKey, controller.signal)
         usedAdvancedScraping = true
         clearTimeout(timeoutId)
-      } catch (scraperError) {
-        console.log('⚠️ Advanced scraper failed, falling back to simple fetch')
+      } catch (scrapingBeeError) {
+        console.log('⚠️ ScrapingBee failed, falling back to simple fetch')
+        console.log('Error:', scrapingBeeError)
         clearTimeout(timeoutId)
         
         // Fallback to simple fetch
@@ -133,22 +134,22 @@ export async function scrapeWebsite(
       }
     } else {
       // Use simple fetch
-      if (useAdvancedScraper && !scraperWorkerUrl) {
-        console.log('⚠️ Advanced scraping recommended but SCRAPER_WORKER_URL not configured')
+      if (useAdvancedScraper && !scrapingBeeApiKey) {
+        console.log('⚠️ Advanced scraping recommended but SCRAPINGBEE_API_KEY not configured')
       }
       
       html = await fetchWithSimpleRequest(url, controller.signal)
       clearTimeout(timeoutId)
       
-      // Check if we should retry with advanced scraping based on HTML content
-      if (!useAdvancedScraper && scraperWorkerUrl && needsAdvancedScraping(url, html)) {
-        console.log('🔄 Detected SPA after initial fetch, retrying with browser scraping')
+      // Check if we should retry with ScrapingBee based on HTML content
+      if (!useAdvancedScraper && scrapingBeeApiKey && needsAdvancedScraping(url, html)) {
+        console.log('🔄 Detected SPA after initial fetch, retrying with ScrapingBee')
         
         try {
-          html = await fetchWithAdvancedScraper(url, scraperWorkerUrl, workerToken)
+          html = await fetchWithScrapingBee(url, scrapingBeeApiKey)
           usedAdvancedScraping = true
         } catch (retryError) {
-          console.log('⚠️ Retry with advanced scraping failed, using initial content')
+          console.log('⚠️ Retry with ScrapingBee failed, using initial content')
         }
       }
     }
@@ -166,9 +167,9 @@ export async function scrapeWebsite(
     // Handle connection errors with helpful messages
     const errorMsg = fetchError.message || String(fetchError)
     
-    // If scraper worker failed and we haven't tried simple fetch yet, try it now
-    if (errorMsg.includes('Scraper worker failed')) {
-      console.log('🔄 Falling back to simple fetch after scraper failure')
+    // If ScrapingBee failed and we haven't tried simple fetch yet, try it now
+    if (errorMsg.includes('ScrapingBee failed')) {
+      console.log('🔄 Falling back to simple fetch after ScrapingBee failure')
       
       try {
         html = await fetchWithSimpleRequest(url)
