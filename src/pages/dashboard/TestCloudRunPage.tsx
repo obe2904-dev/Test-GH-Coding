@@ -89,6 +89,11 @@ export default function TestCloudRunPage() {
 
       const data = await response.json()
       console.log('📥 Result:', data)
+      console.log('📥 Result keys:', Object.keys(data))
+      console.log('📥 Has meta?:', !!data.meta)
+      console.log('📥 Has contact?:', !!data.contact)
+      console.log('📥 Has links?:', !!data.links)
+      console.log('📥 Content quality:', data.content_quality)
       setResult(data)
 
     } catch (error: any) {
@@ -226,6 +231,14 @@ export default function TestCloudRunPage() {
           {/* Success Results */}
           {result.success && (
             <>
+              {/* Debug Panel - Show raw JSON */}
+              <div className="bg-gray-900 rounded-lg shadow-sm border border-gray-700 p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">🔍 Debug: Raw Response</h3>
+                <pre className="text-xs text-green-400 bg-black p-4 rounded overflow-x-auto max-h-96">
+                  {JSON.stringify(result, null, 2)}
+                </pre>
+              </div>
+
               {/* Quality Metrics */}
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">📊 Quality Metrics</h3>
