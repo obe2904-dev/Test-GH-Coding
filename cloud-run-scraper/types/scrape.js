@@ -49,7 +49,11 @@
  * @property {MetaData} meta - Deterministic fields (zero AI cost)
  * @property {ContactData} contact
  * @property {string | null} opening_hours_raw - raw text block, AI will parse
+ * @property {string | null} kitchen_close_time - time when kitchen stops taking orders
+ * @property {string | null} weekly_programme - events/specials by day (e.g., "Monday: Live jazz")
  * @property {LinksData} links
+ * @property {string | null} google_maps_url - link to Google Maps listing
+ * @property {string | null} smiley_url - link to Danish food safety inspection report
  * 
  * @property {string | null} menu_text - dish/price content, stripped
  * @property {string | null} about_text - brand narrative copy

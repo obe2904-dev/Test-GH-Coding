@@ -32,6 +32,18 @@ const SOCIAL_DOMAINS = [
   'twitter.com', 'x.com', 'linkedin.com',
 ];
 
+const GOOGLE_MAPS_PATTERNS = [
+  /maps\.google\.com/i,
+  /goo\.gl\/maps/i,
+  /google\.[a-z]+\/maps/i,
+  /g\.page/i,
+];
+
+const SMILEY_PATTERNS = [
+  /findsmiley\.dk/i,
+  /smiley-rapporten/i,
+];
+
 // Sections of text that are boilerplate noise
 const TEXT_NOISE_STRINGS = [
   'Du bestemmer over dine data',
@@ -325,6 +337,32 @@ function extractContact(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Google Maps link extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract Google Maps link from resolved links
+ * @param {string[]} allUrls
+ * @returns {string | null}
+ */
+function extractGoogleMapsLink(allUrls) {
+  return allUrls.find(url => GOOGLE_MAPS_PATTERNS.some(p => p.test(url))) || null;
+}
+
+// ---------------------------------------------------------------------------
+// Smiley inspection link extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract Danish food safety inspection link
+ * @param {string[]} allUrls
+ * @returns {string | null}
+ */
+function extractSmileyLink(allUrls) {
+  return allUrls.find(url => SMILEY_PATTERNS.some(p => p.test(url))) || null;
+}
+
+// ---------------------------------------------------------------------------
 // Opening hours extraction
 // ---------------------------------------------------------------------------
 
@@ -354,6 +392,69 @@ function extractOpeningHours(text) {
   }
 
   return hoursLines.length > 0 ? hoursLines.join(' ').trim() : null;
+}
+
+// ---------------------------------------------------------------------------
+// Kitchen close time extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract kitchen closing time from text
+ * @param {string} text
+ * @returns {string | null}
+ */
+function extractKitchenCloseTime(text) {
+  // Patterns: "Køkken lukker 22:00" or "Kitchen closes at 10pm" or "Køkken: 11-22"
+  const patterns = [
+    /køkken[^.]*?lukker[^.]*?(\d{1,2}[:.\s]?\d{0,2})/i,
+    /køkken[^.]*?(\d{1,2}[:.\s]?\d{0,2})[^.]*?lukker/i,
+    /kitchen[^.]*?close[^.]*?(\d{1,2}[:.\s]?\d{0,2})/i,
+    /køkken[^.]*?:(.*?\d{1,2}[:.\s]?\d{0,2})[^.]{0,30}/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      // Extract just the time portion
+      const timeMatch = match[1].match(/\d{1,2}[:.\s]?\d{0,2}/);
+      if (timeMatch) {
+        return timeMatch[0].replace(/\s+/g, '').replace('.', ':').trim();
+      }
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Weekly programme extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract weekly programme/events text
+ * @param {string} text
+ * @returns {string | null}
+ */
+function extractWeeklyProgramme(text) {
+  // Look for patterns like "Mandag: Live musik", "Onsdag: Quiz night", etc.
+  const dayPattern = /(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|monday|tuesday|wednesday|thursday|friday|saturday|sunday)[^.]*?:(.*?)(?:\.|\n|$)/gi;
+  
+  const matches = [];
+  let m;
+  while ((m = dayPattern.exec(text)) !== null) {
+    const eventText = m[0].trim();
+    // Filter out opening hours (contain time patterns)
+    if (!/\d{1,2}[:.\s]?\d{2}\s*[-–]\s*\d{1,2}[:.\s]?\d{2}/.test(eventText)) {
+      matches.push(eventText);
+    }
+  }
+
+  // Must have at least 2 days with events to be considered a programme
+  if (matches.length >= 2) {
+    return matches.join(' ').slice(0, 500).trim();  // cap at 500 chars
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -486,6 +587,12 @@ function preprocessHtml(html, url) {
   // 1. Extract structured data before stripping
   const meta = extractMeta(html);
   const links = extractLinks(html, url);
+  
+  // Extract Google Maps and Smiley links from all resolved URLs
+  const allUrls = links.raw.map(({ url }) => url);
+  const googleMapsUrl = extractGoogleMapsLink(allUrls);
+  const smileyUrl = extractSmileyLink(allUrls);
+  
   // JSON-LD kept for potential future use by AI extractor
   // const jsonLd = extractJsonLd(html);
 
@@ -498,6 +605,8 @@ function preprocessHtml(html, url) {
   // 4. Extract deterministic fields from clean text
   const contact = extractContact(clean);
   const openingHoursRaw = extractOpeningHours(clean);
+  const kitchenCloseTime = extractKitchenCloseTime(clean);
+  const weeklyProgramme = extractWeeklyProgramme(clean);
   const { menuText, menuSource: rawMenuSource } = extractMenuText(clean, url);
   const aboutText = extractAboutText(clean, menuText);
 
@@ -514,7 +623,11 @@ function preprocessHtml(html, url) {
     meta,
     contact,
     opening_hours_raw: openingHoursRaw,
+    kitchen_close_time: kitchenCloseTime,
+    weekly_programme: weeklyProgramme,
     links,
+    google_maps_url: googleMapsUrl,
+    smiley_url: smileyUrl,
     menu_text: menuText,
     about_text: aboutText,
     full_text: clean,
@@ -532,6 +645,10 @@ export {
   extractLinks,
   extractContact,
   extractOpeningHours,
+  extractKitchenCloseTime,
+  extractWeeklyProgramme,
+  extractGoogleMapsLink,
+  extractSmileyLink,
   extractMenuText,
   extractAboutText,
 };

@@ -14,7 +14,7 @@ const corsHeaders = {
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const GEMINI_MODEL = 'gemini-2.0-flash-exp';
-const EXTRACTION_PROMPT_VERSION = 'v1';
+const EXTRACTION_PROMPT_VERSION = 'v2';
 
 interface ExtractionRequest {
   scrape_id: string;
@@ -145,6 +145,21 @@ serve(async (req) => {
       throw updateError;
     }
 
+    // Write extracted data to business tables (if not shell content)
+    if (payload.content_quality !== 'shell') {
+      try {
+        await writeExtractedDataToBusinessTables(
+          supabaseClient,
+          scrapeResult.business_id,
+          payload,
+          extractedData
+        );
+      } catch (writeError) {
+        console.error('Failed to write to business tables:', writeError);
+        // Don't fail the entire request - extraction still succeeded
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -195,6 +210,162 @@ serve(async (req) => {
   }
 });
 
+// =====================================================
+// Database Write Functions
+// =====================================================
+
+/**
+ * Write extracted data to business_profile and business_operations tables
+ * Only writes if field is currently NULL/empty (user data always wins)
+ */
+async function writeExtractedDataToBusinessTables(
+  supabase: any,
+  businessId: string,
+  payload: any,
+  extractedData: any
+) {
+  console.log('Writing extracted data to business tables...', { businessId });
+
+  // Update businesses.last_scraped_at
+  await supabase
+    .from('businesses')
+    .update({ last_scraped_at: new Date().toISOString() })
+    .eq('id', businessId);
+
+  // ===== business_profile updates =====
+  const profileUpdates: any = {};
+
+  // Scraped fields (deterministic)
+  if (payload.meta?.title && !await fieldHasValue(supabase, 'business_profile', 'meta_tags', businessId)) {
+    profileUpdates.meta_tags = {
+      title: payload.meta.title,
+      description: payload.meta.description,
+      og_title: payload.meta.og_title,
+      og_description: payload.meta.og_description,
+      og_image: payload.meta.og_image,
+      keywords: payload.meta.keywords,
+      locale: payload.meta.locale,
+    };
+  }
+
+  if (payload.links?.takeaway && !await fieldHasValue(supabase, 'business_profile', 'takeaway_url', businessId)) {
+    profileUpdates.takeaway_url = payload.links.takeaway;
+  }
+
+  // AI-extracted fields
+  if (extractedData.about && !await fieldHasValue(supabase, 'business_profile', 'about_text', businessId)) {
+    profileUpdates.about_text = extractedData.about;
+  }
+
+  if (extractedData.description && !await fieldHasValue(supabase, 'business_profile', 'description', businessId)) {
+    profileUpdates.description = extractedData.description;
+  }
+
+  if (Object.keys(profileUpdates).length > 0) {
+    console.log('Updating business_profile:', profileUpdates);
+    await supabase
+      .from('business_profile')
+      .update(profileUpdates)
+      .eq('business_id', businessId);
+  }
+
+  // ===== business_operations updates =====
+  const operationsUpdates: any = {};
+
+  // Scraped fields
+  if (payload.smiley_url && !await fieldHasValue(supabase, 'business_operations', 'smiley_url', businessId)) {
+    operationsUpdates.smiley_url = payload.smiley_url;
+  }
+
+  if (payload.links?.booking && !await fieldHasValue(supabase, 'business_operations', 'booking_url', businessId)) {
+    operationsUpdates.booking_url = payload.links.booking;
+  }
+
+  if (payload.links?.menu_url && !await fieldHasValue(supabase, 'business_operations', 'menu_url', businessId)) {
+    operationsUpdates.menu_url = payload.links.menu_url;
+  }
+
+  // AI-extracted services (only if services object exists)
+  if (extractedData.services) {
+    const serviceMapping = {
+      has_table_service: 'has_table_service',
+      has_takeaway: 'has_takeaway',
+      has_delivery: 'has_delivery',
+      has_outdoor_seating: 'has_outdoor_seating',
+      has_wifi: 'has_wifi',
+      has_power_outlets: 'has_power_outlets',
+      has_parking: 'has_parking',
+      reservation_required: 'reservation_required',
+      has_kids_menu: 'has_kids_menu',
+    };
+
+    for (const [aiKey, dbKey] of Object.entries(serviceMapping)) {
+      if (extractedData.services[aiKey] === true && !await fieldHasValue(supabase, 'business_operations', dbKey, businessId)) {
+        operationsUpdates[dbKey] = true;
+      }
+    }
+  }
+
+  if (Object.keys(operationsUpdates).length > 0) {
+    console.log('Updating business_operations:', operationsUpdates);
+    await supabase
+      .from('business_operations')
+      .update(operationsUpdates)
+      .eq('business_id', businessId);
+  }
+
+  // ===== business_locations updates =====
+  const locationUpdates: any = {};
+
+  if (payload.contact?.address && extractedData.verified_fields?.address_verified) {
+    if (!await fieldHasValue(supabase, 'business_locations', 'address_line1', businessId)) {
+      locationUpdates.address_line1 = payload.contact.address;
+    }
+  }
+
+  if (payload.contact?.phone && !await fieldHasValue(supabase, 'business_locations', 'phone', businessId)) {
+    locationUpdates.phone = payload.contact.phone;
+  }
+
+  if (payload.contact?.email && !await fieldHasValue(supabase, 'business_locations', 'email', businessId)) {
+    locationUpdates.email = payload.contact.email;
+  }
+
+  if (payload.google_maps_url && !await fieldHasValue(supabase, 'business_locations', 'google_maps_url', businessId)) {
+    locationUpdates.google_maps_url = payload.google_maps_url;
+  }
+
+  if (Object.keys(locationUpdates).length > 0) {
+    console.log('Updating business_locations:', locationUpdates);
+    await supabase
+      .from('business_locations')
+      .update(locationUpdates)
+      .eq('business_id', businessId);
+  }
+
+  console.log('Database writes complete');
+}
+
+/**
+ * Check if a field already has a non-null/non-empty value
+ */
+async function fieldHasValue(supabase: any, table: string, field: string, businessId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from(table)
+    .select(field)
+    .eq('business_id', businessId)
+    .single();
+
+  if (error || !data) return false;
+  
+  const value = data[field];
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string' && value.trim() === '') return false;
+  if (typeof value === 'object' && Object.keys(value).length === 0) return false;
+  
+  return true;
+}
+
 function buildExtractionPrompt(payload: any): string {
   const isRich = payload.content_quality === 'rich';
   
@@ -203,21 +374,57 @@ function buildExtractionPrompt(payload: any): string {
 SCRAPED DATA:
 ${JSON.stringify({
   meta: payload.meta,
+  contact: payload.contact,
+  opening_hours_raw: payload.opening_hours_raw,
+  kitchen_close_time: payload.kitchen_close_time,
+  weekly_programme: payload.weekly_programme,
+  google_maps_url: payload.google_maps_url,
+  smiley_url: payload.smiley_url,
   about_text: payload.about_text,
   full_text: isRich ? payload.full_text : payload.full_text?.substring(0, 2000),
   menu_text: payload.menu_text?.substring(0, 500),
   links: payload.links,
 }, null, 2)}
 
+IMPORTANT DANISH SERVICE TYPES (detect from text):
+- Bordservice (table service)
+- Takeaway (afhentning)
+- Levering (delivery)
+- Udeservering (outdoor seating)
+- Wi-Fi
+- Stikkontakter (power outlets)
+- Parkering (parking)
+- Reservation påkrævet (reservation required)
+- Børnemenu (kids menu)
+
 Extract and return JSON with:
 {
   "about": "2-3 sentence brand story/concept (Danish if website is Danish, else English)",
   "description": "1 sentence venue description for metadata",
-  "venue_hooks": ["hook1", "hook2", "hook3"] // 3-5 compelling reasons to visit,
-  "keywords": ["keyword1", "keyword2"] // 5-8 SEO keywords,
+  "venue_hooks": ["hook1", "hook2", "hook3"], // 3-5 compelling reasons to visit
+  "keywords": ["keyword1", "keyword2"], // 5-8 SEO keywords
   "tone_of_voice": "warm_inviting|sophisticated_refined|casual_fun|authentic_local",
+  "services": {
+    "has_table_service": boolean,
+    "has_takeaway": boolean,
+    "has_delivery": boolean,
+    "has_outdoor_seating": boolean,
+    "has_wifi": boolean,
+    "has_power_outlets": boolean,
+    "has_parking": boolean,
+    "reservation_required": boolean,
+    "has_kids_menu": boolean
+  },
+  "verified_fields": {
+    "address_verified": boolean,  // true if scraped address looks valid
+    "hours_verified": boolean,    // true if opening hours clearly present
+    "kitchen_close_verified": boolean  // true if kitchen close time is accurate
+  },
   "confidence_score": 0.0-1.0 // how confident you are in this extraction
 }
 
-${isRich ? 'RICH CONTENT: Extract detailed information.' : 'THIN CONTENT: Be conservative, extract only what is clearly present.'}`;
+${isRich ? 'RICH CONTENT: Extract detailed information.' : 'THIN CONTENT: Be conservative, extract only what is clearly present.'}
+
+For services: only set true if you find clear evidence in the text. Default to false if uncertain.
+For verified_fields: validate the scraped data - mark true only if it looks correct and complete.`;
 }
