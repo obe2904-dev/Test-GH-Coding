@@ -1011,11 +1011,7 @@ function BusinessProfilePage() {
 
       setScrapeResult(result)
 
-      if (result.cached) {
-        alert('✅ Bruger cache-data (< 24 timer gammel)')
-      } else {
-        alert('✅ Website scraped successfully!')
-      }
+      // Cache status is shown in console log, no need for alert
 
     } catch (error: any) {
       console.error('❌ Scrape error:', error)
