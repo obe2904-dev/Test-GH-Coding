@@ -983,9 +983,27 @@ function BusinessProfilePage() {
     try {
       const { data: { session } } = await sb.auth.getSession()
       const authToken = session?.access_token
+      let effectiveBusinessId: string | undefined = businessId || undefined
+
+      if (!effectiveBusinessId && session?.user?.id) {
+        const { data: business } = await sb
+          .from('businesses')
+          .select('id')
+          .eq('owner_id', session.user.id)
+          .maybeSingle()
+
+        if (business?.id) {
+          effectiveBusinessId = business.id
+          setBusinessId(business.id)
+        }
+      }
 
       if (!authToken) {
         throw new Error('Ikke godkendt')
+      }
+
+      if (!effectiveBusinessId) {
+        throw new Error('Mangler business-id')
       }
 
       console.log('🕷️ Starting async scrape for:', url)
@@ -999,7 +1017,7 @@ function BusinessProfilePage() {
             'Authorization': `Bearer ${authToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ url, force_refresh: true }),
+          body: JSON.stringify({ url, force_refresh: true, business_id: effectiveBusinessId }),
         }
       )
 

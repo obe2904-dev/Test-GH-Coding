@@ -44,7 +44,7 @@ serve(async (req) => {
     if (!force_refresh) {
       const { data: cached } = await supabase
         .from('website_scrape_results')
-        .select('id, scraped_at, scraper_payload, content_quality, menu_source')
+        .select('id, scraped_at, payload, content_quality, menu_source')
         .eq('url', url)
         .gte('scraped_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
         .order('scraped_at', { ascending: false })
@@ -74,7 +74,7 @@ serve(async (req) => {
       .insert({
         business_id: business_id || null,
         url,
-        scraper_payload: { status: 'processing', started_at: new Date().toISOString() },
+        payload: { status: 'processing', started_at: new Date().toISOString() },
         scraper_version: 'cloud-run-v3',
         content_quality: null,
         menu_source: 'none',

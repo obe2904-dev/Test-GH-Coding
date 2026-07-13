@@ -30,7 +30,7 @@ serve(async (req) => {
 
     const { data: job, error } = await supabase
       .from('website_scrape_results')
-      .select('id, scraped_at, scraper_payload, content_quality, menu_source, scraper_version, scraper_metadata')
+      .select('id, scraped_at, payload, content_quality, menu_source, scraper_version, scraper_metadata')
       .eq('id', job_id)
       .single();
 
@@ -50,7 +50,7 @@ serve(async (req) => {
     }
 
     // Check if still processing
-    const payload = job.scraper_payload as any;
+    const payload = job.payload as any;
     if (payload?.status === 'processing') {
       return new Response(
         JSON.stringify({

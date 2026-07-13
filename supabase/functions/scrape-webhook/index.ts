@@ -32,7 +32,7 @@ serve(async (req) => {
       const { error: updateError } = await supabase
         .from('website_scrape_results')
         .update({
-          scraper_payload: payload,
+          payload: payload,
           content_quality: payload.extraction?.quality?.rating || null,
           menu_source: payload.extraction?.services?.menu?.url ? 'scraped' : 'none',
           scraper_metadata: payload.scraper_metadata,
@@ -57,7 +57,7 @@ serve(async (req) => {
       const { error: updateError } = await supabase
         .from('website_scrape_results')
         .update({
-          scraper_payload: {
+          payload: {
             status: 'failed',
             error: error || 'Unknown error',
             failed_at: new Date().toISOString()
