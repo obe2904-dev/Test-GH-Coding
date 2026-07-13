@@ -36,7 +36,7 @@ export interface ScrapeResult {
   html: string
   navigationData?: NavigationData
   usedAdvancedScraping: boolean
-  scraperType: 'simple-fetch' | 'cloud-run-puppeteer' | 'puppeteer-vercel'
+  scraperType: 'simple-fetch' | 'cloud-run-puppeteer'
 }
 
 /**
@@ -65,82 +65,135 @@ function countLinks(html: string): number {
 }
 
 /**
- * Scrape using Puppeteer service (Vercel or Cloud Run)
- * Checks Vercel first, then falls back to Cloud Run
+ * Get Google Cloud identity token for invoking authenticated Cloud Run services
+ * Uses service account credentials stored in environment variable
+ */
+async function getCloudRunIdentityToken(audience: string): Promise<string | null> {
+  try {
+    const serviceAccountJson = Deno.env.get('GCP_SERVICE_ACCOUNT_KEY')
+    
+    if (!serviceAccountJson) {
+      console.warn('⚠️ GCP_SERVICE_ACCOUNT_KEY not set, skipping IAM authentication')
+      return null
+    }
+
+    const serviceAccount = JSON.parse(serviceAccountJson)
+    const { client_email, private_key } = serviceAccount
+
+    if (!client_email || !private_key) {
+      console.error('❌ Invalid service account JSON')
+      return null
+    }
+
+    // Create JWT for Google OAuth token endpoint
+    const now = Math.floor(Date.now() / 1000)
+    const jwtHeader = { alg: 'RS256', typ: 'JWT' }
+    const jwtPayload = {
+      iss: client_email,
+      sub: client_email,
+      aud: 'https://oauth2.googleapis.com/token',
+      iat: now,
+      exp: now + 3600,
+      target_audience: audience
+    }
+
+    // Import the private key
+    const pemHeader = '-----BEGIN PRIVATE KEY-----'
+    const pemFooter = '-----END PRIVATE KEY-----'
+    const pemContents = private_key.replace(/\\n/g, '\n').replace(pemHeader, '').replace(pemFooter, '').trim()
+    
+    const binaryKey = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0))
+    
+    const cryptoKey = await crypto.subtle.importKey(
+      'pkcs8',
+      binaryKey,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['sign']
+    )
+
+    // Sign the JWT
+    const encoder = new TextEncoder()
+    const headerB64 = btoa(JSON.stringify(jwtHeader)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+    const payloadB64 = btoa(JSON.stringify(jwtPayload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+    const unsignedToken = `${headerB64}.${payloadB64}`
+    
+    const signature = await crypto.subtle.sign(
+      'RSASSA-PKCS1-v1_5',
+      cryptoKey,
+      encoder.encode(unsignedToken)
+    )
+    
+    const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+      .replace(/=/g, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+    
+    const jwt = `${unsignedToken}.${signatureB64}`
+
+    // Exchange JWT for identity token
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: jwt
+      })
+    })
+
+    if (!tokenResponse.ok) {
+      console.error('❌ Failed to get identity token:', tokenResponse.status)
+      return null
+    }
+
+    const tokenData = await tokenResponse.json()
+    return tokenData.id_token || null
+
+  } catch (error: any) {
+    console.error('❌ Error getting Cloud Run identity token:', error.message)
+    return null
+  }
+}
+
+/**
+ * Scrape using Cloud Run Puppeteer service
  */
 export async function scrapeWithPuppeteer(url: string): Promise<ScrapeResult | null> {
-  // Try Vercel scraper first
-  const vercelUrl = Deno.env.get('VERCEL_SCRAPER_URL')
-  const vercelApiKey = Deno.env.get('VERCEL_SCRAPER_API_KEY')
-  
-  if (vercelUrl && vercelApiKey) {
-    console.log('🚀 Attempting Vercel Puppeteer scraper')
-    
-    try {
-      const response = await fetch(vercelUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': vercelApiKey
-        },
-        body: JSON.stringify({ url })
-      })
-      
-      if (!response.ok) {
-        console.error('❌ Vercel scraper HTTP error:', response.status)
-        const text = await response.text()
-        console.error('   Response:', text)
-      } else {
-        const data = await response.json()
-        
-        if (!data.html) {
-          console.error('❌ Vercel scraper returned no HTML:', data.error || 'unknown error')
-        } else {
-          console.log(`✅ Vercel Puppeteer succeeded, HTML length:`, data.html.length)
-          
-          // Log navigation data if available
-          if (data.navigationData) {
-            console.log(`   🔗 Extracted ${data.navigationData.totalElements} navigation elements`)
-          }
-          
-          return {
-            html: data.html,
-            navigationData: data.navigationData,
-            usedAdvancedScraping: true,
-            scraperType: 'puppeteer-vercel'
-          }
-        }
-      }
-    } catch (error: any) {
-      console.error('❌ Vercel scraper error:', error.message)
-    }
-    
-    console.log('⚠️ Vercel scraper failed, trying Cloud Run fallback...')
-  }
-  
-  // Fall back to Cloud Run scraper
   const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL')
   const cloudRunApiKey = Deno.env.get('CLOUD_RUN_API_KEY')
   
   if (!cloudRunUrl || !cloudRunApiKey) {
-    console.log('⚠️ No Puppeteer scraper configured (checked both Vercel and Cloud Run)')
+    console.log('⚠️ Cloud Run Puppeteer scraper not configured')
     return null
   }
   
-  console.log('🚀 Attempting Cloud Run Puppeteer scraper')
+  console.log('🚀 Using Cloud Run Puppeteer scraper')
   
   try {
+    // Get Google Cloud identity token for authenticated Cloud Run invocation
+    const idToken = await getCloudRunIdentityToken(cloudRunUrl)
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'x-api-key': cloudRunApiKey
+    }
+    
+    // Add Authorization header if we have an identity token
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`
+      console.log('🔐 Using Cloud Run IAM authentication')
+    }
+    
     const response = await fetch(cloudRunUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': cloudRunApiKey
-      },
+      headers,
       body: JSON.stringify({ url })
     })
     
     if (!response.ok) {
       console.error('❌ Cloud Run scraper HTTP error:', response.status)
+      const errorText = await response.text()
+      console.error('   Response:', errorText)
       return null
     }
     

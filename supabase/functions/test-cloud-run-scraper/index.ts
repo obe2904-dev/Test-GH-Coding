@@ -140,7 +140,10 @@ async function callCloudRunScraper(url: string): Promise<{
     }
   }
   
-  console.log('🚀 Calling Cloud Run Puppeteer scraper:', cloudRunUrl)
+  // Append /scrape-v2 endpoint to the Cloud Run URL (preprocessed structured data)
+  const scrapeEndpoint = `${cloudRunUrl}/scrape-v2`
+  
+  console.log('🚀 Calling Cloud Run Puppeteer scraper v2:', scrapeEndpoint)
   console.log('📍 Target URL:', url)
   
   try {
@@ -158,7 +161,7 @@ async function callCloudRunScraper(url: string): Promise<{
       console.log('🔐 Using Cloud Run IAM authentication')
     }
     
-    const response = await fetch(cloudRunUrl, {
+    const response = await fetch(scrapeEndpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({ url })
@@ -179,23 +182,27 @@ async function callCloudRunScraper(url: string): Promise<{
     
     const data = await response.json()
     
-    if (!data.html) {
+    // V2 endpoint returns structured payload instead of raw HTML
+    if (!data.success) {
       return {
         success: false,
-        error: data.error || 'No HTML returned from Cloud Run',
+        error: data.error || 'Cloud Run scraper failed',
         timing
       }
     }
     
-    console.log(`✅ Cloud Run succeeded - HTML length: ${data.html.length}`)
+    console.log(`✅ Cloud Run v2 succeeded - content quality: ${data.content_quality}, menu source: ${data.menu_source}`)
+    console.log(`   Payload size: ${JSON.stringify(data).length} bytes, reduction: ${data.scraper_metadata?.reduction_ratio}`)
     
     return {
       success: true,
-      html: data.html,
+      payload: data, // Return the entire v2 structured payload
       timing,
       metadata: {
-        htmlLength: data.html.length,
-        finalUrl: data.finalUrl || url
+        contentQuality: data.content_quality,
+        menuSource: data.menu_source,
+        payloadSize: JSON.stringify(data).length,
+        reduction: data.scraper_metadata?.reduction_ratio
       }
     }
     
@@ -227,26 +234,83 @@ function extractStructuredData(html: string): {
   }
 
   try {
+    // First: Extract Schema.org JSON-LD data (before cleaning HTML)
+    const schemaMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gis) || []
+    
+    // Create clean HTML without scripts and styles for pattern matching
+    const cleanHtml = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+    
     // Extract about sections (h1, h2, meta description)
-    const h1Matches = html.match(/<h1[^>]*>(.*?)<\/h1>/gi) || []
+    const h1Matches = cleanHtml.match(/<h1[^>]*>(.*?)<\/h1>/gi) || []
     h1Matches.forEach(match => {
       const text = match.replace(/<[^>]+>/g, '').trim()
-      if (text && text.length > 10) result.about.push(text)
+      if (text && text.length > 10 && text.length < 200) result.about.push(text)
     })
 
     const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i)
     if (metaDesc && metaDesc[1]) result.about.push(metaDesc[1])
 
-    // Extract addresses (look for common patterns)
+    // Extract addresses (Schema.org, meta tags, and patterns)
+    // 1. Schema.org JSON-LD
+    schemaMatches.forEach(scriptTag => {
+      try {
+        const jsonMatch = scriptTag.match(/>(.+)<\/script>/is)
+        if (jsonMatch) {
+          const data = JSON.parse(jsonMatch[1])
+          const extractAddress = (obj: any): void => {
+            if (obj.address) {
+              if (typeof obj.address === 'string') {
+                result.address.push(obj.address)
+              } else if (obj.address.streetAddress || obj.address.addressLocality) {
+                const parts = [
+                  obj.address.streetAddress,
+                  obj.address.postalCode,
+                  obj.address.addressLocality,
+                  obj.address.addressCountry
+                ].filter(Boolean)
+                if (parts.length > 0) result.address.push(parts.join(', '))
+              }
+            }
+          }
+          if (Array.isArray(data)) {
+            data.forEach(extractAddress)
+          } else {
+            extractAddress(data)
+          }
+        }
+      } catch (e) {
+        // Skip invalid JSON
+      }
+    })
+
+    // 2. Meta tags with address
+    const metaAddress = html.match(/<meta[^>]*(?:property|name)=["'](?:og:street-address|business:contact_data:street_address)["'][^>]*content=["']([^"']+)["']/i)
+    if (metaAddress && metaAddress[1]) result.address.push(metaAddress[1])
+
+    // 3. Common address patterns (use cleanHtml to avoid matching JSON)
     const addressPatterns = [
-      /\d{4}\s+[A-Za-zÆØÅæøå\s]+/g, // Danish postal codes
-      /(?:adresse|address|location)[:\s]*([^<\n]{10,100})/gi
+      // Multi-line address with postal code (Åboulevarden 32\n8000 Aarhus C)
+      /([A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s.]+\s+\d+[A-Za-z]?)\s*[\n\r]+\s*(\d{4}\s+[A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s,]+)/g,
+      // Single-line address (Street 15, 8000 City)
+      /\b([A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s.]+\s+\d+[A-Za-z]?,?\s+\d{4}\s+[A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s,]+)/g,
+      // Just postal + city
+      /\b(\d{4}\s+[A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s]+(?:,\s*[A-Za-z]+)?)/g
     ]
     addressPatterns.forEach(pattern => {
-      const matches = html.match(pattern) || []
+      const matches = cleanHtml.match(pattern) || []
       matches.forEach(match => {
-        const cleaned = match.replace(/<[^>]+>/g, '').trim()
-        if (cleaned.length > 5) result.address.push(cleaned)
+        const cleaned = match
+          .replace(/<[^>]+>/g, '') // Remove any HTML tags
+          .replace(/[\n\r]+/g, ', ') // Convert newlines to comma-space
+          .replace(/,\s*,/g, ',') // Remove double commas
+          .replace(/^\w+[:\s]+/i, '') // Remove label prefixes
+          .trim()
+        if (cleaned.length >= 10 && /\d{4}/.test(cleaned)) { // Must have postal code
+          result.address.push(cleaned)
+        }
       })
     })
 
@@ -277,25 +341,104 @@ function extractStructuredData(html: string): {
       })
     })
 
-    // Extract opening hours
+    // Extract opening hours (Schema.org, tables, and patterns)
+    // 1. Schema.org openingHoursSpecification
+    schemaMatches.forEach(scriptTag => {
+      try {
+        const jsonMatch = scriptTag.match(/>(.+)<\/script>/is)
+        if (jsonMatch) {
+          const data = JSON.parse(jsonMatch[1])
+          const extractHours = (obj: any): void => {
+            // openingHours simple string
+            if (obj.openingHours) {
+              if (typeof obj.openingHours === 'string') {
+                result.openingHours.push(obj.openingHours)
+              } else if (Array.isArray(obj.openingHours)) {
+                result.openingHours.push(...obj.openingHours)
+              }
+            }
+            // openingHoursSpecification detailed format
+            if (obj.openingHoursSpecification) {
+              const specs = Array.isArray(obj.openingHoursSpecification) 
+                ? obj.openingHoursSpecification 
+                : [obj.openingHoursSpecification]
+              specs.forEach((spec: any) => {
+                const days = spec.dayOfWeek ? (Array.isArray(spec.dayOfWeek) ? spec.dayOfWeek.join(', ') : spec.dayOfWeek) : ''
+                const opens = spec.opens || ''
+                const closes = spec.closes || ''
+                if (days && opens && closes) {
+                  result.openingHours.push(`${days}: ${opens}-${closes}`)
+                }
+              })
+            }
+          }
+          if (Array.isArray(data)) {
+            data.forEach(extractHours)
+          } else {
+            extractHours(data)
+          }
+        }
+      } catch (e) {
+        // Skip invalid JSON
+      }
+    })
+
+    // 2. Common text patterns for opening hours (use cleanHtml)
     const hourPatterns = [
-      /(?:åbningstid|opening hours?|öffnungszeit)[^<]*?(\d{1,2}[:\.]?\d{0,2}[\s-]+\d{1,2}[:\.]?\d{0,2})/gi,
-      /(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|mon|tue|wed|thu|fri|sat|sun)[^<\n]*?(\d{1,2}[:\.]?\d{0,2}[\s-]+\d{1,2}[:\.]?\d{0,2})/gi
+      // Danish day names with times - flexible whitespace/newlines
+      /((?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)(?:\s*-\s*(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag))?)\s*[:;\n\r\s]*(\d{1,2}[.:]\d{2}\s*[-–—]\s*\d{1,2}[.:]\d{2})/gi,
+      // English day names with times
+      /((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)(?:\s*-\s*(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun))?)\s*[:;\n\r\s]*(\d{1,2}[.:]\d{2}\s*(?:am|pm)?\s*[-–—]\s*\d{1,2}[.:]\d{2}\s*(?:am|pm)?)/gi,
+      // Generic hours with label
+      /(?:åbningstid|opening hours?|öffnungszeit|hours?)[:\s]*([^\n<]{10,200})/gi
     ]
     hourPatterns.forEach(pattern => {
-      const matches = [...html.matchAll(pattern)]
+      const matches = [...cleanHtml.matchAll(pattern)]
       matches.forEach(match => {
-        const text = match[0].replace(/<[^>]+>/g, '').trim()
-        if (text.length < 150) result.openingHours.push(text)
+        let text = match[0].replace(/<[^>]+>/g, '').trim()
+        // Clean up extra whitespace and newlines
+        text = text.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ')
+        // Capitalize first letter for consistency
+        text = text.charAt(0).toUpperCase() + text.slice(1)
+        if (text.length > 5 && text.length < 200 && /\d/.test(text)) {
+          result.openingHours.push(text)
+        }
       })
     })
 
-    // Deduplicate and limit results
+    // 3. Look for time tables (table with days and hours) - use cleanHtml
+    const tableMatches = cleanHtml.match(/<table[^>]*>[\s\S]*?<\/table>/gi) || []
+    tableMatches.forEach(table => {
+      const hasDay = /(mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)/i.test(table)
+      const hasTime = /\d{1,2}[:.\s]?\d{0,2}\s*[-–—]\s*\d{1,2}[:.\s]?\d{0,2}/.test(table)
+      if (hasDay && hasTime) {
+        const rows = table.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || []
+        rows.forEach(row => {
+          const text = row.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+          if (text.length > 5 && text.length < 150 && /\d/.test(text)) {
+            result.openingHours.push(text)
+          }
+        })
+      }
+    })
+
+    // Deduplicate and limit results with better cleaning
     result.about = [...new Set(result.about)].slice(0, 5)
-    result.address = [...new Set(result.address)].slice(0, 5)
+    
+    // Address: Remove duplicates and sort by length (longer = more detailed)
+    const uniqueAddresses = [...new Set(result.address.map(a => a.trim()))]
+      .filter(a => a.length >= 10) // Minimum viable address length
+      .sort((a, b) => b.length - a.length) // Longer addresses first
+    result.address = uniqueAddresses.slice(0, 8)
+    
     result.bookingLinks = [...new Set(result.bookingLinks)].slice(0, 10)
     result.menuLinks = [...new Set(result.menuLinks)].slice(0, 10)
-    result.openingHours = [...new Set(result.openingHours)].slice(0, 10)
+    
+    // Opening hours: Remove duplicates and clean up
+    const uniqueHours = [...new Set(result.openingHours.map(h => h.trim()))]
+      .filter(h => h.length >= 5 && h.length <= 200) // Reasonable length
+      .filter(h => /\d/.test(h)) // Must contain at least one digit
+    result.openingHours = uniqueHours.slice(0, 15)
 
   } catch (error: any) {
     console.error('Error extracting structured data:', error.message)
@@ -322,7 +465,7 @@ serve(async (req: any) => {
       )
     }
 
-    // Call Cloud Run scraper
+    // Call Cloud Run scraper v2
     const scrapeResult = await callCloudRunScraper(url)
 
     if (!scrapeResult.success) {
@@ -342,19 +485,20 @@ serve(async (req: any) => {
       )
     }
 
-    // Extract structured data
-    const structured = extractStructuredData(scrapeResult.html!)
+    // V2 endpoint returns pre-processed structured data - no need to extract
+    const payload = scrapeResult.payload
 
-    // Return results
+    // Return v2 structured results
     return new Response(
       JSON.stringify({
         success: true,
         url,
         timing: scrapeResult.timing,
-        html: scrapeResult.html,
-        htmlLength: scrapeResult.html!.length,
-        structured,
-        metadata: scrapeResult.metadata
+        ...payload, // Spread the v2 payload (meta, contact, links, menu_text, about_text, etc.)
+        metadata: {
+          ...scrapeResult.metadata,
+          cloudRunVersion: 'v2'
+        }
       }),
       { 
         status: 200, 

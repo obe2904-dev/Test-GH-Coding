@@ -1,6 +1,7 @@
 {
   "name": "cloud-run-scraper",
   "version": "1.0.0",
+  "type": "module",
   "description": "Puppeteer-based web scraper for JavaScript-heavy sites",
   "main": "index.js",
   "scripts": {

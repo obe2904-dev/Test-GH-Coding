@@ -5,27 +5,55 @@ interface TestResult {
   success: boolean
   url?: string
   timing?: number
-  html?: string
-  htmlLength?: number
-  structured?: {
-    about: string[]
-    address: string[]
-    bookingLinks: string[]
-    menuLinks: string[]
-    openingHours: string[]
+  
+  // v2 payload structure
+  content_quality?: 'rich' | 'thin' | 'shell'
+  menu_source?: 'inline' | 'link' | 'pdf' | 'none'
+  
+  meta?: {
+    title?: string
+    description?: string
+    locale?: string
   }
+  
+  contact?: {
+    email?: string
+    phone?: string
+    address?: string
+  }
+  
+  links?: {
+    booking?: string
+    menu_url?: string
+    takeaway?: string
+    social?: string[]
+    pdf_menus?: string[]
+    raw?: Array<{ url: string; text: string }>
+  }
+  
+  opening_hours?: {
+    structured?: any[]
+    text?: string
+  }
+  
+  menu_text?: string
+  about_text?: string
+  full_text?: string
+  
+  payload_size?: number
+  original_size?: number
+  
   error?: string
   cloudRunUrl?: string
   hasApiKey?: boolean
   hasServiceAccount?: boolean
-  metadata?: any
 }
 
 export default function TestCloudRunPage() {
   const [url, setUrl] = useState('https://www.noma.dk')
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<TestResult | null>(null)
-  const [showRawHtml, setShowRawHtml] = useState(false)
+  const [showFullText, setShowFullText] = useState(false)
 
   const handleTest = async () => {
     if (!url.trim()) {
@@ -196,159 +224,316 @@ export default function TestCloudRunPage() {
           )}
 
           {/* Success Results */}
-          {result.success && result.html && (
+          {result.success && (
             <>
-              {/* Metadata */}
+              {/* Quality Metrics */}
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">📊 Metadata</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">📊 Quality Metrics</h3>
                 <dl className="grid grid-cols-2 gap-4">
                   <div>
-                    <dt className="text-sm font-medium text-gray-600">URL</dt>
-                    <dd className="mt-1 text-sm text-gray-900 break-all">{result.url}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-sm font-medium text-gray-600">HTML Length</dt>
-                    <dd className="mt-1 text-sm text-gray-900">
-                      {result.htmlLength?.toLocaleString()} characters
+                    <dt className="text-sm font-medium text-gray-600">Content Quality</dt>
+                    <dd className="mt-1">
+                      <span className={`inline-flex px-3 py-1 text-sm font-medium rounded-full ${
+                        result.content_quality === 'rich' ? 'bg-green-100 text-green-800' :
+                        result.content_quality === 'thin' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {result.content_quality || 'unknown'}
+                      </span>
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-sm font-medium text-gray-600">Response Time</dt>
-                    <dd className="mt-1 text-sm text-gray-900">{result.timing}ms</dd>
+                    <dt className="text-sm font-medium text-gray-600">Menu Source</dt>
+                    <dd className="mt-1">
+                      <span className={`inline-flex px-3 py-1 text-sm font-medium rounded-full ${
+                        result.menu_source === 'inline' ? 'bg-green-100 text-green-800' :
+                        result.menu_source === 'link' ? 'bg-blue-100 text-blue-800' :
+                        result.menu_source === 'pdf' ? 'bg-purple-100 text-purple-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {result.menu_source || 'none'}
+                      </span>
+                    </dd>
                   </div>
                   <div>
-                    <dt className="text-sm font-medium text-gray-600">Scraper</dt>
-                    <dd className="mt-1 text-sm text-gray-900">Cloud Run Puppeteer</dd>
+                    <dt className="text-sm font-medium text-gray-600">Payload Size</dt>
+                    <dd className="mt-1 text-sm text-gray-900">
+                      {result.payload_size?.toLocaleString()} bytes
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-sm font-medium text-gray-600">Size Reduction</dt>
+                    <dd className="mt-1 text-sm text-gray-900">
+                      {result.original_size && result.payload_size ? (
+                        <>
+                          {((1 - result.payload_size / result.original_size) * 100).toFixed(1)}%
+                          <span className="text-gray-500 ml-1">
+                            ({result.original_size.toLocaleString()} → {result.payload_size.toLocaleString()})
+                          </span>
+                        </>
+                      ) : 'N/A'}
+                    </dd>
                   </div>
                 </dl>
               </div>
 
-              {/* Structured Data */}
-              {result.structured && (
+              {/* Metadata */}
+              {result.meta && (
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                    📋 Extracted Structured Data
-                  </h3>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">🏷️ Metadata</h3>
+                  <dl className="space-y-3">
+                    {result.meta.title && (
+                      <div>
+                        <dt className="text-sm font-medium text-gray-600">Title</dt>
+                        <dd className="mt-1 text-sm text-gray-900">{result.meta.title}</dd>
+                      </div>
+                    )}
+                    {result.meta.description && (
+                      <div>
+                        <dt className="text-sm font-medium text-gray-600">Description</dt>
+                        <dd className="mt-1 text-sm text-gray-900">{result.meta.description}</dd>
+                      </div>
+                    )}
+                    {result.meta.locale && (
+                      <div>
+                        <dt className="text-sm font-medium text-gray-600">Locale</dt>
+                        <dd className="mt-1 text-sm text-gray-900">{result.meta.locale}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+
+              {/* Contact Info */}
+              {result.contact && Object.keys(result.contact).length > 0 && (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">📞 Contact Information</h3>
+                  <dl className="space-y-3">
+                    {result.contact.email && (
+                      <div>
+                        <dt className="text-sm font-medium text-gray-600">Email</dt>
+                        <dd className="mt-1 text-sm">
+                          <a href={`mailto:${result.contact.email}`} className="text-blue-600 hover:underline">
+                            {result.contact.email}
+                          </a>
+                        </dd>
+                      </div>
+                    )}
+                    {result.contact.phone && (
+                      <div>
+                        <dt className="text-sm font-medium text-gray-600">Phone</dt>
+                        <dd className="mt-1 text-sm">
+                          <a href={`tel:${result.contact.phone}`} className="text-blue-600 hover:underline">
+                            {result.contact.phone}
+                          </a>
+                        </dd>
+                      </div>
+                    )}
+                    {result.contact.address && (
+                      <div>
+                        <dt className="text-sm font-medium text-gray-600">Address</dt>
+                        <dd className="mt-1 text-sm text-gray-900 whitespace-pre-line">
+                          {result.contact.address}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+
+              {/* Links */}
+              {result.links && (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">🔗 Links</h3>
                   
-                  <div className="space-y-6">
-                    {/* About */}
-                    <div>
-                      <h4 className="font-medium text-gray-700 mb-2">📖 About</h4>
-                      {result.structured.about.length > 0 ? (
-                        <ul className="space-y-2">
-                          {result.structured.about.map((item, idx) => (
-                            <li key={idx} className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-gray-400 italic">No about text found</p>
-                      )}
-                    </div>
+                  <div className="space-y-4">
+                    {/* Primary Links */}
+                    {(result.links.booking || result.links.menu_url || result.links.takeaway) && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">Primary Actions</h4>
+                        <dl className="space-y-2">
+                          {result.links.booking && (
+                            <div className="flex items-start gap-2">
+                              <dt className="text-sm font-medium text-gray-600 w-24">Booking:</dt>
+                              <dd className="text-sm flex-1">
+                                <a href={result.links.booking} target="_blank" rel="noopener noreferrer" 
+                                   className="text-blue-600 hover:underline break-all">
+                                  {result.links.booking}
+                                </a>
+                              </dd>
+                            </div>
+                          )}
+                          {result.links.menu_url && (
+                            <div className="flex items-start gap-2">
+                              <dt className="text-sm font-medium text-gray-600 w-24">Menu:</dt>
+                              <dd className="text-sm flex-1">
+                                <a href={result.links.menu_url} target="_blank" rel="noopener noreferrer" 
+                                   className="text-blue-600 hover:underline break-all">
+                                  {result.links.menu_url}
+                                </a>
+                              </dd>
+                            </div>
+                          )}
+                          {result.links.takeaway && (
+                            <div className="flex items-start gap-2">
+                              <dt className="text-sm font-medium text-gray-600 w-24">Takeaway:</dt>
+                              <dd className="text-sm flex-1">
+                                <a href={result.links.takeaway} target="_blank" rel="noopener noreferrer" 
+                                   className="text-blue-600 hover:underline break-all">
+                                  {result.links.takeaway}
+                                </a>
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                      </div>
+                    )}
 
-                    {/* Address */}
-                    <div>
-                      <h4 className="font-medium text-gray-700 mb-2">📍 Address</h4>
-                      {result.structured.address.length > 0 ? (
-                        <ul className="space-y-2">
-                          {result.structured.address.map((item, idx) => (
-                            <li key={idx} className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-gray-400 italic">No addresses found</p>
-                      )}
-                    </div>
-
-                    {/* Booking Links */}
-                    <div>
-                      <h4 className="font-medium text-gray-700 mb-2">🔗 Booking Links</h4>
-                      {result.structured.bookingLinks.length > 0 ? (
-                        <ul className="space-y-2">
-                          {result.structured.bookingLinks.map((item, idx) => (
+                    {/* Social Media */}
+                    {result.links.social && result.links.social.length > 0 && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">
+                          Social Media ({result.links.social.length})
+                        </h4>
+                        <ul className="space-y-1">
+                          {result.links.social.map((link, idx) => (
                             <li key={idx} className="text-sm">
-                              <a
-                                href={item}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline break-all"
-                              >
-                                {item}
+                              <a href={link} target="_blank" rel="noopener noreferrer"
+                                 className="text-blue-600 hover:underline break-all">
+                                {link}
                               </a>
                             </li>
                           ))}
                         </ul>
-                      ) : (
-                        <p className="text-sm text-gray-400 italic">No booking links found</p>
-                      )}
-                    </div>
+                      </div>
+                    )}
 
-                    {/* Menu Links */}
-                    <div>
-                      <h4 className="font-medium text-gray-700 mb-2">🍽️ Menu Links</h4>
-                      {result.structured.menuLinks.length > 0 ? (
-                        <ul className="space-y-2">
-                          {result.structured.menuLinks.map((item, idx) => (
+                    {/* PDF Menus */}
+                    {result.links.pdf_menus && result.links.pdf_menus.length > 0 && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">
+                          PDF Menus ({result.links.pdf_menus.length})
+                        </h4>
+                        <ul className="space-y-1">
+                          {result.links.pdf_menus.map((link, idx) => (
                             <li key={idx} className="text-sm">
-                              <a
-                                href={item}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline break-all"
-                              >
-                                {item}
+                              <a href={link} target="_blank" rel="noopener noreferrer"
+                                 className="text-blue-600 hover:underline break-all">
+                                📄 {link}
                               </a>
                             </li>
                           ))}
                         </ul>
-                      ) : (
-                        <p className="text-sm text-gray-400 italic">No menu links found</p>
-                      )}
-                    </div>
+                      </div>
+                    )}
 
-                    {/* Opening Hours */}
-                    <div>
-                      <h4 className="font-medium text-gray-700 mb-2">🕐 Opening Hours</h4>
-                      {result.structured.openingHours.length > 0 ? (
-                        <ul className="space-y-2">
-                          {result.structured.openingHours.map((item, idx) => (
-                            <li key={idx} className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-gray-400 italic">No opening hours found</p>
-                      )}
-                    </div>
+                    {/* Raw Links */}
+                    {result.links.raw && result.links.raw.length > 0 && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">
+                          All Links ({result.links.raw.length})
+                        </h4>
+                        <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-lg">
+                          <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50 sticky top-0">
+                              <tr>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                  Link Text
+                                </th>
+                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                  URL
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                              {result.links.raw.map((link, idx) => (
+                                <tr key={idx} className="hover:bg-gray-50">
+                                  <td className="px-3 py-2 text-sm text-gray-900">
+                                    {link.text || <span className="text-gray-400 italic">no text</span>}
+                                  </td>
+                                  <td className="px-3 py-2 text-sm">
+                                    <a href={link.url} target="_blank" rel="noopener noreferrer"
+                                       className="text-blue-600 hover:underline break-all text-xs">
+                                      {link.url}
+                                    </a>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* Raw HTML */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">📄 Raw HTML</h3>
-                  <button
-                    onClick={() => setShowRawHtml(!showRawHtml)}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                  >
-                    {showRawHtml ? 'Hide' : 'Show'} HTML
-                  </button>
+              {/* Opening Hours */}
+              {result.opening_hours && (result.opening_hours.structured || result.opening_hours.text) && (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">🕐 Opening Hours</h3>
+                  {result.opening_hours.structured && result.opening_hours.structured.length > 0 && (
+                    <div className="mb-3">
+                      <h4 className="text-sm font-medium text-gray-600 mb-2">Structured</h4>
+                      <pre className="text-sm bg-gray-50 p-3 rounded overflow-x-auto">
+                        {JSON.stringify(result.opening_hours.structured, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {result.opening_hours.text && (
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-600 mb-2">Text</h4>
+                      <p className="text-sm text-gray-900 whitespace-pre-line">
+                        {result.opening_hours.text}
+                      </p>
+                    </div>
+                  )}
                 </div>
-                
-                {showRawHtml && (
-                  <textarea
-                    value={result.html}
-                    readOnly
-                    className="w-full h-96 p-4 font-mono text-xs bg-gray-50 border border-gray-300 rounded-lg"
-                    style={{ resize: 'vertical' }}
-                  />
-                )}
-              </div>
+              )}
+
+              {/* About Text */}
+              {result.about_text && (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">📖 About Text</h3>
+                  <p className="text-sm text-gray-900 whitespace-pre-line leading-relaxed">
+                    {result.about_text}
+                  </p>
+                </div>
+              )}
+
+              {/* Menu Text */}
+              {result.menu_text && (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">🍽️ Menu Text</h3>
+                  <p className="text-sm text-gray-900 whitespace-pre-line leading-relaxed font-mono">
+                    {result.menu_text}
+                  </p>
+                </div>
+              )}
+
+              {/* Full Text (collapsible) */}
+              {result.full_text && (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">📄 Full Text</h3>
+                    <button
+                      onClick={() => setShowFullText(!showFullText)}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                    >
+                      {showFullText ? 'Hide' : 'Show'} Full Text
+                    </button>
+                  </div>
+                  
+                  {showFullText && (
+                    <textarea
+                      value={result.full_text}
+                      readOnly
+                      className="w-full h-96 p-4 font-mono text-xs bg-gray-50 border border-gray-300 rounded-lg"
+                      style={{ resize: 'vertical' }}
+                    />
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -359,11 +544,12 @@ export default function TestCloudRunPage() {
         <div className="bg-blue-50 rounded-lg border border-blue-200 p-6">
           <h3 className="font-semibold text-blue-900 mb-2">ℹ️ About This Test</h3>
           <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-            <li>This page tests <strong>only</strong> the Cloud Run Puppeteer scraper</li>
-            <li>No caching, no simple fetch fallbacks</li>
-            <li>Shows raw HTML and extracted structured data</li>
-            <li>Displays detailed error messages for debugging</li>
-            <li>Useful for verifying Cloud Run configuration and performance</li>
+            <li>Tests the Cloud Run <strong>v2 preprocessor</strong> endpoint</li>
+            <li>Returns structured, preprocessed data (not raw HTML)</li>
+            <li>Shows quality metrics, contact info, and comprehensive link extraction</li>
+            <li>Displays <strong>raw_links</strong> with both URLs and visible link text</li>
+            <li>Reduces payload size by ~95% for AI processing</li>
+            <li>Useful for validating content quality gates and extraction accuracy</li>
           </ul>
         </div>
       )}

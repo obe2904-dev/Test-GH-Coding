@@ -239,6 +239,7 @@ serve(async (req: any) => {
     // Check cache first (24-hour TTL) - unless forceRefresh is true
     let homepageHtml = ''
     let cacheHit = false
+    let navigationData: any = null  // Declare here for cache upgrade path
     
     if (supabase && !forceRefresh) {
       const cacheCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
@@ -265,8 +266,8 @@ serve(async (req: any) => {
               // Call Puppeteer DIRECTLY (don't go through scrapeWebsite which would check threshold again)
               const { scrapeWithPuppeteer } = await import('../_shared/crawling/website-scraper.ts')
               const scrapeResult = await scrapeWithPuppeteer(url)
-              if (scrapeResult && (scrapeResult.scraperType === 'cloud-run-puppeteer' || scrapeResult.scraperType === 'puppeteer-vercel')) {
-                console.log(`✅ Puppeteer re-scrape successful (${scrapeResult.scraperType}), using new content`)
+              if (scrapeResult && scrapeResult.scraperType === 'cloud-run-puppeteer') {
+                console.log(`✅ Puppeteer re-scrape successful, using new content`)
                 homepageHtml = scrapeResult.html
                 navigationData = scrapeResult.navigationData  // Capture navigation data
                 cacheHit = false // Mark as fresh scrape to update cache
@@ -302,7 +303,6 @@ serve(async (req: any) => {
     
     // Scrape if not cached - with intelligent routing
     let scraperType = 'unknown'
-    let navigationData: any = null  // Capture navigation data from Puppeteer
     let contentSignature: any = null
     let scrapingMetrics: any = null
     
