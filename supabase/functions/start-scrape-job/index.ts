@@ -13,7 +13,6 @@ const corsHeaders = {
 };
 
 interface ScrapeRequest {
-  business_id?: string;
   url: string;
   force_refresh?: boolean;
 }
@@ -24,7 +23,7 @@ serve(async (req) => {
   }
 
   try {
-    let { business_id, url, force_refresh = false }: ScrapeRequest = await req.json();
+    let { url, force_refresh = false }: ScrapeRequest = await req.json();
 
     if (!url) {
       throw new Error('url is required');
@@ -39,6 +38,34 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Extract user from Authorization header
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      throw new Error('Missing authorization header');
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      throw new Error('Invalid or expired token');
+    }
+
+    // Resolve business_id from authenticated user
+    const { data: business, error: businessError } = await supabase
+      .from('businesses')
+      .select('id')
+      .eq('owner_id', user.id)
+      .limit(1)
+      .single();
+
+    if (businessError || !business) {
+      throw new Error('No business found for this user');
+    }
+
+    const business_id = business.id;
+    console.log('Resolved business_id:', business_id, 'for user:', user.id);
 
     // Check for recent cache if not forcing refresh
     if (!force_refresh) {
@@ -72,7 +99,7 @@ serve(async (req) => {
     const { data: job, error: insertError } = await supabase
       .from('website_scrape_results')
       .insert({
-        business_id: business_id || null,
+        business_id: business_id,
         url,
         payload: { status: 'processing', started_at: new Date().toISOString() },
         scraper_version: 'cloud-run-v3',
