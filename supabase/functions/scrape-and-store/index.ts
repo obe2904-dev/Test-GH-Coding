@@ -84,11 +84,11 @@ serve(async (req) => {
         .from('website_scrape_results')
         .select('*')
         .eq('business_id', business_id)
-        .eq('url_normalized', url.toLowerCase().replace(/\/$/, ''))
+        .eq('url', url)
         .gte('scraped_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) // 24h cache
         .order('scraped_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (existing) {
         return new Response(
@@ -116,25 +116,28 @@ serve(async (req) => {
     console.log('Calling Cloud Run scraper:', url);
     const scrapeStart = Date.now();
 
-    const response = await fetch(`${cloudRunUrl}/scrape-v2`, {
+    const response = await fetch(`${cloudRunUrl}/scrape-v3`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': apiKey,
       },
       body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(65000), // 65 second timeout (Cloud Run is 60s)
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Cloud Run error:', response.status, errorText);
       throw new Error(`Cloud Run error: ${response.status} ${response.statusText}`);
     }
 
     const payload = await response.json();
     const scrapeDuration = Date.now() - scrapeStart;
 
-    console.log('Scrape complete:', {
-      content_quality: payload.content_quality,
-      menu_source: payload.menu_source,
+    console.log('Scrape complete (v3):', {
+      quality: payload.extraction?.quality?.rating || 'unknown',
+      pages: payload.pages_crawled?.length || 0,
       duration_ms: scrapeDuration,
     });
 
@@ -146,14 +149,16 @@ serve(async (req) => {
         url,
         scraped_at: new Date().toISOString(),
         expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
-        scraper_version: 'cloud-run-v2',
+        scraper_version: 'cloud-run-v3',
         scraper_metadata: {
           duration_ms: scrapeDuration,
-          revision: 'scraper-00013-7ss',
+          revision: 'scraper-00025-qqb',
+          pages_crawled: payload.pages_crawled?.length || 1,
+          quality: payload.extraction?.quality?.rating || 'unknown',
         },
-        content_quality: payload.content_quality,
-        menu_source: payload.menu_source,
-        content_char_count: payload.full_text?.length || 0,
+        content_quality: payload.extraction?.quality?.rating || 'unknown',
+        menu_source: payload.extraction?.services?.menu?.url ? 'scraped' : 'none',
+        content_char_count: payload.extraction?.quality?.business_text_characters || 0,
         raw_size_bytes: JSON.stringify(payload).length,
         payload,
       })

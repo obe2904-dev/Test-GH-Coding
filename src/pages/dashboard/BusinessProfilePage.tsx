@@ -988,10 +988,11 @@ function BusinessProfilePage() {
         throw new Error('Ikke godkendt')
       }
 
-      console.log('🕷️ Calling scrape-and-store for:', url)
+      console.log('🕷️ Starting async scrape for:', url)
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/scrape-and-store`,
+      // Step 1: Start scrape job
+      const startResponse = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-scrape-job`,
         {
           method: 'POST',
           headers: {
@@ -1002,16 +1003,63 @@ function BusinessProfilePage() {
         }
       )
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+      if (!startResponse.ok) {
+        throw new Error(`HTTP ${startResponse.status}`)
       }
 
-      const result = await response.json()
-      console.log('✅ Scrape result:', result)
+      const startResult = await startResponse.json()
+      console.log('✅ Scrape job started:', startResult.job_id)
 
-      setScrapeResult(result)
+      // If cached, we're done
+      if (startResult.cached && startResult.status === 'completed') {
+        console.log('📦 Using cached result')
+        setScrapeResult({ scrape_id: startResult.job_id, cached: true })
+        return
+      }
 
-      // Cache status is shown in console log, no need for alert
+      // Step 2: Poll for completion
+      const jobId = startResult.job_id
+      const maxPolls = 30 // 30 * 3 seconds = 90 seconds max
+      let polls = 0
+
+      while (polls < maxPolls) {
+        await new Promise(resolve => setTimeout(resolve, 3000)) // Wait 3 seconds
+        polls++
+
+        console.log(`🔍 Polling status (${polls}/${maxPolls})...`)
+
+        const statusResponse = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-scrape-status?job_id=${jobId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${authToken}`,
+            },
+          }
+        )
+
+        if (!statusResponse.ok) {
+          throw new Error(`Status check failed: HTTP ${statusResponse.status}`)
+        }
+
+        const statusResult = await statusResponse.json()
+
+        if (statusResult.status === 'completed') {
+          console.log('✅ Scrape completed:', statusResult)
+          setScrapeResult({
+            scrape_id: jobId,
+            content_quality: statusResult.content_quality,
+            menu_source: statusResult.menu_source,
+            cached: false
+          })
+          return
+        } else if (statusResult.status === 'failed') {
+          throw new Error(statusResult.error || 'Scraping failed')
+        }
+
+        // Still processing, continue polling
+      }
+
+      throw new Error('Scraping timeout - took longer than 90 seconds')
 
     } catch (error: any) {
       console.error('❌ Scrape error:', error)
