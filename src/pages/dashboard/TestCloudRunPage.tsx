@@ -54,6 +54,7 @@ export default function TestCloudRunPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<TestResult | null>(null)
   const [showFullText, setShowFullText] = useState(false)
+  const [testMode, setTestMode] = useState<'scraper' | 'analyze'>('scraper')
 
   const handleTest = async () => {
     if (!url.trim()) {
@@ -68,9 +69,10 @@ export default function TestCloudRunPage() {
       const { data: { session } } = await supabase.auth.getSession()
       const authToken = session?.access_token
 
-      const endpoint = import.meta.env.VITE_SUPABASE_URL + '/functions/v1/test-cloud-run-scraper'
+      const functionName = testMode === 'scraper' ? 'test-cloud-run-scraper' : 'analyze-website-v2'
+      const endpoint = import.meta.env.VITE_SUPABASE_URL + `/functions/v1/${functionName}`
       
-      console.log('🚀 Testing Cloud Run scraper:', url)
+      console.log(`🚀 Testing ${testMode} mode:`, url)
       console.log('📡 Endpoint:', endpoint)
 
       const response = await fetch(endpoint, {
@@ -79,7 +81,10 @@ export default function TestCloudRunPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${authToken}`
         },
-        body: JSON.stringify({ url: url.trim() })
+        body: JSON.stringify({ 
+          url: url.trim(),
+          businessName: 'Test Business'
+        })
       })
 
       if (!response.ok) {
@@ -112,16 +117,54 @@ export default function TestCloudRunPage() {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          🧪 Cloud Run Scraper Test
+          🧪 Cloud Run {testMode === 'scraper' ? 'Scraper' : 'AI Analysis'} Test
         </h1>
         <p className="text-gray-600">
-          Direct test of Cloud Run Puppeteer scraping - no cache, no fallbacks
+          {testMode === 'scraper' 
+            ? 'Direct test of Cloud Run v2 preprocessor - returns structured data'
+            : 'Full AI analysis pipeline using Cloud Run v2 + GPT-4o-mini'
+          }
         </p>
       </div>
 
       {/* Test Form */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
         <div className="space-y-4">
+          {/* Mode Toggle */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Test Mode
+            </label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setTestMode('scraper')}
+                className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                  testMode === 'scraper'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                🔧 Scraper Only
+                <div className="text-xs mt-1 opacity-80">
+                  Raw preprocessed data
+                </div>
+              </button>
+              <button
+                onClick={() => setTestMode('analyze')}
+                className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                  testMode === 'analyze'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                🤖 AI Analysis
+                <div className="text-xs mt-1 opacity-80">
+                  Full extraction with GPT-4o-mini
+                </div>
+              </button>
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Website URL
@@ -165,7 +208,7 @@ export default function TestCloudRunPage() {
                 Testing Cloud Run...
               </span>
             ) : (
-              '🚀 Test Cloud Run Scraper'
+              testMode === 'scraper' ? '🚀 Test Cloud Run Scraper' : '🤖 Test AI Analysis'
             )}
           </button>
         </div>
