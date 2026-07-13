@@ -4,7 +4,8 @@ import { supabase } from '../../lib/supabase'
 interface TestResult {
   success: boolean
   url?: string
-  timing?: number
+  timing?: number | { total_ms: number; scraping_ms: number }
+  version?: string
   
   // v2 payload structure
   content_quality?: 'rich' | 'thin' | 'shell'
@@ -40,6 +41,15 @@ interface TestResult {
   about_text?: string
   full_text?: string
   
+  // v2 AI-extracted fields (from analyze-website-v2)
+  about?: string
+  description?: string
+  venue_hooks?: string[]
+  keywords?: string[]
+  tone_of_voice?: string
+  has_menu?: boolean
+  confidence_score?: number
+  
   payload_size?: number
   original_size?: number
   
@@ -55,6 +65,12 @@ export default function TestCloudRunPage() {
   const [result, setResult] = useState<TestResult | null>(null)
   const [showFullText, setShowFullText] = useState(false)
   const [testMode, setTestMode] = useState<'scraper' | 'analyze'>('scraper')
+
+  // Helper to get timing value (handles both v1 number and v2 object)
+  const getTiming = (timing: number | { total_ms: number; scraping_ms: number } | undefined): number | undefined => {
+    if (!timing) return undefined
+    return typeof timing === 'number' ? timing : timing.total_ms
+  }
 
   const handleTest = async () => {
     if (!url.trim()) {
@@ -235,7 +251,7 @@ export default function TestCloudRunPage() {
                 </h3>
                 {result.timing && (
                   <p className="text-sm text-gray-600">
-                    Response time: {result.timing}ms
+                    Response time: {getTiming(result.timing)}ms
                   </p>
                 )}
               </div>
@@ -544,6 +560,76 @@ export default function TestCloudRunPage() {
                       </p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* AI-Extracted Content (v2 only) */}
+              {(result.about || result.description || result.venue_hooks || result.keywords) && (
+                <div className="bg-white rounded-lg shadow-sm border border-blue-200 p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">🤖 AI-Extracted Content</h3>
+                    {result.confidence_score !== undefined && (
+                      <span className="px-3 py-1 text-sm font-medium bg-blue-100 text-blue-800 rounded-full">
+                        Confidence: {(result.confidence_score * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-4">
+                    {result.about && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">About (Concise)</h4>
+                        <p className="text-sm text-gray-900 leading-relaxed bg-blue-50 p-3 rounded">
+                          {result.about}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {result.description && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">Description (Detailed)</h4>
+                        <p className="text-sm text-gray-900 leading-relaxed bg-blue-50 p-3 rounded">
+                          {result.description}
+                        </p>
+                      </div>
+                    )}
+                    
+                    {result.venue_hooks && result.venue_hooks.length > 0 && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">Venue Hooks (USPs)</h4>
+                        <ul className="space-y-2">
+                          {result.venue_hooks.map((hook, idx) => (
+                            <li key={idx} className="text-sm text-gray-900 bg-green-50 p-2 rounded flex items-start gap-2">
+                              <span className="text-green-600 font-bold">•</span>
+                              <span className="flex-1">{hook}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {result.keywords && result.keywords.length > 0 && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">Keywords</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {result.keywords.map((keyword, idx) => (
+                            <span key={idx} className="px-3 py-1 text-sm bg-purple-100 text-purple-800 rounded-full">
+                              {keyword}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {result.tone_of_voice && (
+                      <div>
+                        <h4 className="font-medium text-gray-700 mb-2">Tone of Voice</h4>
+                        <p className="text-sm text-gray-900 bg-yellow-50 p-3 rounded italic">
+                          "{result.tone_of_voice}"
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
