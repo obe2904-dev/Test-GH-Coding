@@ -79,7 +79,7 @@ app.post('/scrape', async (req, res) => {
     });
 
     // Wait a bit for any dynamic content to load
-    await page.waitForTimeout(2000);
+    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // Extract HTML content
     const html = await page.content();
