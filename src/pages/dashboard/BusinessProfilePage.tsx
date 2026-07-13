@@ -98,6 +98,16 @@ function BusinessProfilePage() {
   const [isEditingLocation, setIsEditingLocation] = useState(false)
   const [isEditingContact, setIsEditingContact] = useState(false)
   const [isEditingKeyOfferings, setIsEditingKeyOfferings] = useState(false)
+
+  // Web scraping state
+  const [isScraping, setIsScraping] = useState(false)
+  const [isExtracting, setIsExtracting] = useState(false)
+  const [scrapeResult, setScrapeResult] = useState<any>(null)
+  const [extractResult, setExtractResult] = useState<any>(null)
+  const [scrapeError, setScrapeError] = useState<string | null>(null)
+  const [extractError, setExtractError] = useState<string | null>(null)
+  const [showRawScrapeData, setShowRawScrapeData] = useState(false)
+  const [showRawExtractData, setShowRawExtractData] = useState(false)
   const [_isEditingAbout, _setIsEditingAbout] = useState(false)
   const [_isEditingHours, _setIsEditingHours] = useState(true)
   const [_isEditingMenu, _setIsEditingMenu] = useState(false)
@@ -955,6 +965,121 @@ function BusinessProfilePage() {
     }
   }
 
+  // =====================================================
+  // New Web Scraping Handlers
+  // =====================================================
+
+  const handleScrapeWebsite = async () => {
+    const url = websiteUrl.trim()
+    if (!url) {
+      alert('Indtast venligst en hjemmeside-URL')
+      return
+    }
+
+    setIsScraping(true)
+    setScrapeError(null)
+    setScrapeResult(null)
+
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const authToken = session?.access_token
+
+      if (!authToken) {
+        throw new Error('Ikke godkendt')
+      }
+
+      console.log('🕷️ Calling scrape-and-store for:', url)
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/scrape-and-store`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url }),
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('✅ Scrape result:', result)
+
+      setScrapeResult(result)
+
+      if (result.cached) {
+        alert('✅ Bruger cache-data (< 24 timer gammel)')
+      } else {
+        alert('✅ Website scraped successfully!')
+      }
+
+    } catch (error: any) {
+      console.error('❌ Scrape error:', error)
+      setScrapeError(error.message || 'Scraping fejlede')
+      alert(`Scraping fejlede: ${error.message}`)
+    } finally {
+      setIsScraping(false)
+    }
+  }
+
+  const handleExtractWithAI = async () => {
+    if (!scrapeResult?.scrape_id) {
+      alert('Scrape website først!')
+      return
+    }
+
+    setIsExtracting(true)
+    setExtractError(null)
+    setExtractResult(null)
+
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const authToken = session?.access_token
+
+      if (!authToken) {
+        throw new Error('Ikke godkendt')
+      }
+
+      console.log('🤖 Calling extract-from-scrape for scrape_id:', scrapeResult.scrape_id)
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-from-scrape`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            scrape_id: scrapeResult.scrape_id,
+            force_reextract: true  // Always force fresh extraction for testing
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('✅ Extract result:', result)
+
+      setExtractResult(result)
+      alert('✅ AI extraction complete! Data written to database.')
+
+    } catch (error: any) {
+      console.error('❌ Extract error:', error)
+      setExtractError(error.message || 'AI extraction fejlede')
+      alert(`AI extraction fejlede: ${error.message}`)
+    } finally {
+      setIsExtracting(false)
+    }
+  }
+
   const handleSaveProfile = async (overrideValues?: {
     phone?: string
     email?: string
@@ -1375,6 +1500,181 @@ function BusinessProfilePage() {
                 </span>
                 <span className="sr-only" aria-live="polite">{isAnalyzing ? t('businessProfile.analyzeWebsiteAriaLive') : ''}</span>
               </div>
+            </div>
+          </div>
+
+          {/* Web Data Extraction (Two-Step Testing) */}
+          <div className="bg-purple-50 rounded-lg border-2 border-purple-200 p-4">
+            <div className="space-y-3">
+              {/* Header */}
+              <div className="flex items-center gap-2 mb-2">
+                <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                </svg>
+                <h3 className="text-sm font-semibold text-purple-900">
+                  🧪 Web Data Extraction (Test)
+                </h3>
+              </div>
+
+              <p className="text-xs text-purple-700">
+                To separate knapper til debugging: 1) Scrape raw data, 2) Extract med AI og gem til database
+              </p>
+
+              {/* Buttons */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleScrapeWebsite}
+                  disabled={!websiteUrl.trim() || isScraping}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+                    ${isScraping
+                      ? 'bg-purple-600 text-white opacity-75 cursor-wait'
+                      : 'bg-purple-600 text-white hover:bg-purple-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
+                    }`}
+                >
+                  <svg className={`w-4 h-4 ${isScraping ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                  </svg>
+                  <span>{isScraping ? 'Scraper...' : '1. Scrape Website'}</span>
+                </button>
+
+                <button
+                  onClick={handleExtractWithAI}
+                  disabled={!scrapeResult || isExtracting}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+                    ${isExtracting
+                      ? 'bg-pink-600 text-white opacity-75 cursor-wait'
+                      : 'bg-pink-600 text-white hover:bg-pink-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
+                    }`}
+                >
+                  <svg className={`w-4 h-4 ${isExtracting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  <span>{isExtracting ? 'Extracter...' : '2. Extract with AI'}</span>
+                </button>
+
+                {scrapeResult && (
+                  <span className="text-xs text-purple-700 font-medium">
+                    ✅ Scraped: {scrapeResult.content_quality} · {scrapeResult.menu_source}
+                  </span>
+                )}
+              </div>
+
+              {/* Errors */}
+              {scrapeError && (
+                <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+                  ❌ {scrapeError}
+                </div>
+              )}
+              {extractError && (
+                <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+                  ❌ {extractError}
+                </div>
+              )}
+
+              {/* Scrape Results */}
+              {scrapeResult && (
+                <div className="bg-white rounded-lg border border-purple-300 p-3 space-y-2">
+                  <h4 className="text-xs font-semibold text-purple-900">📊 Scraped Data</h4>
+                  
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    <div><span className="font-medium text-gray-600">Quality:</span> <span className="text-gray-900">{scrapeResult.content_quality}</span></div>
+                    <div><span className="font-medium text-gray-600">Menu:</span> <span className="text-gray-900">{scrapeResult.menu_source}</span></div>
+                    <div><span className="font-medium text-gray-600">Scraped:</span> <span className="text-gray-900">{new Date(scrapeResult.scraped_at).toLocaleString('da-DK')}</span></div>
+                    <div><span className="font-medium text-gray-600">Cache:</span> <span className="text-gray-900">{scrapeResult.cached ? '✅ Yes' : '❌ Fresh'}</span></div>
+                  </div>
+                  
+                  <button
+                    onClick={() => setShowRawScrapeData(!showRawScrapeData)}
+                    className="text-xs text-purple-600 hover:underline mt-1"
+                  >
+                    {showRawScrapeData ? '▼ Hide' : '▶ Show'} Debug Data
+                  </button>
+
+                  {showRawScrapeData && (
+                    <pre className="bg-gray-50 p-2 rounded text-xs overflow-auto max-h-60 border border-gray-200">
+                      {JSON.stringify(scrapeResult, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              )}
+
+              {/* Extract Results */}
+              {extractResult?.extracted_data && (
+                <div className="bg-white rounded-lg border border-pink-300 p-3 space-y-3">
+                  <h4 className="text-xs font-semibold text-pink-900">🤖 AI Extraction → Database</h4>
+
+                  {/* Brand Content */}
+                  {extractResult.extracted_data.about && (
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-gray-600">About Text:</span>
+                      <p className="text-xs text-gray-900 bg-gray-50 p-2 rounded">{extractResult.extracted_data.about}</p>
+                    </div>
+                  )}
+
+                  {extractResult.extracted_data.description && (
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-gray-600">Description:</span>
+                      <p className="text-xs text-gray-900">{extractResult.extracted_data.description}</p>
+                    </div>
+                  )}
+
+                  {/* Services (visible in profile UI checkboxes) */}
+                  {extractResult.extracted_data.services && (
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-gray-600">Tjenester opdaget:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {Object.entries(extractResult.extracted_data.services)
+                          .filter(([_, value]) => value === true)
+                          .map(([key, _]) => (
+                            <span key={key} className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs">
+                              {key.replace('has_', '').replace('_', ' ')}
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Verification Status */}
+                  {extractResult.extracted_data.verified_fields && (
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-gray-600">Verifikation:</span>
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        {extractResult.extracted_data.verified_fields.address_verified && (
+                          <span className="text-green-700">✓ Adresse</span>
+                        )}
+                        {extractResult.extracted_data.verified_fields.hours_verified && (
+                          <span className="text-green-700">✓ Åbningstider</span>
+                        )}
+                        {extractResult.extracted_data.verified_fields.kitchen_close_verified && (
+                          <span className="text-green-700">✓ Køkken lukketid</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Confidence */}
+                  {extractResult.extracted_data.confidence_score !== undefined && (
+                    <div className="pt-2 border-t border-gray-200">
+                      <span className="text-xs text-gray-600">
+                        Confidence: <span className="font-semibold text-gray-900">{(extractResult.extracted_data.confidence_score * 100).toFixed(0)}%</span>
+                      </span>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => setShowRawExtractData(!showRawExtractData)}
+                    className="text-xs text-pink-600 hover:underline"
+                  >
+                    {showRawExtractData ? '▼ Hide' : '▶ Show'} Debug Data
+                  </button>
+
+                  {showRawExtractData && (
+                    <pre className="bg-gray-50 p-2 rounded text-xs overflow-auto max-h-60 border border-gray-200">
+                      {JSON.stringify(extractResult.extracted_data, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
