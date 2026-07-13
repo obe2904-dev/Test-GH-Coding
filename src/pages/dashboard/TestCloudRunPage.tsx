@@ -64,7 +64,9 @@ export default function TestCloudRunPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<TestResult | null>(null)
   const [showFullText, setShowFullText] = useState(false)
-  const [testMode, setTestMode] = useState<'scraper' | 'analyze'>('scraper')
+  const [testMode, setTestMode] = useState<'scraper' | 'analyze' | 'two-step'>('two-step')
+  const [scrapeId, setScrapeId] = useState<string | null>(null)
+  const [businessId, setBusinessId] = useState<string>('')
 
   // Helper to get timing value (handles both v1 number and v2 object)
   const getTiming = (timing: number | { total_ms: number; scraping_ms: number } | undefined): number | undefined => {
@@ -80,42 +82,110 @@ export default function TestCloudRunPage() {
 
     setIsLoading(true)
     setResult(null)
+    setScrapeId(null)
 
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const authToken = session?.access_token
 
-      const functionName = testMode === 'scraper' ? 'test-cloud-run-scraper' : 'analyze-website-v2'
-      const endpoint = import.meta.env.VITE_SUPABASE_URL + `/functions/v1/${functionName}`
-      
-      console.log(`🚀 Testing ${testMode} mode:`, url)
-      console.log('📡 Endpoint:', endpoint)
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ 
-          url: url.trim(),
-          businessName: 'Test Business'
+      if (testMode === 'two-step') {
+        // Step 1: Scrape and store
+        const effectiveBusinessId = businessId.trim() || '00000000-0000-0000-0000-000000000000'
+        console.log('🚀 Step 1: Scraping and storing...', url)
+        
+        const scrapeEndpoint = import.meta.env.VITE_SUPABASE_URL + '/functions/v1/scrape-and-store'
+        const scrapeResponse = await fetch(scrapeEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ 
+            business_id: effectiveBusinessId,
+            url: url.trim(),
+            force_refresh: false
+          })
         })
-      })
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`HTTP ${response.status}: ${errorText}`)
+        if (!scrapeResponse.ok) {
+          const errorText = await scrapeResponse.text()
+          throw new Error(`Scrape failed: ${errorText}`)
+        }
+
+        const scrapeData = await scrapeResponse.json()
+        console.log('✅ Step 1 complete:', scrapeData)
+        setScrapeId(scrapeData.scrape_id)
+
+        // Step 2: Extract with AI
+        console.log('🤖 Step 2: AI extraction from stored data...')
+        const extractEndpoint = import.meta.env.VITE_SUPABASE_URL + '/functions/v1/extract-from-scrape'
+        const extractResponse = await fetch(extractEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ 
+            scrape_id: scrapeData.scrape_id,
+            force_reextract: false
+          })
+        })
+
+        if (!extractResponse.ok) {
+          const errorText = await extractResponse.text()
+          throw new Error(`Extraction failed: ${errorText}`)
+        }
+
+        const extractData = await extractResponse.json()
+        console.log('✅ Step 2 complete:', extractData)
+
+        // Combine results
+        setResult({
+          success: true,
+          url,
+          timing: {
+            total_ms: (scrapeData.scraping_ms || 0) + (extractData.extraction_ms || 0),
+            scraping_ms: scrapeData.scraping_ms
+          },
+          content_quality: scrapeData.content_quality,
+          menu_source: scrapeData.menu_source,
+          about: extractData.extracted_data?.about,
+          description: extractData.extracted_data?.description,
+          venue_hooks: extractData.extracted_data?.venue_hooks,
+          keywords: extractData.extracted_data?.keywords,
+          tone_of_voice: extractData.extracted_data?.tone_of_voice,
+          confidence_score: extractData.extracted_data?.confidence_score,
+        })
+
+      } else {
+        // Legacy modes: scraper or analyze
+        const functionName = testMode === 'scraper' ? 'test-cloud-run-scraper' : 'analyze-website-v2'
+        const endpoint = import.meta.env.VITE_SUPABASE_URL + `/functions/v1/${functionName}`
+        
+        console.log(`🚀 Testing ${testMode} mode:`, url)
+        console.log('📡 Endpoint:', endpoint)
+
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({ 
+            url: url.trim(),
+            businessName: 'Test Business'
+          })
+        })
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          throw new Error(`HTTP ${response.status}: ${errorText}`)
+        }
+
+        const data = await response.json()
+        console.log('📥 Result:', data)
+        setResult(data)
       }
-
-      const data = await response.json()
-      console.log('📥 Result:', data)
-      console.log('📥 Result keys:', Object.keys(data))
-      console.log('📥 Has meta?:', !!data.meta)
-      console.log('📥 Has contact?:', !!data.contact)
-      console.log('📥 Has links?:', !!data.links)
-      console.log('📥 Content quality:', data.content_quality)
-      setResult(data)
 
     } catch (error: any) {
       console.error('❌ Test failed:', error)
@@ -133,12 +203,14 @@ export default function TestCloudRunPage() {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          🧪 Cloud Run {testMode === 'scraper' ? 'Scraper' : 'AI Analysis'} Test
+          🧪 Cloud Run {testMode === 'two-step' ? 'Two-Step Pipeline' : testMode === 'scraper' ? 'Scraper' : 'AI Analysis'} Test
         </h1>
         <p className="text-gray-600">
-          {testMode === 'scraper' 
-            ? 'Direct test of Cloud Run v2 preprocessor - returns structured data'
-            : 'Full AI analysis pipeline using Cloud Run v2 + Gemini 2.5 Flash'
+          {testMode === 'two-step'
+            ? 'Test new architecture: scrape → database → AI extraction (enables re-run without re-scrape)'
+            : testMode === 'scraper' 
+              ? 'Direct test of Cloud Run v2 preprocessor - returns structured data'
+              : 'Full AI analysis pipeline using Cloud Run v2 + Gemini 2.5 Flash (legacy one-shot)'
           }
         </p>
       </div>
@@ -152,6 +224,19 @@ export default function TestCloudRunPage() {
               Test Mode
             </label>
             <div className="flex gap-3">
+              <button
+                onClick={() => setTestMode('two-step')}
+                className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
+                  testMode === 'two-step'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                💾 Two-Step (New)
+                <div className="text-xs mt-1 opacity-80">
+                  Scrape → DB → Extract
+                </div>
+              </button>
               <button
                 onClick={() => setTestMode('scraper')}
                 className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
@@ -173,13 +258,31 @@ export default function TestCloudRunPage() {
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                🤖 AI Analysis
+                🤖 AI Analysis (Legacy)
                 <div className="text-xs mt-1 opacity-80">
-                  Full extraction with Gemini 2.5 Flash
+                  One-shot extraction
                 </div>
               </button>
             </div>
           </div>
+
+          {testMode === 'two-step' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Business ID (for linking scrape)
+              </label>
+              <input
+                type="text"
+                value={businessId}
+                onChange={(e) => setBusinessId(e.target.value)}
+                placeholder="Enter business UUID or leave empty for test"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Leave empty to use a test business ID
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -224,7 +327,11 @@ export default function TestCloudRunPage() {
                 Testing Cloud Run...
               </span>
             ) : (
-              testMode === 'scraper' ? '🚀 Test Cloud Run Scraper' : '🤖 Test AI Analysis'
+              testMode === 'two-step' 
+                ? '💾 Test Two-Step Pipeline' 
+                : testMode === 'scraper' 
+                  ? '🚀 Test Cloud Run Scraper' 
+                  : '🤖 Test AI Analysis'
             )}
           </button>
         </div>
