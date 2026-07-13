@@ -69,6 +69,10 @@ const TestConceptFitPage = lazy(() =>
   import('./pages/dashboard/TestConceptFitPage').then((module) => ({ default: module.default }))
 )
 
+const TestCloudRunPage = lazy(() =>
+  import('./pages/dashboard/TestCloudRunPage').then((module) => ({ default: module.default }))
+)
+
 const MenuPage = lazy(() =>
   import('./pages/dashboard/MenuPage').then((module) => ({ default: module.default }))
 )
@@ -196,6 +200,7 @@ function App() {
               <Route path="test-location-types" element={<TestLocationTypesPage />} />
               <Route path="test-location-full" element={<TestLocationIntelligenceFullPage />} />
               <Route path="test-concept-fit" element={<TestConceptFitPage />} />
+              <Route path="test-cloud-run" element={<TestCloudRunPage />} />
               <Route path="menu" element={<MenuPage />} />
               <Route path="brand" element={<BrandProfilePage />} />
               <Route path="social-media" element={<SocialMediaPage />} />
