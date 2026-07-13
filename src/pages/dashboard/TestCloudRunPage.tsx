@@ -90,7 +90,6 @@ export default function TestCloudRunPage() {
 
       if (testMode === 'two-step') {
         // Step 1: Scrape and store
-        const effectiveBusinessId = businessId.trim() || '00000000-0000-0000-0000-000000000000'
         console.log('🚀 Step 1: Scraping and storing...', url)
         
         const scrapeEndpoint = import.meta.env.VITE_SUPABASE_URL + '/functions/v1/scrape-and-store'
@@ -101,7 +100,7 @@ export default function TestCloudRunPage() {
             'Authorization': `Bearer ${authToken}`
           },
           body: JSON.stringify({ 
-            business_id: effectiveBusinessId,
+            business_id: businessId.trim() || undefined, // Let function auto-detect if empty
             url: url.trim(),
             force_refresh: false
           })
@@ -269,17 +268,17 @@ export default function TestCloudRunPage() {
           {testMode === 'two-step' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Business ID (for linking scrape)
+                Business ID (optional)
               </label>
               <input
                 type="text"
                 value={businessId}
                 onChange={(e) => setBusinessId(e.target.value)}
-                placeholder="Enter business UUID or leave empty for test"
+                placeholder="Auto-detects your first business if empty"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Leave empty to use a test business ID
+                Leave empty to auto-detect your business, or paste a specific UUID
               </p>
             </div>
           )}

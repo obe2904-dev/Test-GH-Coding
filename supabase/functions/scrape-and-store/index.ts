@@ -13,7 +13,7 @@ const corsHeaders = {
 };
 
 interface ScrapeRequest {
-  business_id: string;
+  business_id?: string;
   url: string;
   force_refresh?: boolean;
 }
@@ -24,10 +24,10 @@ serve(async (req) => {
   }
 
   try {
-    const { business_id, url, force_refresh = false }: ScrapeRequest = await req.json();
+    let { business_id, url, force_refresh = false }: ScrapeRequest = await req.json();
 
-    if (!business_id || !url) {
-      throw new Error('business_id and url are required');
+    if (!url) {
+      throw new Error('url is required');
     }
 
     // Initialize Supabase client
@@ -35,6 +35,48 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
+
+    // If no business_id provided, get user's first business
+    if (!business_id) {
+      const authHeader = req.headers.get('Authorization');
+      if (authHeader) {
+        const token = authHeader.replace('Bearer ', '');
+        const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+        
+        if (user) {
+          const { data: businesses } = await supabaseClient
+            .from('businesses')
+            .select('id')
+            .eq('owner_id', user.id)
+            .limit(1);
+          
+          if (businesses && businesses.length > 0) {
+            business_id = businesses[0].id;
+            console.log('Using user\'s first business:', business_id);
+          }
+        }
+      }
+
+      // Still no business_id? Create a test business
+      if (!business_id) {
+        console.log('No business found, creating test business...');
+        const { data: testBusiness, error: createError } = await supabaseClient
+          .from('businesses')
+          .insert({
+            name: 'Test Business (Cloud Run Scraper)',
+            owner_id: '00000000-0000-0000-0000-000000000000', // System user
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          throw new Error(`Failed to create test business: ${createError.message}`);
+        }
+        
+        business_id = testBusiness.id;
+        console.log('Created test business:', business_id);
+      }
+    }
 
     // Check if we have a recent scrape (unless force_refresh)
     if (!force_refresh) {
