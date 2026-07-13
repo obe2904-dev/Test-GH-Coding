@@ -2,7 +2,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 // @ts-ignore - Deno import
 import { createClient } from 'npm:@supabase/supabase-js@2.39.0'
-import OpenAI from 'https://esm.sh/openai@4.68.4'
 
 // @ts-ignore - Deno global
 declare const Deno: any;
@@ -21,7 +20,7 @@ const corsHeaders = {
  *    - 'shell' sites: Skip AI, return deterministic data only
  *    - 'thin' sites: Use minimal AI prompts
  *    - 'rich' sites: Full AI extraction on clean content
- * 3. Pass only relevant text to GPT-4o-mini (~700 tokens vs ~110K)
+ * 3. Pass only relevant text to Gemini 2.5 Flash (~700 tokens vs ~110K)
  * 4. Cache results to avoid redundant scraping
  * 
  * Cost reduction: 55x cheaper per site (700 tokens vs 110K tokens)
@@ -144,6 +143,7 @@ async function getPreprocessedData(url: string): Promise<{
 /**
  * Extract business information using AI on preprocessed content
  * Uses decision gates based on content quality
+ * Uses Gemini 2.5 Flash for cost efficiency
  */
 async function extractWithAI(
   payload: ScrapedPayload,
@@ -156,9 +156,18 @@ async function extractWithAI(
   tone_of_voice?: string
   confidence_score: number
 }> {
-  const openai = new OpenAI({
-    apiKey: Deno.env.get('OPENAI_API_KEY'),
-  })
+  const geminiApiKey = Deno.env.get('GEMINI_API_KEY')
+  
+  if (!geminiApiKey) {
+    console.error('❌ GEMINI_API_KEY not configured')
+    return {
+      about: payload.meta?.description || '',
+      description: payload.meta?.description || '',
+      venue_hooks: [],
+      keywords: [],
+      confidence_score: 0.5
+    }
+  }
   
   // Decision gate: Skip AI for shell sites (minimal content)
   if (payload.content_quality === 'shell') {
@@ -186,7 +195,7 @@ async function extractWithAI(
     }
   }
   
-  console.log(`🤖 [V2] Running AI extraction on ${contentForAI.length} chars (quality: ${payload.content_quality})`)
+  console.log(`🤖 [V2] Running Gemini 2.5 Flash extraction on ${contentForAI.length} chars (quality: ${payload.content_quality})`)
   
   const prompt = `You are analyzing a restaurant/venue website. Extract key information from this content.
 
@@ -209,16 +218,42 @@ Extract the following in JSON format:
 Be specific and factual. Use information from the actual content.`
   
   try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
-      temperature: 0.3,
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiApiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.3,
+          responseMimeType: 'application/json',
+        }
+      })
     })
     
-    const result = JSON.parse(response.choices[0].message.content || '{}')
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('❌ Gemini API error:', response.status, errorText)
+      throw new Error(`Gemini API error: ${response.status}`)
+    }
     
-    console.log(`✅ [V2] AI extraction complete - ${response.usage?.total_tokens || 0} tokens used`)
+    const data = await response.json()
+    const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text
+    
+    if (!textContent) {
+      console.error('❌ No content in Gemini response')
+      throw new Error('No content in Gemini response')
+    }
+    
+    const result = JSON.parse(textContent)
+    
+    const tokenCount = data.usageMetadata?.totalTokenCount || 0
+    console.log(`✅ [V2] Gemini extraction complete - ${tokenCount} tokens used`)
     
     return {
       ...result,

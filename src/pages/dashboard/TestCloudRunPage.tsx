@@ -122,7 +122,7 @@ export default function TestCloudRunPage() {
         <p className="text-gray-600">
           {testMode === 'scraper' 
             ? 'Direct test of Cloud Run v2 preprocessor - returns structured data'
-            : 'Full AI analysis pipeline using Cloud Run v2 + GPT-4o-mini'
+            : 'Full AI analysis pipeline using Cloud Run v2 + Gemini 2.5 Flash'
           }
         </p>
       </div>
@@ -159,7 +159,7 @@ export default function TestCloudRunPage() {
               >
                 🤖 AI Analysis
                 <div className="text-xs mt-1 opacity-80">
-                  Full extraction with GPT-4o-mini
+                  Full extraction with Gemini 2.5 Flash
                 </div>
               </button>
             </div>
