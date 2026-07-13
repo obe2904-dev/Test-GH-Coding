@@ -998,7 +998,7 @@ function BusinessProfilePage() {
             'Authorization': `Bearer ${authToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify({ url, force_refresh: true }),
         }
       )
 
