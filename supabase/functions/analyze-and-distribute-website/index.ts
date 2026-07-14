@@ -560,7 +560,14 @@ function parseOpeningHours(candidates: any[]): Array<{weekday: string, open_time
 
   for (const candidate of candidates) {
     // Handle both string and object formats
-    const candidateStr = typeof candidate === 'string' ? candidate : String(candidate);
+    let candidateStr: string;
+    if (typeof candidate === 'object' && candidate !== null) {
+      // Object format: {day: "monday", time: "09.30 - 23.00"}
+      candidateStr = `${candidate.day}: ${candidate.time}`;
+    } else {
+      candidateStr = String(candidate);
+    }
+    
     const match = candidateStr.match(/^([a-zæøåä]+)[\s:]+(\d{1,2}[:.]\d{2})\s*[-–—til to]+\s*(\d{1,2}[:.]\d{2})/i);
     
     if (match) {
