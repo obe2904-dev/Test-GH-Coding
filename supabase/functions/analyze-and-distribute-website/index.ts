@@ -15,7 +15,7 @@ const corsHeaders = {
 };
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const GEMINI_MODEL = 'gemini-2.0-flash-exp';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const EXTRACTION_PROMPT_VERSION = 'v3-unified';
 
 interface AnalyzeRequest {
@@ -78,32 +78,40 @@ serve(async (req) => {
     if (!force_refresh) {
       const { data: cached } = await supabase
         .from('website_scrape_results')
-        .select('id, scraped_at, payload, content_quality')
+        .select('id, scraped_at, payload, content_quality, extracted_data')
         .eq('url', url)
         .gte('scraped_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
         .order('scraped_at', { ascending: false })
         .limit(1)
         .single();
 
+      // Don't use cache if extraction had errors
       if (cached) {
-        console.log('✅ Using cached scrape:', cached.id);
-        const payload = cached.payload as any;
+        const extractedData = cached.extracted_data;
+        const hasError = extractedData && typeof extractedData === 'string' && extractedData.includes('"error"');
         
-        // Still do AI + distribution on cached data
-        const aiResult = await performAIAnalysis(supabase, business_id, payload);
-        await distributeStructuredData(supabase, business_id, payload);
+        if (hasError) {
+          console.log('⚠️ Cached scrape has extraction error - forcing fresh scrape');
+        } else {
+          console.log('✅ Using cached scrape:', cached.id);
+          const payload = cached.payload as any;
+          
+          // Still do AI + distribution on cached data
+          const aiResult = await performAIAnalysis(supabase, business_id, payload);
+          await distributeStructuredData(supabase, business_id, payload);
         
-        return new Response(
-          JSON.stringify({
-            success: true,
-            cached: true,
-            scrape_id: cached.id,
-            quality: cached.content_quality,
-            ai_analysis: aiResult,
-            duration_ms: Date.now() - startTime,
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+          return new Response(
+            JSON.stringify({
+              success: true,
+              cached: true,
+              scrape_id: cached.id,
+              quality: cached.content_quality,
+              ai_analysis: aiResult,
+              duration_ms: Date.now() - startTime,
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
       }
     }
 
@@ -321,11 +329,15 @@ Extract the following in JSON format:
     const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     
     // Extract JSON from markdown code blocks if present
-    const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/) || 
-                     responseText.match(/```\n([\s\S]*?)\n```/) ||
-                     [null, responseText];
+    let jsonText = responseText;
     
-    const extractedData = JSON.parse(jsonMatch[1]);
+    // Try to extract from ```json ... ``` or ``` ... ```
+    const jsonMatch = responseText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (jsonMatch) {
+      jsonText = jsonMatch[1].trim();
+    }
+    
+    const extractedData = JSON.parse(jsonText);
     console.log('✅ AI extraction complete:', {
       confidence: extractedData.confidence_score,
       tone: extractedData.tone_of_voice,
@@ -546,24 +558,33 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
       .maybeSingle();
 
     if (existingLocation) {
-      await supabase
+      const { error: updateError } = await supabase
         .from('business_locations')
         .update({
           ...locationUpdates,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingLocation.id);
-      console.log('  ✓ Location contact info updated:', Object.keys(locationUpdates).join(', '));
+      
+      if (updateError) {
+        console.error('❌ Failed to update business_locations:', updateError);
+      } else {
+        console.log('  ✓ Location contact info updated:', Object.keys(locationUpdates).join(', '));
+      }
     } else {
-      // Create primary location if it doesn't exist
-      await supabase
+      const { error: insertError } = await supabase
         .from('business_locations')
         .insert({
           business_id: businessId,
           is_primary: true,
           ...locationUpdates,
         });
-      console.log('  ✓ Primary location created with contact info');
+      
+      if (insertError) {
+        console.error('❌ Failed to insert business_locations:', insertError);
+      } else {
+        console.log('  ✓ Primary location created with contact info');
+      }
     }
   }
 
