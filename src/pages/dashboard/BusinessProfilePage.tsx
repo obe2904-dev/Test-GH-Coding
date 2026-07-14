@@ -988,9 +988,9 @@ function BusinessProfilePage() {
         throw new Error('Ikke godkendt')
       }
 
-      console.log('🕷️ Starting async scrape for:', url)
+      console.log('🕷️ Starting scrape for:', url)
 
-      // Step 1: Start scrape job
+      // Call Cloud Run scraper (synchronous, waits for completion)
       const startResponse = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-scrape-job`,
         {

@@ -1,8 +1,7 @@
 // =====================================================
-// Start Async Scrape Job
+// Start Scrape Job (Synchronous)
 // =====================================================
-// Purpose: Immediately return job_id, trigger Cloud Run async
-// Frontend will poll check-scrape-status for completion
+// Purpose: Call Cloud Run, wait for completion, return results immediately
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
@@ -116,7 +115,7 @@ serve(async (req) => {
 
     console.log('Created job:', job.id, 'for URL:', url);
 
-    // Trigger Cloud Run async (fire and forget)
+    // Get Cloud Run credentials
     const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL');
     const apiKey = Deno.env.get('CLOUD_RUN_API_KEY');
 
