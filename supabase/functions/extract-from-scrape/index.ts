@@ -235,21 +235,26 @@ async function writeExtractedDataToBusinessTables(
   // ===== business_profile updates =====
   const profileUpdates: any = {};
 
-  // Scraped fields (deterministic)
-  if (payload.meta?.title && !await fieldHasValue(supabase, 'business_profile', 'meta_tags', businessId)) {
+  // Scraped fields (deterministic) - v3 payload structure
+  const extraction = payload.extraction || payload; // Support both v2 and v3
+  const meta = extraction.meta || payload.meta;
+  const services = extraction.services || {};
+  const business = extraction.business || {};
+
+  if (meta?.title && !await fieldHasValue(supabase, 'business_profile', 'meta_tags', businessId)) {
     profileUpdates.meta_tags = {
-      title: payload.meta.title,
-      description: payload.meta.description,
-      og_title: payload.meta.og_title,
-      og_description: payload.meta.og_description,
-      og_image: payload.meta.og_image,
-      keywords: payload.meta.keywords,
-      locale: payload.meta.locale,
+      title: meta.title,
+      description: meta.description,
+      og_title: meta.og_title,
+      og_description: meta.og_description,
+      og_image: meta.og_image,
+      keywords: meta.keywords,
+      locale: meta.locale,
     };
   }
 
-  if (payload.links?.takeaway && !await fieldHasValue(supabase, 'business_profile', 'takeaway_url', businessId)) {
-    profileUpdates.takeaway_url = payload.links.takeaway;
+  if (services.takeaway?.url && !await fieldHasValue(supabase, 'business_profile', 'takeaway_url', businessId)) {
+    profileUpdates.takeaway_url = services.takeaway.url;
   }
 
   // AI-extracted fields
@@ -272,17 +277,17 @@ async function writeExtractedDataToBusinessTables(
   // ===== business_operations updates =====
   const operationsUpdates: any = {};
 
-  // Scraped fields
-  if (payload.smiley_url && !await fieldHasValue(supabase, 'business_operations', 'smiley_url', businessId)) {
-    operationsUpdates.smiley_url = payload.smiley_url;
+  // Scraped fields - v3 structure
+  if (services.food_inspection?.url && !await fieldHasValue(supabase, 'business_operations', 'smiley_url', businessId)) {
+    operationsUpdates.smiley_url = services.food_inspection.url;
   }
 
-  if (payload.links?.booking && !await fieldHasValue(supabase, 'business_operations', 'booking_url', businessId)) {
-    operationsUpdates.booking_url = payload.links.booking;
+  if (services.booking?.url && !await fieldHasValue(supabase, 'business_operations', 'booking_url', businessId)) {
+    operationsUpdates.booking_url = services.booking.url;
   }
 
-  if (payload.links?.menu_url && !await fieldHasValue(supabase, 'business_operations', 'menu_url', businessId)) {
-    operationsUpdates.menu_url = payload.links.menu_url;
+  if (services.menu?.url && !await fieldHasValue(supabase, 'business_operations', 'menu_url', businessId)) {
+    operationsUpdates.menu_url = services.menu.url;
   }
 
   // AI-extracted services (only if services object exists)

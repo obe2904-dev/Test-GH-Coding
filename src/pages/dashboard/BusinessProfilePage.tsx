@@ -969,7 +969,11 @@ function BusinessProfilePage() {
   // New Web Scraping Handlers
   // =====================================================
 
-  const handleScrapeWebsite = async () => {
+  // =====================================================
+  // UNIFIED WEBSITE ANALYSIS
+  // One function that does: Scrape → AI Analysis → Data Distribution
+  // =====================================================
+  const handleAnalyzeWebsite = async () => {
     const url = websiteUrl.trim()
     if (!url) {
       alert('Indtast venligst en hjemmeside-URL')
@@ -988,11 +992,11 @@ function BusinessProfilePage() {
         throw new Error('Ikke godkendt')
       }
 
-      console.log('🕷️ Starting scrape for:', url)
+      console.log('🚀 Starting unified website analysis for:', url)
 
-      // Call Cloud Run scraper (synchronous, waits for completion)
-      const startResponse = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-scrape-job`,
+      // Call unified analysis function (does everything)
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-and-distribute-website`,
         {
           method: 'POST',
           headers: {
@@ -1003,131 +1007,35 @@ function BusinessProfilePage() {
         }
       )
 
-      if (!startResponse.ok) {
-        throw new Error(`HTTP ${startResponse.status}`)
-      }
-
-      const startResult = await startResponse.json()
-      console.log('✅ Scrape completed:', startResult)
-
-      // Scraping now completes synchronously
-      if (startResult.status === 'completed' || startResult.cached) {
-        setScrapeResult({
-          scrape_id: startResult.job_id,
-          content_quality: startResult.content_quality,
-          menu_source: startResult.menu_source,
-          cached: !!startResult.cached
-        })
-        return
-      }
-
-      // If still processing (shouldn't happen), fall back to polling
-      if (startResult.status === 'processing') {
-        console.log('⏳ Unexpected: still processing, starting poll...')
-        const jobId = startResult.job_id
-        const maxPolls = 30
-        let polls = 0
-
-        while (polls < maxPolls) {
-          await new Promise(resolve => setTimeout(resolve, 3000))
-          polls++
-
-          console.log(`🔍 Polling status (${polls}/${maxPolls})...`)
-
-          const statusResponse = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-scrape-status?job_id=${jobId}`,
-            {
-              headers: {
-                'Authorization': `Bearer ${authToken}`,
-              },
-            }
-          )
-
-          if (!statusResponse.ok) {
-            throw new Error(`Status check failed: HTTP ${statusResponse.status}`)
-          }
-
-          const statusResult = await statusResponse.json()
-
-          if (statusResult.status === 'completed') {
-            console.log('✅ Scrape completed:', statusResult)
-            setScrapeResult({
-              scrape_id: jobId,
-              content_quality: statusResult.content_quality,
-              menu_source: statusResult.menu_source,
-              cached: false
-            })
-            return
-          } else if (statusResult.status === 'failed') {
-            throw new Error(statusResult.error || 'Scraping failed')
-          }
-        }
-
-        throw new Error('Scraping timeout - took longer than 90 seconds')
-      }
-
-      throw new Error(`Unexpected status: ${startResult.status}`)
-
-    } catch (error: any) {
-      console.error('❌ Scrape error:', error)
-      setScrapeError(error.message || 'Scraping fejlede')
-      alert(`Scraping fejlede: ${error.message}`)
-    } finally {
-      setIsScraping(false)
-    }
-  }
-
-  const handleExtractWithAI = async () => {
-    if (!scrapeResult?.scrape_id) {
-      alert('Scrape website først!')
-      return
-    }
-
-    setIsExtracting(true)
-    setExtractError(null)
-    setExtractResult(null)
-
-    try {
-      const { data: { session } } = await sb.auth.getSession()
-      const authToken = session?.access_token
-
-      if (!authToken) {
-        throw new Error('Ikke godkendt')
-      }
-
-      console.log('🤖 Calling extract-from-scrape for scrape_id:', scrapeResult.scrape_id)
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-from-scrape`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${authToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ 
-            scrape_id: scrapeResult.scrape_id,
-            force_reextract: true  // Always force fresh extraction for testing
-          }),
-        }
-      )
-
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
       }
 
       const result = await response.json()
-      console.log('✅ Extract result:', result)
+      console.log('✅ Analysis complete:', result)
 
-      setExtractResult(result)
-      alert('✅ AI extraction complete! Data written to database.')
+      setScrapeResult({
+        scrape_id: result.scrape_id,
+        content_quality: result.quality,
+        ai_analysis: result.ai_analysis,
+        cached: !!result.cached,
+        duration_ms: result.duration_ms,
+      })
+
+      alert(`✅ Website analysis complete!\n\n` +
+            `Quality: ${result.quality}\n` +
+            `Duration: ${(result.duration_ms / 1000).toFixed(1)}s\n` +
+            `AI confidence: ${(result.ai_analysis?.confidence_score || 0).toFixed(2)}`)
+
+      // Refresh page to show updated data
+      window.location.reload()
 
     } catch (error: any) {
-      console.error('❌ Extract error:', error)
-      setExtractError(error.message || 'AI extraction fejlede')
-      alert(`AI extraction fejlede: ${error.message}`)
+      console.error('❌ Analysis error:', error)
+      setScrapeError(error.message || 'Website analysis fejlede')
+      alert(`Website analysis fejlede: ${error.message}`)
     } finally {
-      setIsExtracting(false)
+      setIsScraping(false)
     }
   }
 
@@ -1571,42 +1479,34 @@ function BusinessProfilePage() {
                 To separate knapper til debugging: 1) Scrape raw data, 2) Extract med AI og gem til database
               </p>
 
-              {/* Buttons */}
+              {/* Single Unified Button */}
               <div className="flex items-center gap-3">
                 <button
-                  onClick={handleScrapeWebsite}
+                  onClick={handleAnalyzeWebsite}
                   disabled={!websiteUrl.trim() || isScraping}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+                  className={`inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-medium transition-all
                     ${isScraping
-                      ? 'bg-purple-600 text-white opacity-75 cursor-wait'
-                      : 'bg-purple-600 text-white hover:bg-purple-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
+                      ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white opacity-75 cursor-wait'
+                      : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
                     }`}
                 >
-                  <svg className={`w-4 h-4 ${isScraping ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                  </svg>
-                  <span>{isScraping ? 'Scraper...' : '1. Scrape Website'}</span>
-                </button>
-
-                <button
-                  onClick={handleExtractWithAI}
-                  disabled={!scrapeResult || isExtracting}
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                    ${isExtracting
-                      ? 'bg-pink-600 text-white opacity-75 cursor-wait'
-                      : 'bg-pink-600 text-white hover:bg-pink-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
-                    }`}
-                >
-                  <svg className={`w-4 h-4 ${isExtracting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className={`w-5 h-5 ${isScraping ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                   </svg>
-                  <span>{isExtracting ? 'Extracter...' : '2. Extract with AI'}</span>
+                  <span>{isScraping ? 'Analyserer...' : '🚀 Analyser Min Hjemmeside'}</span>
                 </button>
 
                 {scrapeResult && (
-                  <span className="text-xs text-purple-700 font-medium">
-                    ✅ Scraped: {scrapeResult.content_quality} · {scrapeResult.menu_source}
-                  </span>
+                  <div className="text-xs space-y-1">
+                    <div className="text-purple-700 font-medium">
+                      ✅ Quality: {scrapeResult.content_quality}
+                    </div>
+                    {scrapeResult.ai_analysis && (
+                      <div className="text-pink-700 font-medium">
+                        🤖 AI: {(scrapeResult.ai_analysis.confidence_score || 0).toFixed(2)} confidence
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
