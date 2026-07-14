@@ -36,9 +36,9 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
       weight: determineMissingWeight(homepageExtraction.services.menu, 'menu')
     },
     contact: {
-      keywords: ['kontakt', 'contact', 'find us', 'location'],
+      keywords: ['kontakt', 'contact', 'find us', 'location', 'reach', 'besøg'],
       weight: determineMissingWeight(
-        homepageExtraction.contact.emails.length > 0 || homepageExtraction.contact.phones.length > 0,
+        homepageExtraction.contact.emails.length > 0 && homepageExtraction.contact.phones.length > 0,
         'contact'
       )
     },
