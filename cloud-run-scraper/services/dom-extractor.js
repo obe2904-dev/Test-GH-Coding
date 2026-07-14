@@ -155,8 +155,8 @@ export async function extractPageDocument(page) {
           for (const row of tableRows) {
             const cells = row.querySelectorAll ? [...(row.querySelectorAll('td, th') || [])].filter(isVisible) : [];
             if (cells.length >= 2) {
-              const dayText = clean(cells[0].innerText);
-              const timeText = clean(cells[1].innerText);
+              const dayText = clean(cells[0]?.innerText);
+              const timeText = clean(cells[1]?.innerText);
               if (dayText && timeText && /\d{1,2}[:.]\d{2}/.test(timeText)) {
                 pairs.push({ day_text: dayText, time_text: timeText, structure: 'table' });
               }
@@ -170,8 +170,8 @@ export async function extractPageDocument(page) {
           for (const dt of dts) {
             const dd = dt.nextElementSibling;
             if (dd && dd.tagName === 'DD') {
-              const dayText = clean(dt.innerText);
-              const timeText = clean(dd.innerText);
+              const dayText = clean(dt?.innerText);
+              const timeText = clean(dd?.innerText);
               if (dayText && timeText && /\d{1,2}[:.]\d{2}/.test(timeText)) {
                 pairs.push({ day_text: dayText, time_text: timeText, structure: 'dl' });
               }
@@ -183,7 +183,8 @@ export async function extractPageDocument(page) {
         const listItems = container.querySelectorAll ? [...(container.querySelectorAll('li') || [])].filter(isVisible) : [];
         if (listItems.length > 0) {
           for (const li of listItems) {
-            const text = clean(li.innerText);
+            const text = clean(li?.innerText);
+            if (!text) continue;
             // Match patterns like "Monday: 10:00 - 18:00" or "Mandag - Torsdag 11.30 - 23.30"
             const match = text.match(/^([^:0-9]+?)[\s:-]+(.+)$/);
             if (match && /\d{1,2}[:.]\d{2}/.test(match[2])) {
@@ -196,13 +197,13 @@ export async function extractPageDocument(page) {
         const children = container.children ? [...(container.children || [])].filter(isVisible) : [];
         if (children.length >= 3 && children.length <= 10) {
           for (const child of children) {
-            const childText = clean(child.innerText);
-            if (childText.length < 100) {
+            const childText = clean(child?.innerText);
+            if (childText && childText.length < 100) {
               // Look for inline structure: <span>Monday</span> <span>10:00 - 18:00</span>
               const spans = child.querySelectorAll ? [...(child.querySelectorAll('span, div, p') || [])].filter(isVisible) : [];
               if (spans.length >= 2) {
-                const dayText = clean(spans[0].innerText);
-                const timeText = clean(spans[1].innerText);
+                const dayText = clean(spans[0]?.innerText);
+                const timeText = clean(spans[1]?.innerText);
                 if (dayText && timeText && /\d{1,2}[:.]\d{2}/.test(timeText)) {
                   pairs.push({ day_text: dayText, time_text: timeText, structure: 'div' });
                 }
