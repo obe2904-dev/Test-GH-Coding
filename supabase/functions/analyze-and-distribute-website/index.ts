@@ -275,6 +275,13 @@ Extract the following in JSON format:
   "venue_hooks": ["3-5 key selling points like 'rooftop terrace', 'live music', 'dog-friendly'"],
   "keywords": ["5-8 relevant keywords like 'craft beer', 'brunch', 'family-friendly'"],
   "tone_of_voice": "One word: professional/casual/warm/elegant/playful/sophisticated",
+  "menu_highlights": ["3-10 standout menu items or food categories if mentioned"],
+  "services": {
+    "has_table_service": true/false,
+    "has_takeaway": true/false,
+    "has_delivery": true/false,
+    "has_outdoor_seating": true/false
+  },
   "confidence_score": 0.85
 }`;
 
@@ -316,11 +323,34 @@ Extract the following in JSON format:
     const profileUpdates: any = {};
     
     if (extractedData.about) {
-      profileUpdates.ai_place_synopsis = extractedData.about;
+      profileUpdates.user_about_text = extractedData.about;
     }
     
     if (extractedData.description) {
       profileUpdates.long_description = extractedData.description;
+    }
+
+    // Store venue_hooks as key_offerings (what makes business unique)
+    if (extractedData.venue_hooks && Array.isArray(extractedData.venue_hooks) && extractedData.venue_hooks.length > 0) {
+      profileUpdates.key_offerings = extractedData.venue_hooks;
+    }
+
+    // Store menu highlights in menu_signal structure
+    if (extractedData.menu_highlights && Array.isArray(extractedData.menu_highlights) && extractedData.menu_highlights.length > 0) {
+      profileUpdates.menu_signal = {
+        signatureItems: extractedData.menu_highlights,
+        source: 'ai_website_analysis',
+        confidence: extractedData.confidence_score || 0.8,
+      };
+    }
+
+    // Store keywords and tone for future use
+    if (extractedData.keywords && Array.isArray(extractedData.keywords)) {
+      profileUpdates.business_keywords = extractedData.keywords;
+    }
+
+    if (extractedData.tone_of_voice) {
+      profileUpdates.brand_tone = extractedData.tone_of_voice;
     }
 
     if (Object.keys(profileUpdates).length > 0) {
@@ -333,6 +363,38 @@ Extract the following in JSON format:
         }, {
           onConflict: 'business_id',
         });
+      console.log('  ✓ AI data stored:', Object.keys(profileUpdates).join(', '));
+    }
+
+    // Store service model data in business_operations
+    if (extractedData.services && typeof extractedData.services === 'object') {
+      const operationsUpdates: any = {};
+      
+      if (typeof extractedData.services.has_table_service === 'boolean') {
+        operationsUpdates.has_table_service = extractedData.services.has_table_service;
+      }
+      if (typeof extractedData.services.has_takeaway === 'boolean') {
+        operationsUpdates.has_takeaway = extractedData.services.has_takeaway;
+      }
+      if (typeof extractedData.services.has_delivery === 'boolean') {
+        operationsUpdates.has_delivery = extractedData.services.has_delivery;
+      }
+      if (typeof extractedData.services.has_outdoor_seating === 'boolean') {
+        operationsUpdates.has_outdoor_seating = extractedData.services.has_outdoor_seating;
+      }
+
+      if (Object.keys(operationsUpdates).length > 0) {
+        await supabase
+          .from('business_operations')
+          .upsert({
+            business_id: businessId,
+            ...operationsUpdates,
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'business_id',
+          });
+        console.log('  ✓ Service model stored:', Object.keys(operationsUpdates).join(', '));
+      }
     }
 
     return extractedData;
@@ -436,35 +498,50 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
     console.log('  ✓ Business profile updated:', Object.keys(profileUpdates).join(', '));
   }
 
-  // ===== UPDATE profiles TABLE =====
-  const profileContactUpdates: any = {};
+  // ===== UPDATE business_locations TABLE =====
+  const locationUpdates: any = {};
 
   if (contact.emails?.length > 0 && contact.emails[0].confidence >= 0.7) {
-    profileContactUpdates.business_email = contact.emails[0].value;
+    locationUpdates.email = contact.emails[0].value;
   }
 
   if (contact.phones?.length > 0 && contact.phones[0].confidence >= 0.7) {
-    profileContactUpdates.phone = contact.phones[0].value;
+    locationUpdates.phone = contact.phones[0].value;
   }
 
   if (contact.addresses?.length > 0 && contact.addresses[0].confidence >= 0.7) {
-    profileContactUpdates.address = contact.addresses[0].value;
+    locationUpdates.address_line1 = contact.addresses[0].value;
   }
 
-  if (Object.keys(profileContactUpdates).length > 0) {
-    const { data: existingProfile } = await supabase
-      .from('profiles')
+  if (Object.keys(locationUpdates).length > 0) {
+    // Find the primary location for this business
+    const { data: existingLocation } = await supabase
+      .from('business_locations')
       .select('id')
-      .eq('id', businessId)
-      .single();
+      .eq('business_id', businessId)
+      .eq('is_primary', true)
+      .maybeSingle();
 
-    if (existingProfile) {
+    if (existingLocation) {
       await supabase
-        .from('profiles')
-        .update(profileContactUpdates)
-        .eq('id', businessId);
+        .from('business_locations')
+        .update({
+          ...locationUpdates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingLocation.id);
+      console.log('  ✓ Location contact info updated:', Object.keys(locationUpdates).join(', '));
+    } else {
+      // Create primary location if it doesn't exist
+      await supabase
+        .from('business_locations')
+        .insert({
+          business_id: businessId,
+          is_primary: true,
+          ...locationUpdates,
+        });
+      console.log('  ✓ Primary location created with contact info');
     }
-    console.log('  ✓ Contact info updated:', Object.keys(profileContactUpdates).join(', '));
   }
 
   // ===== UPDATE opening_hours TABLE =====
