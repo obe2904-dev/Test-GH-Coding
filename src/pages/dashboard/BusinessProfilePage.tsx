@@ -970,6 +970,175 @@ function BusinessProfilePage() {
   // =====================================================
 
   // =====================================================
+  // DEBUG: STEP 1 - SCRAPE ONLY (No AI extraction)
+  // =====================================================
+  const handleScrapeOnly = async () => {
+    const url = websiteUrl.trim()
+    if (!url) {
+      alert('Indtast venligst en hjemmeside-URL')
+      return
+    }
+
+    setIsScraping(true)
+    setScrapeError(null)
+    setScrapeResult(null)
+    setExtractResult(null)
+
+    try {
+      console.log('🕷️ DEBUG: Scraping only (no AI)...')
+
+      // Call Cloud Run scraper directly
+      const response = await fetch('https://scraper-831683741713.europe-west1.run.app', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': 'wPoMQTeyMW6zZ60oeRq9QGxZ2R/LHVj4diP7OD54KYo=',
+        },
+        body: JSON.stringify({ url }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Scraper HTTP ${response.status}`)
+      }
+
+      const scrapeData = await response.json()
+      console.log('✅ Scrape complete:', scrapeData)
+
+      // Store in website_scrape_results table
+      const { data: { session } } = await sb.auth.getSession()
+      if (!session || !businessId) {
+        throw new Error('Not authenticated or no business selected')
+      }
+
+      const { data: scrapeRecord, error: insertError } = await sb
+        .from('website_scrape_results')
+        .insert({
+          business_id: businessId,
+          payload: scrapeData,
+          content_quality: scrapeData.extraction?.quality?.rating || 'unknown',
+          menu_source: scrapeData.extraction?.services?.menu?.url ? 'link' : 'none',
+          scraper_version: 'cloud-run-v3',
+        })
+        .select()
+        .single()
+
+      if (insertError) throw insertError
+
+      setScrapeResult({
+        scrape_id: scrapeRecord.id,
+        content_quality: scrapeRecord.content_quality,
+        menu_source: scrapeRecord.menu_source,
+        scraped_at: scrapeRecord.scraped_at,
+        cached: false,
+        payload: scrapeData,
+      })
+
+      alert(`✅ Scrape complete!\n\nQuality: ${scrapeRecord.content_quality}\nStored in: website_scrape_results table\n\n▶️ Now click "Step 2" to extract with AI`)
+
+    } catch (error: any) {
+      console.error('❌ Scrape error:', error)
+      setScrapeError(error.message || 'Scraping fejlede')
+      alert(`Scraping fejlede: ${error.message}`)
+    } finally {
+      setIsScraping(false)
+    }
+  }
+
+  // =====================================================
+  // DEBUG: STEP 2 - AI EXTRACT & SAVE (from existing scrape)
+  // =====================================================
+  const handleExtractAndSave = async () => {
+    if (!scrapeResult) {
+      alert('❌ Kør først "Step 1: Scrape" for at hente rå data')
+      return
+    }
+
+    setIsExtracting(true)
+    setExtractError(null)
+    setExtractResult(null)
+
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const authToken = session?.access_token
+
+      if (!authToken) {
+        throw new Error('Ikke godkendt')
+      }
+
+      console.log('🤖 DEBUG: Extracting with AI and saving to database...')
+
+      // Get the latest scrape from database
+      const { data: latestScrape, error: fetchError } = await sb
+        .from('website_scrape_results')
+        .select('*')
+        .eq('business_id', businessId)
+        .order('scraped_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (fetchError || !latestScrape) {
+        throw new Error('Could not find scraped data')
+      }
+
+      console.log('📄 Using scrape ID:', latestScrape.id)
+
+      // Call edge function with existing scrape ID
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-from-scrape`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            business_id: businessId,
+            scrape_id: latestScrape.id,
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('✅ AI extraction complete:', result)
+
+      setExtractResult(result)
+
+      let message = `✅ AI Extraction Complete!\n\n`
+      message += `📊 Extracted Data:\n`
+      message += `• About: ${result.extracted_data?.about ? '✅' : '❌'}\n`
+      message += `• Keywords: ${result.extracted_data?.keywords?.length || 0} found\n`
+      message += `• Tone: ${result.extracted_data?.tone_of_voice || '❌'}\n`
+      message += `• Key Offerings: ${result.extracted_data?.venue_hooks?.length || 0} found\n`
+      message += `• Confidence: ${((result.extracted_data?.confidence_score || 0) * 100).toFixed(0)}%\n\n`
+      
+      if (result.extracted_data?.error) {
+        message += `⚠️ Error: ${result.extracted_data.error}\n\n`
+      }
+
+      message += `💾 Saved to:\n`
+      message += `• business_profile.user_about_text\n`
+      message += `• business_profile.keywords\n`
+      message += `• business_profile.key_offerings\n`
+      message += `• business_brand_profile.tone_of_voice\n\n`
+      message += `🔄 Reload page to see updates`
+
+      alert(message)
+
+    } catch (error: any) {
+      console.error('❌ Extract error:', error)
+      setExtractError(error.message || 'AI extraction fejlede')
+      alert(`AI extraction fejlede: ${error.message}`)
+    } finally {
+      setIsExtracting(false)
+    }
+  }
+
+  // =====================================================
   // UNIFIED WEBSITE ANALYSIS
   // One function that does: Scrape → AI Analysis → Data Distribution
   // =====================================================
@@ -1504,39 +1673,89 @@ function BusinessProfilePage() {
                 </h3>
               </div>
 
-              <p className="text-xs text-purple-700">
-                To separate knapper til debugging: 1) Scrape raw data, 2) Extract med AI og gem til database
-              </p>
+              {/* AI Extraction Mapping Info Box */}
+              <div className="bg-white rounded-lg border border-purple-300 p-3 text-xs space-y-2">
+                <h4 className="font-semibold text-purple-900">🤖 AI Extracts → Database</h4>
+                <div className="grid grid-cols-1 gap-1 text-gray-700">
+                  <div><code className="bg-purple-100 px-1 rounded">about</code> → <code className="bg-blue-100 px-1 rounded">business_profile.user_about_text</code></div>
+                  <div><code className="bg-purple-100 px-1 rounded">keywords[]</code> → <code className="bg-blue-100 px-1 rounded">business_profile.keywords</code></div>
+                  <div><code className="bg-purple-100 px-1 rounded">venue_hooks[]</code> → <code className="bg-blue-100 px-1 rounded">business_profile.key_offerings</code> (as TEXT)</div>
+                  <div><code className="bg-purple-100 px-1 rounded">tone_of_voice</code> → <code className="bg-blue-100 px-1 rounded">business_brand_profile.tone_of_voice</code></div>
+                  <div><code className="bg-purple-100 px-1 rounded">menu_highlights[]</code> → <code className="bg-blue-100 px-1 rounded">business_profile.menu_signal</code></div>
+                  <div><code className="bg-purple-100 px-1 rounded">services{}</code> → <code className="bg-blue-100 px-1 rounded">business_operations.*</code></div>
+                </div>
+              </div>
 
-              {/* Single Unified Button */}
-              <div className="flex items-center gap-3">
+              {/* Debug Buttons */}
+              <div className="flex flex-col gap-2">
                 <button
-                  onClick={handleAnalyzeWebsite}
+                  onClick={handleScrapeOnly}
                   disabled={!websiteUrl.trim() || isScraping}
-                  className={`inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-medium transition-all
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
                     ${isScraping
-                      ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white opacity-75 cursor-wait'
-                      : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
+                      ? 'bg-blue-600 text-white opacity-75 cursor-wait'
+                      : 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
                     }`}
                 >
-                  <svg className={`w-5 h-5 ${isScraping ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  <svg className={`w-4 h-4 ${isScraping ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
-                  <span>{isScraping ? 'Analyserer...' : '🚀 Analyser Min Hjemmeside'}</span>
+                  <span>{isScraping ? 'Scraper...' : '1️⃣ Scrape Raw Data'}</span>
                 </button>
 
-                {scrapeResult && (
-                  <div className="text-xs space-y-1">
-                    <div className="text-purple-700 font-medium">
-                      ✅ Quality: {scrapeResult.content_quality}
-                    </div>
-                    {scrapeResult.ai_analysis && (
-                      <div className="text-pink-700 font-medium">
-                        🤖 AI: {(scrapeResult.ai_analysis.confidence_score || 0).toFixed(2)} confidence
+                <button
+                  onClick={handleExtractAndSave}
+                  disabled={!scrapeResult || isExtracting}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
+                    ${isExtracting
+                      ? 'bg-pink-600 text-white opacity-75 cursor-wait'
+                      : 'bg-pink-600 text-white hover:bg-pink-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
+                    }`}
+                >
+                  <svg className={`w-4 h-4 ${isExtracting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  <span>{isExtracting ? 'Ekstraherer...' : '2️⃣ Extract with AI & Save'}</span>
+                </button>
+
+                <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded border border-gray-200">
+                  <strong>How it works:</strong><br/>
+                  1. Scrape → Save to <code>website_scrape_results</code> table<br/>
+                  2. AI reads → Extracts data → Saves to profile tables
+                </div>
+              </div>
+
+              {/* Single Unified Button (Original) */}
+              <div className="pt-2 border-t border-purple-300">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleAnalyzeWebsite}
+                    disabled={!websiteUrl.trim() || isScraping}
+                    className={`inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-medium transition-all
+                      ${isScraping
+                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white opacity-75 cursor-wait'
+                        : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-700 hover:to-pink-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
+                      }`}
+                  >
+                    <svg className={`w-5 h-5 ${isScraping ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                    <span>{isScraping ? 'Analyserer...' : '🚀 Unified: Scrape + AI + Save'}</span>
+                  </button>
+
+                  {scrapeResult && (
+                    <div className="text-xs space-y-1">
+                      <div className="text-purple-700 font-medium">
+                        ✅ Quality: {scrapeResult.content_quality}
                       </div>
-                    )}
-                  </div>
-                )}
+                      {scrapeResult.ai_analysis && (
+                        <div className="text-pink-700 font-medium">
+                          🤖 AI: {(scrapeResult.ai_analysis.confidence_score || 0).toFixed(2)} confidence
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Errors */}
