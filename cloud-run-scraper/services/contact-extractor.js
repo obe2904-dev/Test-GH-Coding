@@ -72,11 +72,12 @@ function extractEmails(pageDoc) {
 
 /**
  * Extract phone numbers (Danish 8-digit format)
+ * Priority: 1) tel: links, 2) JSON-LD, 3) footer/contact text, 4) general text
  */
 function extractPhones(pageDoc) {
   const candidates = [];
 
-  // Priority 1: tel: links
+  // Priority 1: tel: links (highest confidence)
   for (const link of pageDoc.links) {
     if (link.url?.startsWith('tel:')) {
       const phone = link.url.replace('tel:', '').trim();
@@ -93,23 +94,102 @@ function extractPhones(pageDoc) {
     }
   }
 
-  // Priority 2: Danish phone patterns in text
+  // Priority 2: JSON-LD structured data
+  if (pageDoc.json_ld_raw && Array.isArray(pageDoc.json_ld_raw)) {
+    for (const jsonStr of pageDoc.json_ld_raw) {
+      try {
+        const data = JSON.parse(jsonStr);
+        const items = Array.isArray(data) ? data : [data];
+        
+        for (const item of items) {
+          const phone = item.telephone || item.phone;
+          if (phone && typeof phone === 'string') {
+            const normalized = normalizePhone(phone);
+            if (normalized) {
+              candidates.push({
+                value: normalized,
+                confidence: 0.95,
+                source_type: 'json_ld',
+                source_url: pageDoc.final_url,
+                evidence: `JSON-LD: ${phone}`
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Skip malformed JSON-LD
+      }
+    }
+  }
+
+  // Priority 3: Footer/contact section text (high confidence for structured areas)
+  for (const block of pageDoc.blocks) {
+    const lowerText = block.text.toLowerCase();
+    const isFooterOrContact = 
+      lowerText.includes('kontakt') ||
+      lowerText.includes('contact') ||
+      lowerText.includes('footer') ||
+      block.section_heading?.toLowerCase().includes('kontakt') ||
+      block.section_heading?.toLowerCase().includes('contact');
+    
+    if (isFooterOrContact) {
+      // Danish phone patterns with context
+      const phonePatterns = [
+        /(?:tlf|tel|telefon|phone|mobil|ring)[\s:]*(\+45\s*\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/gi,
+        /(?:tlf|tel|telefon|phone|mobil|ring)[\s:]*(\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/gi,
+        /\+45\s*\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/g,
+        /\b\d{8}\b/g
+      ];
+
+      for (const pattern of phonePatterns) {
+        const matches = block.text.matchAll(pattern);
+        for (const match of matches) {
+          const phone = match[1] || match[0];
+          
+          // Skip if looks like time or date
+          if (phone.includes(':') || phone.includes('.') || phone.includes('-')) continue;
+          
+          const normalized = normalizePhone(phone);
+          if (normalized) {
+            candidates.push({
+              value: normalized,
+              confidence: 0.90,
+              source_type: 'footer_contact_text',
+              source_url: pageDoc.final_url,
+              evidence: block.text.slice(Math.max(0, match.index - 20), match.index + phone.length + 20)
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Priority 4: Danish phone patterns in general text (lowest confidence)
   // Patterns: +45 32 27 41 43, 32 27 41 43, +4532274143
   // CRITICAL: Avoid matching opening hours (11.30-23.30) or dates
-  const phonePatterns = [
+  const generalPhonePatterns = [
     /\+45\s*\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/g,  // +45 32 27 41 43
-    /(?:tlf|tel|phone|mobil)[\s:]*\+?\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/gi,  // "Tel: 32 27 41 43"
+    /(?:tlf|tel|telefon|phone|mobil)[\s:]*\+?\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/gi,  // "Tel: 32 27 41 43"
     /\b\d{8}\b/g  // 32274143 (8 consecutive digits, word boundaries to avoid years/times)
   ];
 
   for (const block of pageDoc.blocks) {
-    for (const pattern of phonePatterns) {
+    // Skip if already found in footer/contact for this block
+    const lowerText = block.text.toLowerCase();
+    const isFooterOrContact = 
+      lowerText.includes('kontakt') ||
+      lowerText.includes('contact') ||
+      lowerText.includes('footer');
+    
+    if (isFooterOrContact) continue; // Already handled in Priority 3
+
+    for (const pattern of generalPhonePatterns) {
       const matches = block.text.matchAll(pattern);
       for (const match of matches) {
-        const phone = match[0];
+        const phone = match[1] || match[0];
         
-        // Skip if looks like time (contains : or .)
-        if (phone.includes(':') || phone.includes('.')) continue;
+        // Skip if looks like time or date
+        if (phone.includes(':') || phone.includes('.') || phone.includes('-')) continue;
         
         // Skip if in context of opening hours
         const context = block.text.slice(Math.max(0, match.index - 30), match.index + phone.length + 30).toLowerCase();
@@ -121,7 +201,7 @@ function extractPhones(pageDoc) {
         if (normalized) {
           candidates.push({
             value: normalized,
-            confidence: 0.85,
+            confidence: 0.80,
             source_type: 'visible_text',
             source_url: pageDoc.final_url,
             evidence: block.text.slice(Math.max(0, match.index - 20), match.index + phone.length + 20)
