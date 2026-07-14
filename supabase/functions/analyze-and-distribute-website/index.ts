@@ -244,10 +244,21 @@ async function performAIAnalysis(supabase: any, businessId: string, payload: any
   // Build prompt from content
   const business = extraction.business || {};
   const sections = extraction.content_sections || [];
+  
+  console.log('📄 Content sections found:', sections.length);
+  if (sections.length > 0) {
+    console.log('   First section:', {
+      heading: sections[0].heading,
+      textLength: sections[0].text?.length || 0,
+    });
+  }
+  
   const textContent = sections
-    .filter((s: any) => s.section_heading && s.text_content)
-    .map((s: any) => `${s.section_heading}:\n${s.text_content}`)
+    .filter((s: any) => s.heading && s.text)
+    .map((s: any) => `${s.heading}:\n${s.text}`)
     .join('\n\n');
+
+  console.log('📝 Text content length:', textContent.length);
 
   if (!textContent || textContent.length < 100) {
     console.log('⏭️ Skipping AI (no meaningful text)');
