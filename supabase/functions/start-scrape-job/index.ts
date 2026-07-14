@@ -88,6 +88,7 @@ serve(async (req) => {
             scraped_at: cached.scraped_at,
             content_quality: cached.content_quality,
             menu_source: cached.menu_source,
+            payload: cached.payload,
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
@@ -205,6 +206,7 @@ serve(async (req) => {
           content_quality: mappedQuality,
           menu_source: hasMenuUrl ? 'link' : 'none',
           scraped_at: new Date().toISOString(),
+          payload: payload,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
