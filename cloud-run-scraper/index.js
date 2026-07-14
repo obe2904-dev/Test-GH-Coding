@@ -466,7 +466,7 @@ app.post('/scrape-v3', async (req, res) => {
         version: 'v3',
         scraper_type: 'cloud-run-puppeteer-smart',
         duration_ms: duration,
-        pages_crawled: pagesCrawled.length
+        pages_crawled_count: pagesCrawled.length
       }
     };
 
@@ -553,26 +553,131 @@ app.post('/scrape-v3', async (req, res) => {
 /**
  * Extract business name from page document
  */
+/**
+ * Extract business name using multi-source voting
+ * Collects candidates from multiple sources and picks the best one
+ */
 function extractBusinessName(pageDoc) {
-  // Try h1 first
-  const h1Block = pageDoc.blocks.find(b => b.tag === 'h1');
-  if (h1Block && h1Block.text.length < 100) {
-    return {
-      value: h1Block.text,
-      confidence: 0.95,
-      source_type: 'h1',
-      source_url: pageDoc.final_url
-    };
+  const candidates = [];
+
+  // Source 1: JSON-LD (highest confidence if present)
+  // TODO: Add JSON-LD parsing if available in pageDoc
+
+  // Source 2: Open Graph site_name
+  // TODO: Add OG parsing if available in pageDoc
+
+  // Source 3: Title tag (common pattern: "Business Name - Description")
+  if (pageDoc.title) {
+    const titleParts = pageDoc.title.split(/[-–|]/);
+    if (titleParts.length > 0) {
+      const firstPart = titleParts[0].trim();
+      if (firstPart.length > 2 && firstPart.length < 100) {
+        candidates.push({
+          value: firstPart,
+          confidence: 0.80,
+          source_type: 'title_first_part',
+          source_url: pageDoc.final_url
+        });
+      }
+    }
   }
 
-  // Fallback to title
-  if (pageDoc.title && pageDoc.title.length < 100) {
-    return {
-      value: pageDoc.title,
-      confidence: 0.85,
-      source_type: 'title',
-      source_url: pageDoc.final_url
-    };
+  // Source 4: Logo alt text (check blocks for img alt attributes)
+  for (const block of pageDoc.blocks) {
+    if (block.tag === 'img' && block.alt && block.alt.length < 50 && block.alt.length > 2) {
+      // Logo alts often contain business name
+      if (!/foto|photo|image|billed/.test(block.alt.toLowerCase())) {
+        candidates.push({
+          value: block.alt.trim(),
+          confidence: 0.75,
+          source_type: 'logo_alt',
+          source_url: pageDoc.final_url
+        });
+      }
+    }
+  }
+
+  // Source 5: Domain name (extract from final_url)
+  if (pageDoc.final_url) {
+    try {
+      const url = new URL(pageDoc.final_url);
+      const domain = url.hostname.replace(/^www\./, '').split('.')[0];
+      // Capitalize first letter
+      const domainName = domain.charAt(0).toUpperCase() + domain.slice(1);
+      if (domainName.length > 2 && domainName.length < 30) {
+        candidates.push({
+          value: domainName,
+          confidence: 0.65,
+          source_type: 'domain',
+          source_url: pageDoc.final_url
+        });
+      }
+    } catch {}
+  }
+
+  // Source 6: H1 tags (but only if short and not descriptive phrases)
+  const h1Block = pageDoc.blocks.find(b => b.tag === 'h1');
+  if (h1Block && h1Block.text.length < 50 && h1Block.text.length > 2) {
+    const h1Text = h1Block.text.trim();
+    // Skip if looks like a description/category (all caps, contains common category words)
+    const isDescriptive = /^[A-ZÆØÅ\s]+$/.test(h1Text) || 
+                          /cuisine|restaurant|cafe|bar|mad|food|drinks/.test(h1Text.toLowerCase());
+    if (!isDescriptive) {
+      candidates.push({
+        value: h1Text,
+        confidence: 0.70,
+        source_type: 'h1',
+        source_url: pageDoc.final_url
+      });
+    }
+  }
+
+  // Source 7: "Velkommen til X" patterns
+  for (const block of pageDoc.blocks) {
+    const welcomeMatch = block.text.match(/velkommen til\s+([A-ZÆØÅ][a-zæøå]+)/i);
+    if (welcomeMatch) {
+      candidates.push({
+        value: welcomeMatch[1].trim(),
+        confidence: 0.85,
+        source_type: 'welcome_phrase',
+        source_url: pageDoc.final_url
+      });
+    }
+  }
+
+  // Deduplicate and pick best
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // Group by normalized value (case-insensitive)
+  const groups = new Map();
+  for (const candidate of candidates) {
+    const normalized = candidate.value.toLowerCase().trim();
+    if (!groups.has(normalized)) {
+      groups.set(normalized, []);
+    }
+    groups.get(normalized).push(candidate);
+  }
+
+  // Score each group: sum of confidences + bonus for multiple sources
+  let bestGroup = null;
+  let bestScore = 0;
+
+  for (const [normalized, group] of groups) {
+    const confidenceSum = group.reduce((sum, c) => sum + c.confidence, 0);
+    const sourcesBonus = (group.length - 1) * 0.15; // Bonus for multiple sources agreeing
+    const score = confidenceSum + sourcesBonus;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestGroup = group;
+    }
+  }
+
+  // Return the candidate with highest individual confidence from best group
+  if (bestGroup && bestGroup.length > 0) {
+    return bestGroup.sort((a, b) => b.confidence - a.confidence)[0];
   }
 
   return null;

@@ -94,22 +94,39 @@ function extractPhones(pageDoc) {
   }
 
   // Priority 2: Danish phone patterns in text
-  // Patterns: +45 12 34 56 78, 12 34 56 78, +4512345678
-  const phonePattern = /(?:\+45\s?)?(?:\d{2}\s?\d{2}\s?\d{2}\s?\d{2}|\d{8})/g;
+  // Patterns: +45 32 27 41 43, 32 27 41 43, +4532274143
+  // CRITICAL: Avoid matching opening hours (11.30-23.30) or dates
+  const phonePatterns = [
+    /\+45\s*\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/g,  // +45 32 27 41 43
+    /(?:tlf|tel|phone|mobil)[\s:]*\+?\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/gi,  // "Tel: 32 27 41 43"
+    /\b\d{8}\b/g  // 32274143 (8 consecutive digits, word boundaries to avoid years/times)
+  ];
 
   for (const block of pageDoc.blocks) {
-    const matches = block.text.matchAll(phonePattern);
-    for (const match of matches) {
-      const phone = match[0];
-      const normalized = normalizePhone(phone);
-      if (normalized) {
-        candidates.push({
-          value: normalized,
-          confidence: 0.85,
-          source_type: 'visible_text',
-          source_url: pageDoc.final_url,
-          evidence: block.text.slice(Math.max(0, match.index - 20), match.index + phone.length + 20)
-        });
+    for (const pattern of phonePatterns) {
+      const matches = block.text.matchAll(pattern);
+      for (const match of matches) {
+        const phone = match[0];
+        
+        // Skip if looks like time (contains : or .)
+        if (phone.includes(':') || phone.includes('.')) continue;
+        
+        // Skip if in context of opening hours
+        const context = block.text.slice(Math.max(0, match.index - 30), match.index + phone.length + 30).toLowerCase();
+        if (/åbningstider|opening|hours|mandag|monday|tirdag|tuesday|onsdag|wednesday|torsdag|thursday|fredag|friday|lørdag|saturday|søndag|sunday/.test(context)) {
+          continue;
+        }
+        
+        const normalized = normalizePhone(phone);
+        if (normalized) {
+          candidates.push({
+            value: normalized,
+            confidence: 0.85,
+            source_type: 'visible_text',
+            source_url: pageDoc.final_url,
+            evidence: block.text.slice(Math.max(0, match.index - 20), match.index + phone.length + 20)
+          });
+        }
       }
     }
   }
@@ -164,10 +181,8 @@ function extractAddresses(pageDoc) {
     }
   }
 
-  // Priority 3: Google Maps link text
-  const mapsLinks = pageDoc.links.filter(link => 
-    link.url?.includes('maps.google') || link.url?.includes('goo.gl/maps')
-  );
+  // Priority 3: Google Maps link text (use same detection as classifier)
+  const mapsLinks = pageDoc.links.filter(link => isGoogleMapsLink(link.url));
   
   for (const link of mapsLinks) {
     if (link.text && containsPostalCode(link.text)) {
@@ -175,8 +190,8 @@ function extractAddresses(pageDoc) {
       if (cleaned) {
         candidates.push({
           value: cleaned,
-          confidence: 0.80,
-          source_type: 'maps_link_text',
+          confidence: 0.98,  // High confidence - Maps links usually have accurate addresses
+          source_type: 'google_maps_link_text',
           source_url: pageDoc.final_url,
           evidence: link.text
         });
@@ -185,6 +200,26 @@ function extractAddresses(pageDoc) {
   }
 
   return deduplicateCandidates(candidates);
+}
+
+/**
+ * Check if URL is a Google Maps link (matches classifier logic)
+ */
+function isGoogleMapsLink(urlString) {
+  if (!urlString) return false;
+  try {
+    const url = new URL(urlString);
+    const host = url.hostname.toLowerCase();
+    return (
+      host === 'maps.google.com' ||
+      host === 'maps.app.goo.gl' ||
+      (host === 'goo.gl' && url.pathname.startsWith('/maps')) ||
+      (host === 'google.com' && url.pathname.startsWith('/maps')) ||
+      host.includes('maps.google')  // Catch maps.google.dk, maps.google.co.uk, etc.
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**

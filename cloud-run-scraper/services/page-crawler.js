@@ -65,8 +65,10 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
         continue;
       }
 
-      // Skip common excludes
-      if (isExcludedPath(linkUrl.pathname)) {
+      // CRITICAL: Exclude privacy/legal pages FIRST (before any scoring)
+      const linkText = (link.text || '').toLowerCase();
+      const fullContext = `${linkUrl.pathname.toLowerCase()} ${linkText}`;
+      if (isExcludedPage(fullContext)) {
         continue;
       }
 
@@ -116,27 +118,35 @@ function determineMissingWeight(hasField, fieldName) {
 }
 
 /**
- * Check if path should be excluded from crawling
+ * Check if page should be excluded from crawling
+ * Checks both URL path and anchor text for exclusion keywords
+ * Returns true immediately if any privacy/legal/system pattern found
  */
-function isExcludedPath(pathname) {
-  const excludePatterns = [
-    '/privacy',
-    '/privatliv',
-    '/cookie',
-    '/legal',
-    '/terms',
-    '/vilkår',
-    '/login',
-    '/signin',
-    '/signup',
-    '/checkout',
-    '/cart',
-    '/account',
-    '/admin'
+function isExcludedPage(contextString) {
+  // Keywords without leading slashes to catch mid-path matches
+  const excludeKeywords = [
+    'privacy',
+    'privatliv',
+    'cookie',
+    'cookiepolitik',
+    'gdpr',
+    'legal',
+    'terms',
+    'vilkår',
+    'betingelser',
+    'login',
+    'signin',
+    'signup',
+    'checkout',
+    'cart',
+    'account',
+    'admin',
+    'policy',
+    'politik'
   ];
 
-  const lowerPath = pathname.toLowerCase();
-  return excludePatterns.some(pattern => lowerPath.includes(pattern));
+  const lower = contextString.toLowerCase();
+  return excludeKeywords.some(keyword => lower.includes(keyword));
 }
 
 /**
