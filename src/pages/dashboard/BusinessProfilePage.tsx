@@ -1022,10 +1022,39 @@ function BusinessProfilePage() {
         duration_ms: result.duration_ms,
       })
 
-      alert(`✅ Website analysis complete!\n\n` +
-            `Quality: ${result.quality}\n` +
-            `Duration: ${(result.duration_ms / 1000).toFixed(1)}s\n` +
-            `AI confidence: ${(result.ai_analysis?.confidence_score || 0).toFixed(2)}`)
+      // Build detailed summary message
+      let summaryMessage = `✅ Website analysis complete!\n\n`
+      summaryMessage += `📊 Scrape ID: ${result.scrape_id}\n`
+      summaryMessage += `Quality: ${result.quality}\n`
+      summaryMessage += `Duration: ${(result.duration_ms / 1000).toFixed(1)}s\n\n`
+
+      // Show what was distributed
+      if (result.distribution_summary) {
+        const dist = result.distribution_summary
+        summaryMessage += `📝 Data Distributed:\n`
+        
+        // Scraped data
+        if (dist.structured_data?.business_name) {
+          summaryMessage += `  • Business name updated\n`
+        }
+        if (dist.fields_by_table?.business_locations) {
+          summaryMessage += `  • Contact info: ${dist.fields_by_table.business_locations.join(', ')}\n`
+        }
+        
+        // AI data
+        if (dist.ai_fields && !dist.ai_skip_reason) {
+          if (dist.ai_fields.user_about_text) summaryMessage += `  • "Om os" text extracted\n`
+          if (dist.ai_fields.key_offerings?.length) summaryMessage += `  • ${dist.ai_fields.key_offerings.length} key offerings\n`
+          if (dist.ai_fields.menu_signal?.signatureItems?.length) summaryMessage += `  • ${dist.ai_fields.menu_signal.signatureItems.length} menu highlights\n`
+          if (dist.ai_fields.service_model) summaryMessage += `  • Service model detected\n`
+        } else if (dist.ai_skip_reason) {
+          summaryMessage += `  ⚠️ AI skipped: ${dist.ai_skip_reason}\n`
+        }
+      }
+
+      summaryMessage += `\n🔄 Reloading page to show updates...`
+
+      alert(summaryMessage)
 
       // Refresh page to show updated data
       window.location.reload()

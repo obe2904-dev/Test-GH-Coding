@@ -185,7 +185,7 @@ serve(async (req) => {
     // PHASE 3: DATA DISTRIBUTION
     // ==========================================
     console.log('📊 Phase 3: Data Distribution...');
-    await distributeStructuredData(supabase, business_id, payload);
+    const distributionSummary = await distributeStructuredData(supabase, business_id, payload, aiResult);
 
     // ==========================================
     // COMPLETE
@@ -199,6 +199,7 @@ serve(async (req) => {
         scrape_id: scrapeResult.id,
         quality: contentQuality,
         ai_analysis: aiResult,
+        distribution_summary: distributionSummary,
         duration_ms: totalDuration,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -416,7 +417,7 @@ Extract the following in JSON format:
 // =====================================================
 // PHASE 3: DATA DISTRIBUTION
 // =====================================================
-async function distributeStructuredData(supabase: any, businessId: string, payload: any) {
+async function distributeStructuredData(supabase: any, businessId: string, payload: any, aiResult: any) {
   const extraction = payload.extraction || payload;
   const business = extraction.business || {};
   const contact = extraction.contact || {};
@@ -425,6 +426,14 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
   const social = extraction.social || {};
 
   console.log('📝 Distributing structured data...');
+
+  // Track what gets distributed
+  const summary: any = {
+    tables_updated: [],
+    fields_by_table: {},
+    ai_fields: {},
+    structured_data: {},
+  };
 
   // ===== UPDATE businesses TABLE =====
   if (business.name?.value && business.name.confidence >= 0.7) {
@@ -436,6 +445,9 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
       })
       .eq('id', businessId);
     console.log('  ✓ Business name updated');
+    summary.tables_updated.push('businesses');
+    summary.fields_by_table.businesses = ['name', 'last_scraped_at'];
+    summary.structured_data.business_name = business.name.value;
   }
 
   // ===== UPDATE business_profile TABLE =====
@@ -545,9 +557,16 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
   }
 
   // ===== UPDATE opening_hours TABLE =====
+  console.log('🕐 Opening hours data:', {
+    hasCandidates: !!openingHours.candidates,
+    candidatesCount: openingHours.candidates?.length || 0,
+    firstCandidate: openingHours.candidates?.[0] || null,
+  });
+
   if (openingHours.candidates?.length > 0) {
     // Parse opening hours
     const parsedHours = parseOpeningHours(openingHours.candidates);
+    console.log('  📊 Parsed hours:', parsedHours.length, 'days');
     
     if (parsedHours.length > 0) {
       // Delete existing opening hours
@@ -617,6 +636,46 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
   }
 
   console.log('✅ Data distribution complete');
+
+  // Build detailed summary of what was distributed
+  if (aiResult && !aiResult.skip_reason) {
+    summary.ai_fields = {
+      user_about_text: aiResult.about || null,
+      long_description: aiResult.description || null,
+      key_offerings: aiResult.venue_hooks || [],
+      menu_signal: aiResult.menu_highlights ? { signatureItems: aiResult.menu_highlights } : null,
+      business_keywords: aiResult.keywords || [],
+      brand_tone: aiResult.tone_of_voice || null,
+      service_model: aiResult.services || null,
+    };
+  } else {
+    summary.ai_skip_reason = aiResult?.skip_reason || 'unknown';
+  }
+
+  // Log comprehensive summary
+  console.log('📋 Distribution Summary:');
+  console.log('  Scraped Data:');
+  if (summary.structured_data.business_name) console.log('    • Business name:', summary.structured_data.business_name);
+  if (services.booking?.url) console.log('    • Booking URL:', services.booking.url);
+  if (services.takeaway?.url) console.log('    • Takeaway URL:', services.takeaway.url);
+  if (contact.emails?.[0]) console.log('    • Email:', contact.emails[0].value);
+  if (contact.addresses?.[0]) console.log('    • Address:', contact.addresses[0].value);
+  if (openingHours.candidates?.length > 0) console.log('    • Opening hours:', openingHours.candidates.length, 'days');
+  if (socialProfiles.length > 0) console.log('    • Social accounts:', socialProfiles.map(p => p.platform).join(', '));
+  if (services.menu?.url) console.log('    • Menu URL:', services.menu.url);
+  
+  console.log('  AI Extracted Data:');
+  if (aiResult && !aiResult.skip_reason) {
+    if (aiResult.about) console.log('    • About text:', aiResult.about.substring(0, 80) + '...');
+    if (aiResult.venue_hooks?.length) console.log('    • Key offerings:', aiResult.venue_hooks.length, 'items');
+    if (aiResult.menu_highlights?.length) console.log('    • Menu highlights:', aiResult.menu_highlights.length, 'items');
+    if (aiResult.keywords?.length) console.log('    • Keywords:', aiResult.keywords.join(', '));
+    if (aiResult.tone_of_voice) console.log('    • Tone:', aiResult.tone_of_voice);
+  } else {
+    console.log('    ⚠️ AI skipped:', aiResult?.skip_reason || 'unknown');
+  }
+
+  return summary;
 }
 
 // =====================================================
