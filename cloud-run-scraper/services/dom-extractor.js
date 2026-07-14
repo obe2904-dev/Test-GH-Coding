@@ -131,6 +131,100 @@ export async function extractPageDocument(page) {
       .filter(item => item.name && item.content);
 
     // ========================================
+    // Extract Opening Hours (Structured)
+    // ========================================
+
+    const extractOpeningHours = () => {
+      const pairs = [];
+      
+      // Find sections containing opening hours keywords
+      const hoursKeywords = ['åbningstider', 'opening hours', 'öffnungszeiten', 'horaires'];
+      const allElements = [...document.querySelectorAll('*')];
+      
+      const hoursContainers = allElements.filter(el => {
+        const text = (el.textContent || '').toLowerCase();
+        return hoursKeywords.some(kw => text.includes(kw)) && text.length < 500;
+      });
+
+      for (const container of hoursContainers) {
+        // Strategy 1: Table rows (tr)
+        const tableRows = [...container.querySelectorAll('tr')].filter(isVisible);
+        if (tableRows.length > 0) {
+          for (const row of tableRows) {
+            const cells = [...row.querySelectorAll('td, th')].filter(isVisible);
+            if (cells.length >= 2) {
+              const dayText = clean(cells[0].innerText);
+              const timeText = clean(cells[1].innerText);
+              if (dayText && timeText && /\d{1,2}[:.]\d{2}/.test(timeText)) {
+                pairs.push({ day_text: dayText, time_text: timeText, structure: 'table' });
+              }
+            }
+          }
+        }
+
+        // Strategy 2: Definition lists (dt/dd pairs)
+        const dts = [...container.querySelectorAll('dt')].filter(isVisible);
+        if (dts.length > 0) {
+          for (const dt of dts) {
+            const dd = dt.nextElementSibling;
+            if (dd && dd.tagName === 'DD') {
+              const dayText = clean(dt.innerText);
+              const timeText = clean(dd.innerText);
+              if (dayText && timeText && /\d{1,2}[:.]\d{2}/.test(timeText)) {
+                pairs.push({ day_text: dayText, time_text: timeText, structure: 'dl' });
+              }
+            }
+          }
+        }
+
+        // Strategy 3: List items with day + time pattern
+        const listItems = [...container.querySelectorAll('li')].filter(isVisible);
+        if (listItems.length > 0) {
+          for (const li of listItems) {
+            const text = clean(li.innerText);
+            // Match patterns like "Monday: 10:00 - 18:00" or "Mandag - Torsdag 11.30 - 23.30"
+            const match = text.match(/^([^:0-9]+?)[\s:-]+(.+)$/);
+            if (match && /\d{1,2}[:.]\d{2}/.test(match[2])) {
+              pairs.push({ day_text: match[1].trim(), time_text: match[2].trim(), structure: 'list' });
+            }
+          }
+        }
+
+        // Strategy 4: Repeated sibling divs/spans (common in modern layouts)
+        const children = [...container.children].filter(isVisible);
+        if (children.length >= 3 && children.length <= 10) {
+          for (const child of children) {
+            const childText = clean(child.innerText);
+            if (childText.length < 100) {
+              // Look for inline structure: <span>Monday</span> <span>10:00 - 18:00</span>
+              const spans = [...child.querySelectorAll('span, div, p')].filter(isVisible);
+              if (spans.length >= 2) {
+                const dayText = clean(spans[0].innerText);
+                const timeText = clean(spans[1].innerText);
+                if (dayText && timeText && /\d{1,2}[:.]\d{2}/.test(timeText)) {
+                  pairs.push({ day_text: dayText, time_text: timeText, structure: 'div' });
+                }
+              } else {
+                // Single element with day: time pattern
+                const match = childText.match(/^([^:0-9]+?)[\s:-]+(.+)$/);
+                if (match && /\d{1,2}[:.]\d{2}/.test(match[2])) {
+                  pairs.push({ day_text: match[1].trim(), time_text: match[2].trim(), structure: 'div' });
+                }
+              }
+            }
+          }
+        }
+
+        // If we found pairs in this container, stop looking
+        if (pairs.length > 0) break;
+      }
+
+      return pairs.length > 0 ? pairs : null;
+    };
+
+    const opening_hours_structured = extractOpeningHours();
+
+    // ========================================
     // Return Page Document
     // ========================================
 
@@ -143,7 +237,8 @@ export async function extractPageDocument(page) {
       meta,
       links,
       blocks,
-      json_ld_raw: jsonLdRaw
+      json_ld_raw: jsonLdRaw,
+      opening_hours_structured
     };
   });
 }

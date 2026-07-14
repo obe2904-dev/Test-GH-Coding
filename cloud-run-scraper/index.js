@@ -377,10 +377,7 @@ app.post('/scrape-v3', async (req, res) => {
         description: null // TODO: Add description extraction
       },
       contact,
-      opening_hours: {
-        value: null, // TODO: Add opening hours extraction
-        candidates: []
-      },
+      opening_hours: processOpeningHours(homepageDoc),
       services,
       content_sections: extractContentSections(homepageDoc),
       scraped_at: new Date().toISOString()
@@ -419,7 +416,7 @@ app.post('/scrape-v3', async (req, res) => {
             contact: pageContact,
             services: pageServices,
             content_sections: extractContentSections(pageDoc),
-            opening_hours: { value: null, candidates: [] },
+            opening_hours: processOpeningHours(pageDoc),
             business: { name: null, description: null },
             quality: { rating: 'unknown', fields_found: 0, fields_expected: 8, noise_ratio: 0, warnings: [] }
           };
@@ -549,6 +546,31 @@ app.post('/scrape-v3', async (req, res) => {
     }
   }
 });
+
+/**
+ * Process structured opening hours from page document
+ * @param {object} pageDoc - Page document with opening_hours_structured
+ * @returns {object} { value: string | null, candidates: array }
+ */
+function processOpeningHours(pageDoc) {
+  if (!pageDoc.opening_hours_structured || pageDoc.opening_hours_structured.length === 0) {
+    return { value: null, candidates: [] };
+  }
+
+  const pairs = pageDoc.opening_hours_structured;
+  
+  // Format as readable text
+  const lines = pairs.map(pair => `${pair.day_text}: ${pair.time_text}`);
+  const formattedText = lines.join('; ');
+
+  return {
+    value: formattedText,
+    candidates: pairs,
+    confidence: 0.90,
+    source_url: pageDoc.final_url,
+    source_type: 'structured_dom'
+  };
+}
 
 /**
  * Extract business name from page document
