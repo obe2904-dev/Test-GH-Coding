@@ -363,6 +363,7 @@ app.post('/scrape-v3', async (req, res) => {
     const normalizedLinks = normalizeLinks(homepageDoc.links);
     const { classified: services } = classifyLinks(normalizedLinks);
     const contact = extractContact(homepageDoc);
+    const opening_hours = processOpeningHours(homepageDoc);
 
     // Build initial extraction
     let extraction = {
@@ -377,9 +378,9 @@ app.post('/scrape-v3', async (req, res) => {
         description: null // TODO: Add description extraction
       },
       contact,
-      opening_hours: processOpeningHours(homepageDoc),
+      opening_hours,
       services,
-      content_sections: extractContentSections(homepageDoc),
+      content_sections: extractContentSections(homepageDoc, opening_hours),
       scraped_at: new Date().toISOString()
     };
 
@@ -408,6 +409,7 @@ app.post('/scrape-v3', async (req, res) => {
           const pageNormalizedLinks = normalizeLinks(pageDoc.links);
           const { classified: pageServices } = classifyLinks(pageNormalizedLinks);
           const pageContact = extractContact(pageDoc);
+          const pageOpeningHours = processOpeningHours(pageDoc);
 
           const pageExtraction = {
             meta: {
@@ -415,8 +417,8 @@ app.post('/scrape-v3', async (req, res) => {
             },
             contact: pageContact,
             services: pageServices,
-            content_sections: extractContentSections(pageDoc),
-            opening_hours: processOpeningHours(pageDoc),
+            content_sections: extractContentSections(pageDoc, pageOpeningHours),
+            opening_hours: pageOpeningHours,
             business: { name: null, description: null },
             quality: { rating: 'unknown', fields_found: 0, fields_expected: 8, noise_ratio: 0, warnings: [] }
           };
@@ -707,8 +709,11 @@ function extractBusinessName(pageDoc) {
 
 /**
  * Extract content sections from blocks
+ * @param {object} pageDoc - Page document with blocks
+ * @param {object} openingHours - Structured opening hours data (optional)
+ * @returns {array} Content sections
  */
-function extractContentSections(pageDoc) {
+function extractContentSections(pageDoc, openingHours = null) {
   const sections = [];
 
   // Group blocks by section heading
@@ -727,13 +732,43 @@ function extractContentSections(pageDoc) {
     const text = blocks.map(b => b.text).join(' ');
 
     if (text.length >= 50) {
-      sections.push({
-        type: 'unknown', // TODO: Add section type classification
-        heading: heading !== 'unknown' ? heading : null,
-        text,
-        source_url: pageDoc.final_url,
-        confidence: 0.80
-      });
+      // Check if this section contains opening hours
+      const isOpeningHours = /åbningstider|opening hours/i.test(text);
+      
+      if (isOpeningHours && openingHours?.candidates?.length > 0) {
+        // Replace with formatted structured data
+        const formattedLines = openingHours.candidates.map(pair => 
+          `${pair.day_text}: ${pair.time_text}`
+        );
+        
+        // Extract address and email from original text if present
+        const addressMatch = text.match(/[A-ZÆØÅ][a-zæøå]+\s+\d+[,\s]+\d{4}\s+[A-ZÆØÅ][a-zæøå\s]+,\s*[A-ZÆØÅ][a-zæøå]+/);
+        const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+        
+        let formattedText = `ÅBNINGSTIDER\n${formattedLines.join('\n')}`;
+        if (addressMatch) {
+          formattedText += `\n\n${addressMatch[0]}`;
+        }
+        if (emailMatch) {
+          formattedText += `\n${emailMatch[0]}`;
+        }
+        
+        sections.push({
+          type: 'opening_hours',
+          heading: heading !== 'unknown' ? heading : 'ÅBNINGSTIDER',
+          text: formattedText,
+          source_url: pageDoc.final_url,
+          confidence: 0.90
+        });
+      } else {
+        sections.push({
+          type: 'unknown', // TODO: Add section type classification
+          heading: heading !== 'unknown' ? heading : null,
+          text,
+          source_url: pageDoc.final_url,
+          confidence: 0.80
+        });
+      }
     }
   }
 
