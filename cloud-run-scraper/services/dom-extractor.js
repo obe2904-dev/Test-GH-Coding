@@ -147,11 +147,13 @@ export async function extractPageDocument(page) {
       });
 
       for (const container of hoursContainers) {
+        if (!container) continue;
+        
         // Strategy 1: Table rows (tr)
-        const tableRows = [...container.querySelectorAll('tr')].filter(isVisible);
+        const tableRows = container.querySelectorAll ? [...(container.querySelectorAll('tr') || [])].filter(isVisible) : [];
         if (tableRows.length > 0) {
           for (const row of tableRows) {
-            const cells = [...row.querySelectorAll('td, th')].filter(isVisible);
+            const cells = row.querySelectorAll ? [...(row.querySelectorAll('td, th') || [])].filter(isVisible) : [];
             if (cells.length >= 2) {
               const dayText = clean(cells[0].innerText);
               const timeText = clean(cells[1].innerText);
@@ -163,7 +165,7 @@ export async function extractPageDocument(page) {
         }
 
         // Strategy 2: Definition lists (dt/dd pairs)
-        const dts = [...container.querySelectorAll('dt')].filter(isVisible);
+        const dts = container.querySelectorAll ? [...(container.querySelectorAll('dt') || [])].filter(isVisible) : [];
         if (dts.length > 0) {
           for (const dt of dts) {
             const dd = dt.nextElementSibling;
@@ -178,7 +180,7 @@ export async function extractPageDocument(page) {
         }
 
         // Strategy 3: List items with day + time pattern
-        const listItems = [...container.querySelectorAll('li')].filter(isVisible);
+        const listItems = container.querySelectorAll ? [...(container.querySelectorAll('li') || [])].filter(isVisible) : [];
         if (listItems.length > 0) {
           for (const li of listItems) {
             const text = clean(li.innerText);
@@ -191,13 +193,13 @@ export async function extractPageDocument(page) {
         }
 
         // Strategy 4: Repeated sibling divs/spans (common in modern layouts)
-        const children = [...container.children].filter(isVisible);
+        const children = container.children ? [...(container.children || [])].filter(isVisible) : [];
         if (children.length >= 3 && children.length <= 10) {
           for (const child of children) {
             const childText = clean(child.innerText);
             if (childText.length < 100) {
               // Look for inline structure: <span>Monday</span> <span>10:00 - 18:00</span>
-              const spans = [...child.querySelectorAll('span, div, p')].filter(isVisible);
+              const spans = child.querySelectorAll ? [...(child.querySelectorAll('span, div, p') || [])].filter(isVisible) : [];
               if (spans.length >= 2) {
                 const dayText = clean(spans[0].innerText);
                 const timeText = clean(spans[1].innerText);
