@@ -290,11 +290,15 @@ function parseOpeningHours(candidates: any[], business_id: string) {
 
     const openHour = timeMatch[1].padStart(2, '0');
     const openMin = timeMatch[2];
-    const closeHour = timeMatch[3].padStart(2, '0');
+    let closeHour = timeMatch[3].padStart(2, '0');
     const closeMin = timeMatch[4];
 
+    // Normalize 24:00 to 00:00 (midnight end-of-day)
+    if (closeHour === '24') {
+      closeHour = '00';
+    }
+
     const open_time = `${openHour}:${openMin}:00`;
-    // Handle midnight as 00:00:00 (standard SQL time format)
     const close_time = `${closeHour}:${closeMin}:00`;
 
     // Check if it's a day range (e.g., "Mandag - Torsdag")
