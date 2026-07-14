@@ -690,14 +690,20 @@ function extractBusinessName(pageDoc) {
 
   // Source 7: "Velkommen til X" patterns
   for (const block of pageDoc.blocks) {
-    const welcomeMatch = block.text.match(/velkommen til\s+([A-ZÆØÅ][a-zæøå]+)/i);
+    // Match "Velkommen til Business Name" - capture up to 50 chars, stop at long text or punctuation
+    const welcomeMatch = block.text.match(/velkommen til\s+([\wÆØÅæøå\s]{3,50}?)(?:\s{2,}|[.!]|\s+[A-ZÆØÅ]{4,}|$)/i);
     if (welcomeMatch) {
-      candidates.push({
-        value: welcomeMatch[1].trim(),
-        confidence: 0.85,
-        source_type: 'welcome_phrase',
-        source_url: pageDoc.final_url
-      });
+      const name = welcomeMatch[1].trim();
+      // Skip if looks like a description (too many words or all caps tagline)
+      const wordCount = name.split(/\s+/).length;
+      if (wordCount <= 5 && name.length >= 3) {
+        candidates.push({
+          value: name,
+          confidence: 0.85,
+          source_type: 'welcome_phrase',
+          source_url: pageDoc.final_url
+        });
+      }
     }
   }
 
