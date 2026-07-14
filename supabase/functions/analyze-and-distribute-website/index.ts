@@ -546,7 +546,7 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
 // HELPER FUNCTIONS
 // =====================================================
 
-function parseOpeningHours(candidates: string[]): Array<{weekday: string, open_time: string, close_time: string}> {
+function parseOpeningHours(candidates: any[]): Array<{weekday: string, open_time: string, close_time: string}> {
   const result: Array<{weekday: string, open_time: string, close_time: string}> = [];
   const weekdayMap: Record<string, string> = {
     'monday': 'monday', 'mon': 'monday', 'mandag': 'monday',
@@ -559,7 +559,9 @@ function parseOpeningHours(candidates: string[]): Array<{weekday: string, open_t
   };
 
   for (const candidate of candidates) {
-    const match = candidate.match(/^([a-zæøåä]+)[\s:]+(\d{1,2}[:.]\d{2})\s*[-–—til to]+\s*(\d{1,2}[:.]\d{2})/i);
+    // Handle both string and object formats
+    const candidateStr = typeof candidate === 'string' ? candidate : String(candidate);
+    const match = candidateStr.match(/^([a-zæøåä]+)[\s:]+(\d{1,2}[:.]\d{2})\s*[-–—til to]+\s*(\d{1,2}[:.]\d{2})/i);
     
     if (match) {
       const [, day, openTime, closeTime] = match;
