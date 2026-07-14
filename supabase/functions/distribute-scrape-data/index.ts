@@ -224,6 +224,62 @@ serve(async (req) => {
       }
     }
 
+    // =========================================
+    // 6. Upsert social_accounts entries
+    // =========================================
+    if (extraction.services?.social_profiles && extraction.services.social_profiles.length > 0) {
+      for (const social of extraction.services.social_profiles) {
+        const platform = social.platform.toLowerCase();
+        const profileUrl = social.url;
+        
+        // Extract handle from URL
+        const handle = extractHandleFromUrl(profileUrl, platform);
+
+        // Check if account already exists
+        const { data: existingAccount } = await supabase
+          .from('social_accounts')
+          .select('id')
+          .eq('business_id', business_id)
+          .eq('platform', platform)
+          .single();
+
+        if (existingAccount) {
+          // Update existing account
+          const { error: updateError } = await supabase
+            .from('social_accounts')
+            .update({
+              profile_url: profileUrl,
+              handle: handle,
+              is_connected: false // Scraper doesn't have OAuth token
+            })
+            .eq('id', existingAccount.id);
+
+          if (updateError) {
+            console.error(`Failed to update social_accounts for ${platform}:`, updateError);
+          } else {
+            console.log(`Updated social_accounts entry for ${platform}: ${handle}`);
+          }
+        } else {
+          // Insert new account
+          const { error: insertError } = await supabase
+            .from('social_accounts')
+            .insert({
+              business_id: business_id,
+              platform: platform,
+              profile_url: profileUrl,
+              handle: handle,
+              is_connected: false
+            });
+
+          if (insertError) {
+            console.error(`Failed to insert social_accounts for ${platform}:`, insertError);
+          } else {
+            console.log(`Created social_accounts entry for ${platform}: ${handle}`);
+          }
+        }
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -233,7 +289,8 @@ serve(async (req) => {
           business_profile: Object.keys(profileUpdates).length > 0,
           profiles: Object.keys(contactUpdates).length > 0,
           opening_hours: extraction.opening_hours?.candidates?.length > 0,
-          menu_sources: !!extraction.services?.menu?.url
+          menu_sources: !!extraction.services?.menu?.url,
+          social_accounts: extraction.services?.social_profiles?.length > 0
         }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -356,4 +413,45 @@ function parseOpeningHours(candidates: any[], business_id: string) {
   }
 
   return rows;
+}
+
+/**
+ * Extract handle/username from social media URL
+ * @param url - Full URL (e.g., "https://www.instagram.com/cafefaustaarhus/")
+ * @param platform - Platform name (e.g., "instagram")
+ * @returns Handle/username (e.g., "cafefaustaarhus") or null
+ */
+function extractHandleFromUrl(url: string, platform: string): string | null {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    
+    // Remove leading/trailing slashes and split by /
+    const parts = pathname.replace(/^\/|\/$/g, '').split('/');
+    
+    // For most platforms (Instagram, Facebook, Twitter, LinkedIn), handle is first path segment
+    // Examples:
+    // - instagram.com/cafefaustaarhus/ → "cafefaustaarhus"
+    // - facebook.com/cafefaustaarhus/ → "cafefaustaarhus"
+    // - twitter.com/cafefaust → "cafefaust"
+    // - linkedin.com/company/cafe-faust → "cafe-faust" (skip "company" segment)
+    
+    if (platform === 'linkedin' && parts[0] === 'company' && parts[1]) {
+      return parts[1];
+    }
+    
+    if (platform === 'linkedin' && parts[0] === 'in' && parts[1]) {
+      return parts[1]; // Personal profile: linkedin.com/in/username
+    }
+    
+    // For most other platforms, first segment is the handle
+    if (parts[0]) {
+      return parts[0];
+    }
+    
+    return null;
+  } catch (e) {
+    console.error('Failed to extract handle from URL:', url, e);
+    return null;
+  }
 }
