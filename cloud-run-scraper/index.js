@@ -375,7 +375,7 @@ app.post('/scrape-v3', async (req, res) => {
       },
       business: {
         name: extractBusinessName(homepageDoc),
-        description: null // TODO: Add description extraction
+        description: extractBusinessDescription(homepageDoc)
       },
       contact,
       opening_hours,
@@ -577,6 +577,38 @@ function processOpeningHours(pageDoc) {
 /**
  * Extract business name from page document
  */
+/**
+ * Extract business description from hero/welcome text
+ * Looks for the first substantial content block with welcome/intro text
+ */
+function extractBusinessDescription(pageDoc) {
+  // Look through blocks for hero/welcome text
+  for (const block of pageDoc.blocks) {
+    const text = block.text.trim();
+    
+    // Skip if too short
+    if (text.length < 100) continue;
+    
+    // Skip if it's likely opening hours (has time patterns)
+    if (/\d{1,2}[:\.]?\d{2}\s*-\s*\d{1,2}[:\.]?\d{2}/.test(text)) continue;
+    
+    // Look for welcome phrases or substantial intro text
+    const hasWelcome = /velkommen|welcome|introducing|discover|experience|cuisine/i.test(text);
+    const isSubstantial = text.length > 150 && text.split(/\s+/).length > 20;
+    
+    if (hasWelcome || isSubstantial) {
+      return {
+        value: text,
+        confidence: hasWelcome ? 0.85 : 0.75,
+        source_url: pageDoc.final_url,
+        source_type: 'hero_text'
+      };
+    }
+  }
+  
+  return null;
+}
+
 /**
  * Extract business name using multi-source voting
  * Collects candidates from multiple sources and picks the best one
