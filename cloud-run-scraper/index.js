@@ -475,6 +475,7 @@ app.post('/scrape-v3', async (req, res) => {
     const jobId = req.headers['x-job-id'];
 
     if (webhookUrl && jobId) {
+      console.log(`[V3] Calling webhook for job ${jobId}: ${webhookUrl}`);
       fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -483,8 +484,18 @@ app.post('/scrape-v3', async (req, res) => {
           status: 'completed',
           payload: responsePayload
         })
-      }).catch(err => {
-        console.error('[V3] Webhook failed:', err);
+      })
+      .then(res => {
+        if (!res.ok) {
+          console.error(`[V3] Webhook returned ${res.status}: ${res.statusText}`);
+        } else {
+          console.log(`[V3] Webhook succeeded for job ${jobId}`);
+        }
+        return res.text();
+      })
+      .then(body => console.log('[V3] Webhook response:', body))
+      .catch(err => {
+        console.error('[V3] Webhook network error:', err);
       });
     }
 
@@ -499,6 +510,7 @@ app.post('/scrape-v3', async (req, res) => {
     const jobId = req.headers['x-job-id'];
 
     if (webhookUrl && jobId) {
+      console.log(`[V3] Calling failure webhook for job ${jobId}: ${webhookUrl}`);
       fetch(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -507,8 +519,18 @@ app.post('/scrape-v3', async (req, res) => {
           status: 'failed',
           error: error.message
         })
-      }).catch(err => {
-        console.error('[V3] Webhook failed:', err);
+      })
+      .then(res => {
+        if (!res.ok) {
+          console.error(`[V3] Failure webhook returned ${res.status}: ${res.statusText}`);
+        } else {
+          console.log(`[V3] Failure webhook succeeded for job ${jobId}`);
+        }
+        return res.text();
+      })
+      .then(body => console.log('[V3] Failure webhook response:', body))
+      .catch(err => {
+        console.error('[V3] Failure webhook network error:', err);
       });
     }
 

@@ -27,13 +27,33 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Map Cloud Run quality ratings to database values
+    const mapQualityRating = (rating: string | null): string | null => {
+      if (!rating) return null;
+      switch (rating) {
+        case 'excellent':
+        case 'good':
+          return 'rich';
+        case 'partial':
+          return 'thin';
+        case 'poor':
+        case 'failed':
+          return 'shell';
+        default:
+          return 'thin'; // fallback
+      }
+    };
+
     if (status === 'completed' && payload) {
       // Update with successful scrape results
+      const rawRating = payload.extraction?.quality?.rating || null;
+      const mappedQuality = mapQualityRating(rawRating);
+      
       const { error: updateError } = await supabase
         .from('website_scrape_results')
         .update({
           payload: payload,
-          content_quality: payload.extraction?.quality?.rating || null,
+          content_quality: mappedQuality,
           menu_source: payload.extraction?.services?.menu?.url ? 'scraped' : 'none',
           scraper_metadata: payload.scraper_metadata,
           scraped_at: new Date().toISOString()

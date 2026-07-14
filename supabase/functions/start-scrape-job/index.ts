@@ -121,37 +121,112 @@ serve(async (req) => {
     const apiKey = Deno.env.get('CLOUD_RUN_API_KEY');
 
     if (!cloudRunUrl || !apiKey) {
+      console.error('Cloud Run credentials missing:', { cloudRunUrl: !!cloudRunUrl, apiKey: !!apiKey });
       throw new Error('Cloud Run credentials not configured');
     }
 
     // Construct webhook URL
     const webhookUrl = `${supabaseUrl}/functions/v1/scrape-webhook`;
-
-    // Fire async request - don't await, don't catch errors
-    fetch(`${cloudRunUrl}/scrape-v3`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-        'X-Job-ID': job.id,
-        'X-Webhook-URL': webhookUrl,
-      },
-      body: JSON.stringify({ url }),
-    }).catch(err => {
-      // Log but don't block response
-      console.error('Cloud Run trigger failed:', err);
+    
+    console.log('Triggering Cloud Run:', {
+      url: cloudRunUrl,
+      endpoint: '/scrape-v3',
+      job_id: job.id,
+      webhook_url: webhookUrl
     });
 
-    // Return immediately
-    return new Response(
-      JSON.stringify({
-        success: true,
-        job_id: job.id,
-        status: 'processing',
-        message: 'Scraping started. Poll /check-scrape-status for completion.',
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    // Map Cloud Run quality ratings to database values
+    const mapQualityRating = (rating: string | null): string | null => {
+      if (!rating) return null;
+      switch (rating) {
+        case 'excellent':
+        case 'good':
+          return 'rich';
+        case 'partial':
+          return 'thin';
+        case 'poor':
+        case 'failed':
+          return 'shell';
+        default:
+          return 'thin';
+      }
+    };
+
+    // Trigger Cloud Run and await response
+    try {
+      const cloudRunResponse = await fetch(`${cloudRunUrl}/scrape-v3`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey,
+          'X-Job-ID': job.id,
+          'X-Webhook-URL': webhookUrl,
+        },
+        body: JSON.stringify({ url }),
+      });
+      
+      console.log('Cloud Run responded:', cloudRunResponse.status, cloudRunResponse.statusText);
+      
+      if (!cloudRunResponse.ok) {
+        throw new Error(`Cloud Run returned ${cloudRunResponse.status}`);
+      }
+
+      const payload = await cloudRunResponse.json();
+      console.log('Cloud Run payload received, updating database...');
+
+      // Update database with results
+      const rawRating = payload.extraction?.quality?.rating || null;
+      const mappedQuality = mapQualityRating(rawRating);
+      const hasMenuUrl = payload.extraction?.services?.menu?.url;
+      
+      const { error: updateError } = await supabase
+        .from('website_scrape_results')
+        .update({
+          payload: payload,
+          content_quality: mappedQuality,
+          menu_source: hasMenuUrl ? 'link' : 'none',
+          scraper_metadata: payload.scraper_metadata,
+          scraped_at: new Date().toISOString()
+        })
+        .eq('id', job.id);
+
+      if (updateError) {
+        console.error('Failed to update job with results:', updateError);
+        throw updateError;
+      }
+
+      console.log('Successfully updated job:', job.id);
+
+      // Return completed result immediately
+      return new Response(
+        JSON.stringify({
+          success: true,
+          job_id: job.id,
+          status: 'completed',
+          content_quality: mappedQuality,
+          menu_source: hasMenuUrl ? 'link' : 'none',
+          scraped_at: new Date().toISOString(),
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+
+    } catch (err) {
+      console.error('Cloud Run scraping failed:', err);
+      
+      // Update job as failed
+      await supabase
+        .from('website_scrape_results')
+        .update({
+          payload: {
+            status: 'failed',
+            error: err.message,
+            failed_at: new Date().toISOString()
+          }
+        })
+        .eq('id', job.id);
+
+      throw err;
+    }
 
   } catch (error) {
     console.error('Error in start-scrape-job:', error);
