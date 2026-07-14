@@ -225,7 +225,8 @@ export async function extractPageDocument(page) {
             // Match patterns like "Mandag 15 - 22" or "Mandag kl. 09.30 – 23.00"
             // This regex finds day names followed by time patterns
             // Supports: hours only (15-22), hours+minutes (09.30-23.00), mixed separators (til/to/-)
-            const dayPattern = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|man|tir|ons|tor|fre|lør|søn)[\s\w.]*?(\d{1,2}(?:[:.]\d{2})?\s*(?:[-–—]|til|to)\s*\d{1,2}(?:[:.]\d{2})?)/gi;
+            // Explicitly handle "kl." or "kl" prefix before times
+            const dayPattern = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|man|tir|ons|tor|fre|lør|søn)(?:\s+kl\.?)?\s*(\d{1,2}(?:[:.]\d{2})?\s*(?:[-–—]|til|to)\s*\d{1,2}(?:[:.]\d{2})?)/gi;
             const matches = [...fullText.matchAll(dayPattern)];
             
             for (const match of matches) {
