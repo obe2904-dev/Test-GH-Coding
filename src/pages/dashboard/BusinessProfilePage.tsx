@@ -1014,30 +1014,17 @@ function BusinessProfilePage() {
       const scrapeData = await response.json()
       console.log('✅ Scrape complete:', scrapeData)
 
-      const { data: scrapeRecord, error: insertError } = await sb
-        .from('website_scrape_results')
-        .insert({
-          business_id: businessId,
-          payload: scrapeData.payload || scrapeData,
-          content_quality: scrapeData.content_quality || scrapeData.payload?.extraction?.quality?.rating || 'unknown',
-          menu_source: scrapeData.menu_source || scrapeData.payload?.extraction?.services?.menu?.url ? 'link' : 'none',
-          scraper_version: 'cloud-run-v3',
-        })
-        .select()
-        .single()
-
-      if (insertError) throw insertError
-
+      // Edge function already created the database record, just use the returned data
       setScrapeResult({
-        scrape_id: scrapeRecord.id,
-        content_quality: scrapeRecord.content_quality,
-        menu_source: scrapeRecord.menu_source,
-        scraped_at: scrapeRecord.scraped_at,
+        scrape_id: scrapeData.job_id,
+        content_quality: scrapeData.content_quality || 'unknown',
+        menu_source: scrapeData.menu_source || 'none',
+        scraped_at: scrapeData.scraped_at,
         cached: false,
-        payload: scrapeData.payload || scrapeData,
+        payload: scrapeData.payload,
       })
 
-      alert(`✅ Scrape complete!\n\nQuality: ${scrapeRecord.content_quality}\nStored in: website_scrape_results table\n\n▶️ Now click "Populate" to extract with AI`)
+      alert(`✅ Scrape complete!\n\nQuality: ${scrapeData.content_quality || 'unknown'}\nStored in: website_scrape_results table\n\n▶️ Now click "Populate" to extract with AI`)
 
     } catch (error: any) {
       console.error('❌ Scrape error:', error)
