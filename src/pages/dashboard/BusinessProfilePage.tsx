@@ -1060,22 +1060,7 @@ function BusinessProfilePage() {
 
       console.log('🤖 DEBUG: Extracting with AI and saving to database...')
 
-      // Get the latest scrape from database
-      const { data: latestScrape, error: fetchError } = await sb
-        .from('website_scrape_results')
-        .select('*')
-        .eq('business_id', businessId)
-        .order('scraped_at', { ascending: false })
-        .limit(1)
-        .single()
-
-      if (fetchError || !latestScrape) {
-        throw new Error('Could not find scraped data')
-      }
-
-      console.log('📄 Using scrape ID:', latestScrape.id)
-
-      // Call edge function with existing scrape ID
+      // Call edge function with business_id (it will fetch latest scrape)
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-from-scrape`,
         {
@@ -1086,7 +1071,6 @@ function BusinessProfilePage() {
           },
           body: JSON.stringify({
             business_id: businessId,
-            scrape_id: latestScrape.id,
           }),
         }
       )
@@ -1857,9 +1841,9 @@ function BusinessProfilePage() {
               )}
 
               {/* Extract Results */}
-              {(isExtracting || extractResult?.extracted_data) && (
+              {(isExtracting || extractResult) && (
                 <div className="bg-white rounded-lg border border-pink-300 p-3 space-y-3">
-                  <h4 className="text-xs font-semibold text-pink-900">🤖 AI Extraction → Database</h4>
+                  <h4 className="text-xs font-semibold text-pink-900">🤖 Extraction Status</h4>
 
                   <div className="flex flex-wrap gap-2 text-[11px] font-medium">
                     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${extractStage === 'extracting' ? 'bg-amber-100 text-amber-800' : extractStage === 'done' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
@@ -1870,100 +1854,72 @@ function BusinessProfilePage() {
                     </span>
                   </div>
 
-                  <div className="space-y-2 rounded border border-pink-100 bg-pink-50/60 p-3">
-                    {extractionOverview.map((item) => (
-                      <div key={item.label} className="flex items-start gap-2 text-xs">
-                        <span className={`mt-0.5 font-semibold ${item.extracted ? 'text-green-600' : 'text-amber-600'}`}>
-                          {item.extracted ? '✅' : '⏳'}
-                        </span>
-                        <div className="min-w-0">
-                          <div className="font-medium text-gray-900">
-                            <code className="bg-white px-1 rounded">{item.label}</code> → <code className="bg-white px-1 rounded">{item.target}</code>
+                  {extractResult?.extraction && (
+                    <div className="space-y-3">
+                      {/* Successfully saved */}
+                      {extractResult.extraction.saved.length > 0 && (
+                        <div className="rounded border border-green-200 bg-green-50/60 p-3">
+                          <div className="text-xs font-semibold text-green-900 mb-2">✅ Gemt til database</div>
+                          <div className="space-y-1">
+                            {extractResult.extraction.saved.map((field: string) => (
+                              <div key={field} className="flex items-center gap-2 text-xs">
+                                <span className="text-green-600">✅</span>
+                                <code className="bg-white px-1 rounded">{field}</code>
+                                {field === 'email' && extractResult.data?.email && (
+                                  <span className="text-gray-600">→ {extractResult.data.email}</span>
+                                )}
+                              </div>
+                            ))}
                           </div>
-                          <div className="mt-1 flex flex-wrap gap-2">
-                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${item.extracted ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
-                              {item.extracted ? '✅' : '⏳'} Extracted
-                            </span>
-                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${item.saved ? 'bg-green-100 text-green-800' : extractStage === 'error' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
-                              {item.saved ? '✅' : extractStage === 'error' ? '⚠️' : '•'} Saved
-                            </span>
-                          </div>
-                          <div className="text-gray-600 mt-1">{item.detail}</div>
                         </div>
-                      </div>
-                    ))}
+                      )}
 
-                    <div className="border-t border-pink-200 pt-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide text-pink-900">Services saved to business_operations</div>
-                      <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
-                        {serviceMappings.map((service) => {
-                          const isEnabled = extractionData.services?.[service.key] === true
-                          return (
-                            <div key={service.key} className="flex items-center gap-2 text-xs text-gray-700">
-                              <span className={isEnabled ? 'text-green-600' : 'text-amber-600'}>{isEnabled ? '✅' : '⏳'}</span>
-                              <span>
-                                <code className="bg-white px-1 rounded">{service.key}</code> {isEnabled ? 'saved' : 'not set'}
-                                <span className="text-gray-500"> · {service.label}</span>
-                              </span>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </div>
+                      {/* Not found */}
+                      {extractResult.extraction.not_found.length > 0 && (
+                        <div className="rounded border border-amber-200 bg-amber-50/60 p-3">
+                          <div className="text-xs font-semibold text-amber-900 mb-2">⚠️ Dette kunne jeg desværre ikke finde</div>
+                          <div className="space-y-1">
+                            {extractResult.extraction.not_found.map((field: string) => (
+                              <div key={field} className="flex items-center gap-2 text-xs">
+                                <span className="text-amber-600">❌</span>
+                                <code className="bg-white px-1 rounded">{field}</code>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
-                  {/* Brand Content */}
-                  {extractResult.extracted_data.about && (
-                    <div className="space-y-1">
-                      <span className="text-xs font-medium text-gray-600">About Text:</span>
-                      <p className="text-xs text-gray-900 bg-gray-50 p-2 rounded">{extractResult.extracted_data.about}</p>
-                    </div>
-                  )}
-
-                  {extractResult.extracted_data.description && (
-                    <div className="space-y-1">
-                      <span className="text-xs font-medium text-gray-600">Description:</span>
-                      <p className="text-xs text-gray-900">{extractResult.extracted_data.description}</p>
+                      {/* Errors */}
+                      {extractResult.extraction.errors.length > 0 && (
+                        <div className="rounded border border-red-200 bg-red-50/60 p-3">
+                          <div className="text-xs font-semibold text-red-900 mb-2">❌ Fejl ved gemning</div>
+                          <div className="space-y-1">
+                            {extractResult.extraction.errors.map((error: string, idx: number) => (
+                              <div key={idx} className="text-xs text-red-700">
+                                {error}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* Services (visible in profile UI checkboxes) */}
-                  {extractResult.extracted_data.services && (
-                    <div className="space-y-1">
-                      <span className="text-xs font-medium text-gray-600">Tjenester opdaget:</span>
-                      <div className="flex flex-wrap gap-1">
-                        {Object.entries(extractResult.extracted_data.services)
-                          .filter(([_, value]) => value === true)
-                          .map(([key, _]) => (
-                            <span key={key} className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs">
-                              {key.replace('has_', '').replace('_', ' ')}
-                            </span>
-                          ))}
-                      </div>
-                    </div>
-                  )}
+                  <button
+                    onClick={() => setShowRawExtractData(!showRawExtractData)}
+                    className="text-xs text-pink-600 hover:underline"
+                  >
+                    {showRawExtractData ? '▼ Hide' : '▶ Show'} Debug Data
+                  </button>
 
-                  {/* Verification Status */}
-                  {extractResult.extracted_data.verified_fields && (
-                    <div className="space-y-1">
-                      <span className="text-xs font-medium text-gray-600">Verifikation:</span>
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        {extractResult.extracted_data.verified_fields.address_verified && (
-                          <span className="text-green-700">✓ Adresse</span>
-                        )}
-                        {extractResult.extracted_data.verified_fields.hours_verified && (
-                          <span className="text-green-700">✓ Åbningstider</span>
-                        )}
-                        {extractResult.extracted_data.verified_fields.kitchen_close_verified && (
-                          <span className="text-green-700">✓ Køkken lukketid</span>
-                        )}
-                      </div>
-                    </div>
+                  {showRawExtractData && extractResult && (
+                    <pre className="bg-gray-50 p-2 rounded text-xs overflow-auto max-h-60 border border-gray-200">
+                      {JSON.stringify(extractResult, null, 2)}
+                    </pre>
                   )}
+                </div>
+              )}
 
-                  {/* Confidence */}
-                  {extractResult.extracted_data.confidence_score !== undefined && (
-                    <div className="pt-2 border-t border-gray-200">
                       <span className="text-xs text-gray-600">
                         Confidence: <span className="font-semibold text-gray-900">{(extractResult.extracted_data.confidence_score * 100).toFixed(0)}%</span>
                       </span>
