@@ -1844,6 +1844,65 @@ function BusinessProfilePage() {
                     </div>
                   )}
 
+                  {/* Extracted Values Display */}
+                  {extractResult?.debug_extracted_values && (
+                    <div className="bg-blue-50 rounded-lg border border-blue-200 p-3 space-y-2">
+                      <h4 className="text-xs font-semibold text-blue-900">📦 Extracted Values (What AI Found)</h4>
+                      
+                      {Object.keys(extractResult.debug_extracted_values.locations || {}).length > 0 && (
+                        <div className="bg-white rounded p-2">
+                          <div className="text-[11px] font-semibold text-gray-700 mb-1">📍 Contact/Location:</div>
+                          <div className="space-y-1 text-xs">
+                            {Object.entries(extractResult.debug_extracted_values.locations).map(([key, value]: [string, any]) => (
+                              <div key={key} className="flex gap-2">
+                                <code className="text-purple-600">{key}:</code>
+                                <span className="text-gray-900">{String(value)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {Object.keys(extractResult.debug_extracted_values.operations || {}).length > 0 && (
+                        <div className="bg-white rounded p-2">
+                          <div className="text-[11px] font-semibold text-gray-700 mb-1">🔧 Operations:</div>
+                          <div className="space-y-1 text-xs">
+                            {Object.entries(extractResult.debug_extracted_values.operations).map(([key, value]: [string, any]) => (
+                              <div key={key} className="flex gap-2">
+                                <code className="text-purple-600">{key}:</code>
+                                <span className="text-gray-900">{typeof value === 'boolean' ? (value ? '✅ Yes' : '❌ No') : String(value)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {Object.keys(extractResult.debug_extracted_values.profile || {}).length > 0 && (
+                        <div className="bg-white rounded p-2">
+                          <div className="text-[11px] font-semibold text-gray-700 mb-1">✨ Profile (AI Text):</div>
+                          <div className="space-y-1 text-xs">
+                            {Object.entries(extractResult.debug_extracted_values.profile).map(([key, value]: [string, any]) => (
+                              <div key={key} className="flex flex-col gap-1">
+                                <code className="text-purple-600">{key}:</code>
+                                <div className="text-gray-900 bg-gray-50 p-1 rounded max-h-20 overflow-auto">
+                                  {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {extractResult.debug_extracted_values.opening_hours_count > 0 && (
+                        <div className="bg-white rounded p-2">
+                          <div className="text-[11px] font-semibold text-gray-700">
+                            🕐 Opening Hours: {extractResult.debug_extracted_values.opening_hours_count} open days
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <button
                     onClick={() => setShowRawExtractData(!showRawExtractData)}
                     className="text-xs text-pink-600 hover:underline"

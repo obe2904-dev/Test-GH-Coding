@@ -143,6 +143,12 @@ serve(async (req) => {
       ai_used:    aiAllowed,
       quality:    qualityRating,
       extraction: summary,
+      debug_extracted_values: {
+        locations: filterNulls(businessLocations),
+        operations: filterNulls(businessOperations),
+        profile: filterNulls(businessProfile),
+        opening_hours_count: openingHoursRows.filter(r => !r.closed).length,
+      },
     });
 
   } catch (error) {
