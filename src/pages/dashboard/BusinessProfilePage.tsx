@@ -456,6 +456,8 @@ function BusinessProfilePage() {
           .select('*')
           .eq('business_id', businessToUse.id)
 
+        console.log('🕐 DEBUG: Opening hours from DB:', hoursData)
+
         // Load service model from business_operations table
         const { data: operationsData } = await sb
           .from('business_operations')
@@ -478,6 +480,7 @@ function BusinessProfilePage() {
 
           hoursData.forEach((dayData: any) => {
             const dayKey = dayMap[dayData.weekday]
+            console.log('🕐 DEBUG: Processing day:', { weekday: dayData.weekday, dayKey, open_time: dayData.open_time, close_time: dayData.close_time })
             if (dayKey) {
               const hasHours = !!dayData.open_time && !!dayData.close_time
               schedule[dayKey] = {
