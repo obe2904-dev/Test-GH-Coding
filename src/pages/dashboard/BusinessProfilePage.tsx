@@ -1743,6 +1743,21 @@ function BusinessProfilePage() {
                     <span>{isScraping ? 'Analyserer...' : '🚀 Unified: Scrape + AI + Save'}</span>
                   </button>
 
+                  <button
+                    onClick={handleExtractAndSave}
+                    disabled={!scrapeResult || isExtracting}
+                    className={`inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-medium transition-all
+                      ${isExtracting
+                        ? 'bg-emerald-600 text-white opacity-75 cursor-wait'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
+                      }`}
+                  >
+                    <svg className={`w-5 h-5 ${isExtracting ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 12h16m-7-7l7 7-7 7" />
+                    </svg>
+                    <span>{isExtracting ? 'Populerer...' : 'Populate'}</span>
+                  </button>
+
                   {scrapeResult && (
                     <div className="text-xs space-y-1">
                       <div className="text-purple-700 font-medium">
