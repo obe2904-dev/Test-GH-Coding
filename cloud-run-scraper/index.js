@@ -549,69 +549,106 @@ app.post('/scrape-v3', async (req, res) => {
   }
 });
 
+const DAY_ORDER_DANISH = [
+  'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag', 'Søndag'
+];
+
 /**
- * Process structured opening hours from page document
- * @param {object} pageDoc - Page document with opening_hours_structured
- * @returns {Promise<object>} { value: string | null, candidates: array }
+ * Extract and merge opening hours from both structured DOM and text patterns.
+ *
+ * Strategy:
+ *   1. Run text-pattern extraction across all page blocks (handles range
+ *      patterns like "Mandag - Torsdag 11.30 - 23.30").
+ *   2. Run structured DOM extraction (handles explicit day/time table rows).
+ *   3. Merge: structured DOM wins per day, text-pattern fills any gaps.
+ *
+ * This always runs both passes — never short-circuits — so range patterns
+ * are never missed because structured DOM returned a partial result.
  */
-async function processOpeningHours(pageDoc) {
-  // ── Tier 1: Structured DOM (highest confidence) ──────────────────────────
-  const structuredPairs = pageDoc.opening_hours_structured || [];
+function processOpeningHours(pageDoc) {
+  const merged = new Map();
 
-  if (structuredPairs.length >= 2) {
-    // Normalise time separators to HH:MM - HH:MM for consistency
-    const normalisedPairs = structuredPairs.map(pair => ({
-      day_text:  pair.day_text,
-      time_text: normaliseTimeText(pair.time_text),
-    }));
-
-    const lines = normalisedPairs.map(p => `${p.day_text}: ${p.time_text}`);
-    return {
-      value:       lines.join('; '),
-      candidates:  normalisedPairs,
-      confidence:  0.92,
-      source_url:  pageDoc.final_url,
-      source_type: 'structured_dom',
-    };
-  }
-
-  // ── Tier 2: Text-pattern fallback ────────────────────────────────────────
-  // Gather all text content from blocks and run pattern extraction
+  // ── Pass 1: Text-pattern (lower priority, fills gaps) ────────────────────
   const allText = (pageDoc.blocks || [])
     .map(b => b.text || '')
     .join('\n');
 
   const textCandidates = extractOpeningHoursFromText(allText);
 
-  if (textCandidates.length > 0) {
-    const lines = textCandidates.map(p => `${p.day_text}: ${p.time_text}`);
-    console.log(`[V3] Opening hours: text-pattern fallback found ${textCandidates.length} days`);
-    return {
-      value:       lines.join('; '),
-      candidates:  textCandidates,
-      confidence:  0.75,
-      source_url:  pageDoc.final_url,
+  for (const c of textCandidates) {
+    merged.set(c.day_text, {
+      day_text:    c.day_text,
+      time_text:   c.time_text,  // already normalised by extractOpeningHoursFromText
       source_type: 'text_pattern',
+    });
+  }
+
+  // ── Pass 2: Structured DOM (higher priority, overwrites per day) ──────────
+  const structuredPairs = pageDoc.opening_hours_structured || [];
+
+  for (const c of structuredPairs) {
+    merged.set(c.day_text, {
+      day_text:    c.day_text,
+      time_text:   normaliseTimeText(c.time_text),
+      source_type: 'structured_dom',
+    });
+  }
+
+  // ── Build final candidates in day order ───────────────────────────────────
+  const finalCandidates = DAY_ORDER_DANISH
+    .filter(d => merged.has(d))
+    .map(d => merged.get(d));
+
+  if (finalCandidates.length === 0) {
+    console.log('[V3] Opening hours: no candidates found');
+    return {
+      value:       null,
+      candidates:  [],
+      confidence:  0,
+      source_url:  pageDoc.final_url,
+      source_type: 'none',
     };
   }
 
-  // ── No hours found ────────────────────────────────────────────────────────
-  console.log('[V3] Opening hours: no candidates found in structured DOM or text patterns');
-  return { value: null, candidates: [], confidence: 0, source_url: pageDoc.final_url };
+  const hasTextPattern   = finalCandidates.some(c => c.source_type === 'text_pattern');
+  const hasStructuredDom = finalCandidates.some(c => c.source_type === 'structured_dom');
+
+  const sourceType = hasStructuredDom && hasTextPattern
+    ? 'merged'
+    : hasStructuredDom
+      ? 'structured_dom'
+      : 'text_pattern';
+
+  const confidence = hasStructuredDom ? 0.92 : 0.78;
+
+  const lines = finalCandidates.map(p => `${p.day_text}: ${p.time_text}`);
+
+  console.log(
+    `[V3] Opening hours: ${finalCandidates.length} days (${sourceType}),`,
+    `text=${textCandidates.length}, structured=${structuredPairs.length}`
+  );
+
+  return {
+    value:       lines.join('; '),
+    candidates:  finalCandidates,
+    confidence,
+    source_url:  pageDoc.final_url,
+    source_type: sourceType,
+  };
 }
 
 /**
- * Normalise a time range string from structured DOM to "HH:MM - HH:MM".
- * Handles dot separators and missing minutes.
+ * Normalise a time range string to "HH:MM - HH:MM".
+ * Only converts dot separators to colons — does not add seconds.
  * e.g. "11.30 - 23.30" → "11:30 - 23:30"
- *      "17 - 23"        → "17:00 - 23:00"
+ *      "11:30 - 23:30" → unchanged
+ *      "Lukket"        → unchanged
  */
 function normaliseTimeText(raw) {
   if (!raw || raw === 'Lukket') return raw;
-  return raw.replace(/(\d{1,2})[.:]?(\d{2})/g, (_, h, m) =>
+  // Convert dot-separated times only: 11.30 → 11:30
+  return raw.replace(/(\d{1,2})\.(\d{2})/g, (_, h, m) =>
     `${h.padStart(2, '0')}:${m}`
-  ).replace(/\b(\d{1,2})\b(?!\s*[:.]\s*\d)/g, (_, h) =>
-    `${h.padStart(2, '0')}:00`
   );
 }
 
