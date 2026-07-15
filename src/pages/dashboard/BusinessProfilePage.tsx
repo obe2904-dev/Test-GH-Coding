@@ -1557,6 +1557,70 @@ function BusinessProfilePage() {
     setHasUnsavedChanges(false)
   }
 
+  const extractionData = extractResult?.extracted_data
+  const serviceMappings = [
+    { label: 'Bordservice', key: 'has_table_service' },
+    { label: 'Takeaway', key: 'has_takeaway' },
+    { label: 'Levering', key: 'has_delivery' },
+    { label: 'Udeservering', key: 'has_outdoor_seating' },
+    { label: 'Wi-Fi', key: 'has_wifi' },
+    { label: 'Stikkontakter', key: 'has_power_outlets' },
+    { label: 'Parkering', key: 'has_parking' },
+    { label: 'Reservation påkrævet', key: 'reservation_required' },
+    { label: 'Børnemenu', key: 'has_kids_menu' },
+  ]
+
+  const extractionOverview = extractionData
+    ? [
+        {
+          label: 'about',
+          target: 'business_profile.user_about_text',
+          success: Boolean(extractionData.about),
+          detail: extractionData.about ? 'Brand story ready' : 'No about text extracted',
+        },
+        {
+          label: 'keywords[]',
+          target: 'business_profile.keywords',
+          success: Array.isArray(extractionData.keywords) && extractionData.keywords.length > 0,
+          detail: Array.isArray(extractionData.keywords)
+            ? `${extractionData.keywords.length} keywords saved`
+            : 'No keywords extracted',
+        },
+        {
+          label: 'venue_hooks[]',
+          target: 'business_profile.key_offerings (as TEXT)',
+          success: Array.isArray(extractionData.venue_hooks) && extractionData.venue_hooks.length > 0,
+          detail: Array.isArray(extractionData.venue_hooks)
+            ? `${extractionData.venue_hooks.length} hooks saved as text`
+            : 'No venue hooks extracted',
+        },
+        {
+          label: 'tone_of_voice',
+          target: 'business_brand_profile.tone_of_voice',
+          success: Boolean(extractionData.tone_of_voice),
+          detail: extractionData.tone_of_voice ? String(extractionData.tone_of_voice) : 'No tone detected',
+        },
+        {
+          label: 'menu_highlights[]',
+          target: 'business_profile.menu_signal',
+          success: Array.isArray(menuHighlights) && menuHighlights.length > 0,
+          detail: Array.isArray(menuHighlights) && menuHighlights.length > 0
+            ? `${menuHighlights.length} menu highlights available in profile`
+            : 'No menu highlights available',
+        },
+        {
+          label: 'services',
+          target: 'business_operations.*',
+          success:
+            Boolean(extractionData.services) &&
+            Object.values(extractionData.services).some((value) => value === true),
+          detail: Boolean(extractionData.services)
+            ? 'Service flags mapped to business_operations'
+            : 'No service flags extracted',
+        },
+      ]
+    : []
+
   // Show business selector if multiple businesses detected
   if (showBusinessSelector && allBusinesses.length > 1) {
     return (
@@ -1807,6 +1871,40 @@ function BusinessProfilePage() {
               {extractResult?.extracted_data && (
                 <div className="bg-white rounded-lg border border-pink-300 p-3 space-y-3">
                   <h4 className="text-xs font-semibold text-pink-900">🤖 AI Extraction → Database</h4>
+
+                  <div className="space-y-2 rounded border border-pink-100 bg-pink-50/60 p-3">
+                    {extractionOverview.map((item) => (
+                      <div key={item.label} className="flex items-start gap-2 text-xs">
+                        <span className={`mt-0.5 font-semibold ${item.success ? 'text-green-600' : 'text-amber-600'}`}>
+                          {item.success ? '✅' : '⏳'}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900">
+                            <code className="bg-white px-1 rounded">{item.label}</code> → <code className="bg-white px-1 rounded">{item.target}</code>
+                          </div>
+                          <div className="text-gray-600">{item.detail}</div>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="border-t border-pink-200 pt-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-pink-900">Services saved to business_operations</div>
+                      <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
+                        {serviceMappings.map((service) => {
+                          const isEnabled = extractionData.services?.[service.key] === true
+                          return (
+                            <div key={service.key} className="flex items-center gap-2 text-xs text-gray-700">
+                              <span className={isEnabled ? 'text-green-600' : 'text-amber-600'}>{isEnabled ? '✅' : '⏳'}</span>
+                              <span>
+                                <code className="bg-white px-1 rounded">{service.key}</code> {isEnabled ? 'saved' : 'not set'}
+                                <span className="text-gray-500"> · {service.label}</span>
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Brand Content */}
                   {extractResult.extracted_data.about && (
