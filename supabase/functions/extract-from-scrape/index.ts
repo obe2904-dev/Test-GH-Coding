@@ -13,7 +13,7 @@ const corsHeaders = {
 };
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-const GEMINI_MODEL = 'gemini-2.0-flash-exp';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const EXTRACTION_PROMPT_VERSION = 'v2';
 
 interface ExtractionRequest {
