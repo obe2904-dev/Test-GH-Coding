@@ -102,6 +102,7 @@ function BusinessProfilePage() {
   // Web scraping state
   const [isScraping, setIsScraping] = useState(false)
   const [isExtracting, setIsExtracting] = useState(false)
+  const [extractStage, setExtractStage] = useState<'idle' | 'extracting' | 'saving' | 'done' | 'error'>('idle')
   const [scrapeResult, setScrapeResult] = useState<any>(null)
   const [extractResult, setExtractResult] = useState<any>(null)
   const [scrapeError, setScrapeError] = useState<string | null>(null)
@@ -1045,6 +1046,7 @@ function BusinessProfilePage() {
     }
 
     setIsExtracting(true)
+    setExtractStage('extracting')
     setExtractError(null)
     setExtractResult(null)
 
@@ -1097,33 +1099,14 @@ function BusinessProfilePage() {
       const result = await response.json()
       console.log('✅ AI extraction complete:', result)
 
+      setExtractStage('saving')
       setExtractResult(result)
-
-      let message = `✅ AI Extraction Complete!\n\n`
-      message += `📊 Extracted Data:\n`
-      message += `• About: ${result.extracted_data?.about ? '✅' : '❌'}\n`
-      message += `• Keywords: ${result.extracted_data?.keywords?.length || 0} found\n`
-      message += `• Tone: ${result.extracted_data?.tone_of_voice || '❌'}\n`
-      message += `• Key Offerings: ${result.extracted_data?.venue_hooks?.length || 0} found\n`
-      message += `• Confidence: ${((result.extracted_data?.confidence_score || 0) * 100).toFixed(0)}%\n\n`
-      
-      if (result.extracted_data?.error) {
-        message += `⚠️ Error: ${result.extracted_data.error}\n\n`
-      }
-
-      message += `💾 Saved to:\n`
-      message += `• business_profile.user_about_text\n`
-      message += `• business_profile.keywords\n`
-      message += `• business_profile.key_offerings\n`
-      message += `• business_brand_profile.tone_of_voice\n\n`
-      message += `🔄 Reload page to see updates`
-
-      alert(message)
+      setExtractStage('done')
 
     } catch (error: any) {
       console.error('❌ Extract error:', error)
       setExtractError(error.message || 'AI extraction fejlede')
-      alert(`AI extraction fejlede: ${error.message}`)
+      setExtractStage('error')
     } finally {
       setIsExtracting(false)
     }
@@ -1575,13 +1558,15 @@ function BusinessProfilePage() {
         {
           label: 'about',
           target: 'business_profile.user_about_text',
-          success: Boolean(extractionData.about),
+          extracted: Boolean(extractionData.about),
+          saved: Boolean(extractResult?.success && extractionData.about),
           detail: extractionData.about ? 'Brand story ready' : 'No about text extracted',
         },
         {
           label: 'keywords[]',
           target: 'business_profile.keywords',
-          success: Array.isArray(extractionData.keywords) && extractionData.keywords.length > 0,
+          extracted: Array.isArray(extractionData.keywords) && extractionData.keywords.length > 0,
+          saved: Boolean(extractResult?.success && Array.isArray(extractionData.keywords) && extractionData.keywords.length > 0),
           detail: Array.isArray(extractionData.keywords)
             ? `${extractionData.keywords.length} keywords saved`
             : 'No keywords extracted',
@@ -1589,7 +1574,8 @@ function BusinessProfilePage() {
         {
           label: 'venue_hooks[]',
           target: 'business_profile.key_offerings (as TEXT)',
-          success: Array.isArray(extractionData.venue_hooks) && extractionData.venue_hooks.length > 0,
+          extracted: Array.isArray(extractionData.venue_hooks) && extractionData.venue_hooks.length > 0,
+          saved: Boolean(extractResult?.success && Array.isArray(extractionData.venue_hooks) && extractionData.venue_hooks.length > 0),
           detail: Array.isArray(extractionData.venue_hooks)
             ? `${extractionData.venue_hooks.length} hooks saved as text`
             : 'No venue hooks extracted',
@@ -1597,13 +1583,15 @@ function BusinessProfilePage() {
         {
           label: 'tone_of_voice',
           target: 'business_brand_profile.tone_of_voice',
-          success: Boolean(extractionData.tone_of_voice),
+          extracted: Boolean(extractionData.tone_of_voice),
+          saved: Boolean(extractResult?.success && extractionData.tone_of_voice),
           detail: extractionData.tone_of_voice ? String(extractionData.tone_of_voice) : 'No tone detected',
         },
         {
           label: 'menu_highlights[]',
           target: 'business_profile.menu_signal',
-          success: Array.isArray(menuHighlights) && menuHighlights.length > 0,
+          extracted: Array.isArray(menuHighlights) && menuHighlights.length > 0,
+          saved: Boolean(extractResult?.success && Array.isArray(menuHighlights) && menuHighlights.length > 0),
           detail: Array.isArray(menuHighlights) && menuHighlights.length > 0
             ? `${menuHighlights.length} menu highlights available in profile`
             : 'No menu highlights available',
@@ -1611,9 +1599,10 @@ function BusinessProfilePage() {
         {
           label: 'services',
           target: 'business_operations.*',
-          success:
+          extracted:
             Boolean(extractionData.services) &&
             Object.values(extractionData.services).some((value) => value === true),
+          saved: Boolean(extractResult?.success && extractionData.services && Object.values(extractionData.services).some((value) => value === true)),
           detail: Boolean(extractionData.services)
             ? 'Service flags mapped to business_operations'
             : 'No service flags extracted',
@@ -1868,21 +1857,38 @@ function BusinessProfilePage() {
               )}
 
               {/* Extract Results */}
-              {extractResult?.extracted_data && (
+              {(isExtracting || extractResult?.extracted_data) && (
                 <div className="bg-white rounded-lg border border-pink-300 p-3 space-y-3">
                   <h4 className="text-xs font-semibold text-pink-900">🤖 AI Extraction → Database</h4>
+
+                  <div className="flex flex-wrap gap-2 text-[11px] font-medium">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${extractStage === 'extracting' ? 'bg-amber-100 text-amber-800' : extractStage === 'done' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                      {extractStage === 'extracting' ? '⏳' : extractStage === 'done' ? '✅' : '•'} Extracting
+                    </span>
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ${extractStage === 'saving' || extractStage === 'done' ? 'bg-green-100 text-green-800' : extractStage === 'extracting' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}`}>
+                      {extractStage === 'saving' || extractStage === 'done' ? '✅' : extractStage === 'extracting' ? '⏳' : '•'} Saved
+                    </span>
+                  </div>
 
                   <div className="space-y-2 rounded border border-pink-100 bg-pink-50/60 p-3">
                     {extractionOverview.map((item) => (
                       <div key={item.label} className="flex items-start gap-2 text-xs">
-                        <span className={`mt-0.5 font-semibold ${item.success ? 'text-green-600' : 'text-amber-600'}`}>
-                          {item.success ? '✅' : '⏳'}
+                        <span className={`mt-0.5 font-semibold ${item.extracted ? 'text-green-600' : 'text-amber-600'}`}>
+                          {item.extracted ? '✅' : '⏳'}
                         </span>
                         <div className="min-w-0">
                           <div className="font-medium text-gray-900">
                             <code className="bg-white px-1 rounded">{item.label}</code> → <code className="bg-white px-1 rounded">{item.target}</code>
                           </div>
-                          <div className="text-gray-600">{item.detail}</div>
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${item.extracted ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
+                              {item.extracted ? '✅' : '⏳'} Extracted
+                            </span>
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${item.saved ? 'bg-green-100 text-green-800' : extractStage === 'error' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>
+                              {item.saved ? '✅' : extractStage === 'error' ? '⚠️' : '•'} Saved
+                            </span>
+                          </div>
+                          <div className="text-gray-600 mt-1">{item.detail}</div>
                         </div>
                       </div>
                     ))}
