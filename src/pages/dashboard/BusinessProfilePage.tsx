@@ -1919,27 +1919,6 @@ function BusinessProfilePage() {
                   )}
                 </div>
               )}
-
-                      <span className="text-xs text-gray-600">
-                        Confidence: <span className="font-semibold text-gray-900">{(extractResult.extracted_data.confidence_score * 100).toFixed(0)}%</span>
-                      </span>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => setShowRawExtractData(!showRawExtractData)}
-                    className="text-xs text-pink-600 hover:underline"
-                  >
-                    {showRawExtractData ? '▼ Hide' : '▶ Show'} Debug Data
-                  </button>
-
-                  {showRawExtractData && (
-                    <pre className="bg-gray-50 p-2 rounded text-xs overflow-auto max-h-60 border border-gray-200">
-                      {JSON.stringify(extractResult.extracted_data, null, 2)}
-                    </pre>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
