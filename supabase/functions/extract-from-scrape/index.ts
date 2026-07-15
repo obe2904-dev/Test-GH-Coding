@@ -610,9 +610,13 @@ function resolveDanishDay(raw: string): typeof WEEKDAYS[number] | null {
  * The scraper now always outputs this normalised format.
  */
 function parseTimeRange(text: string): { open: string; close: string } | null {
-  // Match HH:MM - HH:MM  (scraper output format after update)
-  const match = text.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+  // Normalize dots to colons (e.g., "11.30 - 23.30" → "11:30 - 23:30")
+  const normalized = text.replace(/(\d{2})\.(\d{2})/g, '$1:$2');
+  
+  // Match HH:MM - HH:MM format
+  const match = normalized.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
   if (!match) return null;
+  
   return {
     open:  `${match[1]}:00`,
     close: `${match[2]}:00`,
