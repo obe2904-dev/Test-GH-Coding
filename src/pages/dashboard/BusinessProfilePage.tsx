@@ -987,15 +987,25 @@ function BusinessProfilePage() {
     try {
       console.log('🕷️ DEBUG: Scraping only (no AI)...')
 
-      // Call Cloud Run scraper directly
-      const response = await fetch('https://scraper-831683741713.europe-west1.run.app', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': 'wPoMQTeyMW6zZ60oeRq9QGxZ2R/LHVj4diP7OD54KYo=',
-        },
-        body: JSON.stringify({ url }),
-      })
+      const { data: { session } } = await sb.auth.getSession()
+      const authToken = session?.access_token
+
+      if (!authToken || !businessId) {
+        throw new Error('Not authenticated or no business selected')
+      }
+
+      // Call the server-side scrape job function to avoid browser CORS issues
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-scrape-job`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url, force_refresh: true }),
+        }
+      )
 
       if (!response.ok) {
         throw new Error(`Scraper HTTP ${response.status}`)
@@ -1004,19 +1014,13 @@ function BusinessProfilePage() {
       const scrapeData = await response.json()
       console.log('✅ Scrape complete:', scrapeData)
 
-      // Store in website_scrape_results table
-      const { data: { session } } = await sb.auth.getSession()
-      if (!session || !businessId) {
-        throw new Error('Not authenticated or no business selected')
-      }
-
       const { data: scrapeRecord, error: insertError } = await sb
         .from('website_scrape_results')
         .insert({
           business_id: businessId,
-          payload: scrapeData,
-          content_quality: scrapeData.extraction?.quality?.rating || 'unknown',
-          menu_source: scrapeData.extraction?.services?.menu?.url ? 'link' : 'none',
+          payload: scrapeData.payload || scrapeData,
+          content_quality: scrapeData.content_quality || scrapeData.payload?.extraction?.quality?.rating || 'unknown',
+          menu_source: scrapeData.menu_source || scrapeData.payload?.extraction?.services?.menu?.url ? 'link' : 'none',
           scraper_version: 'cloud-run-v3',
         })
         .select()
@@ -1030,10 +1034,10 @@ function BusinessProfilePage() {
         menu_source: scrapeRecord.menu_source,
         scraped_at: scrapeRecord.scraped_at,
         cached: false,
-        payload: scrapeData,
+        payload: scrapeData.payload || scrapeData,
       })
 
-      alert(`✅ Scrape complete!\n\nQuality: ${scrapeRecord.content_quality}\nStored in: website_scrape_results table\n\n▶️ Now click "Step 2" to extract with AI`)
+      alert(`✅ Scrape complete!\n\nQuality: ${scrapeRecord.content_quality}\nStored in: website_scrape_results table\n\n▶️ Now click "Populate" to extract with AI`)
 
     } catch (error: any) {
       console.error('❌ Scrape error:', error)
