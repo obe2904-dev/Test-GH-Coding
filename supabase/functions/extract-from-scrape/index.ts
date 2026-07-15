@@ -85,9 +85,21 @@ serve(async (req) => {
     }
 
     // ── Content quality gate ─────────────────────────────────────────────────
-    const qualityRating  = payload.quality?.rating ?? 'unknown';
-    const textCharCount  = payload.quality?.business_text_characters ?? 0;
+    const qualityRating  = payload.quality?.rating          
+                        ?? payload.extraction?.quality?.rating  
+                        ?? 'unknown';
+    const textCharCount  = payload.quality?.business_text_characters
+                        ?? payload.extraction?.quality?.business_text_characters
+                        ?? 0;
     const aiAllowed      = qualityRating !== 'poor' && textCharCount >= MIN_TEXT_CHARS_FOR_AI;
+
+    console.log('🔍 Quality check:', {
+      root_quality:         payload.quality,
+      nested_quality:       payload.extraction?.quality,
+      qualityRating_used:   qualityRating,
+      textCharCount_used:   textCharCount,
+      aiAllowed:            aiAllowed,
+    });
 
     console.log('✅ Payload received:', {
       scrape_id:    scrapeResult.id,
