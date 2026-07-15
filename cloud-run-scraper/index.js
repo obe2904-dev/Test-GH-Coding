@@ -9,7 +9,7 @@ import {
   autoScroll,
   waitForContentStability
 } from './services/browser-helpers.js';
-import { extractPageDocument } from './services/dom-extractor.js';
+import { extractPageDocument, extractOpeningHoursFromText } from './services/dom-extractor.js';
 import { normalizeLinks, classifyLinks } from './services/link-classifier.js';
 import { extractContact } from './services/contact-extractor.js';
 import { calculateQuality, shouldContinueCrawling } from './services/quality-calculator.js';
@@ -363,7 +363,7 @@ app.post('/scrape-v3', async (req, res) => {
     const normalizedLinks = normalizeLinks(homepageDoc.links);
     const { classified: services } = classifyLinks(normalizedLinks);
     const contact = extractContact(homepageDoc);
-    const opening_hours = processOpeningHours(homepageDoc);
+    const opening_hours = await processOpeningHours(homepageDoc);
 
     // Build initial extraction
     let extraction = {
@@ -409,7 +409,7 @@ app.post('/scrape-v3', async (req, res) => {
           const pageNormalizedLinks = normalizeLinks(pageDoc.links);
           const { classified: pageServices } = classifyLinks(pageNormalizedLinks);
           const pageContact = extractContact(pageDoc);
-          const pageOpeningHours = processOpeningHours(pageDoc);
+          const pageOpeningHours = await processOpeningHours(pageDoc);
 
           const pageExtraction = {
             meta: {
@@ -552,26 +552,67 @@ app.post('/scrape-v3', async (req, res) => {
 /**
  * Process structured opening hours from page document
  * @param {object} pageDoc - Page document with opening_hours_structured
- * @returns {object} { value: string | null, candidates: array }
+ * @returns {Promise<object>} { value: string | null, candidates: array }
  */
-function processOpeningHours(pageDoc) {
-  if (!pageDoc.opening_hours_structured || pageDoc.opening_hours_structured.length === 0) {
-    return { value: null, candidates: [] };
+async function processOpeningHours(pageDoc) {
+  // ── Tier 1: Structured DOM (highest confidence) ──────────────────────────
+  const structuredPairs = pageDoc.opening_hours_structured || [];
+
+  if (structuredPairs.length >= 2) {
+    // Normalise time separators to HH:MM - HH:MM for consistency
+    const normalisedPairs = structuredPairs.map(pair => ({
+      day_text:  pair.day_text,
+      time_text: normaliseTimeText(pair.time_text),
+    }));
+
+    const lines = normalisedPairs.map(p => `${p.day_text}: ${p.time_text}`);
+    return {
+      value:       lines.join('; '),
+      candidates:  normalisedPairs,
+      confidence:  0.92,
+      source_url:  pageDoc.final_url,
+      source_type: 'structured_dom',
+    };
   }
 
-  const pairs = pageDoc.opening_hours_structured;
-  
-  // Format as readable text
-  const lines = pairs.map(pair => `${pair.day_text}: ${pair.time_text}`);
-  const formattedText = lines.join('; ');
+  // ── Tier 2: Text-pattern fallback ────────────────────────────────────────
+  // Gather all text content from blocks and run pattern extraction
+  const allText = (pageDoc.blocks || [])
+    .map(b => b.text || '')
+    .join('\n');
 
-  return {
-    value: formattedText,
-    candidates: pairs,
-    confidence: 0.90,
-    source_url: pageDoc.final_url,
-    source_type: 'structured_dom'
-  };
+  const textCandidates = extractOpeningHoursFromText(allText);
+
+  if (textCandidates.length > 0) {
+    const lines = textCandidates.map(p => `${p.day_text}: ${p.time_text}`);
+    console.log(`[V3] Opening hours: text-pattern fallback found ${textCandidates.length} days`);
+    return {
+      value:       lines.join('; '),
+      candidates:  textCandidates,
+      confidence:  0.75,
+      source_url:  pageDoc.final_url,
+      source_type: 'text_pattern',
+    };
+  }
+
+  // ── No hours found ────────────────────────────────────────────────────────
+  console.log('[V3] Opening hours: no candidates found in structured DOM or text patterns');
+  return { value: null, candidates: [], confidence: 0, source_url: pageDoc.final_url };
+}
+
+/**
+ * Normalise a time range string from structured DOM to "HH:MM - HH:MM".
+ * Handles dot separators and missing minutes.
+ * e.g. "11.30 - 23.30" → "11:30 - 23:30"
+ *      "17 - 23"        → "17:00 - 23:00"
+ */
+function normaliseTimeText(raw) {
+  if (!raw || raw === 'Lukket') return raw;
+  return raw.replace(/(\d{1,2})[.:]?(\d{2})/g, (_, h, m) =>
+    `${h.padStart(2, '0')}:${m}`
+  ).replace(/\b(\d{1,2})\b(?!\s*[:.]\s*\d)/g, (_, h) =>
+    `${h.padStart(2, '0')}:00`
+  );
 }
 
 /**

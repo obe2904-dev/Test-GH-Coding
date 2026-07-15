@@ -6,6 +6,241 @@
  * as they use browser-only APIs like getBoundingClientRect().
  */
 
+// =====================================================
+// Opening Hours Text Pattern Fallback
+// =====================================================
+
+const DANISH_DAYS = {
+  mandag:    'Mandag',    man: 'Mandag',
+  tirsdag:   'Tirsdag',  tir: 'Tirsdag',
+  onsdag:    'Onsdag',   ons: 'Onsdag',
+  torsdag:   'Torsdag',  tor: 'Torsdag',
+  fredag:    'Fredag',   fre: 'Fredag',
+  lørdag:    'Lørdag',   lør: 'Lørdag',   lor: 'Lørdag',
+  søndag:    'Søndag',   søn: 'Søndag',   son: 'Søndag',
+};
+
+const DAY_ORDER = [
+  'Mandag', 'Tirsdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lørdag', 'Søndag'
+];
+
+/**
+ * Normalise a raw time string to "HH:MM" format.
+ * Handles: "17.30", "17:30", "17 30", "1730", "17", "2"
+ */
+function normaliseTime(raw) {
+  if (!raw) return null;
+  const s = raw.trim().replace(',', '.');
+
+  // Already HH:MM or H:MM
+  const colonMatch = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (colonMatch) {
+    return `${colonMatch[1].padStart(2, '0')}:${colonMatch[2]}`;
+  }
+
+  // Dot separator: 17.30 or 17.00
+  const dotMatch = s.match(/^(\d{1,2})\.(\d{2})$/);
+  if (dotMatch) {
+    return `${dotMatch[1].padStart(2, '0')}:${dotMatch[2]}`;
+  }
+
+  // 4-digit compact: 1730
+  const compactMatch = s.match(/^(\d{2})(\d{2})$/);
+  if (compactMatch) {
+    return `${compactMatch[1]}:${compactMatch[2]}`;
+  }
+
+  // Hour only: "17" or "2"
+  const hourMatch = s.match(/^(\d{1,2})$/);
+  if (hourMatch) {
+    return `${hourMatch[1].padStart(2, '0')}:00`;
+  }
+
+  return null;
+}
+
+/**
+ * Resolve a Danish day name or abbreviation to its canonical form.
+ * Returns null if unrecognised.
+ */
+function resolveDay(raw) {
+  if (!raw) return null;
+  const key = raw.toLowerCase().trim()
+    .replace(/ø/g, 'ø').replace(/æ/g, 'æ').replace(/å/g, 'å');
+  return DANISH_DAYS[key] || null;
+}
+
+/**
+ * Expand a day range ("Mandag til Torsdag" or "Man-Tor") to an array
+ * of canonical day names.
+ */
+function expandDayRange(fromDay, toDay) {
+  const from = DAY_ORDER.indexOf(fromDay);
+  const to   = DAY_ORDER.indexOf(toDay);
+  if (from === -1 || to === -1) return [];
+  if (from <= to) return DAY_ORDER.slice(from, to + 1);
+  // Wrapping range e.g. Fredag-Mandag — uncommon but handle it
+  return [...DAY_ORDER.slice(from), ...DAY_ORDER.slice(0, to + 1)];
+}
+
+/**
+ * Parse a raw time range string into { open, close } both in "HH:MM".
+ * Handles separators: " - ", "–", " til ", "-"
+ * Returns null if parsing fails.
+ */
+function parseTimeRange(raw) {
+  if (!raw) return null;
+
+  // Normalise separators
+  const normalised = raw
+    .replace(/\s*–\s*/g, ' - ')
+    .replace(/\s+til\s+/gi, ' - ')
+    .trim();
+
+  const parts = normalised.split(/\s*-\s*/);
+  if (parts.length < 2) return null;
+
+  const open  = normaliseTime(parts[0].trim());
+  const close = normaliseTime(parts[parts.length - 1].trim());
+
+  if (!open || !close) return null;
+  return { open, close };
+}
+
+/**
+ * Parse a day expression into an array of canonical day names.
+ * Handles single days, abbreviated ranges (Man-Fre), and "til" ranges.
+ * @param {string} expr
+ * @returns {string[]}
+ */
+function parseDayExpression(expr) {
+  if (!expr) return [];
+  const clean = expr.trim();
+
+  // Range with "-", "–", or "til"
+  const rangeMatch = clean.match(
+    /^([a-zæøå]{3,8})\s*(?:-|–|til)\s*([a-zæøå]{3,8})$/i
+  );
+  if (rangeMatch) {
+    const from = resolveDay(rangeMatch[1]);
+    const to   = resolveDay(rangeMatch[2]);
+    if (from && to) return expandDayRange(from, to);
+  }
+
+  // Single day
+  const single = resolveDay(clean);
+  if (single) return [single];
+
+  return [];
+}
+
+/**
+ * Extract opening hours candidates from freeform text blocks.
+ *
+ * Handles formats including:
+ *   "Mandag - 17:00 - 23:00"
+ *   "Torsdag: 11.30 - 23.30"
+ *   "Åbent mandag til torsdag 17 til 23"
+ *   "Lør-Søn 12-22"
+ *   "Alle dage 11-22"
+ *   "Lukket" / "Closed"
+ *   "Man-Fre: 09.00-17.00, Lør-Søn: 10.00-15.00"
+ *
+ * @param {string} text - Raw text content from a content block
+ * @returns {Array<{ day_text: string, time_text: string }>}
+ */
+export function extractOpeningHoursFromText(text) {
+  if (!text || text.length < 5) return [];
+
+  const candidates = [];
+  const lines = text
+    .split(/[\n;]+/)
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    // --- Pattern: "Alle dage HH - HH" ---
+    const allDaysMatch = line.match(
+      /alle\s+dage\s+(\d[\d.:]*)\s*[-–]\s*(\d[\d.:]*)/i
+    );
+    if (allDaysMatch) {
+      const open  = normaliseTime(allDaysMatch[1]);
+      const close = normaliseTime(allDaysMatch[2]);
+      if (open && close) {
+        const timeText = `${open} - ${close}`;
+        for (const day of DAY_ORDER) {
+          candidates.push({ day_text: day, time_text: timeText });
+        }
+      }
+      continue;
+    }
+
+    // --- Pattern: "Lukket" / "Closed" (whole line or after day name) ---
+    const closedLineMatch = line.match(
+      /^([a-zæøå]{3,8}(?:\s*[-–]\s*[a-zæøå]{3,8})?)\s*:?\s*(lukket|closed)$/i
+    );
+    if (closedLineMatch) {
+      const dayRaw = closedLineMatch[1];
+      const days   = parseDayExpression(dayRaw);
+      for (const day of days) {
+        candidates.push({ day_text: day, time_text: 'Lukket' });
+      }
+      continue;
+    }
+
+    // --- Pattern: day range + time range ---
+    // e.g. "Man-Fre: 09.00 - 17.00"
+    // e.g. "Mandag til torsdag 17 til 23"
+    // e.g. "Torsdag: 11.30 - 23.30"
+    // e.g. "Mandag - 17:00 - 23:00"  (day separator vs time separator)
+    const dayTimeMatch = line.match(
+      /^([a-zæøå]{3,8}(?:\s*(?:til|-|–)\s*[a-zæøå]{3,8})?)\s*[:\-–]?\s*(.+)$/i
+    );
+    if (dayTimeMatch) {
+      const dayPart  = dayTimeMatch[1].trim();
+      const timePart = dayTimeMatch[2].trim();
+
+      // Skip if dayPart doesn't look like a day name
+      const days = parseDayExpression(dayPart);
+      if (days.length === 0) continue;
+
+      // Check for closed
+      if (/lukket|closed/i.test(timePart)) {
+        for (const day of days) {
+          candidates.push({ day_text: day, time_text: 'Lukket' });
+        }
+        continue;
+      }
+
+      // Parse time range from remaining text
+      // Handle "17 til 23" format
+      const tilNormalisedTime = timePart.replace(
+        /(\d[\d.:]*)\s+til\s+(\d[\d.:]*)/i,
+        '$1 - $2'
+      );
+
+      const timeRange = parseTimeRange(tilNormalisedTime);
+      if (timeRange) {
+        const timeText = `${timeRange.open} - ${timeRange.close}`;
+        for (const day of days) {
+          candidates.push({ day_text: day, time_text: timeText });
+        }
+      }
+    }
+  }
+
+  // Deduplicate: last write wins per day (later pages override earlier)
+  const seen = new Map();
+  for (const c of candidates) {
+    seen.set(c.day_text, c);
+  }
+
+  // Return in DAY_ORDER
+  return DAY_ORDER
+    .filter(d => seen.has(d))
+    .map(d => seen.get(d));
+}
+
 /**
  * Extract page document with links, blocks, meta, and structured data
  * @param {import('puppeteer').Page} page
