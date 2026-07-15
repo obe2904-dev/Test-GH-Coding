@@ -74,6 +74,12 @@ serve(async (req) => {
       content_quality: payload.content_quality,
     });
 
+    console.log('🔍 DEBUG: Payload structure:', Object.keys(payload));
+    console.log('🔍 DEBUG: Full payload:', JSON.stringify(payload, null, 2));
+
+    console.log('🔍 Starting field-by-field extraction...');
+    console.log('📧 Checking for email in payload.extraction.contact.emails...');
+
     // Field-by-field extraction
     const extractionResults = {
       found: [] as string[],
@@ -84,13 +90,20 @@ serve(async (req) => {
 
     // FIELD 1: Email
     let email = null;
-    if (payload.emails && Array.isArray(payload.emails) && payload.emails.length > 0) {
-      email = payload.emails[0].value;
+    console.log('📧 Payload extraction.contact.emails:', payload.extraction?.contact?.emails);
+    
+    if (payload.extraction?.contact?.emails && 
+        Array.isArray(payload.extraction.contact.emails) && 
+        payload.extraction.contact.emails.length > 0) {
+      email = payload.extraction.contact.emails[0].value;
+      console.log('📧 Found email:', email);
+      
       if (email) {
         extractionResults.found.push('email');
         
         // Save to business_locations
         try {
+          console.log('💾 Attempting to save email to business_locations...');
           const { error: emailError } = await supabaseClient
             .from('business_locations')
             .update({ email })
@@ -108,8 +121,11 @@ serve(async (req) => {
         }
       }
     } else {
+      console.log('❌ No email found in payload');
       extractionResults.not_found.push('email');
     }
+
+    console.log('📊 Extraction complete:', extractionResults);
 
     return new Response(
       JSON.stringify({
