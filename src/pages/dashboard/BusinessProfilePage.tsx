@@ -1090,10 +1090,10 @@ function BusinessProfilePage() {
       setExtractResult(result)
       setExtractStage('done')
 
-      // Reload profile data to show newly extracted fields in UI
+      // Reload page to show newly extracted fields in UI
       if (result.success) {
-        console.log('🔄 Reloading profile to display extracted data...')
-        await fetchProfile()
+        console.log('🔄 Reloading page to display extracted data...')
+        setTimeout(() => window.location.reload(), 1500)
       }
 
     } catch (error: any) {
