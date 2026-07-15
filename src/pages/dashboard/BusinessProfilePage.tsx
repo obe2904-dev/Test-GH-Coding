@@ -1087,6 +1087,12 @@ function BusinessProfilePage() {
       setExtractResult(result)
       setExtractStage('done')
 
+      // Reload profile data to show newly extracted fields in UI
+      if (result.success) {
+        console.log('🔄 Reloading profile to display extracted data...')
+        await fetchProfile()
+      }
+
     } catch (error: any) {
       console.error('❌ Extract error:', error)
       setExtractError(error.message || 'AI extraction fejlede')
