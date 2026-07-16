@@ -11,6 +11,7 @@
 // =====================================================
 
 const DANISH_DAYS = {
+  // Danish day names (canonical output)
   mandag:    'Mandag',    man: 'Mandag',
   tirsdag:   'Tirsdag',  tir: 'Tirsdag',
   onsdag:    'Onsdag',   ons: 'Onsdag',
@@ -18,6 +19,14 @@ const DANISH_DAYS = {
   fredag:    'Fredag',   fre: 'Fredag',
   lørdag:    'Lørdag',   lør: 'Lørdag',   lor: 'Lørdag',
   søndag:    'Søndag',   søn: 'Søndag',   son: 'Søndag',
+  // English day names (map to Danish canonical)
+  monday:    'Mandag',    mon: 'Mandag',
+  tuesday:   'Tirsdag',   tue: 'Tirsdag',   tues: 'Tirsdag',
+  wednesday: 'Onsdag',    wed: 'Onsdag',
+  thursday:  'Torsdag',   thu: 'Torsdag',   thur: 'Torsdag',   thurs: 'Torsdag',
+  friday:    'Fredag',    fri: 'Fredag',
+  saturday:  'Lørdag',    sat: 'Lørdag',
+  sunday:    'Søndag',    sun: 'Søndag',
 };
 
 const DAY_ORDER = [
@@ -153,10 +162,39 @@ export function extractOpeningHoursFromText(text) {
   if (!text || text.length < 5) return [];
 
   const candidates = [];
-  const lines = text
+
+  // ── Pre-process: join orphaned time lines to preceding day line ───────────
+  // Handles the common two-line format:
+  //   "Mandag - Torsdag"   ← day line
+  //   "11.30 - 23.30"      ← time line (no day context)
+  // Joins them into: "Mandag - Torsdag 11.30 - 23.30"
+  // so the existing pattern matchers work unchanged.
+  const TIME_ONLY_LINE = /^\d{1,2}[.:]\d{2}\s*[-–]\s*\d{1,2}[.:]\d{2}$/;
+
+  const rawLines = text
     .split(/[\n;]+/)
     .map(l => l.trim())
+    .filter(Boolean)
+    .map(l => {
+      // Strip common headers like "OPENING HOURS", "ÅBNINGSTIDER", etc.
+      return l.replace(/^(opening hours?|åbningstider|öffnungszeiten|horaires?|hours?)[:\s]*/i, '').trim();
+    })
     .filter(Boolean);
+
+  const lines = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const current = rawLines[i];
+    const next    = rawLines[i + 1] ?? '';
+
+    if (TIME_ONLY_LINE.test(next)) {
+      // Next line is a bare time range — merge it onto this line
+      lines.push(`${current} ${next}`);
+      i++; // consume the next line
+    } else {
+      lines.push(current);
+    }
+  }
+  // ── End pre-process ───────────────────────────────────────────────────────
 
   for (const line of lines) {
     // --- Pattern: "Alle dage HH - HH" ---
@@ -193,8 +231,9 @@ export function extractOpeningHoursFromText(text) {
     // e.g. "Mandag til torsdag 17 til 23"
     // e.g. "Torsdag: 11.30 - 23.30"
     // e.g. "Mandag - 17:00 - 23:00"  (day separator vs time separator)
+    // e.g. "Monday - Thursday 11.30 - 23.30" (only capture first time range)
     const dayTimeMatch = line.match(
-      /^([a-zæøå]{3,8}(?:\s*(?:til|-|–)\s*[a-zæøå]{3,8})?)\s*[:\-–]?\s*(.+)$/i
+      /^([a-zæøå]{3,8}(?:\s*(?:til|-|–)\s*[a-zæøå]{3,8})?)\s*[:\-–]?\s*(\d[\d.:]*\s*(?:[-–]|til)\s*\d[\d.:]*)/i
     );
     if (dayTimeMatch) {
       const dayPart  = dayTimeMatch[1].trim();

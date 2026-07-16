@@ -1153,7 +1153,7 @@ function BusinessProfilePage() {
       setScrapeResult({
         scrape_id: result.scrape_id,
         content_quality: result.quality,
-        ai_analysis: result.ai_analysis,
+        extraction_summary: result.extraction_summary,
         cached: !!result.cached,
         duration_ms: result.duration_ms,
       })
@@ -1164,27 +1164,38 @@ function BusinessProfilePage() {
       summaryMessage += `Quality: ${result.quality}\n`
       summaryMessage += `Duration: ${(result.duration_ms / 1000).toFixed(1)}s\n\n`
 
-      // Show what was distributed
+      // Show what was distributed (new 3-tier architecture)
       if (result.distribution_summary) {
         const dist = result.distribution_summary
         summaryMessage += `📝 Data Distributed:\n`
         
-        // Scraped data
-        if (dist.structured_data?.business_name) {
-          summaryMessage += `  • Business name updated\n`
+        if (dist.tier1_fields?.length > 0) {
+          summaryMessage += `  • Tier 1 (Structural): ${dist.tier1_fields.length} fields\n`
         }
-        if (dist.fields_by_table?.business_locations) {
-          summaryMessage += `  • Contact info: ${dist.fields_by_table.business_locations.join(', ')}\n`
+        if (dist.tier2_fields?.length > 0) {
+          summaryMessage += `  • Tier 2 (Keywords): ${dist.tier2_fields.length} fields\n`
         }
+        if (dist.tier3_fields?.length > 0) {
+          summaryMessage += `  • Tier 3 (AI): ${dist.tier3_fields.length} fields\n`
+        }
+        summaryMessage += `  • Total: ${dist.total_saved || 0} fields saved\n`
         
-        // AI data
-        if (dist.ai_fields && !dist.ai_skip_reason) {
-          if (dist.ai_fields.user_about_text) summaryMessage += `  • "Om os" text extracted\n`
-          if (dist.ai_fields.key_offerings?.length) summaryMessage += `  • ${dist.ai_fields.key_offerings.length} key offerings\n`
-          if (dist.ai_fields.menu_signal?.signatureItems?.length) summaryMessage += `  • ${dist.ai_fields.menu_signal.signatureItems.length} menu highlights\n`
-          if (dist.ai_fields.service_model) summaryMessage += `  • Service model detected\n`
-        } else if (dist.ai_skip_reason) {
-          summaryMessage += `  ⚠️ AI skipped: ${dist.ai_skip_reason}\n`
+        if (dist.errors?.length > 0) {
+          summaryMessage += `\n⚠️ Errors: ${dist.errors.length}\n`
+        }
+      }
+
+      // Show extraction summary
+      if (result.extraction_summary) {
+        const summary = result.extraction_summary
+        if (summary.saved?.length > 0) {
+          summaryMessage += `\n✅ Extracted: ${summary.saved.length} fields\n`
+          // Show first few saved fields as examples
+          const examples = summary.saved.slice(0, 3).join(', ')
+          summaryMessage += `  ${examples}...\n`
+        }
+        if (summary.errors?.length > 0) {
+          summaryMessage += `\n⚠️ ${summary.errors.length} errors during extraction\n`
         }
       }
 

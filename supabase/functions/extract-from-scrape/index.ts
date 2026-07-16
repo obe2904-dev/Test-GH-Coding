@@ -14,20 +14,20 @@ const GEMINI_MODEL   = 'gemini-2.5-flash';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const MIN_TEXT_CHARS_FOR_AI = 200; // below this, skip Tier 3
+const MIN_TEXT_CHARS_FOR_AI = 200;
 
 const WEEKDAYS = [
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'
 ] as const;
 
 const DANISH_TO_WEEKDAY: Record<string, typeof WEEKDAYS[number]> = {
-  mandag:   'monday',   man: 'monday',
-  tirsdag:  'tuesday',  tir: 'tuesday',
-  onsdag:   'wednesday',ons: 'wednesday',
-  torsdag:  'thursday', tor: 'thursday',
-  fredag:   'friday',   fre: 'friday',
-  lørdag:   'saturday', lør: 'saturday',
-  søndag:   'sunday',   søn: 'sunday',
+  mandag:   'monday',    man: 'monday',
+  tirsdag:  'tuesday',   tir: 'tuesday',
+  onsdag:   'wednesday', ons: 'wednesday',
+  torsdag:  'thursday',  tor: 'thursday',
+  fredag:   'friday',    fre: 'friday',
+  lørdag:   'saturday',  lør: 'saturday',
+  søndag:   'sunday',    søn: 'sunday',
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -85,52 +85,43 @@ serve(async (req) => {
     }
 
     // ── Content quality gate ─────────────────────────────────────────────────
-    const qualityRating  = payload.quality?.rating          
-                        ?? payload.extraction?.quality?.rating  
-                        ?? 'unknown';
-    const textCharCount  = payload.quality?.business_text_characters
-                        ?? payload.extraction?.quality?.business_text_characters
-                        ?? 0;
-    const aiAllowed      = qualityRating !== 'poor' && textCharCount >= MIN_TEXT_CHARS_FOR_AI;
-
-    console.log('🔍 Quality check:', {
-      root_quality:         payload.quality,
-      nested_quality:       payload.extraction?.quality,
-      qualityRating_used:   qualityRating,
-      textCharCount_used:   textCharCount,
-      aiAllowed:            aiAllowed,
-    });
+    const qualityRating = payload.quality?.rating
+                       ?? payload.extraction?.quality?.rating
+                       ?? 'unknown';
+    const textCharCount = payload.quality?.business_text_characters
+                       ?? payload.extraction?.quality?.business_text_characters
+                       ?? 0;
+    const aiAllowed     = qualityRating !== 'poor' && textCharCount >= MIN_TEXT_CHARS_FOR_AI;
 
     console.log('✅ Payload received:', {
-      scrape_id:    scrapeResult.id,
+      scrape_id:  scrapeResult.id,
       business_id,
-      quality:      qualityRating,
-      text_chars:   textCharCount,
-      ai_allowed:   aiAllowed,
+      quality:    qualityRating,
+      text_chars: textCharCount,
+      ai_allowed: aiAllowed,
     });
 
-    // ── Build content text for Tier 2 + Tier 3 ──────────────────────────────
-    const contentText = buildContentText(payload);
-
-    // ── Run all three tiers ──────────────────────────────────────────────────
+    // ── Run extraction tiers ─────────────────────────────────────────────────
     const summary: ExtractionSummary = { found: [], not_found: [], saved: [], errors: [] };
 
     const tier1 = extractTier1(payload);
-    const tier2 = extractTier2(contentText);
+    const tier2 = extractTier2(payload);
     const tier3 = aiAllowed
-      ? await extractTier3(contentText, payload)
+      ? await extractTier3(payload)
       : {};
 
-    // ── Merge results into table buckets ─────────────────────────────────────
+    // ── Merge into table buckets ─────────────────────────────────────────────
     const businessLocations  = buildBusinessLocations(tier1);
     const businessOperations = buildBusinessOperations(tier1, tier2, tier3);
     const businessProfile    = buildBusinessProfile(tier1, tier3);
+    const businesses         = buildBusinesses(tier3);
     const openingHoursRows   = buildOpeningHoursRows(payload, business_id);
 
     // ── Write to database ────────────────────────────────────────────────────
     await writeBusinessLocations(supabase, business_id, businessLocations, summary);
     await writeBusinessOperations(supabase, business_id, businessOperations, summary);
     await writeBusinessProfile(supabase, business_id, businessProfile, summary);
+    await writeBusinesses(supabase, business_id, businesses, summary);
     await writeOpeningHours(supabase, business_id, openingHoursRows, summary);
 
     console.log('📊 Extraction complete:', summary);
@@ -143,12 +134,6 @@ serve(async (req) => {
       ai_used:    aiAllowed,
       quality:    qualityRating,
       extraction: summary,
-      debug_extracted_values: {
-        locations: filterNulls(businessLocations),
-        operations: filterNulls(businessOperations),
-        profile: filterNulls(businessProfile),
-        opening_hours_count: openingHoursRows.filter(r => !r.closed).length,
-      },
     });
 
   } catch (error) {
@@ -158,7 +143,8 @@ serve(async (req) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TIER 1 — Structural extraction from payload paths
+// TIER 1 — Structural paths from payload JSON
+// Zero cost. Always runs. Direct field access only — no inference.
 // ═════════════════════════════════════════════════════════════════════════════
 
 function extractTier1(payload: any): Record<string, FieldResult> {
@@ -171,42 +157,46 @@ function extractTier1(payload: any): Record<string, FieldResult> {
   };
 
   // Contact
-  t1('email',    payload.extraction?.contact?.emails?.[0]?.value,    'contact.emails[0]');
-  t1('phone',    payload.extraction?.contact?.phones?.[0]?.value,    'contact.phones[0]');
+  t1('email',         payload.contact?.emails?.[0]?.value,   'contact.emails[0]');
+  t1('phone',         payload.contact?.phones?.[0]?.value,   'contact.phones[0]');
 
-  // Address split
-  const rawAddress = payload.extraction?.contact?.addresses?.[0]?.value ?? null;
+  // Address — split Danish format "Street Number PostalCode City"
+  const rawAddress = payload.contact?.addresses?.[0]?.value ?? null;
   if (rawAddress) {
     const { address_line1, postal_code } = splitDanishAddress(rawAddress);
     t1('address_line1', address_line1, 'contact.addresses[0] split');
     t1('postal_code',   postal_code,   'contact.addresses[0] split');
   }
 
-  // Services — URLs
-  t1('booking_url',        payload.services?.booking?.url,          'services.booking');
-  t1('takeaway_url',       payload.services?.takeaway?.url,         'services.takeaway');
-  t1('google_maps_url',    payload.services?.google_maps?.url,      'services.google_maps');
-  t1('food_inspection_url',payload.services?.food_inspection?.url,  'services.food_inspection');
-  t1('smiley_url',         payload.services?.food_inspection?.url,  'services.food_inspection');
+  // Service URLs
+  t1('booking_url',         payload.services?.booking?.url,         'services.booking');
+  t1('takeaway_url',        payload.services?.takeaway?.url,        'services.takeaway');
+  t1('google_maps_url',     payload.services?.google_maps?.url,     'services.google_maps');
+  t1('food_inspection_url', payload.services?.food_inspection?.url, 'services.food_inspection');
+  t1('smiley_url',          payload.services?.food_inspection?.url, 'services.food_inspection');
 
-  // has_takeaway: presence of takeaway URL means true
+  // Definitive boolean signals from structural presence
   if (payload.services?.takeaway?.url) {
     r['has_takeaway'] = { value: true, tier: 1, source: 'services.takeaway url present' };
+  }
+  if (payload.services?.booking?.url) {
+    // Booking URL = customers book a table = table service confirmed
+    r['has_table_service'] = { value: true, tier: 1, source: 'services.booking url present' };
   }
 
   // Business text
   t1('long_description', payload.business?.description?.value, 'business.description');
 
-  // user_about_text: largest content section by text length
+  // user_about_text: largest content section
   const sections = payload.content_sections ?? [];
   const bestSection = sections
-    .filter((s: any) => s.text && s.text.length > 50)
+    .filter((s: any) => s.text?.length > 50)
     .sort((a: any, b: any) => b.text.length - a.text.length)[0] ?? null;
   if (bestSection) {
     t1('user_about_text', bestSection.text, 'content_sections[largest]');
   }
 
-  // kitchen_close_time: most common close time across opening hours candidates
+  // kitchen_close_time: most common close time across open days
   const candidates = payload.opening_hours?.candidates ?? [];
   const kitchenClose = deriveKitchenCloseTime(candidates);
   if (kitchenClose) {
@@ -217,55 +207,38 @@ function extractTier1(payload: any): Record<string, FieldResult> {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TIER 2 — Keyword scan over content text
+// TIER 2 — Keyword scan
+// Only for closed-vocabulary fields where regex is unambiguous.
+// DO NOT add fields here that require reading intent or context.
 // ═════════════════════════════════════════════════════════════════════════════
 
-function extractTier2(text: string): Record<string, FieldResult> {
+function extractTier2(payload: any): Record<string, FieldResult> {
   const r: Record<string, FieldResult> = {};
-  const t = text.toLowerCase();
+
+  // Build content text from all sections
+  const sections = payload.content_sections ?? [];
+  const t = sections
+    .map((s: any) => s.text ?? '')
+    .join('\n')
+    .toLowerCase();
 
   const flag = (key: string, result: boolean, source: string) => {
     r[key] = { value: result, tier: 2, source };
   };
 
-  // has_delivery
+  // has_delivery — delivery platform names are unambiguous closed vocabulary
   flag('has_delivery',
     /wolt|just\s*eat|foodora|levering|udbring|delivery/.test(t),
-    'keyword: delivery platforms + levering/udbring'
+    'keyword: delivery platform names'
   );
 
-  // has_table_service
-  flag('has_table_service',
-    /bordbetjening|table\s*service|servering ved bordet|vi serverer/.test(t) ||
-    /restaurant|café|cafe/.test(t), // assumed true for FSE venues
-    'keyword: table service signals'
-  );
-
-  // reservation_required
-  const reservRequired =
-    /reservation\s*påkrævet|kun med reservation|reservation\s*required|booking\s*required/.test(t);
-  flag('reservation_required', reservRequired, 'keyword: reservation required signals');
-
-  // accepts_walk_ins
-  flag('accepts_walk_ins',
-    !reservRequired ||
-    /walk.?in|uden reservation|drop.?in|kom som du er/.test(t),
-    'keyword: walk-in signals + inverse of reservation_required'
-  );
-
-  // has_outdoor_seating
-  flag('has_outdoor_seating',
-    /udeservering|ude\s*servering|terrasse|outdoor\s*seating|haveplads|gårdhave|patio|al\s*fresco|udenfor/.test(t),
-    'keyword: outdoor seating signals'
-  );
-
-  // has_wifi
+  // has_wifi — closed vocabulary, no ambiguity
   flag('has_wifi',
     /wifi|wi-fi|trådløst\s*internet|gratis\s*internet|free\s*wi.?fi/.test(t),
     'keyword: wifi signals'
   );
 
-  // has_parking
+  // has_parking — closed vocabulary
   flag('has_parking',
     /parkering|parkeringsplads|p-plads|parking/.test(t),
     'keyword: parking signals'
@@ -275,45 +248,48 @@ function extractTier2(text: string): Record<string, FieldResult> {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TIER 3 — Single Gemini call for AI-only fields
+// TIER 3 — Single Gemini call
+// Handles all fields requiring inference, context, or interpretation.
+// One call returns all fields as structured JSON.
 // ═════════════════════════════════════════════════════════════════════════════
 
-async function extractTier3(
-  contentText: string,
-  payload: any,
-): Promise<Record<string, FieldResult>> {
-
+async function extractTier3(payload: any): Promise<Record<string, FieldResult>> {
   if (!GEMINI_API_KEY) {
     console.warn('⚠️ No GEMINI_API_KEY — skipping Tier 3');
     return {};
   }
 
+  const geminiInput = buildGeminiInput(payload);
+
   const prompt = `
-You are extracting structured information about a Danish hospitality business
-(restaurant, café, or bar) from its website content.
+Du er ekspert i at analysere danske restauranter, caféer og barer ud fra deres hjemmesideindhold.
 
-Return ONLY a JSON object with exactly these keys. Use null for any field you
-cannot determine with reasonable confidence. Do NOT fabricate information.
-Do NOT guess if the content does not support it.
+Analyser nedenstående indhold og returner præcist denne JSON-struktur.
+Brug null for felter du ikke kan fastslå med rimelig sikkerhed.
+Fabrikér IKKE information. Gæt IKKE hvis indholdet ikke understøtter det.
+Svar KUN med JSON — ingen markdown, ingen forklaringer.
 
-CONTENT:
-${contentText.slice(0, 4000)}
+${geminiInput}
 
-BUSINESS NAME (hint): ${payload.business?.name?.value ?? 'unknown'}
-
-Return this JSON structure (nothing else, no markdown):
+Returner denne JSON (intet andet):
 {
-  "weekly_programme": "Free text describing recurring weekly events, live music, DJ nights, themed evenings etc. Null if none found. Danish preferred.",
-  "menu_description": "1-2 sentence Danish summary of the menu concept and key categories. Null if insufficient menu info.",
-  "key_offerings": "Newline-separated list of 5-7 main dishes or products (names only, Danish). Null if insufficient.",
-  "ai_place_synopsis": "2-3 sentence Danish synopsis of the business: type, location feel, cuisine/concept, who it is for.",
+  "has_table_service": true or false or null,
+  "reservation_required": true or false or null,
+  "accepts_walk_ins": true or false or null,
+  "has_outdoor_seating": true or false or null,
+  "outdoor_seating_term": "Det præcise danske ord virksomheden bruger for udeservering — typisk 'terrasse', 'overdækket terrasse', 'udeservering', 'haveplads', 'gårdhave'. Null hvis ingen udeservering nævnes.",
+  "weekly_programme": "Fritekst der beskriver tilbagevendende ugentlige begivenheder: live musik, DJ-aftener, temaftener, brunch-dage osv. Null hvis intet nævnes. På dansk.",
+  "menu_description": "1-2 sætninger der opsummerer menukoncept og hovedkategorier. Null hvis utilstrækkelig menuinfo.",
+  "key_offerings": "Nylinjesepareret liste med 5-7 hovedretter eller produkter (kun navne, på dansk). Null hvis utilstrækkelig info.",
+  "ai_place_synopsis": "2-3 sætninger der beskriver stedet: type, stemning/atmosfære, køkken/koncept, hvem det henvender sig til. På dansk.",
+  "local_location_reference": "Den korte sætning virksomheden selv bruger til at beskrive hvor de ligger. Skal være et konkret lokationsankerpunkt — et vartegn, gade, vandfront, torv, kvarter eller karakteristisk omgivelse. Eksempler: 'ved åen', 'på Rådhuspladsen', 'i skyggen af Koldinghus', 'i Nyhavn', 'på havnen', 'i Latinerkvarteret', 'ved stranden'. Inkludér IKKE bynavnet alene. Null hvis ingen specifik lokationsreference findes.",
   "menu_signal": {
     "hasMenu": true or false,
-    "menuCategories": ["category1", "category2"] or null,
-    "signatureItems": ["item1", "item2"] or null,
-    "menuDescription": "short description" or null,
-    "programmes": "lunch/dinner/brunch etc." or null,
-    "placeSynopsis": "one sentence" or null,
+    "menuCategories": ["kategori1", "kategori2"] or null,
+    "signatureItems": ["ret1", "ret2"] or null,
+    "menuDescription": "kort beskrivelse" or null,
+    "programmes": "frokost/aften/brunch osv." or null,
+    "placeSynopsis": "én sætning" or null,
     "rawExtract": null
   }
 }
@@ -327,7 +303,10 @@ Return this JSON structure (nothing else, no markdown):
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 1000 },
+          generationConfig: {
+            temperature:     0.1,
+            maxOutputTokens: 1200,
+          },
         }),
       }
     );
@@ -338,11 +317,9 @@ Return this JSON structure (nothing else, no markdown):
     }
 
     const geminiData = await response.json();
-    const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-
-    // Strip markdown fences if present
-    const cleaned = rawText.replace(/```json|```/g, '').trim();
-    const parsed  = JSON.parse(cleaned);
+    const rawText    = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    const cleaned    = rawText.replace(/```json|```/g, '').trim();
+    const parsed     = JSON.parse(cleaned);
 
     const r: Record<string, FieldResult> = {};
 
@@ -352,17 +329,30 @@ Return this JSON structure (nothing else, no markdown):
       }
     };
 
-    t3('weekly_programme', parsed.weekly_programme);
-    t3('menu_description', parsed.menu_description);
-    t3('key_offerings',    parsed.key_offerings);
-    t3('ai_place_synopsis',parsed.ai_place_synopsis);
+    // Boolean operation fields
+    t3('has_table_service',    parsed.has_table_service);
+    t3('reservation_required', parsed.reservation_required);
+    t3('accepts_walk_ins',     parsed.accepts_walk_ins);
+    t3('has_outdoor_seating',  parsed.has_outdoor_seating);
+    t3('outdoor_seating_term', parsed.outdoor_seating_term);
+
+    // Programme and content
+    t3('weekly_programme',  parsed.weekly_programme);
+    t3('menu_description',  parsed.menu_description);
+    t3('key_offerings',     parsed.key_offerings);
+    t3('ai_place_synopsis', parsed.ai_place_synopsis);
+
+    // Location reference — written to businesses table
+    t3('local_location_reference', parsed.local_location_reference);
+
+    // Menu signal — stored as JSON string
     t3('menu_signal',
-      typeof parsed.menu_signal === 'object'
+      parsed.menu_signal && typeof parsed.menu_signal === 'object'
         ? JSON.stringify(parsed.menu_signal)
         : parsed.menu_signal
     );
 
-    console.log('✅ Tier 3 Gemini extraction complete, fields:', Object.keys(r));
+    console.log('✅ Tier 3 complete, fields extracted:', Object.keys(r));
     return r;
 
   } catch (err) {
@@ -372,15 +362,84 @@ Return this JSON structure (nothing else, no markdown):
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// GEMINI INPUT BUILDER
+// Structured labelled sections so the model understands context.
+// Not a raw text dump — each section is labelled and meaningful.
+// ═════════════════════════════════════════════════════════════════════════════
+
+function buildGeminiInput(payload: any): string {
+  const parts: string[] = [];
+
+  // Business identity
+  const name = payload.business?.name?.value ?? null;
+  const url  = payload.meta?.final_url ?? null;
+  if (name) parts.push(`VIRKSOMHED: ${name}`);
+  if (url)  parts.push(`URL: ${url}`);
+
+  // Services detected (gives AI context about what was found structurally)
+  const serviceLines: string[] = [];
+  if (payload.services?.booking?.url) {
+    serviceLines.push(`- Online bordbooking til stede (${payload.services.booking.evidence ?? 'booking url'})`);
+  }
+  if (payload.services?.takeaway?.url) {
+    serviceLines.push(`- Takeaway til stede (${payload.services.takeaway.evidence ?? 'takeaway url'})`);
+  }
+  if (payload.services?.menu?.url) {
+    serviceLines.push(`- Menuside til stede: ${payload.services.menu.url}`);
+  }
+  if (payload.services?.food_inspection?.url) {
+    serviceLines.push(`- Fødevarekontrol (Smiley): ${payload.services.food_inspection.url}`);
+  }
+  const socialProfiles = payload.services?.social_profiles ?? [];
+  for (const sp of socialProfiles) {
+    serviceLines.push(`- Social: ${sp.platform} (${sp.url})`);
+  }
+  if (serviceLines.length > 0) {
+    parts.push(`DETEKTEREDE SERVICES:\n${serviceLines.join('\n')}`);
+  }
+
+  // Opening hours (gives context for table service / reservation inference)
+  const ohValue = payload.opening_hours?.value ?? null;
+  if (ohValue) {
+    parts.push(`ÅBNINGSTIDER:\n${ohValue}`);
+  }
+
+  // Business description
+  const desc = payload.business?.description?.value ?? null;
+  if (desc) {
+    parts.push(`BESKRIVELSE:\n${desc}`);
+  }
+
+  // All content sections — labelled with their heading
+  const sections = payload.content_sections ?? [];
+  for (const section of sections) {
+    if (!section.text || section.text.length < 30) continue;
+    const heading = section.heading ? `SEKTION: ${section.heading}` : 'SEKTION:';
+    parts.push(`${heading}\n${section.text}`);
+  }
+
+  // Contact (useful for synopsis and location inference)
+  const address = payload.contact?.addresses?.[0]?.value ?? null;
+  if (address) parts.push(`ADRESSE: ${address}`);
+
+  const fullText = parts.join('\n\n');
+
+  // Cap at 6,000 chars — enough for rich multi-section sites
+  return fullText.slice(0, 6000);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // TABLE BUILDERS
+// Priority: Tier 1 > Tier 2 > Tier 3 per field.
+// Tier 1 always wins (structural facts beat inference).
 // ═════════════════════════════════════════════════════════════════════════════
 
 function buildBusinessLocations(t1: Record<string, FieldResult>) {
   return {
-    email:        t1.email?.value        ?? null,
-    phone:        t1.phone?.value        ?? null,
-    address_line1:t1.address_line1?.value ?? null,
-    postal_code:  t1.postal_code?.value  ?? null,
+    email:         t1.email?.value         ?? null,
+    phone:         t1.phone?.value         ?? null,
+    address_line1: t1.address_line1?.value ?? null,
+    postal_code:   t1.postal_code?.value   ?? null,
   };
 }
 
@@ -389,8 +448,9 @@ function buildBusinessOperations(
   t2: Record<string, FieldResult>,
   t3: Record<string, FieldResult>,
 ) {
-  // Tier 1 takes precedence over Tier 2 for overlapping keys
-  const get = (key: string) => (t1[key] ?? t2[key] ?? t3[key])?.value ?? null;
+  // Tier 1 wins over Tier 3 wins over Tier 2 for overlapping keys
+  const get = (key: string) =>
+    (t1[key] ?? t3[key] ?? t2[key])?.value ?? null;
 
   return {
     has_takeaway:         get('has_takeaway'),
@@ -399,6 +459,7 @@ function buildBusinessOperations(
     reservation_required: get('reservation_required'),
     accepts_walk_ins:     get('accepts_walk_ins'),
     has_outdoor_seating:  get('has_outdoor_seating'),
+    outdoor_seating_term: get('outdoor_seating_term'),
     has_wifi:             get('has_wifi'),
     has_parking:          get('has_parking'),
     kitchen_close_time:   get('kitchen_close_time'),
@@ -414,29 +475,41 @@ function buildBusinessProfile(
   const get = (key: string) => (t1[key] ?? t3[key])?.value ?? null;
 
   return {
-    long_description:   get('long_description'),
-    user_about_text:    get('user_about_text'),
-    booking_url:        get('booking_url'),
-    takeaway_url:       get('takeaway_url'),
-    google_maps_url:    get('google_maps_url'),
-    food_inspection_url:get('food_inspection_url'),
-    menu_signal:        get('menu_signal'),
-    menu_description:   get('menu_description'),
-    key_offerings:      get('key_offerings'),
-    ai_place_synopsis:  get('ai_place_synopsis'),
+    long_description:    get('long_description'),
+    user_about_text:     get('user_about_text'),
+    booking_url:         get('booking_url'),
+    takeaway_url:        get('takeaway_url'),
+    google_maps_url:     get('google_maps_url'),
+    food_inspection_url: get('food_inspection_url'),
+    menu_signal:         get('menu_signal'),
+    menu_description:    get('menu_description'),
+    key_offerings:       get('key_offerings'),
+    ai_place_synopsis:   get('ai_place_synopsis'),
+  };
+}
+
+function buildBusinesses(t3: Record<string, FieldResult>) {
+  return {
+    // Only local_location_reference is managed here.
+    // All other businesses fields are owned by other pipeline steps.
+    local_location_reference: t3.local_location_reference?.value ?? null,
   };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 // OPENING HOURS BUILDER
+// One row per weekday. Missing days = closed: true.
 // ═════════════════════════════════════════════════════════════════════════════
 
 function buildOpeningHoursRows(payload: any, business_id: string) {
   const candidates: { day_text: string; time_text: string }[] =
     payload.opening_hours?.candidates ?? [];
 
-  // Parse found candidates
-  const found = new Map<string, { open_time: string | null; close_time: string | null; closed: boolean }>();
+  const found = new Map<string, {
+    open_time:  string | null;
+    close_time: string | null;
+    closed:     boolean;
+  }>();
 
   for (const c of candidates) {
     const weekday = resolveDanishDay(c.day_text);
@@ -444,19 +517,16 @@ function buildOpeningHoursRows(payload: any, business_id: string) {
       console.warn('⚠️ Unrecognised day:', c.day_text);
       continue;
     }
-
     if (c.time_text === 'Lukket') {
       found.set(weekday, { open_time: null, close_time: null, closed: true });
       continue;
     }
-
     const times = parseTimeRange(c.time_text);
     if (times) {
       found.set(weekday, { open_time: times.open, close_time: times.close, closed: false });
     }
   }
 
-  // Build one row per weekday — missing days = closed
   return WEEKDAYS.map(weekday => ({
     business_id,
     weekday,
@@ -469,7 +539,8 @@ function buildOpeningHoursRows(payload: any, business_id: string) {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // DATABASE WRITERS
-// Each writer does one upsert per table and records to summary.
+// One upsert/update per table. Null values OVERWRITE existing data.
+// If extraction returns null, the database field is cleared.
 // ═════════════════════════════════════════════════════════════════════════════
 
 async function writeBusinessLocations(
@@ -478,22 +549,20 @@ async function writeBusinessLocations(
   data: Record<string, unknown>,
   summary: ExtractionSummary,
 ) {
-  // Only write non-null fields
-  const payload = filterNulls(data);
-  if (Object.keys(payload).length === 0) return;
+  if (Object.keys(data).length === 0) return;
 
   try {
     const { error, count } = await supabase
       .from('business_locations')
-      .update(payload)
+      .update(data)
       .eq('business_id', business_id)
       .select('business_id', { count: 'exact', head: true });
 
     if (error) throw error;
     if (count === 0) throw new Error(`No business_locations row for ${business_id}`);
 
-    Object.keys(payload).forEach(k => summary.saved.push(`locations.${k}`));
-    console.log('✅ business_locations saved:', Object.keys(payload));
+    Object.keys(data).forEach(k => summary.saved.push(`locations.${k}`));
+    console.log('✅ business_locations saved:', Object.keys(data));
   } catch (err) {
     summary.errors.push(`business_locations: ${err.message}`);
     console.error('❌ business_locations write failed:', err);
@@ -506,18 +575,17 @@ async function writeBusinessOperations(
   data: Record<string, unknown>,
   summary: ExtractionSummary,
 ) {
-  const payload = filterNulls(data);
-  if (Object.keys(payload).length === 0) return;
+  if (Object.keys(data).length === 0) return;
 
   try {
     const { error } = await supabase
       .from('business_operations')
-      .upsert({ business_id, ...payload }, { onConflict: 'business_id' });
+      .upsert({ business_id, ...data }, { onConflict: 'business_id' });
 
     if (error) throw error;
 
-    Object.keys(payload).forEach(k => summary.saved.push(`operations.${k}`));
-    console.log('✅ business_operations saved:', Object.keys(payload));
+    Object.keys(data).forEach(k => summary.saved.push(`operations.${k}`));
+    console.log('✅ business_operations saved:', Object.keys(data));
   } catch (err) {
     summary.errors.push(`business_operations: ${err.message}`);
     console.error('❌ business_operations write failed:', err);
@@ -530,21 +598,46 @@ async function writeBusinessProfile(
   data: Record<string, unknown>,
   summary: ExtractionSummary,
 ) {
-  const payload = filterNulls(data);
-  if (Object.keys(payload).length === 0) return;
+  if (Object.keys(data).length === 0) return;
 
   try {
     const { error } = await supabase
       .from('business_profile')
-      .upsert({ business_id, ...payload }, { onConflict: 'business_id' });
+      .upsert({ business_id, ...data }, { onConflict: 'business_id' });
 
     if (error) throw error;
 
-    Object.keys(payload).forEach(k => summary.saved.push(`profile.${k}`));
-    console.log('✅ business_profile saved:', Object.keys(payload));
+    Object.keys(data).forEach(k => summary.saved.push(`profile.${k}`));
+    console.log('✅ business_profile saved:', Object.keys(data));
   } catch (err) {
     summary.errors.push(`business_profile: ${err.message}`);
     console.error('❌ business_profile write failed:', err);
+  }
+}
+
+async function writeBusinesses(
+  supabase: any,
+  business_id: string,
+  data: Record<string, unknown>,
+  summary: ExtractionSummary,
+) {
+  if (Object.keys(data).length === 0) return;
+
+  try {
+    const { error, count } = await supabase
+      .from('businesses')
+      .update(data)
+      .eq('id', business_id)
+      .select('id', { count: 'exact', head: true });
+
+    if (error) throw error;
+    if (count === 0) throw new Error(`No businesses row for id ${business_id}`);
+
+    Object.keys(data).forEach(k => summary.saved.push(`businesses.${k}`));
+    console.log('✅ businesses saved:', Object.keys(data));
+  } catch (err) {
+    summary.errors.push(`businesses: ${err.message}`);
+    console.error('❌ businesses write failed:', err);
   }
 }
 
@@ -557,7 +650,6 @@ async function writeOpeningHours(
   if (rows.length === 0) return;
 
   try {
-    // Delete existing rows for this business first, then insert fresh
     const { error: deleteError } = await supabase
       .from('opening_hours')
       .delete()
@@ -574,7 +666,7 @@ async function writeOpeningHours(
     const openCount   = rows.filter(r => !r.closed).length;
     const closedCount = rows.filter(r => r.closed).length;
     summary.saved.push(`opening_hours (${openCount} open, ${closedCount} closed)`);
-    console.log(`✅ opening_hours saved: ${openCount} open days, ${closedCount} closed days`);
+    console.log(`✅ opening_hours: ${openCount} open, ${closedCount} closed`);
   } catch (err) {
     summary.errors.push(`opening_hours: ${err.message}`);
     console.error('❌ opening_hours write failed:', err);
@@ -586,10 +678,10 @@ async function writeOpeningHours(
 // ═════════════════════════════════════════════════════════════════════════════
 
 /**
- * Split a Danish address string into street+number and postal code.
- * "Åboulevarden 32 8000 Aarhus C, Danmark" →
- *   address_line1: "Åboulevarden 32"
- *   postal_code:   "8000"
+ * Split Danish address into street+number and 4-digit postal code.
+ * "Åboulevarden 32 8000 Aarhus C, Danmark"
+ *   → address_line1: "Åboulevarden 32"
+ *   → postal_code:   "8000"
  */
 function splitDanishAddress(raw: string): {
   address_line1: string | null;
@@ -613,16 +705,11 @@ function resolveDanishDay(raw: string): typeof WEEKDAYS[number] | null {
 
 /**
  * Parse "HH:MM - HH:MM" into { open, close } as "HH:MM:SS".
- * The scraper now always outputs this normalised format.
+ * Scraper outputs normalised HH:MM format after the opening hours fix.
  */
 function parseTimeRange(text: string): { open: string; close: string } | null {
-  // Normalize dots to colons (e.g., "11.30 - 23.30" → "11:30 - 23:30")
-  const normalized = text.replace(/(\d{2})\.(\d{2})/g, '$1:$2');
-  
-  // Match HH:MM - HH:MM format
-  const match = normalized.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+  const match = text.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
   if (!match) return null;
-  
   return {
     open:  `${match[1]}:00`,
     close: `${match[2]}:00`,
@@ -631,7 +718,6 @@ function parseTimeRange(text: string): { open: string; close: string } | null {
 
 /**
  * Derive kitchen close time as the most common close time across open days.
- * Returns "HH:MM:SS" or null.
  */
 function deriveKitchenCloseTime(
   candidates: { day_text: string; time_text: string }[]
@@ -647,33 +733,13 @@ function deriveKitchenCloseTime(
   }
 
   if (closeCounts.size === 0) return null;
-
-  const [mostCommon] = [...closeCounts.entries()]
-    .sort((a, b) => b[1] - a[1])[0];
-
-  return mostCommon; // already "HH:MM:SS" from parseTimeRange
+  const [mostCommon] = [...closeCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return mostCommon;
 }
 
 /**
- * Build a single content string from payload sections for Tier 2 + Tier 3.
- */
-function buildContentText(payload: any): string {
-  const parts: string[] = [];
-
-  if (payload.business?.description?.value) {
-    parts.push(payload.business.description.value);
-  }
-
-  const sections = payload.content_sections ?? [];
-  for (const s of sections) {
-    if (s.text && s.text.length > 30) parts.push(s.text);
-  }
-
-  return parts.join('\n\n');
-}
-
-/**
- * Remove null/undefined values from an object before DB write.
+ * Remove null/undefined values before DB write so existing values
+ * are never overwritten with null on re-runs.
  */
 function filterNulls(obj: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
@@ -681,9 +747,6 @@ function filterNulls(obj: Record<string, unknown>): Record<string, unknown> {
   );
 }
 
-/**
- * Helper to return a JSON response with cors headers.
- */
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,

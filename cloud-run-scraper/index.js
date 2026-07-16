@@ -19,6 +19,89 @@ import {
   mergePageExtractions
 } from './services/page-crawler.js';
 
+/**
+ * Attempt a plain HTTP GET with a crawler User-Agent to retrieve the
+ * server-side rendered version of a page.
+ *
+ * Many headless CMS platforms (Umbraco Heartcore, Contentful, Sanity,
+ * Prismic etc.) deliberately serve pre-rendered HTML to search crawlers
+ * while serving a JS shell to browsers.
+ *
+ * Returns the HTML string if the response contains substantial visible text,
+ * or null if the page appears to be a JS shell (text too short).
+ *
+ * @param {string} url - The URL to fetch
+ * @param {number} minTextLength - Minimum visible text characters to accept
+ * @returns {Promise<string|null>}
+ */
+async function trySSRFetch(url, minTextLength = 1000) {
+  try {
+    console.log(`[SSR] Attempting pre-flight fetch for: ${url}`);
+
+    const controller = new AbortController();
+    const timeout    = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        // Googlebot UA triggers SSR on most headless CMS platforms
+        'User-Agent':      'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        'Accept':          'text/html,application/xhtml+xml',
+        'Accept-Language': 'da,en;q=0.9',
+        'Cache-Control':   'no-cache',
+      },
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.log(`[SSR] Pre-flight returned ${response.status} — falling back to Puppeteer`);
+      return null;
+    }
+
+    const html = await response.text();
+
+    // Extract alt text from img tags before stripping — some pages carry
+    // meaningful content labels in alt attributes (logo names, section labels)
+    const altTexts = [...html.matchAll(/\balt=["']([^"']{3,})["']/gi)]
+      .map(m => m[1].trim())
+      .filter(Boolean)
+      .join(' ');
+
+    // Strip non-content markup
+    const strippedText = html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')  // strip scripts + contents
+      .replace(/<style[\s\S]*?<\/style>/gi, '')     // strip styles + contents
+      .replace(/<[^>]+>/g, ' ')                     // strip remaining tags
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Combine visible text + alt text for threshold measurement only
+    // The raw HTML is still what gets passed to extractPageDocument()
+    const measuredText = altTexts.length > 0
+      ? `${strippedText} ${altTexts}`.trim()
+      : strippedText;
+
+    console.log(`[SSR] Pre-flight visible text: ${strippedText.length} chars, alt text: ${altTexts.length} chars, combined: ${measuredText.length} chars`);
+
+    if (measuredText.length < minTextLength) {
+      console.log(`[SSR] Text below threshold (${minTextLength}) — JS shell detected, falling back to Puppeteer`);
+      return null;
+    }
+
+    console.log(`[SSR] ✅ SSR content detected (${measuredText.length} chars) — skipping Puppeteer`);
+    return html;
+
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      console.log('[SSR] Pre-flight timed out — falling back to Puppeteer');
+    } else {
+      console.log('[SSR] Pre-flight failed:', err.message, '— falling back to Puppeteer');
+    }
+    return null;
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 const API_KEY = process.env.API_KEY;
@@ -322,39 +405,94 @@ app.post('/scrape-v3', async (req, res) => {
     await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     // ========================================
-    // HOMEPAGE: Navigate and Extract
+    // HOMEPAGE: SSR Pre-flight → Puppeteer fallback
     // ========================================
-    console.log(`[V3] Navigating to homepage...`);
-    await page.goto(url, {
-      waitUntil: 'networkidle2',  // Wait for network to be mostly idle
-      timeout: 30000
-    });
 
-    console.log(`[V3] Page loaded, waiting for content stability...`);
+    let homepageDoc = null;
+    let ssrUsed     = false;
 
-    // Wait for meaningful content
-    const hasContent = await page
-      .waitForFunction(
-        () => document.body?.innerText?.trim().length > 300,
-        { timeout: 10000 }
-      )
-      .then(() => true)
-      .catch(() => {
-        console.warn('[V3] Content wait timed out - proceeding anyway');
-        return false;
+    // Attempt SSR pre-flight first — works for headless CMS sites
+    // (Umbraco Heartcore, Contentful, Sanity etc.) that serve pre-rendered
+    // HTML to Googlebot but a JS shell to browsers.
+    // 400 chars is enough to confirm real content (nav links alone give ~150-200).
+    // Rejects genuine JS shells while accepting minimal but complete pages.
+    const ssrHtml = await trySSRFetch(url, 400);
+
+    if (ssrHtml) {
+      // SSR succeeded — inject HTML into the Puppeteer page for extraction
+      console.log('[V3] Using SSR content — injecting pre-rendered HTML...');
+      
+      // CRITICAL: Disable JavaScript to prevent hydration scripts from clearing/modifying
+      // the DOM. The HTML is already server-rendered, so we don't need JS execution.
+      await page.setJavaScriptEnabled(false);
+      
+      // Inject <base href> to give the page proper URL context for relative links
+      const htmlWithBase = ssrHtml.replace(
+        /<head[^>]*>/i,
+        `$&<base href="${url}">`
+      );
+      
+      // Inject the SSR content
+      await page.setContent(htmlWithBase, { waitUntil: 'domcontentloaded', timeout: 15000 });
+
+      // Note: page.setContent() resets page.url() to "about:blank".
+      // We fix final_url after extraction — see below.
+      ssrUsed = true;
+    } else {
+      // SSR returned a shell — use Puppeteer with full browser rendering
+      console.log('[V3] Navigating with Puppeteer (full browser render)...');
+      await page.goto(url, {
+        waitUntil: 'networkidle2',
+        timeout:   30000,
       });
 
-    console.log(`[V3] Has content: ${hasContent}`);
+      // Wait for meaningful content volume — 500 chars is enough to confirm
+      // the page has rendered beyond nav links and empty shells
+      const hasContent = await page
+        .waitForFunction(
+          () => document.body?.innerText?.trim().length > 500,
+          { timeout: 12000 }
+        )
+        .then(() => true)
+        .catch(() => {
+          console.warn('[V3] Content wait timed out — proceeding with what is available');
+          return false;
+        });
 
-    // Execute Phase 5 in exact order (skip Phase 5b removeKnownNoise - too aggressive)
-    console.log(`[V3] Executing Phase 5: cookie dismiss, scroll, stability, extract...`);
-    await dismissCookieDialog(page);
-    await autoScroll(page);
-    await waitForContentStability(page);
+      console.log(`[V3] Puppeteer content ready: ${hasContent}`);
 
+      // Full browser automation sequence
+      console.log('[V3] Running browser automation (cookie dismiss, scroll, stability)...');
+      await dismissCookieDialog(page);
+      await autoScroll(page);
+      await waitForContentStability(page);
+    }
+
+    // Extract page document — same for both SSR and Puppeteer paths
     console.log('[V3] Extracting page document...');
-    const homepageDoc = await extractPageDocument(page);
-    console.log(`[V3] Extracted: title=${homepageDoc.title}, links=${homepageDoc.links?.length || 0}, blocks=${homepageDoc.blocks?.length || 0}`);
+    homepageDoc = await extractPageDocument(page);
+
+    // page.setContent() resets page.url() to "about:blank".
+    // Override unconditionally for SSR — the real URL is always known.
+    if (ssrUsed) {
+      homepageDoc.final_url    = url;
+      homepageDoc.canonical_url = homepageDoc.canonical_url || url;
+
+      // Fix source_url throughout the extraction for clean payloads
+      const fixSourceUrls = (obj) => {
+        if (!obj || typeof obj !== 'object') return;
+        for (const key of Object.keys(obj)) {
+          if (key === 'source_url' && obj[key] === 'about:blank') {
+            obj[key] = url;
+          } else if (typeof obj[key] === 'object') {
+            fixSourceUrls(obj[key]);
+          }
+        }
+      };
+      fixSourceUrls(homepageDoc);
+    }
+
+    console.log(`[V3] Extracted: title=${homepageDoc.title}, links=${homepageDoc.links?.length || 0}, blocks=${homepageDoc.blocks?.length || 0}, ssr=${ssrUsed}`);
 
     // ========================================
     // HOMEPAGE: Process Extraction
@@ -462,10 +600,11 @@ app.post('/scrape-v3', async (req, res) => {
       extraction,
       pages_crawled: pagesCrawled,
       scraper_metadata: {
-        version: 'v3',
-        scraper_type: 'cloud-run-puppeteer-smart',
-        duration_ms: duration,
-        pages_crawled_count: pagesCrawled.length
+        version:            'v3',
+        scraper_type:       ssrUsed ? 'cloud-run-ssr-fetch' : 'cloud-run-puppeteer-smart',
+        duration_ms:        duration,
+        pages_crawled_count: pagesCrawled.length,
+        ssr_used:           ssrUsed,
       }
     };
 

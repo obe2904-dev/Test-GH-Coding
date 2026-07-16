@@ -94,11 +94,31 @@ serve(async (req) => {
           console.log('⚠️ Cached scrape has extraction error - forcing fresh scrape');
         } else {
           console.log('✅ Using cached scrape:', cached.id);
-          const payload = cached.payload as any;
           
-          // Still do AI + distribution on cached data
-          const aiResult = await performAIAnalysis(supabase, business_id, payload);
-          await distributeStructuredData(supabase, business_id, payload);
+          // Call extract-from-scrape to run 3-tier extraction on cached data
+          const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-from-scrape`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ business_id }),
+          });
+
+          if (!extractResponse.ok) {
+            const errorText = await extractResponse.text();
+            console.error('❌ Extraction failed:', errorText);
+            throw new Error(`Extraction failed: ${extractResponse.status}`);
+          }
+
+          const extractionResult = await extractResponse.json();
+          const distributionSummary = {
+            tier1_fields: extractionResult.summary?.saved?.filter((f: string) => f.includes('tier-1')) || [],
+            tier2_fields: extractionResult.summary?.saved?.filter((f: string) => f.includes('tier-2')) || [],
+            tier3_fields: extractionResult.summary?.saved?.filter((f: string) => f.includes('tier-3')) || [],
+            total_saved: extractionResult.summary?.saved?.length || 0,
+            errors: extractionResult.summary?.errors || [],
+          };
         
           return new Response(
             JSON.stringify({
@@ -106,7 +126,8 @@ serve(async (req) => {
               cached: true,
               scrape_id: cached.id,
               quality: cached.content_quality,
-              ai_analysis: aiResult,
+              extraction_summary: extractionResult.summary,
+              distribution_summary: distributionSummary,
               duration_ms: Date.now() - startTime,
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -174,26 +195,36 @@ serve(async (req) => {
     console.log('💾 Stored scrape result:', scrapeResult.id);
 
     // ==========================================
-    // PHASE 2: AI INTERPRETATION
+    // PHASE 2 & 3: AI EXTRACTION + DISTRIBUTION (3-tier architecture)
     // ==========================================
-    console.log('🤖 Phase 2: AI Analysis...');
-    const aiResult = await performAIAnalysis(supabase, business_id, payload);
+    console.log('🤖 Phase 2 & 3: Running 3-tier extraction...');
     
-    // Update scrape result with AI data
-    await supabase
-      .from('website_scrape_results')
-      .update({
-        extracted_at: new Date().toISOString(),
-        extracted_data: aiResult,
-        extraction_model: GEMINI_MODEL,
-      })
-      .eq('id', scrapeResult.id);
+    // Call extract-from-scrape Edge Function (uses new 3-tier architecture)
+    const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-from-scrape`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ business_id }),
+    });
 
-    // ==========================================
-    // PHASE 3: DATA DISTRIBUTION
-    // ==========================================
-    console.log('📊 Phase 3: Data Distribution...');
-    const distributionSummary = await distributeStructuredData(supabase, business_id, payload, aiResult);
+    if (!extractResponse.ok) {
+      const errorText = await extractResponse.text();
+      console.error('❌ Extraction failed:', errorText);
+      throw new Error(`Extraction failed: ${extractResponse.status}`);
+    }
+
+    const extractionResult = await extractResponse.json();
+    console.log('✅ Extraction complete:', extractionResult.summary);
+    
+    const distributionSummary = {
+      tier1_fields: extractionResult.summary?.saved?.filter((f: string) => f.includes('tier-1')) || [],
+      tier2_fields: extractionResult.summary?.saved?.filter((f: string) => f.includes('tier-2')) || [],
+      tier3_fields: extractionResult.summary?.saved?.filter((f: string) => f.includes('tier-3')) || [],
+      total_saved: extractionResult.summary?.saved?.length || 0,
+      errors: extractionResult.summary?.errors || [],
+    };
 
     // ==========================================
     // COMPLETE
@@ -206,7 +237,7 @@ serve(async (req) => {
         success: true,
         scrape_id: scrapeResult.id,
         quality: contentQuality,
-        ai_analysis: aiResult,
+        extraction_summary: extractionResult.summary,
         distribution_summary: distributionSummary,
         duration_ms: totalDuration,
       }),
@@ -328,14 +359,17 @@ Extract the following in JSON format:
     const geminiData = await geminiResponse.json();
     const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     
-    // Extract JSON from markdown code blocks if present
-    let jsonText = responseText;
+    console.log('🤖 Raw Gemini response (first 200 chars):', responseText.slice(0, 200));
     
-    // Try to extract from ```json ... ``` or ``` ... ```
-    const jsonMatch = responseText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    if (jsonMatch) {
-      jsonText = jsonMatch[1].trim();
-    }
+    // Extract JSON from markdown code blocks if present
+    let jsonText = responseText.trim();
+    
+    // Remove markdown code fences (multiple patterns)
+    jsonText = jsonText.replace(/^```(?:json)?\s*\n?/i, ''); // Remove opening fence
+    jsonText = jsonText.replace(/\n?```\s*$/i, ''); // Remove closing fence
+    jsonText = jsonText.trim();
+    
+    console.log('🧹 Cleaned JSON (first 200 chars):', jsonText.slice(0, 200));
     
     const extractedData = JSON.parse(jsonText);
     console.log('✅ AI extraction complete:', {
@@ -355,8 +389,9 @@ Extract the following in JSON format:
     }
 
     // Store venue_hooks as key_offerings (what makes business unique)
+    // Convert array to newline-separated TEXT format
     if (extractedData.venue_hooks && Array.isArray(extractedData.venue_hooks) && extractedData.venue_hooks.length > 0) {
-      profileUpdates.key_offerings = extractedData.venue_hooks;
+      profileUpdates.key_offerings = extractedData.venue_hooks.slice(0, 10).join('\n');
     }
 
     // Store menu highlights in menu_signal structure
@@ -368,17 +403,13 @@ Extract the following in JSON format:
       };
     }
 
-    // Store keywords and tone for future use
-    if (extractedData.keywords && Array.isArray(extractedData.keywords)) {
-      profileUpdates.business_keywords = extractedData.keywords;
-    }
-
-    if (extractedData.tone_of_voice) {
-      profileUpdates.brand_tone = extractedData.tone_of_voice;
+    // Store keywords (correct column name: keywords, not business_keywords)
+    if (extractedData.keywords && Array.isArray(extractedData.keywords) && extractedData.keywords.length > 0) {
+      profileUpdates.keywords = extractedData.keywords;
     }
 
     if (Object.keys(profileUpdates).length > 0) {
-      await supabase
+      const { error: profileError } = await supabase
         .from('business_profile')
         .upsert({
           business_id: businessId,
@@ -387,7 +418,31 @@ Extract the following in JSON format:
         }, {
           onConflict: 'business_id',
         });
-      console.log('  ✓ AI data stored:', Object.keys(profileUpdates).join(', '));
+      
+      if (profileError) {
+        console.error('  ✗ Profile update error:', profileError);
+      } else {
+        console.log('  ✓ AI data stored:', Object.keys(profileUpdates).join(', '));
+      }
+    }
+
+    // Store tone_of_voice in business_brand_profile (correct table)
+    if (extractedData.tone_of_voice) {
+      const { error: brandError } = await supabase
+        .from('business_brand_profile')
+        .upsert({
+          business_id: businessId,
+          tone_of_voice: extractedData.tone_of_voice,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'business_id',
+        });
+      
+      if (brandError) {
+        console.error('  ✗ Brand tone update error:', brandError);
+      } else {
+        console.log('  ✓ Brand tone stored:', extractedData.tone_of_voice);
+      }
     }
 
     // Store service model data in business_operations
@@ -408,7 +463,7 @@ Extract the following in JSON format:
       }
 
       if (Object.keys(operationsUpdates).length > 0) {
-        await supabase
+        const { error: operationsError } = await supabase
           .from('business_operations')
           .upsert({
             business_id: businessId,
@@ -417,7 +472,12 @@ Extract the following in JSON format:
           }, {
             onConflict: 'business_id',
           });
-        console.log('  ✓ Service model stored:', Object.keys(operationsUpdates).join(', '));
+        
+        if (operationsError) {
+          console.error('  ✗ Operations update error:', operationsError);
+        } else {
+          console.log('  ✓ Service model stored:', Object.keys(operationsUpdates).join(', '));
+        }
       }
     }
 
@@ -425,6 +485,7 @@ Extract the following in JSON format:
 
   } catch (error) {
     console.error('❌ AI analysis failed:', error);
+    console.error('   Error details:', error.message);
     return {
       about: null,
       description: null,
@@ -432,7 +493,7 @@ Extract the following in JSON format:
       keywords: [],
       tone_of_voice: null,
       confidence_score: 0,
-      error: error.message,
+      error: `AI parsing error: ${error.message}`,
     };
   }
 }
