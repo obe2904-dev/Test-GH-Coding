@@ -110,11 +110,19 @@ serve(async (req) => {
       ? await extractTier3(extraction)
       : {};
 
+    // ── Menu extraction (separate focused extraction) ────────────────────────
+    const menuExtraction = aiAllowed
+      ? await extractMenuOfferings(extraction)
+      : {};
+
+    // Merge menu extraction into tier3 (menu extraction takes precedence)
+    const tier3WithMenu = { ...tier3, ...menuExtraction };
+
     // ── Merge into table buckets ─────────────────────────────────────────────
     const businessLocations  = buildBusinessLocations(tier1);
-    const businessOperations = buildBusinessOperations(tier1, tier2, tier3);
-    const businessProfile    = buildBusinessProfile(tier1, tier3);
-    const businesses         = buildBusinesses(tier3);
+    const businessOperations = buildBusinessOperations(tier1, tier2, tier3WithMenu);
+    const businessProfile    = buildBusinessProfile(tier1, tier3WithMenu);
+    const businesses         = buildBusinesses(tier3WithMenu);
     const openingHoursRows   = buildOpeningHoursRows(extraction, business_id);
 
     // ── Write to database ────────────────────────────────────────────────────
@@ -311,7 +319,6 @@ Returner denne JSON (intet andet):
   "outdoor_seating_term": "Det præcise danske ord virksomheden bruger for udeservering — typisk 'terrasse', 'overdækket terrasse', 'udeservering', 'haveplads', 'gårdhave'. Null hvis ingen udeservering nævnes.",
   "weekly_programme": "Fritekst der beskriver tilbagevendende ugentlige begivenheder: live musik, DJ-aftener, temaftener, brunch-dage osv. Null hvis intet nævnes. På dansk.",
   "menu_description": "1-2 sætninger der opsummerer menukoncept og hovedkategorier. Null hvis utilstrækkelig menuinfo.",
-  "key_offerings": "Nylinjesepareret liste med 5-7 hovedretter eller produkter (KUN navne, på dansk). Udtræk fra menuindhold hvis tilgængeligt, ellers fra teksten. Prioritér retter fremfor generiske kategorier. Eksempler: 'Smørrebrød\nBøf Bearnaise\nFisk & Chips\nCaesar Salat\nPasta Carbonara\nBurger\nChocolate Brownie'. Kun null hvis absolut ingen produkter eller retter nævnes.",
   "ai_place_synopsis": "2-3 sætninger der beskriver stedet: type, stemning/atmosfære, køkken/koncept, hvem det henvender sig til. På dansk.",
   "local_location_reference": "Den korte sætning virksomheden selv bruger til at beskrive hvor de ligger. Skal være et konkret lokationsankerpunkt — et vartegn, gade, vandfront, torv, kvarter eller karakteristisk omgivelse. Eksempler: 'ved åen', 'på Rådhuspladsen', 'i skyggen af Koldinghus', 'i Nyhavn', 'på havnen', 'i Latinerkvarteret', 'ved stranden'. Inkludér IKKE bynavnet alene. Null hvis ingen specifik lokationsreference findes.",
   "menu_signal": {
@@ -388,7 +395,6 @@ Returner denne JSON (intet andet):
     // Programme and content
     t3('weekly_programme',  parsed.weekly_programme);
     t3('menu_description',  parsed.menu_description);
-    t3('key_offerings',     parsed.key_offerings);
     t3('ai_place_synopsis', parsed.ai_place_synopsis);
 
     // Location reference — written to businesses table
@@ -407,6 +413,133 @@ Returner denne JSON (intet andet):
   } catch (err) {
     console.error('❌ Tier 3 extraction failed:', err);
     return {};
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MENU EXTRACTION — Separate focused extraction for dish names
+// Fetches menu page if URL exists, sends to Gemini with focused prompt
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function extractMenuOfferings(payload: any): Promise<Record<string, FieldResult>> {
+  const r: Record<string, FieldResult> = {};
+  
+  const menuUrl = payload.services?.menu?.url;
+  if (!menuUrl) {
+    console.log('⏭️  No menu URL detected, skipping menu extraction');
+    return r;
+  }
+
+  if (!GEMINI_API_KEY) {
+    console.warn('⚠️  No GEMINI_API_KEY — skipping menu extraction');
+    return r;
+  }
+
+  console.log(`🍽️  Menu URL detected: ${menuUrl}, fetching menu for dish extraction...`);
+
+  try {
+    // Fetch menu page HTML
+    const response = await fetch(menuUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      console.warn(`⚠️  Failed to fetch menu page: HTTP ${response.status}`);
+      return r;
+    }
+
+    const menuHtml = await response.text();
+    console.log(`✅ Menu HTML fetched: ${menuHtml.length} bytes`);
+
+    // Clean HTML: remove scripts, styles, tags
+    const cleanMenuText = menuHtml
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 8000); // Limit to 8000 chars for Gemini
+
+    if (cleanMenuText.length < 200) {
+      console.warn(`⚠️  Menu content too short (${cleanMenuText.length} chars), skipping`);
+      return r;
+    }
+
+    console.log(`🔍 Cleaned menu text: ${cleanMenuText.length} chars, sending to Gemini...`);
+
+    // Focused prompt: ONLY extract dish names
+    const prompt = `
+Du er ekspert i at udtrække retnavne fra restaurantmenuer.
+
+Analyser nedenstående menuindhold og udtræk 5-7 hovedretter eller signaturretter.
+Returner KUN retnavne — ingen priser, ingen beskrivelser, ingen kategorier.
+Prioritér specifikke retter fremfor generiske kategorier (f.eks. "Smørrebrød med laks" fremfor "Smørrebrød").
+Returner navnene på dansk, ét pr. linje.
+
+MENUINDHOLD:
+${cleanMenuText}
+
+Returner PRÆCIST denne JSON-struktur (intet andet):
+{
+  "key_offerings": "Retnavn 1\\nRetnavn 2\\nRetnavn 3\\nRetnavn 4\\nRetnavn 5"
+}
+
+Eksempel output:
+{
+  "key_offerings": "Smørrebrød med laks\\nBøf Bearnaise\\nFisk & Chips\\nCaesar Salat\\nPasta Carbonara"
+}
+`.trim();
+
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 500,
+          },
+        }),
+      }
+    );
+
+    if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text();
+      console.error('❌ Gemini menu API error:', geminiResponse.status, errorText);
+      return r;
+    }
+
+    const geminiData = await geminiResponse.json();
+    const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    if (!rawText) {
+      console.warn('⚠️  Empty response from Gemini menu extraction');
+      return r;
+    }
+
+    // Parse JSON response
+    const cleanJson = rawText.replace(/^```json\s*|\s*```$/g, '').trim();
+    const parsed = JSON.parse(cleanJson);
+
+    if (parsed.key_offerings) {
+      r['key_offerings'] = {
+        value: parsed.key_offerings,
+        tier: 3,
+        source: 'gemini_menu_extraction',
+      };
+      console.log('✅ Menu extraction complete:', parsed.key_offerings.split('\n').length, 'dishes');
+    }
+
+    return r;
+
+  } catch (err) {
+    console.error('❌ Menu extraction failed:', err.message);
+    return r;
   }
 }
 

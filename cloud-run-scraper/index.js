@@ -579,59 +579,8 @@ app.post('/scrape-v3', async (req, res) => {
       extraction.quality = finalQuality;
 
       console.log(`[V3] Final quality after merge: ${finalQuality.rating} (fields: ${finalQuality.fields_found}/${finalQuality.fields_expected})`);
-    }
-
-    // ========================================
-    // MENU PAGE CRAWL (Always, if detected)
-    // ========================================
-    // Always fetch menu page if detected, regardless of homepage quality
-    // This ensures we get menu content for key_offerings extraction
-    const menuUrl = extraction.services?.menu?.url;
-    console.log(`[V3 DEBUG] Checking menu URL: ${menuUrl}`);
-    if (menuUrl) {
-      console.log(`[V3] Menu URL detected: ${menuUrl}, fetching for key offerings...`);
-      try {
-        // Simple HTTP fetch of menu page (no Puppeteer needed)
-        const menuHtmlResponse = await fetch(menuUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-          },
-          timeout: 10000
-        });
-
-        if (menuHtmlResponse.ok) {
-          const menuHtml = await menuHtmlResponse.text();
-          console.log(`[V3 DEBUG] Menu HTML fetched: ${menuHtml.length} bytes`);
-
-          // Extract visible text from HTML (remove scripts, styles, etc.)
-          const cleanMenuText = menuHtml
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-
-          console.log(`[V3 DEBUG] Cleaned menu text: ${cleanMenuText.length} chars`);
-
-          // Add menu text as a content section
-          if (cleanMenuText.length > 200) {
-            extraction.content_sections.push({
-              heading: 'Menu',
-              text: cleanMenuText.slice(0, 5000),  // Limit to 5000 chars
-              source_url: menuUrl
-            });
-            console.log(`[V3] Menu content added to extraction (${extraction.content_sections.length} total sections)`);
-          } else {
-            console.warn(`[V3] Menu page too short (${cleanMenuText.length} chars), skipping`);
-          }
-        } else {
-          console.warn(`[V3] Failed to fetch menu page: HTTP ${menuHtmlResponse.status}`);
-        }
-      } catch (err) {
-        console.warn(`[V3] Error fetching menu page:`, err.message);
-      }
     } else {
-      console.log(`[V3] No menu URL detected, skipping menu page fetch.`);
+      console.log(`[V3] Homepage quality sufficient (${homepageQuality.rating}), skipping additional pages.`);
     }
 
     await browser.close();
