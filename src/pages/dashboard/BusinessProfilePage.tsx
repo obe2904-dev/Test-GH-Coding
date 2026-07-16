@@ -1682,17 +1682,9 @@ function BusinessProfilePage() {
             </div>
 
             {isEditingBasics && (
-                <div className="grid grid-cols-1 gap-1 text-gray-700">
-                  <div><code className="bg-purple-100 px-1 rounded">about</code> → <code className="bg-blue-100 px-1 rounded">business_profile.user_about_text</code></div>
-                  <div><code className="bg-purple-100 px-1 rounded">keywords[]</code> → <code className="bg-blue-100 px-1 rounded">business_profile.keywords</code></div>
-                  <div><code className="bg-purple-100 px-1 rounded">venue_hooks[]</code> → <code className="bg-blue-100 px-1 rounded">business_profile.key_offerings</code> (as TEXT)</div>
-                  <div><code className="bg-purple-100 px-1 rounded">tone_of_voice</code> → <code className="bg-blue-100 px-1 rounded">business_brand_profile.tone_of_voice</code></div>
-                  <div><code className="bg-purple-100 px-1 rounded">menu_highlights[]</code> → <code className="bg-blue-100 px-1 rounded">business_profile.menu_signal</code></div>
-                  <div><code className="bg-purple-100 px-1 rounded">services{}</code> → <code className="bg-blue-100 px-1 rounded">business_operations.*</code></div>
-                </div>
-              </div>
-
-              {/* Debug Buttons */}
+              <div className="mt-4 pt-4 border-t space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-text-secondary mb-1">Virksomhedsnavn *</label>
               <div className="flex flex-col gap-2">
                 <button
                   onClick={handleScrapeOnly}
