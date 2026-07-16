@@ -1938,7 +1938,7 @@ function BusinessProfilePage() {
                 <h3 className="text-sm font-medium text-brand mb-1">{t('businessProfile.sectionBusiness')}</h3>
                 {!isEditingBasics && (
                   <p className="text-sm text-text-secondary">
-                    {businessName || t('businessProfile.notFilled')} {businessCategory && `· ${businessCategory}`}
+                    {businessName || t('businessProfile.notFilled')}
                   </p>
                 )}
               </div>
