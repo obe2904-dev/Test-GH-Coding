@@ -168,6 +168,37 @@ function extractTier1(payload: any): Record<string, FieldResult> {
     t1('postal_code',   postal_code,   'contact.addresses[0] split');
   }
 
+  // Fallback: Parse phone and address from content_sections if not in contact
+  if (!r['phone'] || !r['address_line1']) {
+    const sections = payload.content_sections ?? [];
+    const contactSection = sections.find((s: any) => 
+      s.heading?.toLowerCase().includes('kontakt') || 
+      s.heading?.toLowerCase().includes('contact')
+    );
+    
+    if (contactSection?.text) {
+      const text = contactSection.text;
+      
+      // Parse Danish phone (8-digit, possibly with spaces: "86 19 07 06" or "86190706")
+      if (!r['phone']) {
+        const phoneMatch = text.match(/(?:tlf\.?:?\s*)?(\d{2}\s?\d{2}\s?\d{2}\s?\d{2})/i);
+        if (phoneMatch) {
+          const cleanPhone = phoneMatch[1].replace(/\s/g, '');
+          t1('phone', cleanPhone, 'content_sections[Kontakt] phone regex');
+        }
+      }
+      
+      // Parse Danish address: "Street Number PostalCode City"
+      if (!r['address_line1']) {
+        const addressMatch = text.match(/([A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s]+\d+)\s+(\d{4})\s+([A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s]+)/);
+        if (addressMatch) {
+          t1('address_line1', addressMatch[1].trim(), 'content_sections[Kontakt] address regex');
+          t1('postal_code', addressMatch[2], 'content_sections[Kontakt] postal code regex');
+        }
+      }
+    }
+  }
+
   // Service URLs
   t1('booking_url',         payload.services?.booking?.url,         'services.booking');
   t1('takeaway_url',        payload.services?.takeaway?.url,        'services.takeaway');
