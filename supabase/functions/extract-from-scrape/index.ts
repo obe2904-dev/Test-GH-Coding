@@ -311,7 +311,7 @@ Returner denne JSON (intet andet):
   "outdoor_seating_term": "Det præcise danske ord virksomheden bruger for udeservering — typisk 'terrasse', 'overdækket terrasse', 'udeservering', 'haveplads', 'gårdhave'. Null hvis ingen udeservering nævnes.",
   "weekly_programme": "Fritekst der beskriver tilbagevendende ugentlige begivenheder: live musik, DJ-aftener, temaftener, brunch-dage osv. Null hvis intet nævnes. På dansk.",
   "menu_description": "1-2 sætninger der opsummerer menukoncept og hovedkategorier. Null hvis utilstrækkelig menuinfo.",
-  "key_offerings": "Nylinjesepareret liste med 3-5 hovedretter eller produkter (kun navne, på dansk). Forsøg at udtrække fra teksten selv hvis menu ikke er tydeligt struktureret. Kun null hvis absolut ingen produkter eller retter nævnes.",
+  "key_offerings": "Nylinjesepareret liste med 5-7 hovedretter eller produkter (KUN navne, på dansk). Udtræk fra menuindhold hvis tilgængeligt, ellers fra teksten. Prioritér retter fremfor generiske kategorier. Eksempler: 'Smørrebrød\nBøf Bearnaise\nFisk & Chips\nCaesar Salat\nPasta Carbonara\nBurger\nChocolate Brownie'. Kun null hvis absolut ingen produkter eller retter nævnes.",
   "ai_place_synopsis": "2-3 sætninger der beskriver stedet: type, stemning/atmosfære, køkken/koncept, hvem det henvender sig til. På dansk.",
   "local_location_reference": "Den korte sætning virksomheden selv bruger til at beskrive hvor de ligger. Skal være et konkret lokationsankerpunkt — et vartegn, gade, vandfront, torv, kvarter eller karakteristisk omgivelse. Eksempler: 'ved åen', 'på Rådhuspladsen', 'i skyggen af Koldinghus', 'i Nyhavn', 'på havnen', 'i Latinerkvarteret', 'ved stranden'. Inkludér IKKE bynavnet alene. Null hvis ingen specifik lokationsreference findes.",
   "menu_signal": {

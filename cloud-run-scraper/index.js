@@ -579,8 +579,65 @@ app.post('/scrape-v3', async (req, res) => {
       extraction.quality = finalQuality;
 
       console.log(`[V3] Final quality after merge: ${finalQuality.rating} (fields: ${finalQuality.fields_found}/${finalQuality.fields_expected})`);
+    }
+
+    // ========================================
+    // MENU PAGE CRAWL (Always, if detected)
+    // ========================================
+    // Always crawl menu page if detected, regardless of homepage quality
+    // This ensures we get menu content for key_offerings extraction
+    const menuUrl = extraction.services?.menu?.url;
+    if (menuUrl) {
+      const alreadyCrawled = pagesCrawled.some(p => {
+        try {
+          const crawledPath = new URL(p.url).pathname;
+          const menuPath = new URL(menuUrl).pathname;
+          return crawledPath === menuPath;
+        } catch {
+          return false;
+        }
+      });
+
+      if (!alreadyCrawled) {
+        console.log(`[V3] Menu URL detected: ${menuUrl}, crawling for key offerings...`);
+        try {
+          const menuPageDoc = await scrapePage(page, menuUrl);
+          const menuNormalizedLinks = normalizeLinks(menuPageDoc.links);
+          const { classified: menuServices } = classifyLinks(menuNormalizedLinks);
+          const menuContact = extractContact(menuPageDoc);
+          const menuOpeningHours = await processOpeningHours(menuPageDoc);
+
+          const menuExtraction = {
+            meta: {
+              final_url: menuPageDoc.final_url || menuUrl
+            },
+            contact: menuContact,
+            services: menuServices,
+            content_sections: extractContentSections(menuPageDoc, menuOpeningHours),
+            opening_hours: menuOpeningHours,
+            business: { name: null, description: null },
+            quality: { rating: 'unknown', fields_found: 0, fields_expected: 8, noise_ratio: 0, warnings: [] }
+          };
+
+          const menuQuality = calculateQuality(menuExtraction);
+          pagesCrawled.push({ url: menuPageDoc.final_url, quality: menuQuality.rating });
+
+          // Merge menu page with existing extraction
+          extraction = mergePageExtractions([extraction, menuExtraction]);
+          
+          // Recalculate quality after menu merge
+          const finalQuality = calculateQuality(extraction);
+          extraction.quality = finalQuality;
+
+          console.log(`[V3] Menu page crawled, final quality: ${finalQuality.rating}`);
+        } catch (err) {
+          console.warn(`[V3] Failed to scrape menu page ${menuUrl}:`, err.message);
+        }
+      } else {
+        console.log(`[V3] Menu URL already crawled, skipping.`);
+      }
     } else {
-      console.log(`[V3] Homepage quality sufficient (${homepageQuality.rating}), skipping additional pages.`);
+      console.log(`[V3] No menu URL detected, skipping menu page crawl.`);
     }
 
     await browser.close();
