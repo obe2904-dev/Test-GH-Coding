@@ -584,113 +584,54 @@ app.post('/scrape-v3', async (req, res) => {
     // ========================================
     // MENU PAGE CRAWL (Always, if detected)
     // ========================================
-    // Always crawl menu page if detected, regardless of homepage quality
+    // Always fetch menu page if detected, regardless of homepage quality
     // This ensures we get menu content for key_offerings extraction
     const menuUrl = extraction.services?.menu?.url;
     console.log(`[V3 DEBUG] Checking menu URL: ${menuUrl}`);
     if (menuUrl) {
-      const alreadyCrawled = pagesCrawled.some(p => {
-        try {
-          const crawledPath = new URL(p.url).pathname;
-          const menuPath = new URL(menuUrl).pathname;
-          return crawledPath === menuPath;
-        } catch {
-          return false;
-        }
-      });
+      console.log(`[V3] Menu URL detected: ${menuUrl}, fetching for key offerings...`);
+      try {
+        // Simple HTTP fetch of menu page (no Puppeteer needed)
+        const menuHtmlResponse = await fetch(menuUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+          },
+          timeout: 10000
+        });
 
-      console.log(`[V3 DEBUG] Menu already crawled: ${alreadyCrawled}, pagesCrawled count: ${pagesCrawled.length}`);
+        if (menuHtmlResponse.ok) {
+          const menuHtml = await menuHtmlResponse.text();
+          console.log(`[V3 DEBUG] Menu HTML fetched: ${menuHtml.length} bytes`);
 
-      if (!alreadyCrawled) {
-        console.log(`[V3] Menu URL detected: ${menuUrl}, crawling for key offerings...`);
-        try {
-          // Create a fresh page for menu to avoid state issues
-          const menuPage = await browser.newPage();
-          await menuPage.setDefaultNavigationTimeout(30000);
-          await menuPage.setDefaultTimeout(30000);
-          await menuPage.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-          
-          // Block unnecessary resources
-          await menuPage.setRequestInterception(true);
-          menuPage.on('request', request => {
-            const blockedTypes = new Set(['image', 'media', 'font']);
-            if (blockedTypes.has(request.resourceType())) {
-              request.abort();
-            } else {
-              request.continue();
-            }
-          });
-          
-          console.log(`[Crawler] Navigating to menu page: ${menuUrl}`);
-          await menuPage.goto(menuUrl, {
-            waitUntil: 'networkidle2',
-            timeout: 30000
-          });
+          // Extract visible text from HTML (remove scripts, styles, etc.)
+          const cleanMenuText = menuHtml
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
 
-          // Wait for page to have substantial content
-          await menuPage
-            .waitForFunction(
-              () => document.body?.innerText?.trim().length > 500,
-              { timeout: 15000 }
-            )
-            .catch(() => {
-              console.warn('[V3] Menu page content wait timed out');
+          console.log(`[V3 DEBUG] Cleaned menu text: ${cleanMenuText.length} chars`);
+
+          // Add menu text as a content section
+          if (cleanMenuText.length > 200) {
+            extraction.content_sections.push({
+              heading: 'Menu',
+              text: cleanMenuText.slice(0, 5000),  // Limit to 5000 chars
+              source_url: menuUrl
             });
-
-          // Dismiss any blocking dialogs
-          await dismissCookieDialog(menuPage);
-          await removeKnownNoise(menuPage);
-          await autoScroll(menuPage);
-          await waitForContentStability(menuPage);
-
-          // Extract menu page content
-          const menuPageDoc = await extractPageDocument(menuPage);
-          console.log(`[V3 DEBUG] Menu page extracted: blocks=${menuPageDoc.blocks?.length}, links=${menuPageDoc.links?.length}`);
-          
-          // Close the menu page
-          await menuPage.close();
-          
-          const menuNormalizedLinks = normalizeLinks(menuPageDoc.links);
-          const { classified: menuServices } = classifyLinks(menuNormalizedLinks);
-          const menuContact = extractContact(menuPageDoc);
-          const menuOpeningHours = await processOpeningHours(menuPageDoc);
-
-          const menuExtraction = {
-            meta: {
-              final_url: menuPageDoc.final_url || menuUrl
-            },
-            contact: menuContact,
-            services: menuServices,
-            content_sections: extractContentSections(menuPageDoc, menuOpeningHours),
-            opening_hours: menuOpeningHours,
-            business: { name: null, description: null },
-            quality: { rating: 'unknown', fields_found: 0, fields_expected: 8, noise_ratio: 0, warnings: [] }
-          };
-
-          console.log(`[V3 DEBUG] Menu extraction built: content_sections=${menuExtraction.content_sections?.length}, before_merge_sections=${extraction.content_sections?.length}`);
-
-          const menuQuality = calculateQuality(menuExtraction);
-          pagesCrawled.push({ url: menuPageDoc.final_url, quality: menuQuality.rating });
-
-          // Merge menu page with existing extraction
-          extraction = mergePageExtractions([extraction, menuExtraction]);
-          
-          console.log(`[V3 DEBUG] After merge: content_sections=${extraction.content_sections?.length}`);
-          
-          // Recalculate quality after menu merge
-          const finalQuality = calculateQuality(extraction);
-          extraction.quality = finalQuality;
-
-          console.log(`[V3] Menu page crawled, final quality: ${finalQuality.rating}`);
-        } catch (err) {
-          console.warn(`[V3] Failed to scrape menu page ${menuUrl}:`, err.message);
-          console.error(err.stack);
+            console.log(`[V3] Menu content added to extraction (${extraction.content_sections.length} total sections)`);
+          } else {
+            console.warn(`[V3] Menu page too short (${cleanMenuText.length} chars), skipping`);
+          }
+        } else {
+          console.warn(`[V3] Failed to fetch menu page: HTTP ${menuHtmlResponse.status}`);
         }
-      } else {
-        console.log(`[V3] Menu URL already crawled, skipping.`);
+      } catch (err) {
+        console.warn(`[V3] Error fetching menu page:`, err.message);
       }
     } else {
-      console.log(`[V3] No menu URL detected, skipping menu page crawl.`);
+      console.log(`[V3] No menu URL detected, skipping menu page fetch.`);
     }
 
     await browser.close();
