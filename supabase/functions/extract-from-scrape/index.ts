@@ -84,13 +84,13 @@ serve(async (req) => {
       return jsonResponse({ success: false, error: 'Payload is empty', scrape_id: scrapeResult.id }, 400);
     }
 
+    // ── Normalize payload structure ──────────────────────────────────────────
+    // Cloud Run scraper nests data under 'extraction' key
+    const extraction = payload.extraction || payload;
+
     // ── Content quality gate ─────────────────────────────────────────────────
-    const qualityRating = payload.quality?.rating
-                       ?? payload.extraction?.quality?.rating
-                       ?? 'unknown';
-    const textCharCount = payload.quality?.business_text_characters
-                       ?? payload.extraction?.quality?.business_text_characters
-                       ?? 0;
+    const qualityRating = extraction.quality?.rating ?? 'unknown';
+    const textCharCount = extraction.quality?.business_text_characters ?? 0;
     const aiAllowed     = qualityRating !== 'poor' && textCharCount >= MIN_TEXT_CHARS_FOR_AI;
 
     console.log('✅ Payload received:', {
@@ -104,10 +104,10 @@ serve(async (req) => {
     // ── Run extraction tiers ─────────────────────────────────────────────────
     const summary: ExtractionSummary = { found: [], not_found: [], saved: [], errors: [] };
 
-    const tier1 = extractTier1(payload);
-    const tier2 = extractTier2(payload);
+    const tier1 = extractTier1(extraction);
+    const tier2 = extractTier2(extraction);
     const tier3 = aiAllowed
-      ? await extractTier3(payload)
+      ? await extractTier3(extraction)
       : {};
 
     // ── Merge into table buckets ─────────────────────────────────────────────
@@ -115,7 +115,7 @@ serve(async (req) => {
     const businessOperations = buildBusinessOperations(tier1, tier2, tier3);
     const businessProfile    = buildBusinessProfile(tier1, tier3);
     const businesses         = buildBusinesses(tier3);
-    const openingHoursRows   = buildOpeningHoursRows(payload, business_id);
+    const openingHoursRows   = buildOpeningHoursRows(extraction, business_id);
 
     // ── Write to database ────────────────────────────────────────────────────
     await writeBusinessLocations(supabase, business_id, businessLocations, summary);
@@ -318,8 +318,26 @@ Returner denne JSON (intet andet):
 
     const geminiData = await response.json();
     const rawText    = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    
+    console.log('🤖 Raw Gemini response (first 500 chars):', rawText.slice(0, 500));
+    
+    if (!rawText || rawText.length < 10) {
+      console.error('❌ Gemini returned empty or very short response');
+      return {};
+    }
+    
     const cleaned    = rawText.replace(/```json|```/g, '').trim();
-    const parsed     = JSON.parse(cleaned);
+    console.log('🧹 Cleaned JSON (first 500 chars):', cleaned.slice(0, 500));
+    
+    let parsed: any;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (parseError) {
+      console.error('❌ JSON parse failed:', parseError.message);
+      console.error('   Raw text length:', rawText.length);
+      console.error('   Cleaned text:', cleaned.slice(0, 1000));
+      return {};
+    }
 
     const r: Record<string, FieldResult> = {};
 
