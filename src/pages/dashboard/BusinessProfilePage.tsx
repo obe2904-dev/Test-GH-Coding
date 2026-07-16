@@ -1667,7 +1667,14 @@ function BusinessProfilePage() {
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">
                 <h3 className="text-sm font-medium text-brand mb-1">{t('businessProfile.sectionBusiness')}</h3>
-              <div className="bg-white rounded-lg border border-purple-300 p-3 text-xs space-y-2">
+                {!isEditingBasics && (
+                  <p className="text-sm text-text-secondary">
+                    {businessName || t('businessProfile.notFilled')}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setIsEditingBasics(!isEditingBasics)}
                 <h4 className="font-semibold text-purple-900">🤖 AI Extracts → Database</h4>
                 <div className="grid grid-cols-1 gap-1 text-gray-700">
                   <div><code className="bg-purple-100 px-1 rounded">about</code> → <code className="bg-blue-100 px-1 rounded">business_profile.user_about_text</code></div>
