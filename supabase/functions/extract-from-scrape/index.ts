@@ -305,7 +305,7 @@ Returner denne JSON (intet andet):
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature:     0.1,
-            maxOutputTokens: 1200,
+            maxOutputTokens: 3000,
           },
         }),
       }
