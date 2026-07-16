@@ -726,7 +726,8 @@ function resolveDanishDay(raw: string): typeof WEEKDAYS[number] | null {
  * Scraper outputs normalised HH:MM format after the opening hours fix.
  */
 function parseTimeRange(text: string): { open: string; close: string } | null {
-  const match = text.match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+  // Match both regular hyphen (-) and en dash (–) for time ranges
+  const match = text.match(/(\d{2}:\d{2})\s*[-–]\s*(\d{2}:\d{2})/);
   if (!match) return null;
   return {
     open:  `${match[1]}:00`,
