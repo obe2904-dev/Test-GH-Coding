@@ -119,6 +119,17 @@ serve(async (req) => {
             total_saved: extractionResult.summary?.saved?.length || 0,
             errors: extractionResult.summary?.errors || [],
           };
+
+          // Update website_url even when using cache
+          console.log('🔗 Updating website_url to:', url);
+          const { error: updateUrlError } = await supabase
+            .from('businesses')
+            .update({ website_url: url })
+            .eq('id', business_id);
+
+          if (updateUrlError) {
+            console.error('⚠️ Failed to update website_url:', updateUrlError.message);
+          }
         
           return new Response(
             JSON.stringify({
@@ -225,6 +236,19 @@ serve(async (req) => {
       total_saved: extractionResult.summary?.saved?.length || 0,
       errors: extractionResult.summary?.errors || [],
     };
+
+    // ==========================================
+    // UPDATE WEBSITE URL
+    // ==========================================
+    console.log('🔗 Updating website_url to:', url);
+    const { error: updateUrlError } = await supabase
+      .from('businesses')
+      .update({ website_url: url })
+      .eq('id', business_id);
+
+    if (updateUrlError) {
+      console.error('⚠️ Failed to update website_url:', updateUrlError.message);
+    }
 
     // ==========================================
     // COMPLETE
