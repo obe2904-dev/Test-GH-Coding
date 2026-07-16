@@ -1597,22 +1597,22 @@ function BusinessProfilePage() {
               </div>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => handleWebsiteAnalysis(false)}
-                  disabled={!websiteUrl.trim()}
+                  onClick={handleAnalyzeWebsite}
+                  disabled={!websiteUrl.trim() || isScraping}
                   className={`inline-flex items-center gap-2 px-4 py-2 rounded text-sm font-medium transition-opacity
-                    ${isAnalyzing
+                    ${isScraping
                       ? 'bg-cta text-text-inverse opacity-75 cursor-wait'
                       : 'bg-cta text-text-inverse hover:bg-cta-hover disabled:bg-surface-alt disabled:text-text-muted disabled:cursor-not-allowed'
                     }`}
                 >
-                  <AnalyzeIcon className={isAnalyzing ? 'w-4 h-4 animate-spin motion-reduce:animate-none text-text-inverse' : 'w-4 h-4 text-text-inverse'} />
-                  <span>{isAnalyzing ? t('businessProfile.analyzingWebsiteButton') : t('businessProfile.analyzeWebsiteButton')}</span>
+                  <AnalyzeIcon className={isScraping ? 'w-4 h-4 animate-spin motion-reduce:animate-none text-text-inverse' : 'w-4 h-4 text-text-inverse'} />
+                  <span>{isScraping ? 'Analyserer...' : 'Analysér hjemmeside'}</span>
                 </button>
                 
-                {analysisAttempts > 0 && !isAnalyzing && (
+                {analysisAttempts > 0 && !isScraping && (
                   <button
-                    onClick={() => handleWebsiteAnalysis(true)}
-                    disabled={!websiteUrl.trim()}
+                    onClick={handleAnalyzeWebsite}
+                    disabled={!websiteUrl.trim() || isScraping}
                     className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm font-medium border border-cta text-cta hover:bg-cta hover:text-text-inverse transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Genindlæs fra hjemmeside og ignorer cache"
                   >
@@ -1629,30 +1629,8 @@ function BusinessProfilePage() {
                     : t('businessProfile.analyzeWebsiteHint')
                   }
                 </span>
-                <span className="sr-only" aria-live="polite">{isAnalyzing ? t('businessProfile.analyzeWebsiteAriaLive') : ''}</span>
+                <span className="sr-only" aria-live="polite">{isScraping ? 'Analyserer hjemmeside...' : ''}</span>
               </div>
-            </div>
-          </div>
-
-          {/* Website Analysis */}
-          <div className="bg-surface rounded-lg border-[0.5px] border-[#E2DDD6] p-4">
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-brand">Analysér hjemmeside</h3>
-              
-              <button
-                onClick={handleAnalyzeWebsite}
-                disabled={!websiteUrl.trim() || isScraping}
-                className={`inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-medium transition-all
-                  ${isScraping
-                    ? 'bg-[#076B4E] text-white opacity-75 cursor-wait'
-                    : 'bg-[#076B4E] text-white hover:bg-[#065a3f] disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed'
-                  }`}
-              >
-                <svg className={`w-5 h-5 ${isScraping ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-                <span>{isScraping ? 'Analyserer...' : 'Analysér hjemmeside'}</span>
-              </button>
 
               {scrapeError && (
                 <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
