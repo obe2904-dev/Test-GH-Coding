@@ -1675,7 +1675,13 @@ function BusinessProfilePage() {
               </div>
               <button
                 onClick={() => setIsEditingBasics(!isEditingBasics)}
-                <h4 className="font-semibold text-purple-900">🤖 AI Extracts → Database</h4>
+                className="text-[13px] font-medium text-[#076B4E] py-1.5 hover:underline"
+              >
+                {isEditingBasics ? t('businessProfile.closeButton') : t('businessProfile.editButton')}
+              </button>
+            </div>
+
+            {isEditingBasics && (
                 <div className="grid grid-cols-1 gap-1 text-gray-700">
                   <div><code className="bg-purple-100 px-1 rounded">about</code> → <code className="bg-blue-100 px-1 rounded">business_profile.user_about_text</code></div>
                   <div><code className="bg-purple-100 px-1 rounded">keywords[]</code> → <code className="bg-blue-100 px-1 rounded">business_profile.keywords</code></div>
