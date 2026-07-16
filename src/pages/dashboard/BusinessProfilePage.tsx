@@ -1685,7 +1685,9 @@ function BusinessProfilePage() {
               <div className="mt-4 pt-4 border-t space-y-3">
                 <div>
                   <label className="block text-xs font-medium text-text-secondary mb-1">Virksomhedsnavn *</label>
-              <div className="flex flex-col gap-2">
+                  <input
+                    type="text"
+                    value={businessName}
                 <button
                   onClick={handleScrapeOnly}
                   disabled={!websiteUrl.trim() || isScraping}
