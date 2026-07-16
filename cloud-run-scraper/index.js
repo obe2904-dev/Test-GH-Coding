@@ -587,6 +587,7 @@ app.post('/scrape-v3', async (req, res) => {
     // Always crawl menu page if detected, regardless of homepage quality
     // This ensures we get menu content for key_offerings extraction
     const menuUrl = extraction.services?.menu?.url;
+    console.log(`[V3 DEBUG] Checking menu URL: ${menuUrl}`);
     if (menuUrl) {
       const alreadyCrawled = pagesCrawled.some(p => {
         try {
@@ -598,10 +599,57 @@ app.post('/scrape-v3', async (req, res) => {
         }
       });
 
+      console.log(`[V3 DEBUG] Menu already crawled: ${alreadyCrawled}, pagesCrawled count: ${pagesCrawled.length}`);
+
       if (!alreadyCrawled) {
         console.log(`[V3] Menu URL detected: ${menuUrl}, crawling for key offerings...`);
         try {
-          const menuPageDoc = await scrapePage(page, menuUrl);
+          // Create a fresh page for menu to avoid state issues
+          const menuPage = await browser.newPage();
+          await menuPage.setDefaultNavigationTimeout(30000);
+          await menuPage.setDefaultTimeout(30000);
+          await menuPage.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+          
+          // Block unnecessary resources
+          await menuPage.setRequestInterception(true);
+          menuPage.on('request', request => {
+            const blockedTypes = new Set(['image', 'media', 'font']);
+            if (blockedTypes.has(request.resourceType())) {
+              request.abort();
+            } else {
+              request.continue();
+            }
+          });
+          
+          console.log(`[Crawler] Navigating to menu page: ${menuUrl}`);
+          await menuPage.goto(menuUrl, {
+            waitUntil: 'networkidle2',
+            timeout: 30000
+          });
+
+          // Wait for page to have substantial content
+          await menuPage
+            .waitForFunction(
+              () => document.body?.innerText?.trim().length > 500,
+              { timeout: 15000 }
+            )
+            .catch(() => {
+              console.warn('[V3] Menu page content wait timed out');
+            });
+
+          // Dismiss any blocking dialogs
+          await dismissCookieDialog(menuPage);
+          await removeKnownNoise(menuPage);
+          await autoScroll(menuPage);
+          await waitForContentStability(menuPage);
+
+          // Extract menu page content
+          const menuPageDoc = await extractPageDocument(menuPage);
+          console.log(`[V3 DEBUG] Menu page extracted: blocks=${menuPageDoc.blocks?.length}, links=${menuPageDoc.links?.length}`);
+          
+          // Close the menu page
+          await menuPage.close();
+          
           const menuNormalizedLinks = normalizeLinks(menuPageDoc.links);
           const { classified: menuServices } = classifyLinks(menuNormalizedLinks);
           const menuContact = extractContact(menuPageDoc);
@@ -619,11 +667,15 @@ app.post('/scrape-v3', async (req, res) => {
             quality: { rating: 'unknown', fields_found: 0, fields_expected: 8, noise_ratio: 0, warnings: [] }
           };
 
+          console.log(`[V3 DEBUG] Menu extraction built: content_sections=${menuExtraction.content_sections?.length}, before_merge_sections=${extraction.content_sections?.length}`);
+
           const menuQuality = calculateQuality(menuExtraction);
           pagesCrawled.push({ url: menuPageDoc.final_url, quality: menuQuality.rating });
 
           // Merge menu page with existing extraction
           extraction = mergePageExtractions([extraction, menuExtraction]);
+          
+          console.log(`[V3 DEBUG] After merge: content_sections=${extraction.content_sections?.length}`);
           
           // Recalculate quality after menu merge
           const finalQuality = calculateQuality(extraction);
@@ -632,6 +684,7 @@ app.post('/scrape-v3', async (req, res) => {
           console.log(`[V3] Menu page crawled, final quality: ${finalQuality.rating}`);
         } catch (err) {
           console.warn(`[V3] Failed to scrape menu page ${menuUrl}:`, err.message);
+          console.error(err.stack);
         }
       } else {
         console.log(`[V3] Menu URL already crawled, skipping.`);
