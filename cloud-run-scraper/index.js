@@ -522,6 +522,20 @@ app.post('/scrape-v3', async (req, res) => {
       scraped_at: new Date().toISOString()
     };
 
+    // Extract menu headlines from homepage if present
+    const homepageMenuHeadlines = extractMenuHeadlines(homepageDoc, 10);
+    if (homepageMenuHeadlines && homepageMenuHeadlines.length > 0) {
+      extraction.content_sections.push({
+        type: 'menu_highlights',
+        heading: 'Menu Highlights',
+        text: homepageMenuHeadlines.join('\n'),
+        source_url: homepageDoc.final_url,
+        confidence: 0.95,
+        item_count: homepageMenuHeadlines.length
+      });
+      console.log(`[V3] Added ${homepageMenuHeadlines.length} menu headlines from homepage`);
+    }
+
     // Calculate initial quality
     const homepageQuality = calculateQuality(extraction);
     extraction.quality = homepageQuality;
@@ -549,6 +563,9 @@ app.post('/scrape-v3', async (req, res) => {
           const pageContact = extractContact(pageDoc);
           const pageOpeningHours = await processOpeningHours(pageDoc);
 
+          // Extract menu headlines if this is a menu page
+          const menuHeadlines = extractMenuHeadlines(pageDoc, 10);
+
           const pageExtraction = {
             meta: {
               final_url: pageDoc.final_url || pageUrl
@@ -560,6 +577,19 @@ app.post('/scrape-v3', async (req, res) => {
             business: { name: null, description: null },
             quality: { rating: 'unknown', fields_found: 0, fields_expected: 8, noise_ratio: 0, warnings: [] }
           };
+
+          // Add menu headlines as special content section if found
+          if (menuHeadlines && menuHeadlines.length > 0) {
+            pageExtraction.content_sections.push({
+              type: 'menu_highlights',
+              heading: 'Menu Highlights',
+              text: menuHeadlines.join('\n'),
+              source_url: pageDoc.final_url,
+              confidence: 0.95,
+              item_count: menuHeadlines.length
+            });
+            console.log(`[V3] Added ${menuHeadlines.length} menu headlines from ${new URL(pageUrl).pathname}`);
+          }
 
           const pageQuality = calculateQuality(pageExtraction);
           pagesCrawled.push({ url: pageDoc.final_url, quality: pageQuality.rating });
@@ -960,6 +990,108 @@ function extractBusinessName(pageDoc) {
   }
 
   return null;
+}
+
+/**
+ * Extract menu item headlines from a menu page
+ * Extracts H1/H2/H3 headlines without descriptions or prices
+ * Prioritizes food > drinks > snacks with per-section caps
+ * @param {object} pageDoc - Page document with blocks
+ * @param {number} maxItems - Maximum total items to extract (5-10)
+ * @returns {string[]|null} Array of menu item headlines or null if not a menu page
+ */
+function extractMenuHeadlines(pageDoc, maxItems = 10) {
+  // Detect if this is a menu page
+  const pageText = pageDoc.blocks.map(b => b.text).join(' ').toLowerCase();
+  const menuIndicators = ['menu', 'menukort', 'mad', 'drikke', 'food', 'drink', 'brunch', 'frokost', 'aften'];
+  const isMenuPage = menuIndicators.some(indicator => pageText.includes(indicator));
+  
+  if (!isMenuPage) {
+    return null;
+  }
+
+  console.log('[Menu Extract] Menu page detected, extracting headlines...');
+
+  // Category classification
+  const foodKeywords = ['brunch', 'frokost', 'lunch', 'middag', 'dinner', 'aften', 'mad', 'food', 'ret', 'dish', 'burger', 'sandwich', 'salat', 'pasta', 'pizza'];
+  const drinkKeywords = ['cocktail', 'drink', 'bar', 'vin', 'wine', 'øl', 'beer', 'kaffe', 'coffee', 'te', 'tea', 'juice'];
+  const snackKeywords = ['snack', 'tapas', 'småret', 'side', 'tilbehør'];
+
+  const classifyHeading = (text) => {
+    const lower = text.toLowerCase();
+    if (foodKeywords.some(kw => lower.includes(kw))) return 'food';
+    if (drinkKeywords.some(kw => lower.includes(kw))) return 'drink';
+    if (snackKeywords.some(kw => lower.includes(kw))) return 'snack';
+    return 'food'; // Default to food
+  };
+
+  // Extract headlines from blocks
+  // Look for patterns like: short text (3-50 chars), capitalized, no prices
+  const headlines = [];
+  let currentSection = null;
+  const sectionItems = { food: [], drink: [], snack: [] };
+
+  for (const block of pageDoc.blocks) {
+    const text = block.text.trim();
+    
+    // Skip if contains price patterns
+    if (/\d+[.,]\d+\s*kr|kr[.,]?\s*\d+|\d+\s*,-|DKK|\$|€|£/.test(text)) {
+      continue;
+    }
+
+    // Detect section headers (H1/H2 - longer, all caps, or contains menu keywords)
+    if (
+      text.length > 3 && text.length < 50 && 
+      (text === text.toUpperCase() || menuIndicators.some(ind => text.toLowerCase().includes(ind)))
+    ) {
+      currentSection = classifyHeading(text);
+      continue;
+    }
+
+    // Extract potential menu items (H3 - short, capitalized, 3-50 chars)
+    if (
+      text.length >= 3 && 
+      text.length <= 50 && 
+      /^[A-ZÆØÅ]/.test(text) && // Starts with capital
+      !/\s{3,}/.test(text) && // Not excessive whitespace
+      !/(privacy|cookie|gdpr|login|cart|account)/i.test(text) // Not UI/system text
+    ) {
+      const category = currentSection || classifyHeading(text);
+      headlines.push({ text, category });
+    }
+  }
+
+  if (headlines.length === 0) {
+    console.log('[Menu Extract] No headlines found');
+    return null;
+  }
+
+  // Group by category
+  for (const item of headlines) {
+    sectionItems[item.category].push(item.text);
+  }
+
+  // Apply priority: food > drinks > snacks
+  const priorityOrder = ['food', 'drink', 'snack'];
+  const result = [];
+
+  // Count sections with items
+  const activeSections = priorityOrder.filter(cat => sectionItems[cat].length > 0);
+  const perSectionCap = activeSections.length > 1 ? 3 : maxItems; // Cap at 2-3 per section if multiple sections
+
+  for (const category of priorityOrder) {
+    const items = sectionItems[category];
+    if (items.length === 0) continue;
+
+    const takeCount = Math.min(items.length, perSectionCap, maxItems - result.length);
+    result.push(...items.slice(0, takeCount));
+
+    if (result.length >= maxItems) break;
+  }
+
+  console.log(`[Menu Extract] Extracted ${result.length} headlines: food=${sectionItems.food.length}, drink=${sectionItems.drink.length}, snack=${sectionItems.snack.length}`);
+  
+  return result.length > 0 ? result : null;
 }
 
 /**

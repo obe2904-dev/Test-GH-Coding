@@ -27,13 +27,17 @@ import { extractPageDocument } from './dom-extractor.js';
  */
 export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPages = 4) {
   const candidates = [];
+  const menuUrls = [];  // Separate tracking for menu URLs
   const baseUrl = new URL(homepageDoc.final_url);
+
+  // Menu keywords for always-crawl detection
+  const menuKeywords = ['menu', 'menukort', 'madkort', 'drikkekort', 'food', 'drinks'];
 
   // Priority keywords for different content types
   const keywordSets = {
     menu: {
-      keywords: ['menu', 'menukort', 'madkort', 'drikkekort', 'food', 'drinks'],
-      weight: determineMissingWeight(homepageExtraction.services.menu, 'menu')
+      keywords: menuKeywords,
+      weight: 3.0  // Always high priority for menu extraction
     },
     contact: {
       keywords: ['kontakt', 'contact', 'find us', 'location', 'reach', 'besøg'],
@@ -72,11 +76,18 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
         continue;
       }
 
-      // Score based on keywords and missing fields
-      let score = 0;
+      // Check if this is a menu URL
       const url = link.url.toLowerCase();
       const text = (link.text || '').toLowerCase();
       const combined = `${url} ${text}`;
+      const isMenuUrl = menuKeywords.some(keyword => combined.includes(keyword));
+
+      if (isMenuUrl && !menuUrls.includes(link.url)) {
+        menuUrls.push(link.url);
+      }
+
+      // Score based on keywords and missing fields
+      let score = 0;
 
       for (const [type, config] of Object.entries(keywordSets)) {
         for (const keyword of config.keywords) {
@@ -91,7 +102,8 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
         candidates.push({
           url: link.url,
           score,
-          text: link.text
+          text: link.text,
+          isMenu: isMenuUrl
         });
       }
     } catch {
@@ -99,11 +111,28 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
     }
   }
 
-  // Sort by score descending, take top N
-  return candidates
-    .sort((a, b) => b.score - a.score)
-    .slice(0, maxPages)
-    .map(c => c.url);
+  // Sort by score descending
+  const sortedCandidates = candidates.sort((a, b) => b.score - a.score);
+  
+  // ALWAYS include menu URLs (even if maxPages is reached)
+  // Take top menu URL + fill remaining slots with other high-priority pages
+  const result = [];
+  
+  // Add first menu URL if found (guaranteed inclusion)
+  if (menuUrls.length > 0) {
+    result.push(menuUrls[0]);
+    console.log(`[Crawler] Menu URL detected (always crawl): ${new URL(menuUrls[0]).pathname}`);
+  }
+  
+  // Fill remaining slots with highest scoring non-menu pages
+  for (const candidate of sortedCandidates) {
+    if (result.length >= maxPages) break;
+    if (!result.includes(candidate.url)) {
+      result.push(candidate.url);
+    }
+  }
+  
+  return result;
 }
 
 /**
