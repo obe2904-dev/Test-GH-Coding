@@ -984,7 +984,17 @@ function extractContentSections(pageDoc, openingHours = null) {
 
   // Convert to sections array
   for (const [heading, blocks] of sectionMap) {
-    const text = blocks.map(b => b.text).join(' ');
+    // Deduplicate repeated sentences (common on restaurant sites with repeating hero text)
+    const uniqueTexts = [];
+    const seen = new Set();
+    for (const block of blocks) {
+      const trimmed = block.text.trim();
+      if (trimmed && !seen.has(trimmed)) {
+        seen.add(trimmed);
+        uniqueTexts.push(trimmed);
+      }
+    }
+    const text = uniqueTexts.join(' ');
 
     if (text.length >= 50) {
       // Check if this section contains opening hours

@@ -198,7 +198,9 @@ function extractTier1(payload: any): Record<string, FieldResult> {
       
       // Parse Danish address: "Street Number PostalCode City"
       if (!r['address_line1']) {
-        const addressMatch = text.match(/([A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s]+\d+)\s+(\d{4})\s+([A-ZÆØÅa-zæøå][A-ZÆØÅa-zæøå\s]+)/);
+        // Match Danish street address: Street name (starts with capital, min 3 chars) + number
+        // More strict to avoid matching fragments like "S Åboulevarden"
+        const addressMatch = text.match(/\b([A-ZÆØÅ][a-zæøå]{2,}[a-zæøå\s]+\d+[A-Za-z]?)\s+(\d{4})\s+([A-ZÆØÅ][a-zæøå\s]+)/);
         if (addressMatch) {
           t1('address_line1', addressMatch[1].trim(), 'content_sections[Kontakt] address regex');
           t1('postal_code', addressMatch[2], 'content_sections[Kontakt] postal code regex');
@@ -425,17 +427,19 @@ async function extractMenuOfferings(payload: any): Promise<Record<string, FieldR
   const r: Record<string, FieldResult> = {};
   
   const menuUrl = payload.services?.menu?.url;
+  console.log(`🔍 [MENU] Checking for menu URL... services=${!!payload.services}, menu=${!!payload.services?.menu}, url=${menuUrl}`);
+  
   if (!menuUrl) {
-    console.log('⏭️  No menu URL detected, skipping menu extraction');
+    console.log('⏭️  [MENU] No menu URL detected, skipping menu extraction');
     return r;
   }
 
   if (!GEMINI_API_KEY) {
-    console.warn('⚠️  No GEMINI_API_KEY — skipping menu extraction');
+    console.warn('⚠️  [MENU] No GEMINI_API_KEY — skipping menu extraction');
     return r;
   }
 
-  console.log(`🍽️  Menu URL detected: ${menuUrl}, fetching menu for dish extraction...`);
+  console.log(`🍽️  [MENU] Menu URL detected: ${menuUrl}, fetching menu for dish extraction...`);
 
   try {
     // Fetch menu page HTML
@@ -447,12 +451,12 @@ async function extractMenuOfferings(payload: any): Promise<Record<string, FieldR
     });
 
     if (!response.ok) {
-      console.warn(`⚠️  Failed to fetch menu page: HTTP ${response.status}`);
+      console.warn(`⚠️  [MENU] Failed to fetch menu page: HTTP ${response.status}`);
       return r;
     }
 
     const menuHtml = await response.text();
-    console.log(`✅ Menu HTML fetched: ${menuHtml.length} bytes`);
+    console.log(`✅ [MENU] Menu HTML fetched: ${menuHtml.length} bytes`);
 
     // Clean HTML: remove scripts, styles, tags
     const cleanMenuText = menuHtml
@@ -463,12 +467,14 @@ async function extractMenuOfferings(payload: any): Promise<Record<string, FieldR
       .trim()
       .slice(0, 8000); // Limit to 8000 chars for Gemini
 
+    console.log(`🧹 [MENU] Cleaned menu text: ${cleanMenuText.length} chars`);
+
     if (cleanMenuText.length < 200) {
-      console.warn(`⚠️  Menu content too short (${cleanMenuText.length} chars), skipping`);
+      console.warn(`⚠️  [MENU] Menu content too short (${cleanMenuText.length} chars), skipping`);
       return r;
     }
 
-    console.log(`🔍 Cleaned menu text: ${cleanMenuText.length} chars, sending to Gemini...`);
+    console.log(`🔍 [MENU] Sending to Gemini... (first 200 chars: ${cleanMenuText.slice(0, 200)})`);
 
     // Focused prompt: ONLY extract dish names
     const prompt = `
@@ -510,21 +516,28 @@ Eksempel output:
 
     if (!geminiResponse.ok) {
       const errorText = await geminiResponse.text();
-      console.error('❌ Gemini menu API error:', geminiResponse.status, errorText);
+      console.error('❌ [MENU] Gemini API error:', geminiResponse.status, errorText.slice(0, 200));
       return r;
     }
 
     const geminiData = await geminiResponse.json();
+    console.log(`📦 [MENU] Gemini response received:`, JSON.stringify(geminiData).slice(0, 300));
+    
     const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
     if (!rawText) {
-      console.warn('⚠️  Empty response from Gemini menu extraction');
+      console.warn('⚠️  [MENU] Empty response from Gemini menu extraction');
       return r;
     }
 
+    console.log(`📝 [MENU] Raw Gemini text (first 200 chars): ${rawText.slice(0, 200)}`);
+
     // Parse JSON response
     const cleanJson = rawText.replace(/^```json\s*|\s*```$/g, '').trim();
+    console.log(`🔧 [MENU] Cleaned JSON: ${cleanJson.slice(0, 200)}`);
+    
     const parsed = JSON.parse(cleanJson);
+    console.log(`✅ [MENU] Parsed result:`, parsed);
 
     if (parsed.key_offerings) {
       r['key_offerings'] = {
@@ -532,13 +545,16 @@ Eksempel output:
         tier: 3,
         source: 'gemini_menu_extraction',
       };
-      console.log('✅ Menu extraction complete:', parsed.key_offerings.split('\n').length, 'dishes');
+      console.log('🎉 [MENU] Menu extraction complete:', parsed.key_offerings.split('\n').length, 'dishes');
+      console.log('📋 [MENU] Dishes:', parsed.key_offerings);
+    } else {
+      console.warn('⚠️  [MENU] No key_offerings in parsed response');
     }
 
     return r;
 
   } catch (err) {
-    console.error('❌ Menu extraction failed:', err.message);
+    console.error('❌ [MENU] Menu extraction failed:', err.message, err.stack);
     return r;
   }
 }
