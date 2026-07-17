@@ -391,6 +391,7 @@ async function extractUsingAIExtractors(
     console.log(`   - menuSignal:`, Object.keys(menuSignal));
 
     // Map basicInfo results
+    t3('business_name', basicInfo.businessName, 'ai_basic_info');
     t3('user_about_text', basicInfo.description, 'ai_basic_info');
     t3('local_location_reference', basicInfo.localLocationReference, 'ai_basic_info');
     t3('ai_place_synopsis', basicInfo.description, 'ai_basic_info'); // Same as user_about_text
@@ -564,8 +565,9 @@ function buildBusinessProfile(
 
 function buildBusinesses(ai: Record<string, FieldResult>) {
   return {
-    // Only local_location_reference is managed here.
-    // All other businesses fields are owned by other pipeline steps.
+    // Update business name from website (corrects typos, handles rebranding)
+    business_name: ai.business_name?.value ?? null,
+    // Update local location reference (e.g., "ved åen")
     local_location_reference: ai.local_location_reference?.value ?? null,
   };
 }
