@@ -161,14 +161,67 @@ function buildLabeledContent(scraperPayload: any): string {
   
   // Add each content section with heading label (like OLD system's "=== Page: /about ===")
   const contentSections = scraperPayload.content_sections || [];
-  for (const section of contentSections) {
-    const heading = section.heading || 'Section';
-    const text = section.text || '';
-    
-    // Only include sections with meaningful content
-    if (text.length >= 50) {
-      sections.push(`=== ${heading} ===\n${text}`);
-    }
+  
+  // Filter and score sections to exclude navigation/junk
+  const scoredSections = contentSections
+    .map((section: any) => {
+      const heading = section.heading || null;
+      const text = section.text || '';
+      
+      // Calculate quality score
+      let score = 0;
+      
+      // Has meaningful heading (not null) = +20 points
+      if (heading && heading.length > 3) {
+        score += 20;
+      }
+      
+      // Text length (optimal: 100-2000 chars)
+      if (text.length >= 100 && text.length <= 2000) {
+        score += 30;
+      } else if (text.length > 50 && text.length < 5000) {
+        score += 10;
+      }
+      
+      // Low link density (count "Link to" occurrences)
+      const linkCount = (text.match(/Link to|href|http|www\./gi) || []).length;
+      const wordCount = text.split(/\s+/).length;
+      const linkDensity = wordCount > 0 ? linkCount / wordCount : 0;
+      
+      if (linkDensity < 0.1) {
+        score += 30; // Very few links = good content
+      } else if (linkDensity > 0.3) {
+        score -= 20; // High link density = likely navigation
+      }
+      
+      // Contains business-relevant words (positive indicators)
+      const goodWords = /velkommen|welcome|om os|about|cafe|restaurant|mad|food|oplevelse|experience/i;
+      if (goodWords.test(text)) {
+        score += 20;
+      }
+      
+      // Generic navigation words (negative indicators)
+      const navWords = /MENUKORT|BRUNCH|FROKOST|KONTAKT|BOOK DIT BORD|MENU|CONTACT|HOME/g;
+      const navMatches = (text.match(navWords) || []).length;
+      if (navMatches > 5) {
+        score -= 30; // Likely navigation menu
+      }
+      
+      return { section, heading, text, score };
+    })
+    .filter(item => item.score > 0 && item.text.length >= 50) // Only keep positive-scoring sections
+    .sort((a, b) => b.score - a.score); // Sort by quality (best first)
+  
+  console.log(`🔍 Section scoring:`, scoredSections.map(s => ({ 
+    heading: s.heading || '(no heading)', 
+    score: s.score, 
+    length: s.text.length 
+  })));
+  
+  // Build labeled content from scored sections
+  for (const item of scoredSections) {
+    const heading = item.heading || 'Section';
+    sections.push(`=== ${heading} ===\n${item.text}`);
   }
   
   // Add contact information if available (helps AI extractors)
@@ -189,7 +242,7 @@ function buildLabeledContent(scraperPayload: any): string {
   }
   
   const labeledContent = sections.join('\n\n');
-  console.log(`📝 Built labeled content: ${labeledContent.length} chars from ${contentSections.length} sections`);
+  console.log(`📝 Built labeled content: ${labeledContent.length} chars from ${scoredSections.length} quality sections (filtered from ${contentSections.length} total)`);
   
   return labeledContent;
 }
