@@ -325,14 +325,9 @@ function extractTier1(payload: any): Record<string, FieldResult> {
   // Business text
   t1('long_description', payload.business?.description?.value, 'business.description');
 
-  // user_about_text: largest content section
-  const sections = payload.content_sections ?? [];
-  const bestSection = sections
-    .filter((s: any) => s.text?.length > 50)
-    .sort((a: any, b: any) => b.text.length - a.text.length)[0] ?? null;
-  if (bestSection) {
-    t1('user_about_text', bestSection.text, 'content_sections[largest]');
-  }
+  // user_about_text: REMOVED - let AI extractors handle this with quality filtering
+  // Old logic selected largest section which often picked navigation menus
+  // AI extractors use quality-filtered content and understand business descriptions
 
   // kitchen_close_time: most common close time across open days
   const candidates = payload.opening_hours?.candidates ?? [];
