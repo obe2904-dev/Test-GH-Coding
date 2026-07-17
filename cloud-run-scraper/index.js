@@ -542,9 +542,9 @@ app.post('/scrape-v3', async (req, res) => {
 
       let additionalUrls = discoverAdditionalPages(homepageDoc, extraction, 4);
       
-      // FORCE menu URL inclusion if detected and not already in list
+      // PRIORITIZE menu URL if detected and not already in list
       if (menuUrl && !additionalUrls.includes(menuUrl)) {
-        console.log(`[V3] Force-adding menu URL: ${new URL(menuUrl).pathname}`);
+        console.log(`[V3] Prioritizing menu URL: ${new URL(menuUrl).pathname}`);
         additionalUrls = [menuUrl, ...additionalUrls].slice(0, 4);
       }
       console.log(`[V3] Found ${additionalUrls.length} candidate pages: ${additionalUrls.map(u => new URL(u).pathname).join(', ')}`);
@@ -553,7 +553,7 @@ app.post('/scrape-v3', async (req, res) => {
 
       for (const pageUrl of additionalUrls) {
         try {
-          const pageDoc = await scrapePage(page, pageUrl);
+          const pageDoc = await scrapePage(page, pageUrl, 15000); // 15s timeout for additional pages
           const pageNormalizedLinks = normalizeLinks(pageDoc.links);
           const { classified: pageServices } = classifyLinks(pageNormalizedLinks);
           const pageContact = extractContact(pageDoc);

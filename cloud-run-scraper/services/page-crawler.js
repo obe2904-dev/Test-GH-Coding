@@ -182,14 +182,15 @@ function isExcludedPage(contextString) {
  * Scrape a single page
  * @param {import('puppeteer').Page} page
  * @param {string} url
+ * @param {number} timeout - Navigation timeout in ms (default 30000)
  * @returns {Promise<object>} Page document
  */
-export async function scrapePage(page, url) {
+export async function scrapePage(page, url, timeout = 30000) {
   console.log(`[Crawler] Scraping ${url}`);
 
   await page.goto(url, {
     waitUntil: 'domcontentloaded',
-    timeout: 30000
+    timeout
   });
 
   // Wait for network idle (XHR/fetch hydration)
