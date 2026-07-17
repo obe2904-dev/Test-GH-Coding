@@ -995,34 +995,38 @@ function extractContentSections(pageDoc, openingHours = null) {
       }
     }
     
-    // Join and then deduplicate sentences to handle cases where blocks themselves contain duplicates
+    // Join and deduplicate at word-chunk level (handle cases without punctuation)
     const combinedText = uniqueTexts.join(' ');
-    const sentences = combinedText.split(/([.!?]\s+)/).filter(Boolean);
-    const uniqueSentences = [];
-    const sentenceSeen = new Set();
     
-    for (let i = 0; i < sentences.length; i++) {
-      const sentence = sentences[i].trim();
-      if (!sentence) continue;
+    // Split by sentence boundaries OR by word chunks (10+ words)
+    const chunks = [];
+    let current = '';
+    const words = combinedText.split(/\s+/);
+    
+    for (const word of words) {
+      current += (current ? ' ' : '') + word;
       
-      // Skip single punctuation separators
-      if (/^[.!?]+$/.test(sentence)) {
-        if (uniqueSentences.length > 0) {
-          uniqueSentences[uniqueSentences.length - 1] += sentence;
-        }
-        continue;
+      // Break on sentence ending or after ~10 words
+      if (/[.!?]$/.test(word) || current.split(/\s+/).length >= 10) {
+        if (current) chunks.push(current.trim());
+        current = '';
       }
-      
-      // Normalize for comparison (lowercase, remove extra spaces)
-      const normalized = sentence.toLowerCase().replace(/\s+/g, ' ');
-      
-      if (!sentenceSeen.has(normalized)) {
-        sentenceSeen.add(normalized);
-        uniqueSentences.push(sentence);
+    }
+    if (current) chunks.push(current.trim());
+    
+    // Deduplicate chunks
+    const uniqueChunks = [];
+    const chunkSeen = new Set();
+    
+    for (const chunk of chunks) {
+      const normalized = chunk.toLowerCase().replace(/\s+/g, ' ');
+      if (!chunkSeen.has(normalized) && chunk.length > 10) {
+        chunkSeen.add(normalized);
+        uniqueChunks.push(chunk);
       }
     }
     
-    const text = uniqueSentences.join(' ').trim();
+    const text = uniqueChunks.join(' ').trim();
 
     if (text.length >= 50) {
       // Check if this section contains opening hours
