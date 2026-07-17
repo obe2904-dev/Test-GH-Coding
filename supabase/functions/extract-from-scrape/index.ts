@@ -4,12 +4,18 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
+// Import OLD proven AI extractors
+import { extractBasicInfo } from '../_shared/ai-extractors/basic-info-extractor.ts';
+import { extractContact } from '../_shared/ai-extractors/contact-extractor.ts';
+import { extractMenuSignal } from '../_shared/ai-extractors/menu-signal-extractor.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
 const GEMINI_MODEL   = 'gemini-2.5-flash';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -106,23 +112,18 @@ serve(async (req) => {
 
     const tier1 = extractTier1(extraction);
     const tier2 = extractTier2(extraction);
-    const tier3 = aiAllowed
-      ? await extractTier3(extraction)
+    
+    // ── AI Extraction using OLD proven extractors ────────────────────────────
+    const labeledContent = buildLabeledContent(extraction);
+    const aiExtracted = aiAllowed
+      ? await extractUsingAIExtractors(extraction, labeledContent)
       : {};
-
-    // ── Menu extraction (separate focused extraction) ────────────────────────
-    const menuExtraction = aiAllowed
-      ? await extractMenuOfferings(extraction)
-      : {};
-
-    // Merge menu extraction into tier3 (menu extraction takes precedence)
-    const tier3WithMenu = { ...tier3, ...menuExtraction };
 
     // ── Merge into table buckets ─────────────────────────────────────────────
-    const businessLocations  = buildBusinessLocations(tier1);
-    const businessOperations = buildBusinessOperations(tier1, tier2, tier3WithMenu);
-    const businessProfile    = buildBusinessProfile(tier1, tier3WithMenu);
-    const businesses         = buildBusinesses(tier3WithMenu);
+    const businessLocations  = buildBusinessLocations(tier1, aiExtracted);
+    const businessOperations = buildBusinessOperations(tier1, tier2, aiExtracted);
+    const businessProfile    = buildBusinessProfile(tier1, aiExtracted);
+    const businesses         = buildBusinesses(aiExtracted);
     const openingHoursRows   = buildOpeningHoursRows(extraction, business_id);
 
     // ── Write to database ────────────────────────────────────────────────────
@@ -149,6 +150,49 @@ serve(async (req) => {
     return jsonResponse({ success: false, error: error.message }, 500);
   }
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CONTENT TRANSFORMATION — Convert scraper JSON to labeled text format
+// This mimics the OLD system's HTML→text conversion for AI extractors
+// ═════════════════════════════════════════════════════════════════════════════
+
+function buildLabeledContent(scraperPayload: any): string {
+  const sections: string[] = [];
+  
+  // Add each content section with heading label (like OLD system's "=== Page: /about ===")
+  const contentSections = scraperPayload.content_sections || [];
+  for (const section of contentSections) {
+    const heading = section.heading || 'Section';
+    const text = section.text || '';
+    
+    // Only include sections with meaningful content
+    if (text.length >= 50) {
+      sections.push(`=== ${heading} ===\n${text}`);
+    }
+  }
+  
+  // Add contact information if available (helps AI extractors)
+  if (scraperPayload.contact) {
+    const contactParts: string[] = [];
+    if (scraperPayload.contact.phones?.[0]?.value) {
+      contactParts.push(`Phone: ${scraperPayload.contact.phones[0].value}`);
+    }
+    if (scraperPayload.contact.emails?.[0]?.value) {
+      contactParts.push(`Email: ${scraperPayload.contact.emails[0].value}`);
+    }
+    if (scraperPayload.contact.addresses?.[0]?.value) {
+      contactParts.push(`Address: ${scraperPayload.contact.addresses[0].value}`);
+    }
+    if (contactParts.length > 0) {
+      sections.push(`=== Contact Information ===\n${contactParts.join('\n')}`);
+    }
+  }
+  
+  const labeledContent = sections.join('\n\n');
+  console.log(`📝 Built labeled content: ${labeledContent.length} chars from ${contentSections.length} sections`);
+  
+  return labeledContent;
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // TIER 1 — Structural paths from payload JSON
@@ -289,272 +333,99 @@ function extractTier2(payload: any): Record<string, FieldResult> {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// TIER 3 — Single Gemini call
-// Handles all fields requiring inference, context, or interpretation.
-// One call returns all fields as structured JSON.
+// AI EXTRACTION — Use OLD proven extractors (parallel execution)
+// Replaces old extractTier3 + extractMenuOfferings with proven AI extractors
 // ═════════════════════════════════════════════════════════════════════════════
 
-async function extractTier3(payload: any): Promise<Record<string, FieldResult>> {
-  if (!GEMINI_API_KEY) {
-    console.warn('⚠️ No GEMINI_API_KEY — skipping Tier 3');
-    return {};
+async function extractUsingAIExtractors(
+  payload: any,
+  labeledContent: string
+): Promise<Record<string, FieldResult>> {
+  const r: Record<string, FieldResult> = {};
+
+  if (!GEMINI_API_KEY || !OPENAI_API_KEY) {
+    console.warn('⚠️  Missing API keys (GEMINI or OPENAI) — skipping AI extraction');
+    return r;
   }
 
-  const geminiInput = buildGeminiInput(payload);
-
-  const prompt = `
-Du er ekspert i at analysere danske restauranter, caféer og barer ud fra deres hjemmesideindhold.
-
-Analyser nedenstående indhold og returner præcist denne JSON-struktur.
-Brug null for felter du ikke kan fastslå med rimelig sikkerhed.
-Fabrikér IKKE information. Gæt IKKE hvis indholdet ikke understøtter det.
-Svar KUN med JSON — ingen markdown, ingen forklaringer.
-
-${geminiInput}
-
-Returner denne JSON (intet andet):
-{
-  "has_table_service": true or false or null,
-  "reservation_required": true or false or null,
-  "accepts_walk_ins": true or false or null,
-  "has_outdoor_seating": true or false or null,
-  "outdoor_seating_term": "Det præcise danske ord virksomheden bruger for udeservering — typisk 'terrasse', 'overdækket terrasse', 'udeservering', 'haveplads', 'gårdhave'. Null hvis ingen udeservering nævnes.",
-  "weekly_programme": "Fritekst der beskriver tilbagevendende ugentlige begivenheder: live musik, DJ-aftener, temaftener, brunch-dage osv. Null hvis intet nævnes. På dansk.",
-  "menu_description": "1-2 sætninger der opsummerer menukoncept og hovedkategorier. Null hvis utilstrækkelig menuinfo.",
-  "ai_place_synopsis": "2-3 sætninger der beskriver stedet: type, stemning/atmosfære, køkken/koncept, hvem det henvender sig til. På dansk.",
-  "local_location_reference": "Den korte sætning virksomheden selv bruger til at beskrive hvor de ligger. Skal være et konkret lokationsankerpunkt — et vartegn, gade, vandfront, torv, kvarter eller karakteristisk omgivelse. Eksempler: 'ved åen', 'på Rådhuspladsen', 'i skyggen af Koldinghus', 'i Nyhavn', 'på havnen', 'i Latinerkvarteret', 'ved stranden'. Inkludér IKKE bynavnet alene. Null hvis ingen specifik lokationsreference findes.",
-  "menu_signal": {
-    "hasMenu": true or false,
-    "menuCategories": ["kategori1", "kategori2"] or null,
-    "signatureItems": ["ret1", "ret2"] or null,
-    "menuDescription": "kort beskrivelse" or null,
-    "programmes": "frokost/aften/brunch osv." or null,
-    "placeSynopsis": "én sætning" or null,
-    "rawExtract": null
+  if (labeledContent.length < 200) {
+    console.log('⏭️  Labeled content too short for AI extraction');
+    return r;
   }
-}
-`.trim();
+
+  const t3 = (key: string, value: unknown, source: string) => {
+    if (value !== null && value !== undefined && value !== '') {
+      r[key] = { value, tier: 3, source };
+    }
+  };
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature:     0.1,
-            maxOutputTokens: 3000,
-          },
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      console.error('❌ Gemini API error:', response.status, await response.text());
-      return {};
-    }
-
-    const geminiData = await response.json();
-    const rawText    = geminiData.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    // Prepare context hints for extractors
+    const metadata = {
+      title: payload.business?.name?.value || payload.meta?.title,
+      description: payload.meta?.description,
+    };
     
-    console.log('🤖 Raw Gemini response (first 500 chars):', rawText.slice(0, 500));
-    
-    if (!rawText || rawText.length < 10) {
-      console.error('❌ Gemini returned empty or very short response');
-      return {};
-    }
-    
-    const cleaned    = rawText.replace(/```json|```/g, '').trim();
-    console.log('🧹 Cleaned JSON (first 500 chars):', cleaned.slice(0, 500));
-    
-    let parsed: any;
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch (parseError) {
-      console.error('❌ JSON parse failed:', parseError.message);
-      console.error('   Raw text length:', rawText.length);
-      console.error('   Cleaned text:', cleaned.slice(0, 1000));
-      return {};
-    }
-
-    const r: Record<string, FieldResult> = {};
-
-    const t3 = (key: string, value: unknown) => {
-      if (value !== null && value !== undefined) {
-        r[key] = { value, tier: 3, source: 'gemini' };
-      }
+    const hints = {
+      businessName: payload.business?.name?.value || null,
+      businessType: payload.business?.type?.value || null,
+      languageHint: payload.meta?.detected_language || 'da',
     };
 
-    // Boolean operation fields
-    t3('has_table_service',    parsed.has_table_service);
-    t3('reservation_required', parsed.reservation_required);
-    t3('accepts_walk_ins',     parsed.accepts_walk_ins);
-    t3('has_outdoor_seating',  parsed.has_outdoor_seating);
-    t3('outdoor_seating_term', parsed.outdoor_seating_term);
+    console.log(`🤖 Running AI extractors in parallel...`);
 
-    // Programme and content
-    t3('weekly_programme',  parsed.weekly_programme);
-    t3('menu_description',  parsed.menu_description);
-    t3('ai_place_synopsis', parsed.ai_place_synopsis);
+    // Run extractors in parallel (like OLD system)
+    const [basicInfo, contactInfo, menuSignal] = await Promise.all([
+      extractBasicInfo(labeledContent, metadata, null, hints, OPENAI_API_KEY),
+      extractContact(labeledContent, [], OPENAI_API_KEY, hints.languageHint),
+      extractMenuSignal(labeledContent, {
+        businessName: hints.businessName,
+        businessType: hints.businessType,
+        languageHint: hints.languageHint,
+      }),
+    ]);
 
-    // Location reference — written to businesses table
-    t3('local_location_reference', parsed.local_location_reference);
+    console.log(`✅ AI extractors complete`);
+    console.log(`   - basicInfo:`, Object.keys(basicInfo));
+    console.log(`   - contactInfo:`, Object.keys(contactInfo));
+    console.log(`   - menuSignal:`, Object.keys(menuSignal));
 
-    // Menu signal — stored as JSON string
-    t3('menu_signal',
-      parsed.menu_signal && typeof parsed.menu_signal === 'object'
-        ? JSON.stringify(parsed.menu_signal)
-        : parsed.menu_signal
-    );
+    // Map basicInfo results
+    t3('user_about_text', basicInfo.description, 'ai_basic_info');
+    t3('local_location_reference', basicInfo.localLocationReference, 'ai_basic_info');
+    t3('ai_place_synopsis', basicInfo.description, 'ai_basic_info'); // Same as user_about_text
 
-    console.log('✅ Tier 3 complete, fields extracted:', Object.keys(r));
+    // Map contactInfo results (as fallback - Tier 1 takes priority in merge)
+    if (contactInfo.phone) {
+      t3('phone', contactInfo.phone, 'ai_contact');
+    }
+    if (contactInfo.email) {
+      t3('email', contactInfo.email, 'ai_contact');
+    }
+    if (contactInfo.address) {
+      t3('address_line1', contactInfo.address.street, 'ai_contact');
+      t3('postal_code', contactInfo.address.postalCode, 'ai_contact');
+    }
+
+    // Map menuSignal results
+    if (menuSignal.signatureItems && menuSignal.signatureItems.length > 0) {
+      t3('key_offerings', menuSignal.signatureItems.join('\n'), 'ai_menu_signal');
+    }
+    if (menuSignal.menuDescription) {
+      t3('menu_description', menuSignal.menuDescription, 'ai_menu_signal');
+    }
+    if (menuSignal.placeSynopsis) {
+      t3('place_synopsis', menuSignal.placeSynopsis, 'ai_menu_signal');
+    }
+
+    // Store full menu signal as JSON for backwards compatibility
+    t3('menu_signal', JSON.stringify(menuSignal), 'ai_menu_signal');
+
+    console.log(`✅ AI extraction complete, fields extracted:`, Object.keys(r));
     return r;
 
   } catch (err) {
-    console.error('❌ Tier 3 extraction failed:', err);
-    return {};
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// MENU EXTRACTION — Separate focused extraction for dish names
-// Fetches menu page if URL exists, sends to Gemini with focused prompt
-// ═════════════════════════════════════════════════════════════════════════════
-
-async function extractMenuOfferings(payload: any): Promise<Record<string, FieldResult>> {
-  const r: Record<string, FieldResult> = {};
-  
-  const menuUrl = payload.services?.menu?.url;
-  console.log(`🔍 [MENU] Checking for menu URL... services=${!!payload.services}, menu=${!!payload.services?.menu}, url=${menuUrl}`);
-  
-  if (!menuUrl) {
-    console.log('⏭️  [MENU] No menu URL detected, skipping menu extraction');
-    return r;
-  }
-
-  if (!GEMINI_API_KEY) {
-    console.warn('⚠️  [MENU] No GEMINI_API_KEY — skipping menu extraction');
-    return r;
-  }
-
-  console.log(`🍽️  [MENU] Menu URL detected: ${menuUrl}, fetching menu for dish extraction...`);
-
-  try {
-    // Fetch menu page HTML
-    const response = await fetch(menuUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-      },
-      signal: AbortSignal.timeout(10000),
-    });
-
-    if (!response.ok) {
-      console.warn(`⚠️  [MENU] Failed to fetch menu page: HTTP ${response.status}`);
-      return r;
-    }
-
-    const menuHtml = await response.text();
-    console.log(`✅ [MENU] Menu HTML fetched: ${menuHtml.length} bytes`);
-
-    // Clean HTML: remove scripts, styles, tags
-    const cleanMenuText = menuHtml
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 8000); // Limit to 8000 chars for Gemini
-
-    console.log(`🧹 [MENU] Cleaned menu text: ${cleanMenuText.length} chars`);
-
-    if (cleanMenuText.length < 200) {
-      console.warn(`⚠️  [MENU] Menu content too short (${cleanMenuText.length} chars), skipping`);
-      return r;
-    }
-
-    console.log(`🔍 [MENU] Sending to Gemini... (first 200 chars: ${cleanMenuText.slice(0, 200)})`);
-
-    // Focused prompt: ONLY extract dish names
-    const prompt = `
-Du er ekspert i at udtrække retnavne fra restaurantmenuer.
-
-Analyser nedenstående menuindhold og udtræk 5-7 hovedretter eller signaturretter.
-Returner KUN retnavne — ingen priser, ingen beskrivelser, ingen kategorier.
-Prioritér specifikke retter fremfor generiske kategorier (f.eks. "Smørrebrød med laks" fremfor "Smørrebrød").
-Returner navnene på dansk, ét pr. linje.
-
-MENUINDHOLD:
-${cleanMenuText}
-
-Returner PRÆCIST denne JSON-struktur (intet andet):
-{
-  "key_offerings": "Retnavn 1\\nRetnavn 2\\nRetnavn 3\\nRetnavn 4\\nRetnavn 5"
-}
-
-Eksempel output:
-{
-  "key_offerings": "Smørrebrød med laks\\nBøf Bearnaise\\nFisk & Chips\\nCaesar Salat\\nPasta Carbonara"
-}
-`.trim();
-
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 500,
-          },
-        }),
-      }
-    );
-
-    if (!geminiResponse.ok) {
-      const errorText = await geminiResponse.text();
-      console.error('❌ [MENU] Gemini API error:', geminiResponse.status, errorText.slice(0, 200));
-      return r;
-    }
-
-    const geminiData = await geminiResponse.json();
-    console.log(`📦 [MENU] Gemini response received:`, JSON.stringify(geminiData).slice(0, 300));
-    
-    const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    if (!rawText) {
-      console.warn('⚠️  [MENU] Empty response from Gemini menu extraction');
-      return r;
-    }
-
-    console.log(`📝 [MENU] Raw Gemini text (first 200 chars): ${rawText.slice(0, 200)}`);
-
-    // Parse JSON response
-    const cleanJson = rawText.replace(/^```json\s*|\s*```$/g, '').trim();
-    console.log(`🔧 [MENU] Cleaned JSON: ${cleanJson.slice(0, 200)}`);
-    
-    const parsed = JSON.parse(cleanJson);
-    console.log(`✅ [MENU] Parsed result:`, parsed);
-
-    if (parsed.key_offerings) {
-      r['key_offerings'] = {
-        value: parsed.key_offerings,
-        tier: 3,
-        source: 'gemini_menu_extraction',
-      };
-      console.log('🎉 [MENU] Menu extraction complete:', parsed.key_offerings.split('\n').length, 'dishes');
-      console.log('📋 [MENU] Dishes:', parsed.key_offerings);
-    } else {
-      console.warn('⚠️  [MENU] No key_offerings in parsed response');
-    }
-
-    return r;
-
-  } catch (err) {
-    console.error('❌ [MENU] Menu extraction failed:', err.message, err.stack);
+    console.error('❌ AI extraction failed:', err);
     return r;
   }
 }
@@ -628,27 +499,31 @@ function buildGeminiInput(payload: any): string {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // TABLE BUILDERS
-// Priority: Tier 1 > Tier 2 > Tier 3 per field.
+// Priority: Tier 1 > AI Extractors > Tier 2 per field.
 // Tier 1 always wins (structural facts beat inference).
 // ═════════════════════════════════════════════════════════════════════════════
 
-function buildBusinessLocations(t1: Record<string, FieldResult>) {
+function buildBusinessLocations(
+  t1: Record<string, FieldResult>,
+  ai: Record<string, FieldResult>
+) {
+  // Tier 1 (scraper direct) takes priority, AI extractors as fallback
   return {
-    email:         t1.email?.value         ?? null,
-    phone:         t1.phone?.value         ?? null,
-    address_line1: t1.address_line1?.value ?? null,
-    postal_code:   t1.postal_code?.value   ?? null,
+    email:         (t1.email ?? ai.email)?.value                 ?? null,
+    phone:         (t1.phone ?? ai.phone)?.value                 ?? null,
+    address_line1: (t1.address_line1 ?? ai.address_line1)?.value ?? null,
+    postal_code:   (t1.postal_code ?? ai.postal_code)?.value     ?? null,
   };
 }
 
 function buildBusinessOperations(
   t1: Record<string, FieldResult>,
   t2: Record<string, FieldResult>,
-  t3: Record<string, FieldResult>,
+  ai: Record<string, FieldResult>,
 ) {
-  // Tier 1 wins over Tier 3 wins over Tier 2 for overlapping keys
+  // Tier 1 wins over AI wins over Tier 2 for overlapping keys
   const get = (key: string) =>
-    (t1[key] ?? t3[key] ?? t2[key])?.value ?? null;
+    (t1[key] ?? ai[key] ?? t2[key])?.value ?? null;
 
   return {
     has_takeaway:         get('has_takeaway'),
@@ -668,9 +543,10 @@ function buildBusinessOperations(
 
 function buildBusinessProfile(
   t1: Record<string, FieldResult>,
-  t3: Record<string, FieldResult>,
+  ai: Record<string, FieldResult>,
 ) {
-  const get = (key: string) => (t1[key] ?? t3[key])?.value ?? null;
+  // Tier 1 > AI for overlapping keys
+  const get = (key: string) => (t1[key] ?? ai[key])?.value ?? null;
 
   return {
     long_description:    get('long_description'),
@@ -686,11 +562,11 @@ function buildBusinessProfile(
   };
 }
 
-function buildBusinesses(t3: Record<string, FieldResult>) {
+function buildBusinesses(ai: Record<string, FieldResult>) {
   return {
     // Only local_location_reference is managed here.
     // All other businesses fields are owned by other pipeline steps.
-    local_location_reference: t3.local_location_reference?.value ?? null,
+    local_location_reference: ai.local_location_reference?.value ?? null,
   };
 }
 
