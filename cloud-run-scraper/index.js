@@ -533,27 +533,32 @@ app.post('/scrape-v3', async (req, res) => {
     // ========================================
     let pagesCrawled = [{ url: homepageDoc.final_url, quality: homepageQuality.rating }];
 
-    // ALWAYS crawl menu page if detected (regardless of quality)
+    // Menu-aware crawl decision
     const menuUrl = extraction.services?.menu?.url;
-    const shouldCrawlMore = shouldContinueCrawling(homepageQuality) || menuUrl;
+    
+    let shouldCrawlMore = false;
+    let additionalUrls = [];
+    
+    if (menuUrl) {
+      // MENU DETECTED: Only crawl menu page (fast path)
+      console.log(`[V3] Menu detected, crawling menu page only: ${new URL(menuUrl).pathname}`);
+      additionalUrls = [menuUrl];
+      shouldCrawlMore = true;
+    } else if (shouldContinueCrawling(homepageQuality)) {
+      // NO MENU: Crawl multiple pages for data enrichment
+      console.log(`[V3] Quality insufficient, discovering additional pages...`);
+      additionalUrls = discoverAdditionalPages(homepageDoc, extraction, 4);
+      shouldCrawlMore = true;
+    }
 
     if (shouldCrawlMore) {
-      console.log(`[V3] ${menuUrl ? 'Menu detected' : 'Quality insufficient'}, discovering additional pages...`);
-
-      let additionalUrls = discoverAdditionalPages(homepageDoc, extraction, 4);
-      
-      // PRIORITIZE menu URL if detected and not already in list
-      if (menuUrl && !additionalUrls.includes(menuUrl)) {
-        console.log(`[V3] Prioritizing menu URL: ${new URL(menuUrl).pathname}`);
-        additionalUrls = [menuUrl, ...additionalUrls].slice(0, 4);
-      }
-      console.log(`[V3] Found ${additionalUrls.length} candidate pages: ${additionalUrls.map(u => new URL(u).pathname).join(', ')}`);
+      console.log(`[V3] Crawling ${additionalUrls.length} additional page(s): ${additionalUrls.map(u => new URL(u).pathname).join(', ')}`);
 
       const additionalExtractions = [extraction];
 
       for (const pageUrl of additionalUrls) {
         try {
-          const pageDoc = await scrapePage(page, pageUrl, 15000); // 15s timeout for additional pages
+          const pageDoc = await scrapePage(page, pageUrl, 10000); // 10s timeout for additional pages
           const pageNormalizedLinks = normalizeLinks(pageDoc.links);
           const { classified: pageServices } = classifyLinks(pageNormalizedLinks);
           const pageContact = extractContact(pageDoc);
