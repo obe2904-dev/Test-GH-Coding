@@ -619,7 +619,7 @@ function buildBusinessProfile(
 function buildBusinesses(ai: Record<string, FieldResult>) {
   return {
     // Update business name from website (corrects typos, handles rebranding)
-    business_name: ai.business_name?.value ?? null,
+    name: ai.business_name?.value ?? null,
     // Update local location reference (e.g., "ved åen")
     local_location_reference: ai.local_location_reference?.value ?? null,
   };
