@@ -522,20 +522,6 @@ app.post('/scrape-v3', async (req, res) => {
       scraped_at: new Date().toISOString()
     };
 
-    // Extract menu headlines from homepage if present
-    const homepageMenuHeadlines = extractMenuHeadlines(homepageDoc, 10);
-    if (homepageMenuHeadlines && homepageMenuHeadlines.length > 0) {
-      extraction.content_sections.push({
-        type: 'menu_highlights',
-        heading: 'Menu Highlights',
-        text: homepageMenuHeadlines.join('\n'),
-        source_url: homepageDoc.final_url,
-        confidence: 0.95,
-        item_count: homepageMenuHeadlines.length
-      });
-      console.log(`[V3] Added ${homepageMenuHeadlines.length} menu headlines from homepage`);
-    }
-
     // Calculate initial quality
     const homepageQuality = calculateQuality(extraction);
     extraction.quality = homepageQuality;
@@ -547,10 +533,20 @@ app.post('/scrape-v3', async (req, res) => {
     // ========================================
     let pagesCrawled = [{ url: homepageDoc.final_url, quality: homepageQuality.rating }];
 
-    if (shouldContinueCrawling(homepageQuality)) {
-      console.log(`[V3] Quality insufficient, discovering additional pages...`);
+    // ALWAYS crawl menu page if detected (regardless of quality)
+    const menuUrl = extraction.services?.menu?.url;
+    const shouldCrawlMore = shouldContinueCrawling(homepageQuality) || menuUrl;
 
-      const additionalUrls = discoverAdditionalPages(homepageDoc, extraction, 4);
+    if (shouldCrawlMore) {
+      console.log(`[V3] ${menuUrl ? 'Menu detected' : 'Quality insufficient'}, discovering additional pages...`);
+
+      let additionalUrls = discoverAdditionalPages(homepageDoc, extraction, 4);
+      
+      // FORCE menu URL inclusion if detected and not already in list
+      if (menuUrl && !additionalUrls.includes(menuUrl)) {
+        console.log(`[V3] Force-adding menu URL: ${new URL(menuUrl).pathname}`);
+        additionalUrls = [menuUrl, ...additionalUrls].slice(0, 4);
+      }
       console.log(`[V3] Found ${additionalUrls.length} candidate pages: ${additionalUrls.map(u => new URL(u).pathname).join(', ')}`);
 
       const additionalExtractions = [extraction];
@@ -1001,10 +997,9 @@ function extractBusinessName(pageDoc) {
  * @returns {string[]|null} Array of menu item headlines or null if not a menu page
  */
 function extractMenuHeadlines(pageDoc, maxItems = 10) {
-  // Detect if this is a menu page
-  const pageText = pageDoc.blocks.map(b => b.text).join(' ').toLowerCase();
-  const menuIndicators = ['menu', 'menukort', 'mad', 'drikke', 'food', 'drink', 'brunch', 'frokost', 'aften'];
-  const isMenuPage = menuIndicators.some(indicator => pageText.includes(indicator));
+  // ONLY run on actual menu pages (URL-based check, not content)
+  const pageUrl = pageDoc.final_url?.toLowerCase() || '';
+  const isMenuPage = /menu|menukort|food|drinks|mad|drikke/.test(pageUrl);
   
   if (!isMenuPage) {
     return null;
@@ -1054,7 +1049,8 @@ function extractMenuHeadlines(pageDoc, maxItems = 10) {
       text.length <= 50 && 
       /^[A-ZÆØÅ]/.test(text) && // Starts with capital
       !/\s{3,}/.test(text) && // Not excessive whitespace
-      !/(privacy|cookie|gdpr|login|cart|account)/i.test(text) // Not UI/system text
+      !/(privacy|cookie|gdpr|login|cart|account|link to|facebook|instagram|kontakt|book|gavekort|english)/i.test(text) && // Not UI/navigation text
+      text.split(/\s+/).length <= 5 // Max 5 words
     ) {
       const category = currentSection || classifyHeading(text);
       headlines.push({ text, category });
