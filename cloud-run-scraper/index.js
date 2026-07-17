@@ -994,7 +994,35 @@ function extractContentSections(pageDoc, openingHours = null) {
         uniqueTexts.push(trimmed);
       }
     }
-    const text = uniqueTexts.join(' ');
+    
+    // Join and then deduplicate sentences to handle cases where blocks themselves contain duplicates
+    const combinedText = uniqueTexts.join(' ');
+    const sentences = combinedText.split(/([.!?]\s+)/).filter(Boolean);
+    const uniqueSentences = [];
+    const sentenceSeen = new Set();
+    
+    for (let i = 0; i < sentences.length; i++) {
+      const sentence = sentences[i].trim();
+      if (!sentence) continue;
+      
+      // Skip single punctuation separators
+      if (/^[.!?]+$/.test(sentence)) {
+        if (uniqueSentences.length > 0) {
+          uniqueSentences[uniqueSentences.length - 1] += sentence;
+        }
+        continue;
+      }
+      
+      // Normalize for comparison (lowercase, remove extra spaces)
+      const normalized = sentence.toLowerCase().replace(/\s+/g, ' ');
+      
+      if (!sentenceSeen.has(normalized)) {
+        sentenceSeen.add(normalized);
+        uniqueSentences.push(sentence);
+      }
+    }
+    
+    const text = uniqueSentences.join(' ').trim();
 
     if (text.length >= 50) {
       // Check if this section contains opening hours
