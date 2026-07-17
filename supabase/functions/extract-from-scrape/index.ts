@@ -440,9 +440,20 @@ async function extractUsingAIExtractors(
 
     // Map basicInfo results
     t3('business_name', basicInfo.businessName, 'ai_basic_info');
-    t3('user_about_text', basicInfo.description, 'ai_basic_info');
     t3('local_location_reference', basicInfo.localLocationReference, 'ai_basic_info');
-    t3('ai_place_synopsis', basicInfo.description, 'ai_basic_info'); // Same as user_about_text
+    t3('ai_place_synopsis', basicInfo.description, 'ai_basic_info');
+
+    // Build comprehensive user_about_text by combining descriptions
+    let aboutText = basicInfo.description || '';
+    if (menuSignal.menuDescription && menuSignal.menuDescription !== basicInfo.description) {
+      // Combine place description + menu description for richer content
+      aboutText = aboutText 
+        ? `${aboutText}\n\n${menuSignal.menuDescription}`
+        : menuSignal.menuDescription;
+    }
+    if (aboutText) {
+      t3('user_about_text', aboutText, 'ai_combined');
+    }
 
     // Map contactInfo results (as fallback - Tier 1 takes priority in merge)
     if (contactInfo.phone) {
