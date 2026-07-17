@@ -442,17 +442,22 @@ async function extractUsingAIExtractors(
     t3('business_name', basicInfo.businessName, 'ai_basic_info');
     t3('local_location_reference', basicInfo.localLocationReference, 'ai_basic_info');
     
-    // user_about_text: Prioritize descriptions with location branding ("ved åen")
-    // placeSynopsis includes brand identity + location + offerings (most complete)
-    // Fallback chain: placeSynopsis > basicInfo.description > menuDescription
-    const aboutText = menuSignal.placeSynopsis || basicInfo.description || menuSignal.menuDescription;
-    if (aboutText) {
-      const source = menuSignal.placeSynopsis ? 'ai_menu_signal' : 
-                     basicInfo.description ? 'ai_basic_info' : 'ai_menu_signal';
+    // user_about_text: Capture how business brands itself + what they offer
+    // basicInfo.description is designed to extract brand identity from actual website content
+    // If it's short (< 100 chars), enhance with menuDescription for richer detail
+    let aboutText = basicInfo.description || menuSignal.placeSynopsis || '';
+    
+    if (aboutText && aboutText.length < 100 && menuSignal.menuDescription) {
+      // Short brand statement + detailed offerings = comprehensive description
+      aboutText = `${aboutText}\n\n${menuSignal.menuDescription}`;
+      t3('user_about_text', aboutText, 'ai_combined');
+    } else if (aboutText) {
+      // Rich description already captures brand + offerings
+      const source = basicInfo.description ? 'ai_basic_info' : 'ai_menu_signal';
       t3('user_about_text', aboutText, source);
     }
     
-    // ai_place_synopsis: Store same synthesis for backwards compatibility
+    // ai_place_synopsis: Use menu-signal's focused synthesis for backwards compatibility
     if (menuSignal.placeSynopsis) {
       t3('ai_place_synopsis', menuSignal.placeSynopsis, 'ai_menu_signal');
     }
