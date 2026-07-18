@@ -5,6 +5,7 @@ import { useTierStore } from '../../stores/tierStore'
 import { useBusinessStore } from '../../stores/businessStore'
 import { LoadingSpinner } from '../../components/ui/Feedback'
 import { AnalyzeIcon } from './BusinessProfileIcons'
+import { getMenuExtractionService } from '../../services/menuExtractionService'
 
 type MenuStatus = 'pending' | 'extracting' | 'extracted' | 'error'
 type MenuType = 'standard' | 'special'
@@ -502,6 +503,7 @@ function MenuPage() {
   }
 
   // Internal extraction function (called by queue processor)
+  // UPDATED: Now uses Menu Extraction v2.0 with client-side orchestrator
   const extractMenuInternal = async (cardId: string, sourceUrl: string) => {
     if (!businessId) return
 
@@ -516,7 +518,6 @@ function MenuPage() {
         .eq('id', cardId)
 
       // Delete old extraction results for THIS specific menu source
-      // Uses source_id to target only this source's results (prevents cascade deletion)
       await supabase
         .from('menu_results_v2')
         .delete()
@@ -526,157 +527,64 @@ function MenuPage() {
         prev.map(c => c.id === cardId ? { ...c, status: 'extracting', error_message: undefined } : c)
       )
 
-      // Call extraction Edge Function
-      const { data: { session } } = await supabase.auth.getSession()
-      const authToken = session?.access_token
+      // Initialize extraction service
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+      const extractionService = getMenuExtractionService(supabaseUrl, supabaseKey)
 
-      const endpoint = import.meta.env.VITE_SUPABASE_FUNCTION_MENU_EXTRACT as string
-      console.log('🌐 Calling menu extraction endpoint:', endpoint, 'with auth:', !!authToken)
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({
-          url: sourceUrl,
-          businessId,
-          sourceId: cardId
-        })
+      console.log('🚀 Starting Menu Extraction v2.0 for:', sourceUrl)
+      
+      // Run extraction (scraper + orchestrator)
+      const result = await extractionService.extractMenu({
+        businessId,
+        sourceId: cardId,
+        sourceUrl,
+        supabaseUrl,
+        supabaseKey,
       })
 
-      if (!response.ok) {
-        throw new Error(t('menu.extractFailed'))
+      console.log('✅ Extraction complete:', {
+        status: result.status,
+        quality: result.quality?.overallScore,
+        attempts: result.attempts?.length,
+      })
+
+      // Update menu_sources status based on result
+      if (result.status === 'done' || result.status === 'partial') {
+        await supabase
+          .from('menu_sources')
+          .update({ status: 'extracted' })
+          .eq('id', cardId)
+        
+        // Update operations pricing
+        if (operationsUpdateTimeoutRef.current) {
+          clearTimeout(operationsUpdateTimeoutRef.current)
+        }
+        operationsUpdateTimeoutRef.current = setTimeout(() => {
+          updateOperationsPricing().catch(err => 
+            console.error('Error updating operations pricing:', err)
+          )
+        }, 2000)
+        
+      } else if (result.status === 'permanent_error' || result.status === 'manual_review_needed') {
+        await supabase
+          .from('menu_sources')
+          .update({ 
+            status: 'error',
+            error_message: result.errorCode || 'Extraction failed'
+          })
+          .eq('id', cardId)
       }
 
-      const result = await response.json()
-      console.log('✅ Extraction job created:', result)
+      // Remove from active extractions and reload
+      setActiveExtractions(prev => {
+        const next = new Set(prev)
+        next.delete(cardId)
+        return next
+      })
+      
+      await loadMenuCards(businessId)
 
-      // Poll for completion (menu_results_v2 table)
-      const resultId = result.resultId
-      if (resultId) {
-        let attempts = 0
-        const maxAttempts = 90 // 90 seconds max (increased for multiple simultaneous extractions)
-        
-        const pollInterval = setInterval(async () => {
-          attempts++
-          
-          try {
-            const { data: jobResult, error: fetchError } = await supabase
-              .from('menu_results_v2')
-              .select('*')
-              .eq('id', resultId)
-              .maybeSingle() // Use maybeSingle() instead of single() - doesn't error on 0 rows
-
-            if (fetchError) {
-              console.error('Error fetching job result:', fetchError)
-              // Only fail after max attempts
-              if (attempts >= maxAttempts) {
-                clearInterval(pollInterval)
-                pollIntervalsRef.current.delete(cardId)
-                setActiveExtractions(prev => {
-                  const next = new Set(prev)
-                  next.delete(cardId)
-                  return next
-                })
-                await supabase.from('menu_sources').update({ status: 'error', error_message: 'Polling timeout' }).eq('id', cardId)
-                await loadMenuCards(businessId)
-              }
-              return
-            }
-
-            // If row doesn't exist yet, keep polling (jobResult will be null)
-            if (!jobResult) {
-              if (attempts >= maxAttempts) {
-                clearInterval(pollInterval)
-                pollIntervalsRef.current.delete(cardId)
-                setActiveExtractions(prev => {
-                  const next = new Set(prev)
-                  next.delete(cardId)
-                  return next
-                })
-                // Don't mark as error - job might still be processing, just took too long to poll
-                console.log('⏱️ Polling timeout - job may still complete. Reload page to check.')
-                await loadMenuCards(businessId)
-              }
-              return
-            }
-
-            if (jobResult.status === 'done') {
-              clearInterval(pollInterval)
-              pollIntervalsRef.current.delete(cardId)
-              setActiveExtractions(prev => {
-                const next = new Set(prev)
-                next.delete(cardId)
-                return next
-              })
-              
-              // Update menu_sources status
-              await supabase
-                .from('menu_sources')
-                .update({ status: 'extracted' })
-                .eq('id', cardId)
-
-              // Debounce operations pricing update to prevent concurrent updates
-              // When multiple menus extract simultaneously, only update once after all complete
-              if (operationsUpdateTimeoutRef.current) {
-                clearTimeout(operationsUpdateTimeoutRef.current)
-              }
-              operationsUpdateTimeoutRef.current = setTimeout(() => {
-                updateOperationsPricing().catch(err => 
-                  console.error('Error updating operations pricing:', err)
-                )
-              }, 2000) // Wait 2 seconds after last completion
-
-              // Reload cards
-              await loadMenuCards(businessId)
-            } else if (jobResult.status === 'error') {
-              // Extraction failed
-              clearInterval(pollInterval)
-              pollIntervalsRef.current.delete(cardId)
-              setActiveExtractions(prev => {
-                const next = new Set(prev)
-                next.delete(cardId)
-                return next
-              })
-              
-              await supabase
-                .from('menu_sources')
-                .update({ 
-                  status: 'error',
-                  error_message: jobResult?.error_message || 'Extraction failed'
-                })
-                .eq('id', cardId)
-
-              await loadMenuCards(businessId)
-            }
-            // If status is 'queued' or 'processing', keep polling (do nothing here)
-          } catch (pollError) {
-            console.error('Polling error:', pollError)
-            // Don't stop polling on error unless max attempts reached
-            if (attempts >= maxAttempts) {
-              clearInterval(pollInterval)
-              pollIntervalsRef.current.delete(cardId)
-              setActiveExtractions(prev => {
-                const next = new Set(prev)
-                next.delete(cardId)
-                return next
-              })
-            }
-          }
-        }, 1000) // Poll every second
-        
-        // Store interval reference for cleanup
-        pollIntervalsRef.current.set(cardId, pollInterval)
-      } else {
-        // Fallback: reload after a delay
-        setActiveExtractions(prev => {
-          const next = new Set(prev)
-          next.delete(cardId)
-          return next
-        })
-        setTimeout(() => loadMenuCards(businessId), 3000)
-      }
     } catch (error) {
       console.error('Error extracting menu:', error)
       
