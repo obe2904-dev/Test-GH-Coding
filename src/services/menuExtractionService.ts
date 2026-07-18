@@ -6,9 +6,16 @@
 
 import { ExtractionOrchestrator } from '../lib/menu-extraction/ExtractionOrchestrator';
 import { ExtractionContext, MenuExtractionResult, SourceType } from '../lib/menu-extraction/types';
+import { supabase } from '../lib/supabase';
 
-const SCRAPER_URL = 'https://scraper-831683741713.europe-west1.run.app/scrape-v3';
-const SCRAPER_API_KEY = import.meta.env.VITE_SCRAPER_API_KEY || 'wPoMQTeyMW6zZ60oeRq9QGxZ2R/LHVj4diP7OD54KYo=';
+// Use Supabase Edge Function as CORS proxy to Cloud Run scraper
+const getScraperUrl = () => {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error('VITE_SUPABASE_URL not configured');
+  }
+  return `${supabaseUrl}/functions/v1/scrape-menu`;
+};
 
 interface ScraperResponse {
   url: string;
@@ -90,17 +97,23 @@ export class MenuExtractionService {
   private async callScraper(url: string, businessId: string): Promise<ScraperResponse> {
     console.log('🌐 Calling scraper:', url);
     
-    const response = await fetch(SCRAPER_URL, {
+    // Get auth token for Supabase Edge Function
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('Not authenticated');
+    }
+
+    const scraperUrl = getScraperUrl();
+    
+    const response = await fetch(scraperUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': SCRAPER_API_KEY,
+        'Authorization': `Bearer ${session.access_token}`,
       },
       body: JSON.stringify({
         url,
         business_id: businessId,
-        extract_menu: true,
-        extract_opening_hours: false,
       }),
     });
     
