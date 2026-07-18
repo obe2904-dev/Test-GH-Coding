@@ -75,7 +75,8 @@ export class MenuExtractionService {
       scraperData,
       sourceType,
       options.businessId,
-      options.sourceId
+      options.sourceId,
+      options.sourceUrl
     );
     
     // Step 4: Run orchestrator
@@ -159,13 +160,14 @@ export class MenuExtractionService {
     scraperData: ScraperResponse,
     sourceType: SourceType,
     businessId: string,
-    sourceId: string
+    sourceId: string,
+    sourceUrl: string
   ): ExtractionContext {
     const firstPage = scraperData.pages_crawled[0];
     const runId = crypto.randomUUID();
     
     return {
-      sourceUrl: scraperData.url,
+      sourceUrl,
       sourceType,
       businessId,
       sourceId,
