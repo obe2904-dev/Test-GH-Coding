@@ -32,7 +32,7 @@ export class PDFTextStrategy extends BaseStrategy {
 
     // Check if source is PDF
     const isPdf = context.sourceType === SourceType.PDF_DIRECT ||
-                  context.sourceUrl.toLowerCase().endsWith('.pdf');
+                  (context.sourceUrl && context.sourceUrl.toLowerCase().endsWith('.pdf'));
     
     if (!isPdf) return false;
     

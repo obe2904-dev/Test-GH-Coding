@@ -165,7 +165,10 @@ export class MenuExtractionService {
   private determineSourceType(scraperData: ScraperResponse, url: string): SourceType {
     const structure = scraperData.scraper_metadata?.structure_type?.toLowerCase();
     
-    if (url.toLowerCase().endsWith('.pdf') || structure === 'direct_pdf') {
+    // Check if URL is a PDF (including URLs with image transformation params)
+    const isPdfUrl = url.toLowerCase().includes('.pdf');
+    
+    if (isPdfUrl || structure === 'direct_pdf') {
       return SourceType.PDF_DIRECT;
     }
     
@@ -206,6 +209,7 @@ export class MenuExtractionService {
         visibleText: firstPage?.page_data?.visible_text,
         screenshot: undefined,
         networkResponses: [],
+        menu_discovery: (scraperData as any).menu_discovery, // Add menu discovery data for ImageOCR
         platformMetadata: scraperData.scraper_metadata?.platform_detected ? {
           platform: scraperData.scraper_metadata.platform_detected,
           confidence: 0.8,

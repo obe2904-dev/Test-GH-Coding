@@ -6,6 +6,7 @@
 import { StructuredJSONStrategy } from './strategies/StructuredJSONStrategy';
 import { PDFTextStrategy } from './strategies/PDFTextStrategy';
 import { SemanticDOMStrategy } from './strategies/SemanticDOMStrategy';
+import { ImageOCRStrategy } from './strategies/ImageOCRStrategy';
 import { StandardQualityScorer } from './QualityScorer';
 import { MenuValidator } from './MenuValidator';
 import { MenuPersistence } from './MenuPersistence';
@@ -52,6 +53,7 @@ export class ExtractionOrchestrator {
     // Initialize strategies in priority order
     this.strategies = [
       new StructuredJSONStrategy(),
+      new ImageOCRStrategy(options.supabaseUrl, options.supabaseKey), // High priority for scanned menus
       new PDFTextStrategy(),
       new SemanticDOMStrategy(),
       // Additional strategies would be added here
@@ -77,9 +79,15 @@ export class ExtractionOrchestrator {
     const startTime = Date.now();
     const candidates: MenuCandidate[] = [];
     
-    // 1. Capture artifacts if enabled
-    if (this.options.enableArtifactCapture && context.artifacts) {
-      await this.captureArtifacts(context);
+    // 1. Capture artifacts if enabled - DISABLED for now to prevent errors
+    // TODO: Re-enable after fixing bucket permissions and browser compatibility
+    if (false && this.options.enableArtifactCapture && context.artifacts) {
+      try {
+        await this.captureArtifacts(context);
+      } catch (error) {
+        console.warn('⚠️ Failed to capture artifacts (non-critical):', error);
+        // Continue extraction even if artifact capture fails
+      }
     }
     
     // 2. Run strategies in priority order

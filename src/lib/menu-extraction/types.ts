@@ -158,6 +158,22 @@ export interface NetworkCapture {
 }
 
 // ============================================================================
+// Menu Discovery (from v3 scraper)
+// ============================================================================
+
+export interface MenuDiscovery {
+  structure: 'image_gallery' | 'direct_pdf' | 'nested_pages' | 'inline_html' | 'unknown';
+  confidence: 'high' | 'medium' | 'low';
+  extractionMethod?: 'ocr_required' | 'pdf_extract' | 'html_parse' | 'nested_crawl';
+  reasoning?: string;
+  assets?: {
+    imageLinks?: Array<{ url: string; text: string; ariaLabel?: string }>;
+    displayedImages?: Array<{ url: string; alt: string; width: number; height: number }>;
+    pdfLinks?: Array<{ url: string; text: string } | string>; // Can be object or just URL string
+  };
+}
+
+// ============================================================================
 // Extraction Context
 // ============================================================================
 
@@ -172,9 +188,10 @@ export interface ExtractionContext {
     initialHtml?: string;
     renderedHtml?: string;
     visibleText?: string;
-    screenshot?: Buffer;
+    screenshot?: Uint8Array;
     platformMetadata?: PlatformMetadata;
     networkResponses?: NetworkCapture[];
+    menu_discovery?: MenuDiscovery[]; // v3 scraper menu discovery data for ImageOCR
   };
   
   hints?: PlatformHints;

@@ -61,18 +61,18 @@ export class ArtifactCapture {
    * Upload artifact to storage
    */
   private async uploadArtifact(
-    content: string | Buffer,
+    content: string | Uint8Array,
     path: string,
     contentType: string,
     compress: boolean = true
   ): Promise<ArtifactReference> {
-    let buffer: Buffer;
+    let buffer: Uint8Array;
     let compressed = false;
     let actualContentType = contentType;
     
-    // Convert to buffer
+    // Convert to buffer (browser-compatible)
     if (typeof content === 'string') {
-      buffer = Buffer.from(content, 'utf-8');
+      buffer = new TextEncoder().encode(content);
     } else {
       buffer = content;
     }
@@ -82,7 +82,8 @@ export class ArtifactCapture {
     compressed = false;
     
     // Generate hash (browser-compatible)
-    const hash = this.hashContent(buffer.toString('utf-8'));
+    const contentString = typeof content === 'string' ? content : new TextDecoder().decode(buffer);
+    const hash = this.hashContent(contentString);
     
     // Upload to Supabase Storage
     const { error } = await this.supabase.storage
@@ -175,7 +176,7 @@ export class ArtifactCapture {
    * Capture screenshot
    */
   async captureScreenshot(
-    buffer: Buffer,
+    buffer: Uint8Array,
     type: 'full' | 'menu',
     businessId: string,
     sourceId: string,
@@ -217,7 +218,7 @@ export class ArtifactCapture {
    * Capture PDF
    */
   async capturePDF(
-    buffer: Buffer,
+    buffer: Uint8Array,
     businessId: string,
     sourceId: string,
     runId: string
@@ -275,10 +276,10 @@ export class ArtifactCapture {
       initialHtml?: string;
       renderedHtml?: string;
       visibleText?: string;
-      screenshotFull?: Buffer;
-      screenshotMenu?: Buffer[];
+      screenshotFull?: Uint8Array;
+      screenshotMenu?: Uint8Array[];
       networkCaptures?: NetworkCapture[];
-      sourcePdf?: Buffer;
+      sourcePdf?: Uint8Array;
       diagnostics?: any;
     }
   ): Promise<ArtifactManifest> {
@@ -359,7 +360,7 @@ export class ArtifactCapture {
   /**
    * Load artifact from storage
    */
-  async loadArtifact(path: string): Promise<Buffer> {
+  async loadArtifact(path: string): Promise<Uint8Array> {
     const { data, error } = await this.supabase.storage
       .from(this.bucketName)
       .download(path);
@@ -368,7 +369,7 @@ export class ArtifactCapture {
       throw new Error(`Failed to load artifact: ${error.message}`);
     }
     
-    return Buffer.from(await data.arrayBuffer());
+    return new Uint8Array(await data.arrayBuffer());
   }
   
   /**
