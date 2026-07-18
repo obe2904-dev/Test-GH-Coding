@@ -2,6 +2,7 @@ import { supabase } from '../../../../lib/supabase'
 import type { WeekSchedule } from '../../../../types/businessProfile'
 import type { BusinessSector } from '../../../../types/businessSector'
 import type { BusinessOfferingsProfile } from '../../../../types/businessOfferings'
+import { normalizeMenuUrl, isPdfUrl, normalizePdfUrl } from '../../../../lib/urlNormalization'
 
 const DEFAULT_COUNTRY = 'Danmark'
 
@@ -176,33 +177,39 @@ export async function saveBusinessProfile(data: ProfileData): Promise<void> {
     }, { onConflict: 'business_id' })
 
   // Sync detected menu URLs to menu_sources table
+  // Uses UPSERT with normalized_url to maintain stable source IDs
   if (data.detectedMenuUrls?.length > 0) {
-    const { data: existingSources } = await (supabase
-      .from('menu_sources') as any)
-      .select('source_url')
-      .eq('business_id', businessId)
-    
-    const existingUrls = new Set(existingSources?.map((s: any) => s.source_url) || [])
-    const newUrls = data.detectedMenuUrls.filter(url => !existingUrls.has(url))
-    
-    if (newUrls.length > 0) {
-      const menuSourcesToInsert = newUrls.map(url => {
-        // Detect menu type from URL
-        const detected = detectMenuTypeFromUrl(url)
-        return {
-          business_id: businessId,
-          source_url: url,
-          source_type: 'url' as const,
-          source_origin: 'ai_detected' as const,
-          status: 'pending' as const,
-          menu_type: detected.type,
-          label: detected.label,
-          created_by: user?.id,
-          created_at: new Date().toISOString()
-        }
-      })
+    const menuSourcesToUpsert = data.detectedMenuUrls.map(url => {
+      // Detect menu type from URL
+      const detected = detectMenuTypeFromUrl(url)
       
-      await (supabase.from('menu_sources') as any).insert(menuSourcesToInsert)
+      // Normalize URL for stable identity
+      const normalizedUrl = isPdfUrl(url) ? normalizePdfUrl(url) : normalizeMenuUrl(url)
+      
+      return {
+        business_id: businessId,
+        source_url: url,
+        normalized_url: normalizedUrl,
+        source_type: 'url' as const,
+        source_origin: 'ai_detected' as const,
+        status: 'pending' as const,
+        menu_type: detected.type,
+        label: detected.label,
+        created_by: user?.id,
+        created_at: new Date().toISOString()
+      }
+    })
+    
+    // Upsert: if normalized_url exists for this business, update; otherwise insert
+    const { error: upsertError } = await (supabase
+      .from('menu_sources') as any)
+      .upsert(menuSourcesToUpsert, {
+        onConflict: 'business_id,normalized_url',
+        ignoreDuplicates: false
+      })
+    
+    if (upsertError) {
+      console.error('Error upserting menu sources:', upsertError)
     }
   }
 

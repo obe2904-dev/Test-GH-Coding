@@ -6,6 +6,7 @@ import { useBusinessStore } from '../../stores/businessStore'
 import { LoadingSpinner } from '../../components/ui/Feedback'
 import { AnalyzeIcon } from './BusinessProfileIcons'
 import { getMenuExtractionService } from '../../services/menuExtractionService'
+import { normalizeMenuUrl, isPdfUrl, normalizePdfUrl } from '../../lib/urlNormalization'
 
 type MenuStatus = 'pending' | 'extracting' | 'extracted' | 'error'
 type MenuType = 'standard' | 'special'
@@ -494,6 +495,13 @@ function MenuPage() {
     // Check if already in queue or extracting
     if (activeExtractions.has(cardId) || extractionQueue.some(item => item.cardId === cardId)) {
       console.log(`⏭️ Menu already queued or extracting: ${cardId}`)
+      return
+    }
+
+    // Check if this URL already has a completed extraction
+    const existingCard = menuCards.find(c => c.id === cardId)
+    if (existingCard?.status === 'extracted') {
+      console.log(`✅ Menu already extracted: ${sourceUrl}`)
       return
     }
 
@@ -994,24 +1002,33 @@ function MenuPage() {
     const { data: authData } = await supabase.auth.getUser()
     const userId = authData?.user?.id
 
-    // Find which selected URLs are NOT yet in menu_sources
-    const currentMenuCardUrlSet = new Set(menuCards.map(c => c.source_url))
-    const urlsToAdd = Array.from(selectedUrls).filter(url => !currentMenuCardUrlSet.has(url))
+    // Upsert selected URLs into menu_sources (maintains stable source IDs)
+    const sourcesToUpsert = Array.from(selectedUrls).map(url => {
+      const normalizedUrl = isPdfUrl(url) ? normalizePdfUrl(url) : normalizeMenuUrl(url)
+      
+      return {
+        business_id: businessId,
+        source_url: url,
+        normalized_url: normalizedUrl,
+        source_type: 'url',
+        source_origin: 'ai_detected',
+        status: 'pending',
+        menu_type: detectMenuType(url),
+        label: detectMenuLabel(url),
+        created_by: userId,
+      }
+    })
 
-    // Insert new URLs into menu_sources
-    if (urlsToAdd.length > 0) {
-      await supabase.from('menu_sources').insert(
-        urlsToAdd.map(url => ({
-          business_id: businessId,
-          source_url: url,
-          source_type: 'url',
-          source_origin: 'ai_detected',
-          status: 'pending',
-          menu_type: detectMenuType(url),
-          label: detectMenuLabel(url),
-          created_by: userId,
-        }))
-      )
+    const { error: upsertError } = await supabase
+      .from('menu_sources')
+      .upsert(sourcesToUpsert, {
+        onConflict: 'business_id,normalized_url',
+        ignoreDuplicates: false
+      })
+    
+    if (upsertError) {
+      console.error('Error upserting menu sources:', upsertError)
+      return
     }
 
     // Query all menu_sources for selected URLs to get their IDs (fresh from DB)
