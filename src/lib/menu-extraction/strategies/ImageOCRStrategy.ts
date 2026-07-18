@@ -116,7 +116,7 @@ export class ImageOCRStrategy extends BaseStrategy {
       console.log(`🖼️ Found ${imageUrls.length} menu images for OCR`);
       
       // Step 2: Perform OCR on all images
-      const ocrResults = await this.performOCROnImages(imageUrls);
+      const ocrResults = await this.performOCROnImages(imageUrls, context);
       
       if (ocrResults.length === 0 || ocrResults.every(r => !r.success)) {
         return this.failed(StrategyError.STRATEGY_EXTERNAL_SERVICE_FAILED, 'OCR failed for all images');
@@ -307,7 +307,7 @@ export class ImageOCRStrategy extends BaseStrategy {
   /**
    * Perform OCR on multiple images/PDFs
    */
-  private async performOCROnImages(imageUrls: string[]): Promise<OCRResponse[]> {
+  private async performOCROnImages(imageUrls: string[], context: ExtractionContext): Promise<OCRResponse[]> {
     const results: OCRResponse[] = [];
     
     // Process images/PDFs sequentially to avoid rate limits
@@ -320,7 +320,7 @@ export class ImageOCRStrategy extends BaseStrategy {
         
         if (isPdf) {
           console.log('📄 Detected PDF - downloading to storage first...');
-          const pdfResult = await this.processPdf(imageUrl);
+          const pdfResult = await this.processPdf(imageUrl, context.businessId, context.sourceId);
           if (pdfResult) {
             results.push(pdfResult);
           }
@@ -380,7 +380,7 @@ export class ImageOCRStrategy extends BaseStrategy {
   /**
    * Process a PDF: download, store, check for text layer, then OCR if needed
    */
-  private async processPdf(pdfUrl: string): Promise<OCRResponse | null> {
+  private async processPdf(pdfUrl: string, businessId: string, sourceId: string): Promise<OCRResponse | null> {
     try {
       // Step 1: Download PDF to storage
       console.log('📥 Step 1/3: Downloading PDF to storage...');
@@ -392,8 +392,8 @@ export class ImageOCRStrategy extends BaseStrategy {
         },
         body: JSON.stringify({ 
           pdfUrl,
-          businessId: 'temp', // TODO: Pass actual businessId
-          sourceId: 'temp',   // TODO: Pass actual sourceId
+          businessId,
+          sourceId,
         }),
       });
       
