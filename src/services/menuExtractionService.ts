@@ -151,14 +151,11 @@ export class MenuExtractionService {
       throw new Error('Scraper returned no pages');
     }
 
+    // Edge Function now transforms v3 → v2, so page_data should exist
+    // But be lenient if it doesn't (log warning instead of throwing)
     const firstPage = scraperData.pages_crawled[0];
-    if (!firstPage || !firstPage.page_data) {
-      throw new Error('First page missing page_data');
-    }
-
-    // Warn if missing expected fields (non-blocking)
-    if (!firstPage.page_data.html && !firstPage.page_data.visible_text && !firstPage.page_data.blocks) {
-      console.warn('⚠️ Page data missing all content fields (html, visible_text, blocks)');
+    if (!firstPage?.page_data) {
+      console.warn('⚠️ First page missing page_data - extraction may fail');
     }
   }
   

@@ -77,53 +77,67 @@ serve(async (req) => {
     // Get scraper response
     const scraperData = await scraperResponse.json();
     
-    // Enrich response with request context (ensures url and business_id are always present)
-    const enrichedData = {
-      ...scraperData,
-      url: scraperData.url || url, // Use scraper's url if present, fallback to request url
-      business_id: scraperData.business_id || business_id, // Ensure business_id is present
+    console.log('Raw scraper response keys:', Object.keys(scraperData));
+    
+    // Transform v3 response to v2 format for backward compatibility
+    // v3 has: extraction{}, pages_crawled[{url, quality}], menu_discovery[]
+    // v2 expects: pages_crawled[{url, page_data{html, visible_text, blocks}}]
+    
+    const transformedData: any = {
+      success: scraperData.success,
+      url: scraperData.extraction?.meta?.final_url || url,
+      business_id: business_id,
+      scraper_metadata: scraperData.scraper_metadata || {},
+      pages_crawled: []
     };
 
-    // Validate response structure
-    if (!enrichedData.pages_crawled || !Array.isArray(enrichedData.pages_crawled)) {
-      console.error('Invalid scraper response: missing pages_crawled array');
-      return new Response(
-        JSON.stringify({ 
-          error: 'Invalid scraper response structure',
-          details: 'Missing or invalid pages_crawled array'
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // Build page_data from extraction object
+    if (scraperData.extraction) {
+      const extraction = scraperData.extraction;
+      
+      // Create fake HTML from extracted content for v2 compatibility
+      const fakeHtml = `
+        <html>
+          <head><title>${extraction.meta?.title || ''}</title></head>
+          <body>
+            ${extraction.business?.description?.value || ''}
+            ${extraction.content_sections?.map((s: any) => `<section><h2>${s.heading || ''}</h2><p>${s.text || ''}</p></section>`).join('') || ''}
+          </body>
+        </html>
+      `;
+      
+      // Extract visible text
+      const visibleText = [
+        extraction.business?.name?.value,
+        extraction.business?.description?.value,
+        ...extraction.content_sections?.map((s: any) => `${s.heading}\n${s.text}`) || []
+      ].filter(Boolean).join('\n\n');
+      
+      transformedData.pages_crawled.push({
+        url: extraction.meta?.final_url || url,
+        page_data: {
+          html: fakeHtml,
+          visible_text: visibleText,
+          blocks: extraction.content_sections || [],
+          raw_extraction: extraction  // Keep original for reference
+        }
+      });
     }
 
-    if (enrichedData.pages_crawled.length === 0) {
-      console.error('Scraper returned no pages');
-      return new Response(
-        JSON.stringify({ 
-          error: 'Scraper returned no pages',
-          url: enrichedData.url
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // Add menu discovery data
+    if (scraperData.menu_discovery && scraperData.menu_discovery.length > 0) {
+      transformedData.menu_discovery = scraperData.menu_discovery;
+      transformedData.scraper_metadata.structure_type = scraperData.menu_discovery[0].structure;
     }
 
-    // Validate first page has required data
-    const firstPage = enrichedData.pages_crawled[0];
-    if (!firstPage || !firstPage.page_data) {
-      console.error('First page missing page_data');
-      return new Response(
-        JSON.stringify({ 
-          error: 'Invalid page structure',
-          details: 'First page missing page_data'
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('Scraper response validated and enriched successfully');
+    console.log('Transformed v3 → v2:', {
+      has_pages: transformedData.pages_crawled.length,
+      has_page_data: !!transformedData.pages_crawled[0]?.page_data,
+      structure: transformedData.scraper_metadata?.structure_type
+    });
     
     return new Response(
-      JSON.stringify(enrichedData),
+      JSON.stringify(transformedData),
       { 
         status: 200, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
