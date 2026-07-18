@@ -25,6 +25,11 @@ export class PDFTextStrategy extends BaseStrategy {
    * Check if strategy can handle this source
    */
   canHandle(context: ExtractionContext): boolean {
+    // Defensive: check context and sourceUrl exist
+    if (!context || !context.sourceUrl) {
+      return false;
+    }
+
     // Check if source is PDF
     const isPdf = context.sourceType === SourceType.PDF_DIRECT ||
                   context.sourceUrl.toLowerCase().endsWith('.pdf');
@@ -32,7 +37,7 @@ export class PDFTextStrategy extends BaseStrategy {
     if (!isPdf) return false;
     
     // Check if we have visible text (indicates text layer)
-    const visibleText = context.artifacts.visibleText;
+    const visibleText = context.artifacts?.visibleText;
     if (!visibleText || visibleText.trim().length < 100) {
       return false;
     }

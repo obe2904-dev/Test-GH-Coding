@@ -67,10 +67,13 @@ export class MenuExtractionService {
     // Step 1: Call scraper to fetch and render page
     const scraperData = await this.callScraper(options.sourceUrl, options.businessId);
     
-    // Step 2: Determine source type
+    // Step 2: Validate scraper response
+    this.validateScraperResponse(scraperData);
+    
+    // Step 3: Determine source type
     const sourceType = this.determineSourceType(scraperData, options.sourceUrl);
     
-    // Step 3: Build extraction context
+    // Step 4: Build extraction context
     const context = this.buildExtractionContext(
       scraperData,
       sourceType,
@@ -79,7 +82,7 @@ export class MenuExtractionService {
       options.sourceUrl
     );
     
-    // Step 4: Run orchestrator
+    // Step 5: Run orchestrator
     console.log('🔄 Running extraction orchestrator...');
     const result = await this.orchestrator.extract(context);
     
@@ -130,6 +133,33 @@ export class MenuExtractionService {
     }
     
     return data;
+  }
+  
+  /**
+   * Validate scraper response structure
+   */
+  private validateScraperResponse(scraperData: ScraperResponse): void {
+    if (!scraperData) {
+      throw new Error('Scraper returned null or undefined response');
+    }
+
+    if (!scraperData.pages_crawled || !Array.isArray(scraperData.pages_crawled)) {
+      throw new Error('Scraper response missing pages_crawled array');
+    }
+
+    if (scraperData.pages_crawled.length === 0) {
+      throw new Error('Scraper returned no pages');
+    }
+
+    const firstPage = scraperData.pages_crawled[0];
+    if (!firstPage || !firstPage.page_data) {
+      throw new Error('First page missing page_data');
+    }
+
+    // Warn if missing expected fields (non-blocking)
+    if (!firstPage.page_data.html && !firstPage.page_data.visible_text && !firstPage.page_data.blocks) {
+      console.warn('⚠️ Page data missing all content fields (html, visible_text, blocks)');
+    }
   }
   
   /**

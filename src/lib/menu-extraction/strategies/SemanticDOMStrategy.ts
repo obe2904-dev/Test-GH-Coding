@@ -25,6 +25,11 @@ export class SemanticDOMStrategy extends BaseStrategy {
    * Check if strategy can handle this source
    */
   canHandle(context: ExtractionContext): boolean {
+    // Defensive: check context and artifacts exist
+    if (!context || !context.artifacts) {
+      return false;
+    }
+
     const html = context.artifacts.renderedHtml || context.artifacts.initialHtml;
     if (!html) return false;
     

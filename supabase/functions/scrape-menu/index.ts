@@ -74,11 +74,56 @@ serve(async (req) => {
       );
     }
 
-    // Return scraper response with CORS headers
+    // Get scraper response
     const scraperData = await scraperResponse.json();
     
+    // Enrich response with request context (ensures url and business_id are always present)
+    const enrichedData = {
+      ...scraperData,
+      url: scraperData.url || url, // Use scraper's url if present, fallback to request url
+      business_id: scraperData.business_id || business_id, // Ensure business_id is present
+    };
+
+    // Validate response structure
+    if (!enrichedData.pages_crawled || !Array.isArray(enrichedData.pages_crawled)) {
+      console.error('Invalid scraper response: missing pages_crawled array');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid scraper response structure',
+          details: 'Missing or invalid pages_crawled array'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (enrichedData.pages_crawled.length === 0) {
+      console.error('Scraper returned no pages');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Scraper returned no pages',
+          url: enrichedData.url
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Validate first page has required data
+    const firstPage = enrichedData.pages_crawled[0];
+    if (!firstPage || !firstPage.page_data) {
+      console.error('First page missing page_data');
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid page structure',
+          details: 'First page missing page_data'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Scraper response validated and enriched successfully');
+    
     return new Response(
-      JSON.stringify(scraperData),
+      JSON.stringify(enrichedData),
       { 
         status: 200, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
