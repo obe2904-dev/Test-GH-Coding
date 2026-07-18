@@ -157,21 +157,31 @@ serve(async (req) => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 function buildLabeledContent(scraperPayload: any): string {
-  const sections: string[] = [];
-  
-  // Add each content section with heading label (like OLD system's "=== Page: /about ===")
   const contentSections = scraperPayload.content_sections || [];
   
-  // Filter and score sections to exclude navigation/junk
-  const scoredSections = contentSections
+  // Separate navigation sections from body sections
+  const navigationSections: any[] = [];
+  const bodySections: any[] = [];
+  
+  for (const section of contentSections) {
+    const heading = section.heading || '';
+    // Navigation keywords are SIGNAL, not noise — separate them for explicit labeling
+    if (/MENUKORT|BRUNCH|FROKOST|KONTAKT|BOOK DIT BORD|MENU|DRINKS|AFTEN/i.test(heading)) {
+      navigationSections.push(section);
+    } else {
+      bodySections.push(section);
+    }
+  }
+  
+  // Score body sections only (no negative penalty for nav headings)
+  const scoredSections = bodySections
     .map((section: any) => {
       const heading = section.heading || null;
       const text = section.text || '';
       
-      // Calculate quality score
       let score = 0;
       
-      // Has meaningful heading (not null) = +20 points
+      // Has meaningful heading
       if (heading && heading.length > 3) {
         score += 20;
       }
@@ -183,48 +193,37 @@ function buildLabeledContent(scraperPayload: any): string {
         score += 10;
       }
       
-      // Low link density (count "Link to" occurrences)
+      // Low link density
       const linkCount = (text.match(/Link to|href|http|www\./gi) || []).length;
       const wordCount = text.split(/\s+/).length;
       const linkDensity = wordCount > 0 ? linkCount / wordCount : 0;
       
       if (linkDensity < 0.1) {
-        score += 30; // Very few links = good content
+        score += 30;
       } else if (linkDensity > 0.3) {
-        score -= 20; // High link density = likely navigation
+        score -= 20;
       }
       
-      // Contains business-relevant words (positive indicators)
-      const goodWords = /velkommen|welcome|om os|about|cafe|restaurant|mad|food|oplevelse|experience/i;
-      if (goodWords.test(text)) {
+      // Business-relevant words
+      if (/velkommen|welcome|om os|about|cafe|restaurant|mad|food|oplevelse|experience/i.test(text)) {
         score += 20;
-      }
-      
-      // Generic navigation words (negative indicators)
-      const navWords = /MENUKORT|BRUNCH|FROKOST|KONTAKT|BOOK DIT BORD|MENU|CONTACT|HOME/g;
-      const navMatches = (text.match(navWords) || []).length;
-      if (navMatches > 5) {
-        score -= 30; // Likely navigation menu
       }
       
       return { section, heading, text, score };
     })
-    .filter(item => item.score > 0 && item.text.length >= 50) // Only keep positive-scoring sections
-    .sort((a, b) => b.score - a.score); // Sort by quality (best first)
+    .filter(item => item.score > 0 && item.text.length >= 50)
+    .sort((a, b) => b.score - a.score);
   
-  console.log(`🔍 Section scoring:`, scoredSections.map(s => ({ 
-    heading: s.heading || '(no heading)', 
-    score: s.score, 
-    length: s.text.length 
-  })));
+  console.log(`🔍 Section scoring: ${scoredSections.length} body sections (${navigationSections.length} navigation sections separated)`);
   
-  // Build labeled content from scored sections
+  // Build body content
+  const sections: string[] = [];
   for (const item of scoredSections) {
     const heading = item.heading || 'Section';
     sections.push(`=== ${heading} ===\n${item.text}`);
   }
   
-  // Add contact information if available (helps AI extractors)
+  // Add contact information
   if (scraperPayload.contact) {
     const contactParts: string[] = [];
     if (scraperPayload.contact.phones?.[0]?.value) {
@@ -241,8 +240,21 @@ function buildLabeledContent(scraperPayload: any): string {
     }
   }
   
-  const labeledContent = sections.join('\n\n');
-  console.log(`📝 Built labeled content: ${labeledContent.length} chars from ${scoredSections.length} quality sections (filtered from ${contentSections.length} total)`);
+  const bodyText = sections.join('\n\n');
+  
+  // Navigation labels passed explicitly as offerings signal (like OLD system did by accident)
+  const navText = navigationSections
+    .map(s => s.heading || s.text || '')
+    .filter(Boolean)
+    .join(' | ');
+  
+  const navBlock = navText
+    ? `NAVIGATION LABELS (use these for key_offerings / Det i tilbyder):\n${navText}\n\n---\n\n`
+    : '';
+  
+  const labeledContent = `${navBlock}${bodyText}`;
+  
+  console.log(`📝 Built labeled content: ${labeledContent.length} chars (${navigationSections.length} nav labels + ${scoredSections.length} body sections)`);
   
   return labeledContent;
 }
@@ -268,9 +280,10 @@ function extractTier1(payload: any): Record<string, FieldResult> {
   // Address — split Danish format "Street Number PostalCode City"
   const rawAddress = payload.contact?.addresses?.[0]?.value ?? null;
   if (rawAddress) {
-    const { address_line1, postal_code } = splitDanishAddress(rawAddress);
+    const { address_line1, postal_code, city } = splitDanishAddress(rawAddress);
     t1('address_line1', address_line1, 'contact.addresses[0] split');
     t1('postal_code',   postal_code,   'contact.addresses[0] split');
+    t1('city',          city,          'contact.addresses[0] split');
   }
 
   // Fallback: Parse phone and address from content_sections if not in contact
@@ -580,6 +593,7 @@ function buildBusinessLocations(
     phone:         (t1.phone ?? ai.phone)?.value                 ?? null,
     address_line1: (t1.address_line1 ?? ai.address_line1)?.value ?? null,
     postal_code:   (t1.postal_code ?? ai.postal_code)?.value     ?? null,
+    city:          (t1.city ?? ai.city)?.value                   ?? null,
   };
 }
 
@@ -694,14 +708,41 @@ async function writeBusinessLocations(
   if (Object.keys(data).length === 0) return;
 
   try {
-    const { error, count } = await supabase
+    // Check if a location row exists for this business
+    const { data: existing, error: fetchError } = await supabase
       .from('business_locations')
-      .update(data)
+      .select('id')
       .eq('business_id', business_id)
-      .select('business_id', { count: 'exact', head: true });
+      .limit(1)
+      .maybeSingle();
 
-    if (error) throw error;
-    if (count === 0) throw new Error(`No business_locations row for ${business_id}`);
+    if (fetchError) throw fetchError;
+
+    if (existing) {
+      // Update existing row, ensure is_primary is true
+      const { error: updateError } = await supabase
+        .from('business_locations')
+        .update({ 
+          is_primary: true,
+          country: 'Denmark',
+          ...data 
+        })
+        .eq('id', existing.id);
+      
+      if (updateError) throw updateError;
+    } else {
+      // Insert new row as primary location
+      const { error: insertError } = await supabase
+        .from('business_locations')
+        .insert({ 
+          business_id, 
+          is_primary: true,
+          country: 'Denmark', 
+          ...data 
+        });
+      
+      if (insertError) throw insertError;
+    }
 
     Object.keys(data).forEach(k => summary.saved.push(`locations.${k}`));
     console.log('✅ business_locations saved:', Object.keys(data));
@@ -828,12 +869,15 @@ async function writeOpeningHours(
 function splitDanishAddress(raw: string): {
   address_line1: string | null;
   postal_code:   string | null;
+  city:          string | null;
 } {
-  const match = raw.match(/^(.+?)\s+(\d{4})\b/);
-  if (!match) return { address_line1: null, postal_code: null };
+  // Match: "Street Number PostalCode City"
+  const match = raw.match(/^(.+?)\s+(\d{4})\s+(.+)$/);
+  if (!match) return { address_line1: null, postal_code: null, city: null };
   return {
     address_line1: match[1].trim(),
     postal_code:   match[2],
+    city:          match[3].trim(),
   };
 }
 

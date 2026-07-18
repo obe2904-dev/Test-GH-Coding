@@ -251,6 +251,31 @@ serve(async (req) => {
     }
 
     // ==========================================
+    // QUEUE MENU ENRICHMENT (ASYNC - NON-BLOCKING)
+    // ==========================================
+    const menuPagesQueued = payload.menu_pages_queued || [];
+    if (menuPagesQueued.length > 0) {
+      console.log(`📋 Queueing ${menuPagesQueued.length} menu enrichment job(s):`, menuPagesQueued.map(p => p.url));
+      
+      // Queue all menu pages for async crawling
+      const jobInserts = menuPagesQueued.map(menuPage => ({
+        url: menuPage.url,
+        business_id,
+        job_type: 'menu_enrichment',
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      }));
+      
+      supabase
+        .from('scrape_jobs')
+        .insert(jobInserts)
+        .then(() => console.log(`✅ ${jobInserts.length} menu enrichment job(s) queued`))
+        .catch((err: Error) => console.warn('⚠️ Failed to queue menu jobs:', err.message));
+    } else {
+      console.log('ℹ️ No menu pages detected for async enrichment');
+    }
+
+    // ==========================================
     // COMPLETE
     // ==========================================
     const totalDuration = Date.now() - startTime;
@@ -263,6 +288,7 @@ serve(async (req) => {
         quality: contentQuality,
         extraction_summary: extractionResult.summary,
         distribution_summary: distributionSummary,
+        menu_enrichment: menuPagesQueued.length > 0 ? `${menuPagesQueued.length} pages queued` : 'not_applicable',
         duration_ms: totalDuration,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

@@ -120,12 +120,30 @@ export function classifyLink(
     return 'BOOKING'
   }
   
-  // 4) Menu pages - expanded Danish patterns (checked AFTER booking)
+  // 4) Menu pages - expanded comprehensive patterns (aligned with Cloud Run classifier)
   const menuPatterns = [
-    'menu', 'menukort', 'mad', 'drikke', 'food', 'drinks', 'spise', 'eat',
-    'cocktail', 'vin', 'wine', 'øl', 'beer', 'brunch', 'frokost', 'aften',
-    'julefrokost', 'julemenu', 'morgenmad', 'breakfast', 'lunch',
-    'dessert', 'snack', 'tapas', 'smørrebrød', 'buffet'
+    // Core menu/card terms
+    'menu', 'menukort', 'madkort', 'drikkekort', 'food menu', 'wine list', 'vinkort',
+    // Meal periods
+    'morgenmad', 'morgenmenu', 'breakfast',
+    'brunch', 'brunchmenu', 'brunchkort', 'brunchbuffet',
+    'frokost', 'frokostmenu', 'frokostkort', 'frokostbuffet', 'lunch',
+    'aften', 'aftenmenu', 'aftenkort', 'aftensmad', 'evening',
+    'middag', 'middagsmenu',
+    // Menu types
+    'buffet', 'aftenbuffet', 'grillbuffet',
+    'a-la-carte', 'alacarte', 'smagemenu', 'sæsonmenu',
+    'dagens menu', 'dagens ret', 'ugens menu',
+    // Menu sections
+    'forretter', 'hovedretter', 'desserter', 'dessertkort',
+    'snacks', 'småretter', 'deleretter',
+    'børnemenu', 'juniormenu',
+    // Drinks
+    'cocktail', 'cocktailkort', 'vin', 'vine', 'vinmenu', 'wine', 'øl', 'ølkort', 'fadøl', 'specialøl', 'beer',
+    // Special occasion  
+    'julemenu', 'nytårsmenu', 'julefrokost',
+    // Legacy patterns
+    'mad', 'drikke', 'drinks', 'spise', 'eat', 'dessert', 'tapas', 'smørrebrød'
   ]
   // Use word boundary for 'dinner' to avoid matching 'dinnerbooking'
   const isDinnerMenu = /\bdinner\b/i.test(lower) && !lower.includes('booking')

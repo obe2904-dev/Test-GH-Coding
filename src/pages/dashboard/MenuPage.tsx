@@ -385,13 +385,13 @@ function MenuPage() {
         normalizedUrl = `https://${normalizedUrl}`
       }
 
-      console.log('🔍 Attempting to analyze website:', {
+      console.log('🔍 Attempting to detect menus:', {
         originalUrl: websiteUrl,
         normalizedUrl,
         businessId
       })
 
-      const endpoint = import.meta.env.VITE_SUPABASE_FUNCTION_ANALYZE_WEBSITE as string
+      const endpoint = import.meta.env.VITE_SUPABASE_FUNCTION_DETECT_MENUS as string
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {

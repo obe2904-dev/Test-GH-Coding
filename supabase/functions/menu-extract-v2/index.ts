@@ -194,6 +194,117 @@ function looksLikePdf(bytes: Uint8Array): boolean {
 }
 
 /**
+ * Extract text from image using Google Cloud Vision API
+ */
+async function extractTextFromImageWithVision(imageBytes: Uint8Array): Promise<string> {
+  const visionApiKey = Deno.env.get('GOOGLE_VISION_API_KEY')
+  if (!visionApiKey) {
+    throw new Error('GOOGLE_VISION_API_KEY environment variable not set')
+  }
+
+  // Parse service account JSON
+  let serviceAccountJson: any
+  try {
+    const raw = visionApiKey.trim()
+    const jsonText = raw.startsWith('{') ? raw : new TextDecoder().decode(base64ToBytes(raw))
+    serviceAccountJson = JSON.parse(jsonText)
+  } catch (err) {
+    throw new Error(`Failed to parse GOOGLE_VISION_API_KEY: ${err}`)
+  }
+
+  const projectId = serviceAccountJson.project_id
+  if (!projectId) {
+    throw new Error('Service account JSON missing project_id')
+  }
+
+  // Get OAuth2 access token for Vision API
+  const clientEmail = String(serviceAccountJson.client_email || '')
+  const privateKey = String(serviceAccountJson.private_key || '')
+  if (!clientEmail || !privateKey) {
+    throw new Error('Invalid service account JSON (missing client_email/private_key)')
+  }
+
+  const now = Math.floor(Date.now() / 1000)
+  const assertion = await signJwtRs256(privateKey, {
+    iss: clientEmail,
+    sub: clientEmail,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 60 * 60,
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+  })
+
+  const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion,
+    }).toString(),
+  })
+
+  if (!tokenResp.ok) {
+    const errorText = await tokenResp.text()
+    throw new Error(`Google token exchange failed: ${tokenResp.status} ${errorText}`)
+  }
+
+  const tokenJson = await tokenResp.json()
+  const accessToken = String((tokenJson as any).access_token || '')
+  if (!accessToken) {
+    throw new Error('Google token exchange returned no access_token')
+  }
+
+  // Convert image bytes to base64
+  const base64Image = bytesToBase64(imageBytes)
+
+  // Call Vision API for text detection
+  const visionResp = await fetch(
+    `https://vision.googleapis.com/v1/images:annotate`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        requests: [
+          {
+            image: {
+              content: base64Image,
+            },
+            features: [
+              {
+                type: 'DOCUMENT_TEXT_DETECTION',
+                maxResults: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    }
+  )
+
+  if (!visionResp.ok) {
+    const errorText = await visionResp.text()
+    throw new Error(`Vision API request failed: ${visionResp.status} ${errorText}`)
+  }
+
+  const visionJson = await visionResp.json()
+  const responses = visionJson.responses || []
+  if (responses.length === 0) {
+    throw new Error('Vision API returned no responses')
+  }
+
+  const textAnnotation = responses[0].fullTextAnnotation
+  if (!textAnnotation || !textAnnotation.text) {
+    throw new Error('No text found in image')
+  }
+
+  console.log(`✅ Vision API extracted ${textAnnotation.text.length} characters from image`)
+  return textAnnotation.text
+}
+
+/**
  * Classify establishment type based on menu structure
  * FSE = Full-Service Establishment (restaurants with meal courses)
  * SBO = Specialized Beverage Outlet (cafes, coffee shops, bars)
@@ -1538,25 +1649,93 @@ serve(async (req: Request) => {
       const isImageContentType = probeCt.includes('image/')
       
       if (isImageUrl || isImageContentType) {
-        console.error('❌ URL is a menu image - OCR extraction not yet supported')
-        await supabaseService
-          .from('menu_results_v2')
-          .update({
-            status: 'error',
-            error_message: 'Vi kan desværre ikke udtrække tekst automatisk fra menubilleder. Upload billedet manuelt eller brug menukort-siden i stedet.',
-            source_content_type: probeCt || 'image/*',
-            completed_at: new Date().toISOString(),
-          })
-          .eq('id', resultId)
+        console.log('🖼️ Image detected - attempting OCR extraction with Google Vision API')
         
-        return new Response(
-          JSON.stringify({
-            success: true,
-            resultId,
-            message: 'Image detected - extraction skipped',
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+        try {
+          // Mark as processing
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'processing',
+              claimed_at: new Date().toISOString(),
+              attempts: 1,
+              extraction_method: 'edge_ocr',
+              source_content_type: probeCt || 'image/*',
+            })
+            .eq('id', resultId)
+
+          // Download the full image
+          const imageResp = await fetchWithTimeout(url, {
+            method: 'GET',
+            redirect: 'follow',
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenuExtractorBot/1.0)' },
+          }, FETCH_TIMEOUT_MS)
+
+          if (!imageResp.ok) {
+            throw new Error(`Failed to download image: ${imageResp.status}`)
+          }
+
+          const imageBytes = new Uint8Array(await imageResp.arrayBuffer())
+          console.log(`📥 Downloaded image: ${imageBytes.length} bytes`)
+
+          // Extract text using Vision API
+          const extractedText = await extractTextFromImageWithVision(imageBytes)
+          
+          if (!extractedText || extractedText.trim().length < 10) {
+            throw new Error('Vision API extracted insufficient text from image')
+          }
+
+          console.log(`📝 Extracted ${extractedText.length} characters, parsing menu...`)
+
+          // Parse the extracted text with OpenAI
+          const menuStructure = await parseMenuWithOpenAI(extractedText, languageCode)
+          
+          // Classify establishment type
+          const establishmentType = classifyEstablishmentType(menuStructure)
+
+          // Mark as completed
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'completed',
+              menu_structure: menuStructure,
+              establishment_type: establishmentType,
+              completed_at: new Date().toISOString(),
+            })
+            .eq('id', resultId)
+
+          console.log('✅ Image OCR extraction completed successfully')
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              resultId,
+              message: 'Image OCR extraction completed',
+              menuStructure,
+              establishmentType,
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        } catch (ocrError: any) {
+          console.error('❌ Image OCR extraction failed:', ocrError)
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'error',
+              error_message: `OCR fejlede: ${ocrError.message || 'Ukendt fejl'}`,
+              completed_at: new Date().toISOString(),
+            })
+            .eq('id', resultId)
+          
+          return new Response(
+            JSON.stringify({
+              success: false,
+              resultId,
+              error: ocrError.message || 'OCR extraction failed',
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
       }
 
       // Persist observed content type for observability.

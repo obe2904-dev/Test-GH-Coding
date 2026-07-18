@@ -18,6 +18,7 @@ import {
   scrapePage,
   mergePageExtractions
 } from './services/page-crawler.js';
+import { discoverMenuStructure, isMenuLandingPage } from './services/menu-discovery.js';
 
 /**
  * Attempt a plain HTTP GET with a crawler User-Agent to retrieve the
@@ -100,6 +101,97 @@ async function trySSRFetch(url, minTextLength = 1000) {
     }
     return null;
   }
+}
+
+/**
+ * Detect CMS/platform type from HTML content and extracted document.
+ * Returns platform fingerprint to guide scraping strategy.
+ * 
+ * @param {string} html - Raw HTML source
+ * @param {object} homepageDoc - Extracted document from dom-extractor
+ * @returns {object} { platform: string, confidence: number, isSPA: boolean }
+ */
+function detectPlatform(html, homepageDoc) {
+  const checks = {
+    wordpress: [
+      /wp-content\//i.test(html),
+      /wp-json/i.test(html),
+      /wp-includes/i.test(html)
+    ],
+    umbraco_heartcore: [
+      /umbraco/i.test(html),
+      (homepageDoc?.rawText?.length || 0) < 500 && html.length > 50000 // SPA indicator
+    ],
+    umbraco: [
+      /umbraco/i.test(html),
+      (homepageDoc?.rawText?.length || 0) >= 500 // Server-rendered
+    ],
+    wix: [
+      /wix\.com/i.test(html),
+      /_wix_/i.test(html),
+      /static\.parastorage\.com/i.test(html)
+    ],
+    squarespace: [
+      /squarespace\.com/i.test(html),
+      /static1\.squarespace/i.test(html)
+    ],
+    webflow: [
+      /webflow\.io/i.test(html),
+      /data-wf-/i.test(html),
+      /assets\.website-files\.com/i.test(html)
+    ],
+    shopify: [
+      /cdn\.shopify\.com/i.test(html),
+      /Shopify\.theme/i.test(html)
+    ]
+  };
+
+  // Score each platform
+  for (const [platform, patterns] of Object.entries(checks)) {
+    const matches = patterns.filter(Boolean).length;
+    if (matches >= 2) {
+      const isSPA = platform === 'umbraco_heartcore' || (homepageDoc?.rawText?.length || 0) < 300;
+      console.log(`[Platform] Detected: ${platform} (${matches}/${patterns.length} signals, SPA: ${isSPA})`);
+      return { platform, confidence: matches / patterns.length, isSPA };
+    }
+  }
+
+  // SPA heuristic (no CMS fingerprint but thin SSR content)
+  const isSPA = (homepageDoc?.rawText?.length || 0) < 300 && html.length > 20000;
+  const platform = isSPA ? 'spa_unknown' : 'static_or_unknown';
+  
+  console.log(`[Platform] Detected: ${platform} (SPA: ${isSPA})`);
+  return { platform, confidence: 0.5, isSPA };
+}
+
+/**
+ * Get appropriate JavaScript hydration wait time based on platform.
+ * Different platforms need different wait times for JS frameworks to mount.
+ * 
+ * @param {string} platform - Platform identifier from detectPlatform()
+ * @param {boolean} isSPA - Whether site is SPA/headless
+ * @returns {number} Milliseconds to wait for hydration
+ */
+function getHydrationTimeout(platform, isSPA) {
+  const timeouts = {
+    wordpress: 3000,
+    squarespace: 3000,
+    drupal: 4000,
+    wix: 8000,
+    webflow: 8000,
+    umbraco: 4000,
+    umbraco_heartcore: 12000,
+    spa_unknown: 10000,
+    static_or_unknown: 3000
+  };
+
+  const baseTimeout = timeouts[platform] || 5000;
+  
+  // Add extra time for confirmed SPAs
+  const finalTimeout = isSPA && baseTimeout < 10000 ? Math.max(baseTimeout, 10000) : baseTimeout;
+  
+  console.log(`[Hydration] Platform: ${platform}, SPA: ${isSPA} → Wait: ${finalTimeout}ms`);
+  return finalTimeout;
 }
 
 const app = express();
@@ -345,7 +437,7 @@ app.post('/scrape-v3', async (req, res) => {
       });
     }
 
-    const { url } = req.body;
+    const { url, openai_api_key } = req.body;
 
     if (!url) {
       return res.status(400).json({
@@ -499,8 +591,11 @@ app.post('/scrape-v3', async (req, res) => {
     // ========================================
     console.log(`[V3] Processing homepage extraction...`);
     const normalizedLinks = normalizeLinks(homepageDoc.links);
-    const { classified: services } = classifyLinks(normalizedLinks);
-    const contact = extractContact(homepageDoc);
+    const { classified: services } = await classifyLinks(normalizedLinks, { 
+      openaiApiKey: openai_api_key,
+      homepageUrl: url 
+    });
+    const contact = await extractContact(homepageDoc);
     const opening_hours = await processOpeningHours(homepageDoc);
 
     // Build initial extraction
@@ -529,47 +624,155 @@ app.post('/scrape-v3', async (req, res) => {
     console.log(`[V3] Homepage quality: ${homepageQuality.rating} (fields: ${homepageQuality.fields_found}/${homepageQuality.fields_expected}, noise: ${homepageQuality.noise_ratio})`);
 
     // ========================================
-    // SMART CRAWL DECISION
+    // SMART CRAWL DECISION - Platform-aware, page-type prioritization
     // ========================================
     let pagesCrawled = [{ url: homepageDoc.final_url, quality: homepageQuality.rating }];
+    let menuPagesQueued = []; // Track menu pages for async queue
 
-    // Menu-aware crawl decision
-    const menuUrl = extraction.services?.menu?.url;
+    // Detect platform for smart hydration timing
+    const platformInfo = detectPlatform(ssrHtml || await page.content(), homepageDoc);
+    const hydrationTimeout = getHydrationTimeout(platformInfo.platform, platformInfo.isSPA);
+
+    // CRITICAL: Only crawl /kontakt/ if phone is missing
+    // Address is now extracted from homepage blocks (Fix 1) - no need to crawl /kontakt/
+    // Avoids Cloud Run network sandbox blocking /kontakt/ page resources
+    const missingPhone = contact.phones.length === 0;
+    const missingAddress = contact.addresses.length === 0;
+    const missingContact = missingPhone; // Address extraction happens from homepage
+    const shouldCrawlMore = shouldContinueCrawling(homepageQuality) || missingContact;
     
-    let shouldCrawlMore = false;
-    let additionalUrls = [];
+    console.log(`[V3] Contact check: phones=${contact.phones.length}, addresses=${contact.addresses.length}, missingPhone=${missingPhone}, shouldCrawlMore=${shouldCrawlMore}`);
     
-    if (menuUrl) {
-      // MENU DETECTED: Only crawl menu page (fast path)
-      console.log(`[V3] Menu detected, crawling menu page only: ${new URL(menuUrl).pathname}`);
-      additionalUrls = [menuUrl];
-      shouldCrawlMore = true;
-    } else if (shouldContinueCrawling(homepageQuality)) {
-      // NO MENU: Crawl multiple pages for data enrichment
-      console.log(`[V3] Quality insufficient, discovering additional pages...`);
-      additionalUrls = discoverAdditionalPages(homepageDoc, extraction, 4);
-      shouldCrawlMore = true;
+    if (missingContact) {
+      console.log(`[V3] Missing phone - forcing page discovery for /kontakt/`);
+    }
+    
+    const discoveredPages = shouldCrawlMore ? discoverAdditionalPages(homepageDoc, extraction, 6) : [];
+
+    // Separate pages by type: essential (contact/about) vs menu
+    const essentialPages = discoveredPages.filter(p => p.priority >= 60 && p.type !== 'menu');
+    const menuPages = discoveredPages.filter(p => p.type === 'menu');
+
+    // Track menu URLs for async queue (in response metadata)
+    // CRITICAL: Include ALL menu URLs from classifier (not just the best one)
+    menuPagesQueued = menuPages.map(p => ({ url: p.url, type: p.type }));
+    
+    // Add all detected menu URLs from services.menu_all
+    if (extraction.services?.menu_all && Array.isArray(extraction.services.menu_all)) {
+      for (const menuItem of extraction.services.menu_all) {
+        if (!menuPagesQueued.find(m => m.url === menuItem.url)) {
+          menuPagesQueued.push({ url: menuItem.url, type: 'menu' });
+          console.log(`[V3] Added detected menu URL to queue: ${new URL(menuItem.url).pathname}`);
+        }
+      }
+    }
+    
+    if (menuPagesQueued.length > 0) {
+      console.log(`[V3] Total menu pages queued for async enrichment: ${menuPagesQueued.map(p => new URL(p.url).pathname).join(', ')}`);
     }
 
-    if (shouldCrawlMore) {
-      console.log(`[V3] Crawling ${additionalUrls.length} additional page(s): ${additionalUrls.map(u => new URL(u).pathname).join(', ')}`);
+    // ========================================
+    // MENU DISCOVERY - Phase 1a: Detection Only
+    // ========================================
+    let menuDiscoveryResults = [];
+    
+    if (menuPagesQueued.length > 0) {
+      console.log(`\n🔍 [MENU DISCOVERY] Starting discovery for ${menuPagesQueued.length} menu URL(s)...`);
+      
+      // Discover structure for each menu URL (limit to first 3 to avoid timeout)
+      const menuUrlsToDiscover = menuPagesQueued.slice(0, 3);
+      
+      for (const menuPage of menuUrlsToDiscover) {
+        try {
+          // Only discover if it looks like a landing page (not a direct PDF/image link)
+          const urlObj = new URL(menuPage.url);
+          const isPdfLink = urlObj.pathname.toLowerCase().endsWith('.pdf');
+          const isImageLink = /\.(jpg|jpeg|png|gif|webp)$/i.test(urlObj.pathname);
+          
+          if (isPdfLink) {
+            console.log(`⏭️  Skipping discovery for direct PDF link: ${urlObj.pathname}`);
+            menuDiscoveryResults.push({
+              menuUrl: menuPage.url,
+              structure: 'direct_pdf',
+              confidence: 'high',
+              skipped: true,
+              extractionMethod: 'pdf_extract'
+            });
+            continue;
+          }
+          
+          if (isImageLink) {
+            console.log(`⏭️  Skipping discovery for direct image link: ${urlObj.pathname}`);
+            menuDiscoveryResults.push({
+              menuUrl: menuPage.url,
+              structure: 'image_gallery',
+              confidence: 'high',
+              skipped: true,
+              extractionMethod: 'ocr_required'
+            });
+            continue;
+          }
+          
+          // Run discovery on HTML menu pages
+          if (isMenuLandingPage(menuPage.url)) {
+            console.log(`🔍 Running discovery on landing page: ${urlObj.pathname}`);
+            const discovery = await discoverMenuStructure(browser, menuPage.url, 10000);
+            menuDiscoveryResults.push(discovery);
+            
+            // Log key findings
+            if (discovery.success) {
+              console.log(`   ✅ Structure: ${discovery.structure} | Method: ${discovery.extractionMethod}`);
+              if (discovery.assets) {
+                const assetSummary = Object.entries(discovery.assets)
+                  .map(([key, val]) => `${key}=${Array.isArray(val) ? val.length : 'N/A'}`)
+                  .join(', ');
+                console.log(`   📊 Assets: ${assetSummary}`);
+              }
+            }
+          } else {
+            console.log(`⏭️  Skipping discovery for non-landing page: ${urlObj.pathname}`);
+          }
+          
+        } catch (discErr) {
+          console.error(`❌ Menu discovery failed for ${menuPage.url}:`, discErr.message);
+          menuDiscoveryResults.push({
+            menuUrl: menuPage.url,
+            structure: 'error',
+            confidence: 'none',
+            error: discErr.message,
+            extractionMethod: 'manual_review'
+          });
+        }
+      }
+      
+      console.log(`✅ [MENU DISCOVERY] Completed: ${menuDiscoveryResults.length} result(s)\n`);
+    }
+
+    // Crawl ONLY essential pages (contact + about) - skip menu pages
+    if (essentialPages.length > 0) {
+      console.log(`[V3] Crawling ${essentialPages.length} essential page(s): ${essentialPages.map(p => `${new URL(p.url).pathname} (${p.type})`).join(', ')}`);
 
       const additionalExtractions = [extraction];
 
-      for (const pageUrl of additionalUrls) {
+      for (const pageInfo of essentialPages) {
         try {
-          const pageDoc = await scrapePage(page, pageUrl, 10000); // 10s timeout for additional pages
+          // Use adaptive timeout based on page type
+          const pageTimeout = pageInfo.type === 'contact' ? 12000 : 10000;
+          
+          const pageDoc = await scrapePage(page, pageInfo.url, pageTimeout);
           const pageNormalizedLinks = normalizeLinks(pageDoc.links);
-          const { classified: pageServices } = classifyLinks(pageNormalizedLinks);
-          const pageContact = extractContact(pageDoc);
+          const { classified: pageServices } = await classifyLinks(pageNormalizedLinks, { 
+            openaiApiKey: openai_api_key,
+            homepageUrl: pageInfo.url 
+          });
+          const pageContact = await extractContact(pageDoc);
+          console.log(`[Crawler] ${pageInfo.url} → blocks: ${pageDoc?.blocks?.length ?? 0}, phones: ${pageContact?.phones?.length ?? 0}, addresses: ${pageContact?.addresses?.length ?? 0}`);
           const pageOpeningHours = await processOpeningHours(pageDoc);
-
-          // Extract menu headlines if this is a menu page
-          const menuHeadlines = extractMenuHeadlines(pageDoc, 10);
 
           const pageExtraction = {
             meta: {
-              final_url: pageDoc.final_url || pageUrl
+              final_url: pageDoc.final_url || pageInfo.url,
+              page_type: pageInfo.type
             },
             contact: pageContact,
             services: pageServices,
@@ -579,25 +782,14 @@ app.post('/scrape-v3', async (req, res) => {
             quality: { rating: 'unknown', fields_found: 0, fields_expected: 8, noise_ratio: 0, warnings: [] }
           };
 
-          // Add menu headlines as special content section if found
-          if (menuHeadlines && menuHeadlines.length > 0) {
-            pageExtraction.content_sections.push({
-              type: 'menu_highlights',
-              heading: 'Menu Highlights',
-              text: menuHeadlines.join('\n'),
-              source_url: pageDoc.final_url,
-              confidence: 0.95,
-              item_count: menuHeadlines.length
-            });
-            console.log(`[V3] Added ${menuHeadlines.length} menu headlines from ${new URL(pageUrl).pathname}`);
-          }
-
           const pageQuality = calculateQuality(pageExtraction);
-          pagesCrawled.push({ url: pageDoc.final_url, quality: pageQuality.rating });
+          pagesCrawled.push({ url: pageDoc.final_url, quality: pageQuality.rating, type: pageInfo.type });
 
           additionalExtractions.push(pageExtraction);
+          
+          console.log(`[V3] ✅ Crawled ${pageInfo.type} page: ${new URL(pageInfo.url).pathname} (quality: ${pageQuality.rating})`);
         } catch (err) {
-          console.warn(`[V3] Failed to scrape ${pageUrl}:`, err.message);
+          console.warn(`[V3] ⚠️ Failed to scrape ${pageInfo.type} page ${pageInfo.url}:`, err.message);
         }
       }
 
@@ -630,11 +822,18 @@ app.post('/scrape-v3', async (req, res) => {
       version: 'v3',
       extraction,
       pages_crawled: pagesCrawled,
+      menu_pages_queued: menuPagesQueued,  // Menu pages for async enrichment
+      menu_discovery: menuDiscoveryResults, // Phase 1a: Structure detection results
       scraper_metadata: {
         version:            'v3',
         scraper_type:       ssrUsed ? 'cloud-run-ssr-fetch' : 'cloud-run-puppeteer-smart',
+        platform:           platformInfo.platform,
+        platform_confidence: platformInfo.confidence,
+        is_spa:             platformInfo.isSPA,
         duration_ms:        duration,
         pages_crawled_count: pagesCrawled.length,
+        menu_pages_skipped: menuPagesQueued.length,
+        menu_discovery_count: menuDiscoveryResults.length,
         ssr_used:           ssrUsed,
       }
     };

@@ -6,7 +6,7 @@
  * 2. Evaluate quality
  * 3. If quality good/excellent → STOP (1 page)
  * 4. If quality partial/poor → Crawl 2-4 more pages
- * 5. Prioritize by: missing fields first, then keywords
+ * 5. Prioritize by: type (contact/about > menu), missing fields, keywords
  * 6. Merge results with conflict resolution
  */
 
@@ -19,45 +19,58 @@ import {
 import { extractPageDocument } from './dom-extractor.js';
 
 /**
- * Discover and score additional pages to crawl
+ * Classify page type from URL and link text.
+ * Returns page type and priority for crawl scheduling.
+ * 
+ * @param {string} url - Page URL
+ * @param {string} linkText - Anchor text (if available)
+ * @returns {object} { type: string, priority: number }
+ */
+export function classifyPageType(url, linkText = '') {
+  const urlLower = url.toLowerCase();
+  const textLower = (linkText || '').toLowerCase();
+  const combined = `${urlLower} ${textLower}`;
+
+  // Contact pages (highest priority - has address)
+  const contactKeywords = ['kontakt', 'contact', 'find', 'location', 'reach', 'besøg', 'findus', 'findvej'];
+  if (contactKeywords.some(k => combined.includes(k))) {
+    return { type: 'contact', priority: 90 };
+  }
+
+  // About pages (high priority - has description)
+  const aboutKeywords = ['om-os', 'om os', 'about', 'historie', 'history', 'concept', 'vores'];
+  if (aboutKeywords.some(k => combined.includes(k))) {
+    return { type: 'about', priority: 70 };
+  }
+
+  // Menu pages (skip for sync crawl)
+  const menuKeywords = ['menu', 'menukort', 'madkort', 'drikkekort', 'food', 'drinks', 'brunch', 'frokost', 'aften', 'cocktail', 'drikke', 'mad'];
+  if (menuKeywords.some(k => combined.includes(k))) {
+    return { type: 'menu', priority: 0 };
+  }
+
+  // Opening hours (medium priority)
+  const hoursKeywords = ['åbningstid', 'opening', 'hours', 'praktisk', 'practical'];
+  if (hoursKeywords.some(k => combined.includes(k))) {
+    return { type: 'hours', priority: 60 };
+  }
+
+  // Default: unknown type, low priority
+  return { type: 'other', priority: 30 };
+}
+
+/**
+ * Discover and score additional pages to crawl.
+ * Now returns typed page objects with priorities.
+ * 
  * @param {object} homepageDoc - Extracted homepage document
  * @param {object} homepageExtraction - Initial extraction from homepage
  * @param {number} maxPages - Max additional pages to crawl (2-4)
- * @returns {array} Sorted URLs to crawl
+ * @returns {array} Sorted page objects: { url, type, priority, text }
  */
 export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPages = 4) {
   const candidates = [];
-  const menuUrls = [];  // Separate tracking for menu URLs
   const baseUrl = new URL(homepageDoc.final_url);
-
-  // Menu keywords for always-crawl detection
-  const menuKeywords = ['menu', 'menukort', 'madkort', 'drikkekort', 'food', 'drinks'];
-
-  // Priority keywords for different content types
-  const keywordSets = {
-    menu: {
-      keywords: menuKeywords,
-      weight: 3.0  // Always high priority for menu extraction
-    },
-    contact: {
-      keywords: ['kontakt', 'contact', 'find us', 'location', 'reach', 'besøg'],
-      weight: determineMissingWeight(
-        homepageExtraction.contact.emails.length > 0 && homepageExtraction.contact.phones.length > 0,
-        'contact'
-      )
-    },
-    hours: {
-      keywords: ['åbningstider', 'opening hours', 'praktisk', 'practical'],
-      weight: determineMissingWeight(homepageExtraction.opening_hours?.value, 'hours')
-    },
-    about: {
-      keywords: ['om os', 'about', 'historie', 'history', 'concept'],
-      weight: determineMissingWeight(
-        homepageExtraction.content_sections?.some(s => s.type === 'about'),
-        'about'
-      )
-    }
-  };
 
   // Score each internal link
   for (const link of homepageDoc.links) {
@@ -69,81 +82,58 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
         continue;
       }
 
-      // CRITICAL: Exclude privacy/legal pages FIRST (before any scoring)
+      // CRITICAL: Exclude privacy/legal pages FIRST
       const linkText = (link.text || '').toLowerCase();
       const fullContext = `${linkUrl.pathname.toLowerCase()} ${linkText}`;
       if (isExcludedPage(fullContext)) {
         continue;
       }
 
-      // Check if this is a menu URL
-      const url = link.url.toLowerCase();
-      const text = (link.text || '').toLowerCase();
-      const combined = `${url} ${text}`;
-      const isMenuUrl = menuKeywords.some(keyword => combined.includes(keyword));
+      // Classify page type
+      const { type, priority } = classifyPageType(link.url, link.text);
 
-      if (isMenuUrl && !menuUrls.includes(link.url)) {
-        menuUrls.push(link.url);
+      // Boost priority if field is missing from homepage
+      let adjustedPriority = priority;
+      if (type === 'contact' && homepageExtraction.contact.addresses.length === 0) {
+        adjustedPriority += 10; // Really need this
+      }
+      if (type === 'about' && (!homepageExtraction.content_sections || homepageExtraction.content_sections.length < 3)) {
+        adjustedPriority += 10; // Need more content
       }
 
-      // Score based on keywords and missing fields
-      let score = 0;
+      // Add to candidates (including menu pages for later queuing)
+      candidates.push({
+        url: link.url,
+        type,
+        priority: adjustedPriority,
+        text: link.text || ''
+      });
 
-      for (const [type, config] of Object.entries(keywordSets)) {
-        for (const keyword of config.keywords) {
-          if (combined.includes(keyword)) {
-            score += 10 * config.weight; // Weight by how badly we need this field
-            break;
-          }
-        }
-      }
-
-      if (score > 0) {
-        candidates.push({
-          url: link.url,
-          score,
-          text: link.text,
-          isMenu: isMenuUrl
-        });
-      }
     } catch {
       // Invalid URL, skip
     }
   }
 
-  // Sort by score descending
-  const sortedCandidates = candidates.sort((a, b) => b.score - a.score);
-  
-  // ALWAYS include menu URLs (even if maxPages is reached)
-  // Take top menu URL + fill remaining slots with other high-priority pages
-  const result = [];
-  
-  // Add first menu URL if found (guaranteed inclusion)
-  if (menuUrls.length > 0) {
-    result.push(menuUrls[0]);
-    console.log(`[Crawler] Menu URL detected (always crawl): ${new URL(menuUrls[0]).pathname}`);
-  }
-  
-  // Fill remaining slots with highest scoring non-menu pages
-  for (const candidate of sortedCandidates) {
-    if (result.length >= maxPages) break;
-    if (!result.includes(candidate.url)) {
-      result.push(candidate.url);
+  // Sort by priority descending
+  candidates.sort((a, b) => b.priority - a.priority);
+
+  // Deduplicate URLs
+  const seen = new Set();
+  const uniqueCandidates = [];
+  for (const candidate of candidates) {
+    if (!seen.has(candidate.url)) {
+      seen.add(candidate.url);
+      uniqueCandidates.push(candidate);
     }
   }
+
+  // Take top N pages
+  const result = uniqueCandidates.slice(0, maxPages);
+  
+  console.log(`[Crawler] Discovered ${result.length} pages to crawl:`, 
+    result.map(p => `${new URL(p.url).pathname} (${p.type}, pri=${p.priority})`));
   
   return result;
-}
-
-/**
- * Determine weight for missing field
- * Returns higher weight if field is missing/empty
- */
-function determineMissingWeight(hasField, fieldName) {
-  if (!hasField) {
-    return 3.0; // High priority - field is missing
-  }
-  return 1.0; // Low priority - already have this field
 }
 
 /**
@@ -211,6 +201,22 @@ export async function scrapePage(page, url, timeout = 30000) {
   await removeKnownNoise(page);
   await autoScroll(page);
   await waitForContentStability(page);
+
+  // Guard: verify we have content before extracting
+  // If stability check left us with an empty DOM, wait one more beat
+  let bodyLength = 0;
+  try {
+    bodyLength = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
+  } catch (_) {}
+
+  if (bodyLength < 100) {
+    console.warn(`[scrapePage] Body too short after stability (${bodyLength} chars) — waiting 2s`);
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      bodyLength = await page.evaluate(() => document.body?.innerText?.trim().length ?? 0);
+    } catch (_) {}
+    console.log(`[scrapePage] Body length after extra wait: ${bodyLength} chars`);
+  }
   
   return await extractPageDocument(page);
 }

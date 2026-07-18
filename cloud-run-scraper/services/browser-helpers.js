@@ -146,33 +146,48 @@ export async function autoScroll(page) {
 export async function waitForContentStability(page, options = {}) {
   const {
     intervalMs = 300,
-    maxWaitMs = 5000,
-    requiredStableChecks = 2
+    maxWaitMs = 4000,
+    requiredStableChecks = 3,
   } = options;
 
-  try {
-    await page.evaluate(async ({ intervalMs, maxWaitMs, requiredStableChecks }) => {
-      const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-      const deadline = Date.now() + maxWaitMs;
-      let stableCount = 0;
-      let lastLength = 0;
+  const deadline = Date.now() + maxWaitMs;
+  let stableCount = 0;
+  let lastLength = 0;
 
-      while (Date.now() < deadline) {
-        await sleep(intervalMs);
-        const current = document.body?.innerText?.length ?? 0;
+  // Poll from Node side — avoids keeping a CDP async handle open in the
+  // browser context, which is what triggers "Promise was collected" when
+  // the execution context is replaced (soft nav, iframe reload, cookie banner)
+  while (Date.now() < deadline) {
+    let currentLength = 0;
 
-        if (current === lastLength) {
-          stableCount++;
-          if (stableCount >= requiredStableChecks) {
-            return;
-          }
-        } else {
-          stableCount = 0;
-          lastLength = current;
-        }
+    try {
+      // page.evaluate with a SYNC function — no async in browser context,
+      // so no dangling Promise for GC to collect
+      currentLength = await page.evaluate(
+        () => document.body?.innerText?.trim().length ?? 0
+      );
+    } catch (err) {
+      // Execution context was destroyed (navigation mid-check)
+      // Reset stable count and wait for context to settle
+      console.warn('[waitForContentStability] Context destroyed, waiting for re-attach:', err?.message);
+      stableCount = 0;
+      await new Promise(r => setTimeout(r, intervalMs * 2));
+      continue;
+    }
+
+    if (currentLength === lastLength && currentLength > 0) {
+      stableCount++;
+      if (stableCount >= requiredStableChecks) {
+        console.log(`[waitForContentStability] Stable after ${stableCount} checks (${currentLength} chars)`);
+        return;
       }
-    }, { intervalMs, maxWaitMs, requiredStableChecks });
-  } catch (err) {
-    console.warn('waitForContentStability failed:', err?.message);
+    } else {
+      stableCount = 0;
+      lastLength = currentLength;
+    }
+
+    await new Promise(r => setTimeout(r, intervalMs));
   }
+
+  console.warn(`[waitForContentStability] Max wait reached (${maxWaitMs}ms) — proceeding with current DOM`);
 }

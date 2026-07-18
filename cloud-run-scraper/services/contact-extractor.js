@@ -9,14 +9,53 @@
  */
 
 /**
+ * Extract Danish address from page blocks using pattern matching.
+ * Simple approach: match permissively, clean post-extraction.
+ */
+function extractAddressFromBlocks(pageDoc) {
+  const blocks = pageDoc?.blocks || [];
+  if (!blocks.length) return null;
+
+  // Simple pattern that works: Street Number, PostalCode City
+  const fullPattern = /([A-ZÆØÅ][a-zæøåA-ZÆØÅ\s]+\s+\d+[A-Za-z]?)[,\s]+(\d{4})\s+([A-ZÆØÅ][a-zæøåA-ZÆØÅ\s]+)/;
+
+  for (const block of blocks) {
+    const text = block.text?.trim() || '';
+    const match = text.match(fullPattern);
+    
+    if (match) {
+      const [, street, postal, city] = match;
+      let address = `${street.trim()} ${postal} ${city.trim()}`;
+      
+      // Clean garbage: leading single letter from "A/S Streetname" 
+      address = address.replace(/^[A-Z]\s+/, '');
+      
+      // Clean garbage: trailing contact keywords
+      address = address.replace(/\s+(Tlf|Tel|E-mail|CVR|Se vejkort|Åbningstider).*$/i, '');
+      
+      console.log(`[extractAddress] Found: "${address}"`);
+      return {
+        value: address,
+        confidence: 0.99,
+        source_type: 'homepage_block_pattern',
+        source_url: pageDoc.final_url,
+        evidence: `Block: ${text}`
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
  * Extract contact information from page document
  * @param {object} pageDoc - From extractPageDocument()
- * @returns {object} Contact candidates with evidence
+ * @returns {Promise<object>} Contact candidates with evidence
  */
-export function extractContact(pageDoc) {
+export async function extractContact(pageDoc) {
   const emails = extractEmails(pageDoc);
   const phones = extractPhones(pageDoc);
-  const addresses = extractAddresses(pageDoc);
+  const addresses = await extractAddresses(pageDoc);
 
   return {
     emails,
@@ -134,10 +173,13 @@ function extractPhones(pageDoc) {
     
     if (isFooterOrContact) {
       // Danish phone patterns with context
+      // FIX: Added dot (.) to character class to handle "Tlf.:" style
+      // FIX: Added space-separated pattern for "86 19 07 06" style
       const phonePatterns = [
-        /(?:tlf|tel|telefon|phone|mobil|ring)[\s:]*(\+45\s*\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/gi,
-        /(?:tlf|tel|telefon|phone|mobil|ring)[\s:]*(\d{2}\s*\d{2}\s*\d{2}\s*\d{2})/gi,
-        /\+45\s*\d{2}\s*\d{2}\s*\d{2}\s*\d{2}/g,
+        /(?:tlf|tel|telefon|phone|mobil|ring)[\s:.]*\+?45[\s-]*\d{2}[\s-]*\d{2}[\s-]*\d{2}[\s-]*\d{2}/gi,
+        /(?:tlf|tel|telefon|phone|mobil|ring)[\s:.]*\d{2}[\s-]*\d{2}[\s-]*\d{2}[\s-]*\d{2}/gi,
+        /\b\d{2}\s+\d{2}\s+\d{2}\s+\d{2}\b/g,
+        /\+45[\s-]*\d{2}[\s-]*\d{2}[\s-]*\d{2}[\s-]*\d{2}/g,
         /\b\d{8}\b/g
       ];
 
@@ -215,14 +257,149 @@ function extractPhones(pageDoc) {
 }
 
 /**
- * Extract addresses
- * CRITICAL: Handle multi-node address concatenation properly
- * Input: ["Åboulevarden 32", "8000 Aarhus C"]
- * Expected: "Åboulevarden 32, 8000 Aarhus C"
- * NOT: "Åboulevarden 328000 Aarhus C"
+ * Extract addresses using AI (primary method)
+ * Handles all Danish address formats naturally without regex edge cases
  */
-function extractAddresses(pageDoc) {
+async function extractAddressesWithAI(pageDoc) {
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+  if (!GEMINI_API_KEY) {
+    console.warn('[Address AI] GEMINI_API_KEY not set, skipping AI extraction');
+    return [];
+  }
+
+  // Collect relevant text blocks (prioritize address tags and blocks with numbers)
+  const relevantBlocks = pageDoc.blocks
+    .filter(b => 
+      b.tag === 'address' ||
+      /\d/.test(b.text) || // Contains any digit
+      (b.section_heading && /kontakt|adresse|info|footer/i.test(b.section_heading))
+    )
+    .slice(0, 30) // Increased limit
+    .map(b => b.text)
+    .join('\n\n');
+
+  console.log(`[Address AI] Collected ${relevantBlocks.length} chars from ${pageDoc.blocks.length} total blocks`);
+
+  if (!relevantBlocks || relevantBlocks.length < 10) {
+    console.log('[Address AI] No relevant text found for extraction');
+    return [];
+  }
+
+  const prompt = `Du er en dansk adresse-ekstraktor. Find fysiske adresser i følgende tekst.
+
+TEKST:
+${relevantBlocks}
+
+REGLER:
+- En dansk adresse har vejnavn + nummer + postnummer (4 cifre) + by
+- Returner KUN faktiske fysiske adresser (ikke links, telefonnumre, emails)
+- Returner adresser i format: "Vejnavn Nummer, Postnummer By"
+- Hvis ingen adresse findes, returner tomt array
+
+Returner JSON array med fundne adresser:
+{"addresses": ["Åboulevarden 38, 8000 Aarhus C"]}`;
+
+  // Prompt sanity check before calling API
+  const promptIssues = [];
+  if (prompt.includes('undefined')) promptIssues.push('prompt contains literal "undefined"');
+  if (prompt.includes('null') && (prompt.match(/\bnull\b/g)?.length || 0) > 2) promptIssues.push('prompt contains multiple nulls');
+  if (prompt.length < 50) promptIssues.push(`prompt suspiciously short: ${prompt.length} chars`);
+  if (!GEMINI_API_KEY || GEMINI_API_KEY.trim() === '') promptIssues.push('API key is empty');
+
+  if (promptIssues.length > 0) {
+    console.error('[Address AI] Prompt issues detected:', promptIssues);
+    console.error('[Address AI] Prompt preview:', prompt.slice(0, 300));
+  }
+
+  try {
+    console.log('[Address AI] Calling Gemini API...');
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.1, // Low temperature for factual extraction
+            maxOutputTokens: 256,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Address AI] Gemini API error details:', JSON.stringify({
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+        promptLength: prompt.length,
+        promptPreview: prompt.slice(0, 200),
+        model: 'gemini-2.0-flash-exp'
+      }, null, 2));
+      return [];
+    }
+
+    const data = await response.json();
+    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    
+    console.log('[Address AI] Gemini response:', responseText.substring(0, 200));
+    
+    // Extract JSON from markdown code blocks if present
+    let jsonText = responseText.trim()
+      .replace(/^```(?:json)?\s*\n?/i, '')
+      .replace(/\n?```\s*$/i, '')
+      .trim();
+
+    const parsed = JSON.parse(jsonText);
+    const addresses = parsed.addresses || [];
+
+    console.log(`[Address AI] Parsed ${addresses.length} addresses:`, addresses);
+
+    return addresses
+      .filter(addr => addr && containsPostalCode(addr))
+      .map(addr => ({
+        value: addr.trim(),
+        confidence: 0.92,
+        source_type: 'ai_extraction',
+        source_url: pageDoc.final_url,
+        evidence: 'AI-extracted from page content'
+      }));
+
+  } catch (error) {
+    console.error('[Address AI] Extraction failed:', error.message, error.stack);
+    return [];
+  }
+}
+
+/**
+ * Extract addresses
+ * Uses AI extraction as primary method with regex fallback
+ */
+async function extractAddresses(pageDoc) {
   const candidates = [];
+
+  // Priority 0: Deterministic block pattern extraction (homepage blocks)
+  // This works even when /kontakt/ page fails to render
+  const blockAddress = extractAddressFromBlocks(pageDoc);
+  if (blockAddress) {
+    console.log(`[extractAddresses] Address from blocks: "${blockAddress.value}"`);
+    candidates.push(blockAddress);
+    // Return immediately if found - no need for AI/regex fallback
+    return deduplicateCandidates(candidates);
+  }
+
+  // Priority 1: AI extraction (handles all Danish address formats)
+  const aiAddresses = await extractAddressesWithAI(pageDoc);
+  candidates.push(...aiAddresses);
+
+  // If AI found addresses, return them
+  if (candidates.length > 0) {
+    return deduplicateCandidates(candidates);
+  }
+
+  // Fallback: Regex-based extraction
 
   // Priority 1: <address> elements
   const addressBlocks = pageDoc.blocks.filter(b => b.tag === 'address');
@@ -240,8 +417,9 @@ function extractAddresses(pageDoc) {
   }
 
   // Priority 2: Postal code + street patterns
+  // FIX: Allow Danish definite article suffixes (-en, -et, -ne, -erne) after street types
   const postalPattern = /\b\d{4}\s+[A-ZÆØÅa-zæøå]+(?:\s+[A-ZÆØÅa-zæøå]+)?\b/;
-  const streetPattern = /[A-ZÆØÅ][a-zæøå]+(?:vej|vænget|gade|boulevard|alle|stræde|torv|plads|vej|gården)\s+\d+[A-Za-z]?/;
+  const streetPattern = /[A-ZÆØÅ][a-zæøå]+(?:vej|vænget|gade|boulevard|alle|allé|stræde|torv|plads|gården)(?:en|et|ne|erne)?\s+\d+[A-Za-z]?/;
 
   for (const block of pageDoc.blocks) {
     const text = block.text;
@@ -261,25 +439,58 @@ function extractAddresses(pageDoc) {
     }
   }
 
-  // Priority 3: Google Maps link text (use same detection as classifier)
+  // Priority 3: Google Maps link text OR query parameter
   const mapsLinks = pageDoc.links.filter(link => isGoogleMapsLink(link.url));
   
   for (const link of mapsLinks) {
+    // Try link text first
     if (link.text && containsPostalCode(link.text)) {
       const cleaned = cleanAddress(link.text);
       if (cleaned) {
         candidates.push({
           value: cleaned,
-          confidence: 0.98,  // High confidence - Maps links usually have accurate addresses
+          confidence: 0.98,
           source_type: 'google_maps_link_text',
           source_url: pageDoc.final_url,
           evidence: link.text
         });
       }
     }
+    
+    // Fallback: Parse address from Maps URL query parameter
+    try {
+      const decoded = decodeHtmlEntities(link.url);
+      const url = new URL(decoded);
+      const query = url.searchParams.get('query') || url.searchParams.get('q');
+      if (query && containsPostalCode(query)) {
+        const cleaned = cleanAddress(query);
+        if (cleaned) {
+          candidates.push({
+            value: cleaned,
+            confidence: 0.95,
+            source_type: 'google_maps_url_query',
+            source_url: pageDoc.final_url,
+            evidence: `Maps query: ${query}`
+          });
+        }
+      }
+    } catch (e) {
+      // Invalid URL, skip
+    }
   }
 
   return deduplicateCandidates(candidates);
+}
+
+/**
+ * Decode HTML entities in URL (handles &#038; -> &)
+ */
+function decodeHtmlEntities(url) {
+  if (!url) return url;
+  return url
+    .replace(/&#038;/g, '&')
+    .replace(/&amp;/g, '&')
+    .replace(/&#x26;/g, '&');
 }
 
 /**
@@ -288,13 +499,15 @@ function extractAddresses(pageDoc) {
 function isGoogleMapsLink(urlString) {
   if (!urlString) return false;
   try {
-    const url = new URL(urlString);
+    const decoded = decodeHtmlEntities(urlString);
+    const url = new URL(decoded);
     const host = url.hostname.toLowerCase();
     return (
       host === 'maps.google.com' ||
+      host === 'www.google.com' && url.pathname.startsWith('/maps') ||
+      host === 'google.com' && url.pathname.startsWith('/maps') ||
       host === 'maps.app.goo.gl' ||
       (host === 'goo.gl' && url.pathname.startsWith('/maps')) ||
-      (host === 'google.com' && url.pathname.startsWith('/maps')) ||
       host.includes('maps.google')  // Catch maps.google.dk, maps.google.co.uk, etc.
     );
   } catch {
