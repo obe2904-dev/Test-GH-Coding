@@ -23,10 +23,10 @@ export const AI_MODELS = {
   fast: 'gpt-4o-mini',
   
   // Vision - for image analysis
-  vision: 'gemini-2.0-flash-exp',
+  vision: 'gemini-2.5-flash',
   
   // Gemini Flash - very low cost (~$0.075/1M input, $0.30/1M output)
-  geminiFlash: 'gemini-2.0-flash-exp'
+  geminiFlash: 'gemini-2.5-flash'
 } as const
 
 export type AIModel = typeof AI_MODELS[keyof typeof AI_MODELS]
@@ -46,8 +46,8 @@ export const EXTRACTOR_MODELS = {
     paid: 'gpt-4o'
   },
   menuSignal: {
-    free: 'gemini-2.0-flash-exp',
-    paid: 'gemini-2.0-flash-exp'
+    free: 'gemini-2.5-flash',
+    paid: 'gemini-2.5-flash'
   },
   toneOfVoice: {
     free: 'gpt-4o-mini',

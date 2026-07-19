@@ -48,11 +48,11 @@ export const AI_MODELS: Record<AIFeature, Record<UserTier, string>> = {
   },
   
   // Photo analysis (vision task)
-  // Uses Gemini 2.0 Flash (Google's vision model) - configured in Edge Function
+  // Uses Gemini 2.5 Flash (Google's vision model) - configured in Edge Function
   photoAnalysis: {
-    free: 'gemini-2.0-flash-exp',      // Google Gemini (all tiers use same model)
-    standardplus: 'gemini-2.0-flash-exp', // Analysis depth varies by tier
-    premium: 'gemini-2.0-flash-exp',      // Most detailed analysis
+    free: 'gemini-2.5-flash',      // Google Gemini (all tiers use same model)
+    standardplus: 'gemini-2.5-flash', // Analysis depth varies by tier
+    premium: 'gemini-2.5-flash',      // Most detailed analysis
   },
   
   // Website/PDF analysis (comprehension)

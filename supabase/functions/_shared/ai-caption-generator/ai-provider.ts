@@ -66,12 +66,12 @@ export const FEATURE_AI_CONFIG: Record<AIFeature, { provider: 'gemini' | 'openai
 // Legacy support - defaults to 'default' feature config
 export const AI_PROVIDER: 'gemini' | 'openai' = FEATURE_AI_CONFIG.default.provider
 export const AI_MODELS = {
-  gemini: 'gemini-2.0-flash-exp',
+  gemini: 'gemini-2.5-flash',
   openai: 'gpt-4o-mini'
 } as const
 
 // Available models for configuration:
-// Gemini: gemini-2.0-flash-exp, gemini-2.5-flash, gemini-exp-1206
+// Gemini: gemini-2.5-flash, gemini-exp-1206
 // OpenAI: gpt-4o-mini, gpt-4o, gpt-4-turbo
 
 // ============================================================================
