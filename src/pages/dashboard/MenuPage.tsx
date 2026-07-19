@@ -5,7 +5,7 @@ import { useTierStore } from '../../stores/tierStore'
 import { useBusinessStore } from '../../stores/businessStore'
 import { LoadingSpinner } from '../../components/ui/Feedback'
 import { AnalyzeIcon } from './BusinessProfileIcons'
-import { normalizeMenuUrl, isPdfUrl, normalizePdfUrl } from '../../lib/urlNormalization'
+import { normalizeMenuUrl, isPdfUrl, normalizePdfUrl, decodeHtmlUrl } from '../../lib/urlNormalization'
 
 type MenuStatus = 'pending' | 'extracting' | 'extracted' | 'error'
 type MenuType = 'standard' | 'special'
@@ -1098,11 +1098,12 @@ function MenuPage() {
 
     // Upsert selected URLs into menu_sources (maintains stable source IDs)
     const sourcesToUpsert = Array.from(selectedUrls).map(url => {
-      const normalizedUrl = isPdfUrl(url) ? normalizePdfUrl(url) : normalizeMenuUrl(url)
+      const cleanUrl = decodeHtmlUrl(url).trim()
+      const normalizedUrl = isPdfUrl(cleanUrl) ? normalizePdfUrl(cleanUrl) : normalizeMenuUrl(cleanUrl)
       
       return {
         business_id: businessId,
-        source_url: url,
+        source_url: cleanUrl,
         normalized_url: normalizedUrl,
         source_type: 'url',
         source_origin: 'ai_detected',

@@ -12,6 +12,15 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
+function decodeHtmlUrl(url: string): string {
+  return url
+    .replace(/&amp;/g, '&')
+    .replace(/&#38;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+}
+
 function base64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64)
   const bytes = new Uint8Array(bin.length)
@@ -181,8 +190,9 @@ serve(async (req: Request) => {
   try {
     // Parse request body
     const { businessId, sourceId, sourceUrl, languageCode } = await req.json()
+    const cleanSourceUrl = typeof sourceUrl === 'string' ? decodeHtmlUrl(sourceUrl).trim() : ''
 
-    if (!businessId || !sourceUrl) {
+    if (!businessId || !cleanSourceUrl) {
       return new Response(
         JSON.stringify({
           success: false,
@@ -275,7 +285,7 @@ serve(async (req: Request) => {
         business_id: businessId,
         source_id: sourceId || null,
         source_kind: 'url',
-        source_url: sourceUrl,
+        source_url: cleanSourceUrl,
         status: 'queued',
         language_code: languageCode || 'da',
         attempts: 0,

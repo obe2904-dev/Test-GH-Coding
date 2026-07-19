@@ -25,6 +25,15 @@ function _stripContentType(ct: string | null): string {
   return ct.split(';')[0]?.trim().toLowerCase() || ''
 }
 
+function decodeHtmlUrl(url: string): string {
+  return url
+    .replace(/&amp;/g, '&')
+    .replace(/&#38;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+}
+
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -1728,7 +1737,7 @@ serve(async (req: Request) => {
 
     const body = await req.json()
     const businessId = body?.businessId
-    const url = body?.url
+    const url = typeof body?.url === 'string' ? decodeHtmlUrl(body.url).trim() : ''
     const sourceId = body?.sourceId // menu_sources.id - for tracking which source this extraction belongs to
     const languageCode = normalizeLanguageCode(body?.languageCode)
 

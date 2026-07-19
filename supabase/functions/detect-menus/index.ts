@@ -105,6 +105,15 @@ function isFalsePositiveUrl(url: string): boolean {
   return falsePositives.some(term => urlLower.includes(term))
 }
 
+function decodeHtmlUrl(url: string): string {
+  return url
+    .replace(/&amp;/g, '&')
+    .replace(/&#38;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+}
+
 // =====================================================
 // Helper: Extract menu URLs from HTML
 // =====================================================
@@ -117,7 +126,7 @@ function extractMenuUrlsFromHtml(html: string, baseUrl: string): MenuUrl[] {
   let match
   while ((match = srcsetRegex.exec(html)) !== null) {
     const srcsetValue = match[0]
-    const urlMatch = match[1].split(',')[0].trim().split(' ')[0] // Take first URL from srcset
+    const urlMatch = decodeHtmlUrl(match[1].split(',')[0].trim().split(' ')[0]) // Take first URL from srcset
     
     try {
       const absoluteUrl = new URL(urlMatch, baseUrl).href
@@ -161,7 +170,7 @@ function extractMenuUrlsFromHtml(html: string, baseUrl: string): MenuUrl[] {
   const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi
   while ((match = imgRegex.exec(html)) !== null) {
     const imgTag = match[0]
-    const urlMatch = match[1]
+    const urlMatch = decodeHtmlUrl(match[1])
     
     try {
       const absoluteUrl = new URL(urlMatch, baseUrl).href
@@ -200,7 +209,7 @@ function extractMenuUrlsFromHtml(html: string, baseUrl: string): MenuUrl[] {
   // Extract from <a href="...pdf"> or <a href="...jpg">
   const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>/gi
   while ((match = linkRegex.exec(html)) !== null) {
-    const urlMatch = match[1]
+    const urlMatch = decodeHtmlUrl(match[1])
     const linkTag = match[0]
     
     // Skip false positives early
