@@ -17,6 +17,14 @@ type OcrResponse = {
   error?: string;
 };
 
+type GeminiResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
+  }>;
+};
+
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -46,19 +54,63 @@ async function runDoclingExtract(body: Record<string, unknown>) {
 }
 
 async function runImageOcr(body: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke<OcrResponse>('ocr-menu', {
-    body,
-  });
-
-  if (error) {
-    throw new Error(error.message);
+  const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!geminiKey) {
+    throw new Error('VITE_GEMINI_API_KEY is not configured');
   }
 
-  if (!data?.success) {
-    throw new Error(data?.error || 'Image OCR failed');
+  const imageBase64 = typeof body.imageBase64 === 'string' ? body.imageBase64 : '';
+  const mimeType = typeof body.mimeType === 'string' && body.mimeType ? body.mimeType : 'image/jpeg';
+  const fileName = typeof body.fileName === 'string' ? body.fileName : 'image';
+
+  if (!imageBase64) {
+    throw new Error('Image data is missing');
   }
 
-  return data;
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        generationConfig: {
+          temperature: 0,
+          maxOutputTokens: 4096,
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: 'Extract all visible text from this menu image. Return only the extracted text, preserving line breaks as best as possible.',
+              },
+              {
+                inlineData: {
+                  mimeType,
+                  data: imageBase64,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => 'Unknown error');
+    throw new Error(`Gemini image OCR failed: ${response.status} ${errorText}`);
+  }
+
+  const data = (await response.json()) as GeminiResponse;
+  const text = data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('\n').trim() || '';
+
+  return {
+    success: true,
+    text,
+    confidence: 0.9,
+    imageUrl: fileName,
+  } satisfies OcrResponse;
 }
 
 export function TestPdfPage() {
