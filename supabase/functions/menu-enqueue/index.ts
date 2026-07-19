@@ -12,6 +12,166 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return btoa(bin)
+}
+
+function base64UrlEncodeBytes(bytes: Uint8Array): string {
+  return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function base64UrlEncodeJson(obj: unknown): string {
+  const json = JSON.stringify(obj)
+  return base64UrlEncodeBytes(new TextEncoder().encode(json))
+}
+
+function pemToPkcs8Bytes(pem: string): Uint8Array {
+  const cleaned = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+    .replace(/-----END PRIVATE KEY-----/g, '')
+    .replace(/\s+/g, '')
+  return base64ToBytes(cleaned)
+}
+
+async function signJwtRs256(privateKeyPem: string, payload: Record<string, unknown>): Promise<string> {
+  const header = { alg: 'RS256', typ: 'JWT' }
+  const encHeader = base64UrlEncodeJson(header)
+  const encPayload = base64UrlEncodeJson(payload)
+  const signingInput = `${encHeader}.${encPayload}`
+
+  const keyBytes = pemToPkcs8Bytes(privateKeyPem)
+  const keyBuf = new Uint8Array(keyBytes).buffer
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    keyBuf,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+
+  const sig = await crypto.subtle.sign(
+    { name: 'RSASSA-PKCS1-v1_5' },
+    key,
+    new TextEncoder().encode(signingInput)
+  )
+  const encSig = base64UrlEncodeBytes(new Uint8Array(sig))
+  return `${signingInput}.${encSig}`
+}
+
+async function mintGoogleIdToken(params: {
+  serviceAccountJson: string
+  audience: string
+}): Promise<string> {
+  const raw = params.serviceAccountJson.trim()
+  const jsonText = raw.startsWith('{')
+    ? raw
+    : new TextDecoder().decode(base64ToBytes(raw))
+
+  const sa = JSON.parse(jsonText)
+  const clientEmail = String(sa.client_email || '')
+  const privateKey = String(sa.private_key || '')
+  if (!clientEmail || !privateKey) throw new Error('Invalid service account JSON (missing client_email/private_key)')
+
+  const now = Math.floor(Date.now() / 1000)
+  const assertion = await signJwtRs256(privateKey, {
+    iss: clientEmail,
+    sub: clientEmail,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 60 * 60,
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+  })
+
+  const tokenResp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion,
+    }).toString(),
+  })
+  if (!tokenResp.ok) {
+    throw new Error(`Google token exchange failed: ${tokenResp.status}`)
+  }
+
+  const tokenJson = await tokenResp.json().catch(() => ({}))
+  const accessToken = String((tokenJson as any).access_token || '')
+  if (!accessToken) throw new Error('Google token exchange returned no access_token')
+
+  const iamResp = await fetch(
+    `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(clientEmail)}:generateIdToken`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        audience: params.audience,
+        includeEmail: true,
+      }),
+    }
+  )
+  if (!iamResp.ok) {
+    throw new Error(`generateIdToken failed: ${iamResp.status}`)
+  }
+  const iamJson = await iamResp.json().catch(() => ({}))
+  const idToken = String((iamJson as any).token || '')
+  if (!idToken) throw new Error('generateIdToken returned no token')
+  return idToken
+}
+
+async function triggerMenuWorkerOnce(): Promise<void> {
+  const triggerOnEnqueue = (Deno.env.get('MENU_OCR_WORKER_TRIGGER_ON_ENQUEUE') ?? '').trim().toLowerCase()
+  const triggerEnabled = triggerOnEnqueue === '1' || triggerOnEnqueue === 'true' || triggerOnEnqueue === 'yes'
+  if (!triggerEnabled) return
+
+  const baseUrl = (Deno.env.get('MENU_OCR_WORKER_URL') ?? '').trim()
+  if (!baseUrl) return
+
+  const token = (Deno.env.get('MENU_OCR_WORKER_TOKEN') ?? '').trim()
+  const saJsonOrB64 = (Deno.env.get('MENU_OCR_WORKER_GCP_SA_JSON') ?? '').trim()
+  const audience = (Deno.env.get('MENU_OCR_WORKER_GCP_AUDIENCE') ?? baseUrl).trim().replace(/\/$/, '')
+  const url = `${baseUrl.replace(/\/$/, '')}/run-once`
+
+  const headers: Record<string, string> = {}
+  if (token) headers['x-worker-token'] = token
+  if (saJsonOrB64) {
+    try {
+      const idToken = await mintGoogleIdToken({
+        serviceAccountJson: saJsonOrB64,
+        audience,
+      })
+      headers['Authorization'] = `Bearer ${idToken}`
+    } catch (e) {
+      console.warn('⚠️ Failed to mint Google ID token for worker trigger:', e)
+    }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 4500)
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+    })
+  } catch (e) {
+    console.warn('⚠️ Failed to trigger worker /run-once:', e)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 serve(async (req: Request) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -160,6 +320,9 @@ serve(async (req: Request) => {
     }
 
     console.log(`[menu-enqueue] Created job ${resultRow.id} for business ${businessId}`)
+
+    // Best-effort wake-up so queued URL jobs do not wait for the next poll cycle.
+    await triggerMenuWorkerOnce()
 
     return new Response(
       JSON.stringify({
