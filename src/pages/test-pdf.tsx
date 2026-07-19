@@ -1,4 +1,32 @@
 import { useState } from 'react';
+import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+
+GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/legacy/build/pdf.worker.mjs',
+  import.meta.url,
+).toString();
+
+async function extractPdfText(arrayBuffer: ArrayBuffer) {
+  const loadingTask = getDocument({ data: new Uint8Array(arrayBuffer) });
+  const pdf = await loadingTask.promise;
+  const pageTexts: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((item: any) => ('str' in item ? item.str : ''))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (pageText) {
+      pageTexts.push(`Page ${pageNumber}\n${pageText}`);
+    }
+  }
+
+  return pageTexts.join('\n\n');
+}
 
 export function TestPdfPage() {
   const [pdfUrl, setPdfUrl] = useState('');
@@ -14,21 +42,10 @@ export function TestPdfPage() {
     setError('');
     setExtractedText('');
 
-    const formData = new FormData();
-    formData.append('pdf', file);
-
     try {
-      const response = await fetch('/api/test-pdf-extract', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to extract: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      setExtractedText(data.text || 'No text extracted');
+      const arrayBuffer = await file.arrayBuffer();
+      const text = await extractPdfText(arrayBuffer);
+      setExtractedText(text || 'No text extracted. This PDF may be image-based and require OCR.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -44,20 +61,20 @@ export function TestPdfPage() {
     setExtractedText('');
 
     try {
-      const response = await fetch('/api/test-pdf-extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: pdfUrl }),
-      });
-
+      const response = await fetch(pdfUrl);
       if (!response.ok) {
-        throw new Error(`Failed to extract: ${response.statusText}`);
+        throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
       }
 
-      const data = await response.json();
-      setExtractedText(data.text || 'No text extracted');
+      const arrayBuffer = await response.arrayBuffer();
+      const text = await extractPdfText(arrayBuffer);
+      setExtractedText(text || 'No text extracted. This PDF may be image-based and require OCR.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(
+        err instanceof Error
+          ? `${err.message}. If this is a remote PDF, the server must allow CORS.`
+          : 'Unknown error',
+      );
     } finally {
       setLoading(false);
     }
@@ -66,7 +83,10 @@ export function TestPdfPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-bold mb-8">PDF Text Extraction Test</h1>
+        <h1 className="text-3xl font-bold mb-3">PDF Text Extraction Test</h1>
+        <p className="mb-8 text-sm text-gray-600">
+          Upload a PDF and extract the text directly in the browser. Remote PDF URLs work only if the host allows CORS.
+        </p>
 
           {/* File Upload Section */}
           <div className="bg-white rounded-lg shadow p-6 mb-6">
