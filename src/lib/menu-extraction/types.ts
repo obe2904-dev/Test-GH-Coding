@@ -465,6 +465,8 @@ export interface MenuResultRow {
   id: string;
   business_id: string;
   source_id: string;
+  source_kind?: 'url' | 'storage';  // Database constraint: defaults to 'url'
+  source_url?: string | null;  // Required when source_kind = 'url'
   structured_data: NormalizedMenu;  // JSONB
   ai_summary?: string;
   service_periods?: string[];

@@ -61,6 +61,8 @@ export class MenuPersistence {
     const row: Partial<MenuResultRow> = {
       business_id: context.businessId, // Required for RLS policy
       source_id: context.sourceId,
+      source_kind: 'url',  // Required for CHECK constraint
+      source_url: context.sourceUrl,  // Required when source_kind = 'url'
       structured_data: result.menu || undefined,
       ai_summary: result.menu ? this.generateMenuSummary(result.menu) : undefined,
       service_periods: result.menu ? this.extractServicePeriods(result.menu) : [],
