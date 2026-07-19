@@ -37,6 +37,10 @@ const PublicDataProcessingPage = lazy(() =>
   import('./pages/DataProcessingPage').then((module) => ({ default: module.DataProcessingPage }))
 )
 
+const TestPdfPage = lazy(() =>
+  import('./pages/test-pdf').then((module) => ({ default: module.TestPdfPage }))
+)
+
 const OnboardingPage = lazy(() =>
   import('./pages/OnboardingPage').then((module) => ({ default: module.OnboardingPage }))
 )
@@ -172,6 +176,7 @@ function App() {
             <Route path="/terms" element={<PublicTermsPage />} />
             <Route path="/privacy" element={<PublicPrivacyPage />} />
             <Route path="/data-processing" element={<PublicDataProcessingPage />} />
+            <Route path="/test-pdf" element={<TestPdfPage />} />
             
             {/* Onboarding Route */}
             <Route 

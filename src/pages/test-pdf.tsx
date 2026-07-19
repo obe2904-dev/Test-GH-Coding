@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import Head from 'next/head';
 
-export default function TestPdfPage() {
+export function TestPdfPage() {
   const [pdfUrl, setPdfUrl] = useState('');
   const [extractedText, setExtractedText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -65,12 +64,7 @@ export default function TestPdfPage() {
   };
 
   return (
-    <>
-      <Head>
-        <title>PDF Text Extraction Test</title>
-      </Head>
-      
-      <div className="min-h-screen bg-gray-50 p-8">
+    <div className="min-h-screen bg-gray-50 p-8">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-3xl font-bold mb-8">PDF Text Extraction Test</h1>
 
@@ -142,6 +136,6 @@ export default function TestPdfPage() {
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
