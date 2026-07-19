@@ -136,6 +136,5 @@ export function TestPdfPage() {
           )}
         </div>
       </div>
-    </div>
   );
 }
