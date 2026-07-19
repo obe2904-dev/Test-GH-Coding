@@ -25,6 +25,50 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin)
 }
 
+function detectUploadedFileType(bytes: Uint8Array, fallbackMimeType: string): { mimeType: string; extension: string } {
+  if (bytes.length >= 4) {
+    const isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46
+    if (isPdf) return { mimeType: 'application/pdf', extension: 'pdf' }
+  }
+
+  if (bytes.length >= 3) {
+    const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+    if (isJpeg) return { mimeType: 'image/jpeg', extension: 'jpg' }
+  }
+
+  if (bytes.length >= 8) {
+    const isPng =
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    if (isPng) return { mimeType: 'image/png', extension: 'png' }
+  }
+
+  if (bytes.length >= 12) {
+    const riff = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])
+    const webp = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11])
+    if (riff === 'RIFF' && webp === 'WEBP') return { mimeType: 'image/webp', extension: 'webp' }
+  }
+
+  if (bytes.length >= 6) {
+    const header = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5])
+    if (header === 'GIF87a' || header === 'GIF89a') return { mimeType: 'image/gif', extension: 'gif' }
+  }
+
+  const normalizedFallback = fallbackMimeType.toLowerCase().split(';')[0].trim()
+  if (normalizedFallback === 'application/pdf') return { mimeType: 'application/pdf', extension: 'pdf' }
+  if (normalizedFallback === 'image/png') return { mimeType: 'image/png', extension: 'png' }
+  if (normalizedFallback === 'image/webp') return { mimeType: 'image/webp', extension: 'webp' }
+  if (normalizedFallback === 'image/gif') return { mimeType: 'image/gif', extension: 'gif' }
+
+  return { mimeType: normalizedFallback || 'application/octet-stream', extension: 'bin' }
+}
+
 function base64UrlEncodeBytes(bytes: Uint8Array): string {
   return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
@@ -270,7 +314,9 @@ serve(async (req: Request) => {
     if (!(file instanceof File)) throw new Error('Missing file')
 
     const originalName = typeof form.get('fileName') === 'string' ? String(form.get('fileName')) : file.name
-    const safeName = (originalName || 'menu.pdf').replace(/[^a-zA-Z0-9._-]/g, '_')
+    const safeBaseName = (originalName || 'menu')
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
 
     // Optional: menu headline and service period from user
     const menuHeadline = form.get('menuHeadline')
@@ -278,16 +324,19 @@ serve(async (req: Request) => {
     const serviceHeadline = typeof menuHeadline === 'string' ? menuHeadline.trim() : null
     const servicePeriodText = typeof servicePeriod === 'string' ? servicePeriod.trim() : null
 
-    const pdfBytes = new Uint8Array(await file.arrayBuffer())
-    if (pdfBytes.length === 0) throw new Error('Empty file')
+    const uploadBytes = new Uint8Array(await file.arrayBuffer())
+    if (uploadBytes.length === 0) throw new Error('Empty file')
+
+    const detectedType = detectUploadedFileType(uploadBytes, file.type || 'application/octet-stream')
+    const normalizedFileName = `${safeBaseName}.${detectedType.extension}`
 
     // Store PDF so menus are retained
-    const storagePath = `${businessId}/menu/${crypto.randomUUID()}_${safeName}`
+    const storagePath = `${businessId}/menu/${crypto.randomUUID()}_${normalizedFileName}`
 
     const { data: uploadData, error: uploadError } = await supabaseService.storage
       .from('business-documents')
-      .upload(storagePath, pdfBytes, {
-        contentType: 'application/pdf',
+      .upload(storagePath, uploadBytes, {
+        contentType: detectedType.mimeType,
         upsert: false,
       })
 
@@ -303,12 +352,12 @@ serve(async (req: Request) => {
       .upsert({
         business_id: businessId,
         document_type: 'menu',
-        file_name: safeName,
+        file_name: normalizedFileName,
         storage_path: storagePath,
         public_url: urlData.publicUrl,
         extracted_text: null,
         extracted_json: null,
-        file_size: pdfBytes.length,
+        file_size: uploadBytes.length,
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'storage_path',
@@ -321,6 +370,7 @@ serve(async (req: Request) => {
       source_url: urlData.publicUrl,
       storage_bucket: 'business-documents',
       storage_path: storagePath,
+      source_content_type: detectedType.mimeType,
       status: 'queued',
       language_code: languageCode,
     }
