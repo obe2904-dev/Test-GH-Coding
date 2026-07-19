@@ -76,6 +76,16 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
+function guessFileNameFromUrl(rawUrl: string, fallback: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    const lastSegment = parsed.pathname.split('/').filter(Boolean).pop() || fallback;
+    return lastSegment.includes('.') ? lastSegment : `${lastSegment}.pdf`;
+  } catch {
+    return fallback;
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -130,10 +140,16 @@ serve(async (req) => {
         );
       }
 
-      const response = await fetch(`${doclingUrl}/extract-pdf`, {
+      const formData = new FormData();
+      formData.append(
+        'file',
+        new Blob([buffer], { type: mimeType || 'application/pdf' }),
+        guessFileNameFromUrl(body.url, body.fileName || 'url.pdf'),
+      );
+
+      const response = await fetch(`${doclingUrl}/extract-pdf-file`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: body.url }),
+        body: formData,
       });
 
       const responseText = await response.text();
