@@ -111,7 +111,6 @@ export class MenuPersistence {
       category_name: item.categoryName,
       description: item.description,
       dietary_labels: item.dietaryLabels,
-      allergens: item.allergens,
       service_period: item.servicePeriod,
       source_evidence: item.sourceEvidence ? JSON.stringify(item.sourceEvidence) : undefined,
     }));
@@ -144,7 +143,6 @@ export class MenuPersistence {
           categoryName: category.name,
           description: item.description,
           dietaryLabels: item.dietaryLabels,
-          allergens: item.allergensExplicit,
           servicePeriod: item.availability?.servicePeriod,
           sourceEvidence: item.sourceEvidence,
         });

@@ -495,7 +495,6 @@ export interface MenuItemNormalizedRow {
   category_name?: string;
   description?: string;
   dietary_labels?: string[];
-  allergens?: string[];
   service_period?: string;
   source_evidence?: string;  // JSON string of evidence
   created_at: string;
@@ -513,7 +512,6 @@ export interface FlattenedMenuItem {
   categoryName: string;
   description?: string;
   dietaryLabels?: string[];
-  allergens?: string[];
   servicePeriod?: string;
   sourceEvidence?: EvidenceReference[];
 }
