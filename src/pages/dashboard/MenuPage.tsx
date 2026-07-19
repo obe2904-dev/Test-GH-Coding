@@ -603,6 +603,61 @@ function MenuPage() {
         } else {
           console.log(`✅ Verified job ${resultId} exists with status ${verifiedJob.status}`)
         }
+
+        if (verifiedJob?.status === 'done' || verifiedJob?.status === 'completed') {
+          await supabase
+            .from('menu_sources')
+            .update({ status: 'extracted' })
+            .eq('id', cardId)
+
+          if (operationsUpdateTimeoutRef.current) {
+            clearTimeout(operationsUpdateTimeoutRef.current)
+          }
+          operationsUpdateTimeoutRef.current = setTimeout(() => {
+            updateOperationsPricing().catch(err =>
+              console.error('Error updating operations pricing:', err)
+            )
+          }, 2000)
+
+          setActiveExtractions(prev => {
+            const next = new Set(prev)
+            next.delete(cardId)
+            return next
+          })
+
+          await loadMenuCards(businessId)
+          return
+        }
+
+        if (verifiedJob?.status === 'error' || verifiedJob?.status === 'failed') {
+          await supabase
+            .from('menu_sources')
+            .update({
+              status: 'error',
+              error_message: verifiedJob.error_message || 'Extraction failed',
+            })
+            .eq('id', cardId)
+
+          setMenuCards(prev =>
+            prev.map(c =>
+              c.id === cardId
+                ? {
+                    ...c,
+                    status: 'error',
+                    error_message: verifiedJob.error_message || 'Extraction failed',
+                  }
+                : c
+            )
+          )
+
+          setActiveExtractions(prev => {
+            const next = new Set(prev)
+            next.delete(cardId)
+            return next
+          })
+
+          return
+        }
       }
 
       // Subscribe to job status changes
