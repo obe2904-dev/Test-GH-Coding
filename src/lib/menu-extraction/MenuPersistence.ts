@@ -50,6 +50,7 @@ export class MenuPersistence {
     const successfulAttempt = result.attempts.find(a => a.status === 'success');
     
     const row: Partial<MenuResultRow> = {
+      business_id: context.businessId, // Required for RLS policy
       source_id: context.sourceId,
       structured_data: result.menu || undefined,
       ai_summary: result.menu ? this.generateMenuSummary(result.menu) : undefined,
