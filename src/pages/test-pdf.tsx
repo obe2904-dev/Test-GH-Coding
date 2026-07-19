@@ -37,6 +37,46 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
   return btoa(binary);
 }
 
+function detectFileKind(buffer: ArrayBuffer): 'pdf' | 'image' | 'unknown' {
+  const bytes = new Uint8Array(buffer);
+
+  if (bytes.length >= 4) {
+    const isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+    if (isPdf) return 'pdf';
+  }
+
+  if (bytes.length >= 3) {
+    const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    if (isJpeg) return 'image';
+  }
+
+  if (bytes.length >= 8) {
+    const isPng =
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a;
+    if (isPng) return 'image';
+  }
+
+  if (bytes.length >= 12) {
+    const signature = String.fromCharCode(
+      bytes[0], bytes[1], bytes[2], bytes[3],
+      bytes[8], bytes[9], bytes[10], bytes[11]
+    );
+    if (signature.startsWith('RIFF') && signature.endsWith('WEBP')) return 'image';
+  }
+
+  const header = new TextDecoder('latin1').decode(bytes.slice(0, 16));
+  if (header.startsWith('GIF87a') || header.startsWith('GIF89a')) return 'image';
+
+  return 'unknown';
+}
+
 async function runDoclingExtract(body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke<DoclingResponse>('test-docling-pdf', {
     body,
@@ -124,8 +164,8 @@ export function TestPdfPage() {
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
 
 
-  const runPdfExtract = async (file: File) => {
-    const pdfBase64 = arrayBufferToBase64(await file.arrayBuffer());
+  const runPdfExtract = async (file: File, fileBytes: ArrayBuffer) => {
+    const pdfBase64 = arrayBufferToBase64(fileBytes);
     const data = await runDoclingExtract({
       pdfBase64,
       fileName: file.name,
@@ -139,8 +179,8 @@ export function TestPdfPage() {
     setOcrConfidence(null);
   };
 
-  const runImageExtract = async (file: File) => {
-    const imageBase64 = arrayBufferToBase64(await file.arrayBuffer());
+  const runImageExtract = async (file: File, fileBytes: ArrayBuffer) => {
+    const imageBase64 = arrayBufferToBase64(fileBytes);
     const data = await runImageOcr({
       imageBase64,
       mimeType: file.type || 'image/jpeg',
@@ -166,11 +206,17 @@ export function TestPdfPage() {
     setOcrConfidence(null);
 
     try {
-      const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(file.name);
+      const fileBytes = await file.arrayBuffer();
+      const detectedKind = detectFileKind(fileBytes);
+      const isImage =
+        detectedKind === 'image' ||
+        file.type.startsWith('image/') ||
+        /\.(jpe?g|png|webp|gif)$/i.test(file.name);
+
       if (isImage) {
-        await runImageExtract(file);
+        await runImageExtract(file, fileBytes);
       } else {
-        await runPdfExtract(file);
+        await runPdfExtract(file, fileBytes);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
