@@ -75,14 +75,14 @@ async function runImageOcr(body: Record<string, unknown>) {
       body: JSON.stringify({
         generationConfig: {
           temperature: 0,
-          maxOutputTokens: 4096,
+          maxOutputTokens: 8192,
         },
         contents: [
           {
             role: 'user',
             parts: [
               {
-                text: 'Extract all visible text from this menu image. Return only the extracted text, preserving line breaks as best as possible.',
+                text: 'This is a restaurant menu image. Transcribe EVERY visible word, line, heading, item, description, and price in reading order. Do not summarize. Do not omit small text. Preserve line breaks and spacing as closely as possible. If text is unclear, include your best reading and mark uncertain words with [?]. Return only the transcription text.',
               },
               {
                 inlineData: {
