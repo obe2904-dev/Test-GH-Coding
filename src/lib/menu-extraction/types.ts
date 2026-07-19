@@ -463,6 +463,7 @@ export interface DiscoveredSource {
 
 export interface MenuResultRow {
   id: string;
+  business_id: string;
   source_id: string;
   structured_data: NormalizedMenu;  // JSONB
   ai_summary?: string;
