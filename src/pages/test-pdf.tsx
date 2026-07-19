@@ -9,6 +9,14 @@ type DoclingResponse = {
   error?: string;
 };
 
+type OcrResponse = {
+  success: boolean;
+  text?: string;
+  confidence?: number;
+  imageUrl?: string;
+  error?: string;
+};
+
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -37,6 +45,22 @@ async function runDoclingExtract(body: Record<string, unknown>) {
   return data;
 }
 
+async function runImageOcr(body: Record<string, unknown>) {
+  const { data, error } = await supabase.functions.invoke<OcrResponse>('ocr-menu', {
+    body,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data?.success) {
+    throw new Error(data?.error || 'Image OCR failed');
+  }
+
+  return data;
+}
+
 export function TestPdfPage() {
   const [pdfUrl, setPdfUrl] = useState('');
   const [extractedText, setExtractedText] = useState('');
@@ -45,6 +69,7 @@ export function TestPdfPage() {
   const [sourceLabel, setSourceLabel] = useState('');
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [markdown, setMarkdown] = useState('');
+  const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -56,6 +81,7 @@ export function TestPdfPage() {
     setSourceLabel('');
     setPageCount(null);
     setMarkdown('');
+    setOcrConfidence(null);
 
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -86,6 +112,7 @@ export function TestPdfPage() {
     setSourceLabel('');
     setPageCount(null);
     setMarkdown('');
+    setOcrConfidence(null);
 
     try {
       const data = await runDoclingExtract({ url: pdfUrl.trim() });
@@ -93,6 +120,36 @@ export function TestPdfPage() {
       setMarkdown(data.markdown || '');
       setSourceLabel('Docling Cloud Run (URL)');
       setPageCount(typeof data.metadata?.pages === 'number' ? data.metadata.pages : null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    setError('');
+    setExtractedText('');
+    setSourceLabel('');
+    setPageCount(null);
+    setMarkdown('');
+    setOcrConfidence(null);
+
+    try {
+      const pdfBase64 = arrayBufferToBase64(await file.arrayBuffer());
+      const data = await runImageOcr({
+        imageBase64: pdfBase64,
+        mimeType: file.type || 'image/jpeg',
+        fileName: file.name,
+      });
+
+      setExtractedText(data.text || 'No text extracted from image.');
+      setSourceLabel('Image OCR (file upload)');
+      setOcrConfidence(typeof data.confidence === 'number' ? data.confidence : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -122,6 +179,24 @@ export function TestPdfPage() {
               file:bg-blue-50 file:text-blue-700
               hover:file:bg-blue-100"
           />
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <h2 className="text-xl font-semibold mb-4">Upload Image File</h2>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleImageUpload}
+            className="block w-full text-sm text-gray-500
+              file:mr-4 file:py-2 file:px-4
+              file:rounded file:border-0
+              file:text-sm file:font-semibold
+              file:bg-blue-50 file:text-blue-700
+              hover:file:bg-blue-100"
+          />
+          <p className="mt-3 text-sm text-gray-500">
+            Use this for JPG or PNG menu photos, including scanned menus you have as images.
+          </p>
         </div>
 
         {/* URL Input Section */}
@@ -172,6 +247,11 @@ export function TestPdfPage() {
                 <div className="text-sm text-gray-600">Pages: {pageCount}</div>
               )}
             </div>
+            {ocrConfidence !== null && (
+              <div className="mb-4 text-sm text-gray-600">
+                OCR confidence: {(ocrConfidence * 100).toFixed(1)}%
+              </div>
+            )}
             <div className="bg-gray-50 p-4 rounded border max-h-96 overflow-y-auto">
               <pre className="whitespace-pre-wrap text-sm font-mono">{extractedText}</pre>
             </div>

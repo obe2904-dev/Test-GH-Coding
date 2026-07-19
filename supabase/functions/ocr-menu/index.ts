@@ -12,7 +12,9 @@ const corsHeaders = {
 };
 
 interface OCRRequest {
-  imageUrl: string;
+  imageUrl?: string;
+  imageBase64?: string;
+  mimeType?: string;
 }
 
 interface OCRResponse {
@@ -30,13 +32,13 @@ serve(async (req) => {
   }
 
   try {
-    const { imageUrl }: OCRRequest = await req.json();
+    const { imageUrl, imageBase64, mimeType }: OCRRequest = await req.json();
 
-    if (!imageUrl) {
+    if (!imageUrl && !imageBase64) {
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: 'imageUrl is required',
+          error: 'imageUrl or imageBase64 is required',
           text: '',
           confidence: 0,
         }),
@@ -60,20 +62,27 @@ serve(async (req) => {
       );
     }
 
-    console.log('Performing OCR on:', imageUrl.substring(0, 100) + '...');
+    const logTarget = imageUrl ? imageUrl.substring(0, 100) + '...' : 'base64 upload';
+    console.log('Performing OCR on:', logTarget);
 
-    // Fetch the image
+    // Fetch or decode the image
     let imageData: string;
     try {
-      const imageResponse = await fetch(imageUrl);
-      
-      if (!imageResponse.ok) {
-        throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+      if (imageBase64) {
+        imageData = imageBase64.includes(',') ? imageBase64.split(',').pop() || '' : imageBase64;
+        if (!imageData) {
+          throw new Error('Empty imageBase64 payload');
+        }
+      } else {
+        const imageResponse = await fetch(imageUrl!);
+        
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+        }
+        
+        const imageBuffer = await imageResponse.arrayBuffer();
+        imageData = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
       }
-      
-      const imageBuffer = await imageResponse.arrayBuffer();
-      const base64Image = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
-      imageData = base64Image;
       
     } catch (error: any) {
       console.error('Image fetch failed:', error);
@@ -83,11 +92,13 @@ serve(async (req) => {
           error: `Failed to fetch image: ${error.message}`,
           text: '',
           confidence: 0,
-          imageUrl,
+          imageUrl: imageUrl || '',
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    const detectedMimeType = mimeType || 'image/jpeg';
 
     // Call Google Vision API
     try {
@@ -164,7 +175,7 @@ serve(async (req) => {
           success: true,
           text: extractedText,
           confidence: avgConfidence,
-          imageUrl,
+          imageUrl: imageUrl || '',
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
