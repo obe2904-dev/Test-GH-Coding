@@ -3,10 +3,14 @@ import { supabase } from '../lib/supabase';
 
 type DoclingResponse = {
   success: boolean;
+  kind?: 'pdf' | 'image' | 'unknown';
   text?: string;
   markdown?: string;
   metadata?: Record<string, unknown>;
   error?: string;
+  imageBase64?: string;
+  mimeType?: string;
+  fileName?: string;
 };
 
 type OcrResponse = {
@@ -238,6 +242,22 @@ export function TestPdfPage() {
 
     try {
       const data = await runDoclingExtract({ url: pdfUrl.trim() });
+
+      if (data.kind === 'image' && data.imageBase64) {
+        const imageData = await runImageOcr({
+          imageBase64: data.imageBase64,
+          mimeType: data.mimeType || 'image/jpeg',
+          fileName: data.fileName || 'image-from-url',
+        });
+
+        setExtractedText(imageData.text || 'No text extracted from image URL.');
+        setMarkdown('');
+        setSourceLabel('Image OCR (URL)');
+        setPageCount(null);
+        setOcrConfidence(typeof imageData.confidence === 'number' ? imageData.confidence : null);
+        return;
+      }
+
       setExtractedText(data.text || 'No text extracted. This PDF may be image-based and require OCR.');
       setMarkdown(data.markdown || '');
       setSourceLabel('Docling Cloud Run (URL)');
