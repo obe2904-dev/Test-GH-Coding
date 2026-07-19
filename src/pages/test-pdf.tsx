@@ -114,7 +114,6 @@ export function TestPdfPage() {
     setOcrConfidence(null);
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
       const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(file.name);
       if (isImage) {
         await runImageExtract(file);
@@ -152,39 +151,6 @@ export function TestPdfPage() {
     }
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setLoading(true);
-    setError('');
-    setExtractedText('');
-    setSourceLabel('');
-    setPageCount(null);
-    setMarkdown('');
-          <h2 className="text-xl font-semibold mb-4">Upload PDF or Image File</h2>
-
-    try {
-            accept="application/pdf,.pdf,image/*,.jpg,.jpeg,.png,.webp,.gif"
-      const data = await runImageOcr({
-        imageBase64: pdfBase64,
-        mimeType: file.type || 'image/jpeg',
-        fileName: file.name,
-      });
-
-      setExtractedText(data.text || 'No text extracted from image.');
-      setSourceLabel('Image OCR (file upload)');
-          <p className="mt-3 text-sm text-gray-500">
-            PDFs go through Docling. JPG, PNG, and other images go through OCR.
-          </p>
-      setOcrConfidence(typeof data.confidence === 'number' ? data.confidence : null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-4xl mx-auto">
@@ -195,10 +161,10 @@ export function TestPdfPage() {
 
         {/* File Upload Section */}
         <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Upload PDF File</h2>
+          <h2 className="text-xl font-semibold mb-4">Upload PDF or Image File</h2>
           <input
             type="file"
-            accept="application/pdf,.pdf"
+            accept="application/pdf,.pdf,image/*,.jpg,.jpeg,.png,.webp,.gif"
             onChange={handleFileUpload}
             className="block w-full text-sm text-gray-500
               file:mr-4 file:py-2 file:px-4
@@ -207,23 +173,8 @@ export function TestPdfPage() {
               file:bg-blue-50 file:text-blue-700
               hover:file:bg-blue-100"
           />
-        </div>
-
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Upload Image File</h2>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            className="block w-full text-sm text-gray-500
-              file:mr-4 file:py-2 file:px-4
-              file:rounded file:border-0
-              file:text-sm file:font-semibold
-              file:bg-blue-50 file:text-blue-700
-              hover:file:bg-blue-100"
-          />
           <p className="mt-3 text-sm text-gray-500">
-            Use this for JPG or PNG menu photos, including scanned menus you have as images.
+            PDFs go through Docling. JPG, PNG, and other images go through OCR.
           </p>
         </div>
 
