@@ -543,27 +543,65 @@ function MenuPage() {
         resultId = existingJobs[0].id
         console.log(`📋 Reusing existing job: ${resultId}`)
       } else {
-        // Create new queued job
-        const { data: newJob, error: insertError } = await supabase
-          .from('menu_results_v2')
-          .insert({
-            business_id: businessId,
-            source_id: cardId,
-            source_kind: 'url',
-            source_url: sourceUrl,
-            status: 'queued',
-            language_code: 'da',
-            attempts: 0,
-          })
-          .select('id')
-          .single()
-
-        if (insertError || !newJob) {
-          throw new Error(`Failed to create extraction job: ${insertError?.message || 'Unknown error'}`)
+        // Call Edge Function to create queued job (uses service role key to bypass RLS)
+        const enqueueUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/menu-enqueue`
+        
+        const { data: session } = await supabase.auth.getSession()
+        if (!session?.session?.access_token) {
+          throw new Error('Not authenticated')
         }
 
-        resultId = newJob.id
-        console.log(`📥 Created queued job: ${resultId} for ${sourceUrl}`)
+        const enqueuePayload = {
+          businessId,
+          sourceId: cardId,
+          sourceUrl,
+          languageCode: 'da',
+        }
+        console.log(`📤 Calling enqueue endpoint`, enqueuePayload)
+        
+        const enqueueResponse = await fetch(enqueueUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.session.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+          },
+          body: JSON.stringify(enqueuePayload),
+        })
+
+        console.log(`📨 Enqueue response status: ${enqueueResponse.status}`)
+        
+        if (!enqueueResponse.ok) {
+          const errorText = await enqueueResponse.text()
+          console.error(`❌ Enqueue failed:`, errorText)
+          throw new Error(`Failed to enqueue extraction: ${enqueueResponse.status} ${errorText}`)
+        }
+
+        const enqueueData = await enqueueResponse.json()
+        console.log(`📦 Enqueue response data:`, enqueueData)
+        
+        if (!enqueueData.success || !enqueueData.resultId) {
+          console.error(`❌ Enqueue returned invalid response:`, enqueueData)
+          throw new Error(enqueueData.error || 'Enqueue returned success=false or missing resultId')
+        }
+
+        resultId = enqueueData.resultId
+        console.log(`📥 Created queued job: ${resultId} (businessId: ${businessId}, sourceId: ${cardId})`)
+        
+        // Verify the job exists in database
+        const { data: verifiedJob, error: verifyError } = await supabase
+          .from('menu_results_v2')
+          .select('id, status')
+          .eq('id', resultId)
+          .maybeSingle()
+
+        if (verifyError) {
+          console.error(`⚠️ Could not verify job ${resultId}:`, verifyError)
+        } else if (!verifiedJob) {
+          throw new Error(`Backend returned resultId ${resultId}, but no menu_results_v2 row exists`)
+        } else {
+          console.log(`✅ Verified job ${resultId} exists with status ${verifiedJob.status}`)
+        }
       }
 
       // Subscribe to job status changes
