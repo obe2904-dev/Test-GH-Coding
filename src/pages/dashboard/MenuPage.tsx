@@ -1114,6 +1114,8 @@ function MenuPage() {
       }
     })
 
+    const normalizedSelectedUrls = sourcesToUpsert.map(source => source.normalized_url)
+
     const { error: upsertError } = await supabase
       .from('menu_sources')
       .upsert(sourcesToUpsert, {
@@ -1131,7 +1133,7 @@ function MenuPage() {
       .from('menu_sources')
       .select('id, source_url')
       .eq('business_id', businessId)
-      .in('source_url', Array.from(selectedUrls))
+      .in('normalized_url', normalizedSelectedUrls)
 
     // Reload menu cards to reflect newly inserted sources
     await loadMenuCards(businessId)
