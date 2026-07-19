@@ -543,50 +543,51 @@ function MenuPage() {
         resultId = existingJobs[0].id
         console.log(`📋 Reusing existing job: ${resultId}`)
       } else {
-        // Call Edge Function to create queued job (uses service role key to bypass RLS)
-        const enqueueUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/menu-enqueue`
+        // Call the production extractor directly so selected menu URLs use the same
+        // PDF/image handling path as the working extraction pipeline.
+        const extractUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/menu-extract-v2`
         
         const { data: session } = await supabase.auth.getSession()
         if (!session?.session?.access_token) {
           throw new Error('Not authenticated')
         }
 
-        const enqueuePayload = {
+        const extractPayload = {
           businessId,
           sourceId: cardId,
           sourceUrl,
           languageCode: 'da',
         }
-        console.log(`📤 Calling enqueue endpoint`, enqueuePayload)
+        console.log(`📤 Calling extractor endpoint`, extractPayload)
         
-        const enqueueResponse = await fetch(enqueueUrl, {
+        const extractResponse = await fetch(extractUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${session.session.access_token}`,
             'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
           },
-          body: JSON.stringify(enqueuePayload),
+          body: JSON.stringify(extractPayload),
         })
 
-        console.log(`📨 Enqueue response status: ${enqueueResponse.status}`)
+        console.log(`📨 Extract response status: ${extractResponse.status}`)
         
-        if (!enqueueResponse.ok) {
-          const errorText = await enqueueResponse.text()
-          console.error(`❌ Enqueue failed:`, errorText)
-          throw new Error(`Failed to enqueue extraction: ${enqueueResponse.status} ${errorText}`)
+        if (!extractResponse.ok) {
+          const errorText = await extractResponse.text()
+          console.error(`❌ Extract failed:`, errorText)
+          throw new Error(`Failed to start extraction: ${extractResponse.status} ${errorText}`)
         }
 
-        const enqueueData = await enqueueResponse.json()
-        console.log(`📦 Enqueue response data:`, enqueueData)
+        const extractData = await extractResponse.json()
+        console.log(`📦 Extract response data:`, extractData)
         
-        if (!enqueueData.success || !enqueueData.resultId) {
-          console.error(`❌ Enqueue returned invalid response:`, enqueueData)
-          throw new Error(enqueueData.error || 'Enqueue returned success=false or missing resultId')
+        if (!extractData.success || !extractData.resultId) {
+          console.error(`❌ Extract returned invalid response:`, extractData)
+          throw new Error(extractData.error || 'Extractor returned success=false or missing resultId')
         }
 
-        resultId = enqueueData.resultId
-        console.log(`📥 Created queued job: ${resultId} (businessId: ${businessId}, sourceId: ${cardId})`)
+        resultId = extractData.resultId
+        console.log(`📥 Created extraction job: ${resultId} (businessId: ${businessId}, sourceId: ${cardId})`)
         
         // Verify the job exists in database
         const { data: verifiedJob, error: verifyError } = await supabase
