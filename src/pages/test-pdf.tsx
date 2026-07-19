@@ -71,6 +71,36 @@ export function TestPdfPage() {
   const [markdown, setMarkdown] = useState('');
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
 
+
+  const runPdfExtract = async (file: File) => {
+    const pdfBase64 = arrayBufferToBase64(await file.arrayBuffer());
+    const data = await runDoclingExtract({
+      pdfBase64,
+      fileName: file.name,
+      mimeType: file.type || 'application/pdf',
+    });
+
+    setExtractedText(data.text || 'No text extracted. This PDF may be image-based and require OCR.');
+    setMarkdown(data.markdown || '');
+    setSourceLabel('Docling Cloud Run (file upload)');
+    setPageCount(typeof data.metadata?.pages === 'number' ? data.metadata.pages : null);
+    setOcrConfidence(null);
+  };
+
+  const runImageExtract = async (file: File) => {
+    const imageBase64 = arrayBufferToBase64(await file.arrayBuffer());
+    const data = await runImageOcr({
+      imageBase64,
+      mimeType: file.type || 'image/jpeg',
+      fileName: file.name,
+    });
+
+    setExtractedText(data.text || 'No text extracted from image.');
+    setMarkdown('');
+    setSourceLabel('Image OCR (file upload)');
+    setPageCount(null);
+    setOcrConfidence(typeof data.confidence === 'number' ? data.confidence : null);
+  };
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -85,17 +115,12 @@ export function TestPdfPage() {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const pdfBase64 = arrayBufferToBase64(arrayBuffer);
-      const data = await runDoclingExtract({
-        pdfBase64,
-        fileName: file.name,
-        mimeType: file.type || 'application/pdf',
-      });
-
-      setExtractedText(data.text || 'No text extracted. This PDF may be image-based and require OCR.');
-      setMarkdown(data.markdown || '');
-      setSourceLabel('Docling Cloud Run (file upload)');
-      setPageCount(typeof data.metadata?.pages === 'number' ? data.metadata.pages : null);
+      const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(file.name);
+      if (isImage) {
+        await runImageExtract(file);
+      } else {
+        await runPdfExtract(file);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -137,10 +162,10 @@ export function TestPdfPage() {
     setSourceLabel('');
     setPageCount(null);
     setMarkdown('');
-    setOcrConfidence(null);
+          <h2 className="text-xl font-semibold mb-4">Upload PDF or Image File</h2>
 
     try {
-      const pdfBase64 = arrayBufferToBase64(await file.arrayBuffer());
+            accept="application/pdf,.pdf,image/*,.jpg,.jpeg,.png,.webp,.gif"
       const data = await runImageOcr({
         imageBase64: pdfBase64,
         mimeType: file.type || 'image/jpeg',
@@ -149,6 +174,9 @@ export function TestPdfPage() {
 
       setExtractedText(data.text || 'No text extracted from image.');
       setSourceLabel('Image OCR (file upload)');
+          <p className="mt-3 text-sm text-gray-500">
+            PDFs go through Docling. JPG, PNG, and other images go through OCR.
+          </p>
       setOcrConfidence(typeof data.confidence === 'number' ? data.confidence : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
