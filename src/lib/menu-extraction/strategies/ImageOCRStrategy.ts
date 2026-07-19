@@ -134,8 +134,8 @@ export class ImageOCRStrategy extends BaseStrategy {
       
       console.log(`📝 OCR extracted ${combinedText.length} characters`);
       
-      // Step 4: Extract structured menu using GPT-4
-      const extracted = await this.extractWithOpenAI(combinedText, context);
+      // Step 4: Extract structured menu using Gemini 2.5 Flash
+      const extracted = await this.extractWithGemini(combinedText, context);
       
       // Step 5: Validate result
       if (!this.isViableMenu(extracted)) {
@@ -461,34 +461,34 @@ export class ImageOCRStrategy extends BaseStrategy {
    * Extract structured menu data using OpenAI
    * Reuses parsing logic from PDFTextStrategy
    */
-  private async extractWithOpenAI(ocrText: string, context: ExtractionContext): Promise<NormalizedMenu> {
+  private async extractWithGemini(ocrText: string, context: ExtractionContext): Promise<NormalizedMenu> {
     const cleanedText = this.cleanTextForLLM(ocrText);
     
-    const prompt = `Extract the menu from this OCR text. The text may have OCR errors.
+    const prompt = `Du er en menu-ekstraktor. Ekstraher menuen fra denne OCR-tekst. Teksten kan have OCR-fejl.
 
-IMPORTANT RULES:
-1. Extract ALL items with names and prices
-2. Group items into logical categories (Starters, Mains, Desserts, Drinks, etc.)
-3. Keep Danish names as-is (don't translate)
-4. Format prices as numbers (remove currency symbols)
-5. Include descriptions if present
-6. Handle multi-page menus (look for "--- Next Page ---" markers)
+KRITISKE REGLER:
+1. Ekstraher KUN elementer der faktisk findes i teksten
+2. OPFIND IKKE retter eller priser - hvis du er usikker, udelad dem
+3. Behold danske navne præcis som de står (oversæt ikke)
+4. Priser skal være tal (fjern valutasymboler)
+5. Grupper i logiske kategorier (Forret, Hovedret, Dessert, Drikkevarer osv.)
+6. Håndter multi-side menuer (kig efter "--- Next Page ---" markeringer)
 
-OCR TEXT:
+OCR-TEKST:
 ${cleanedText}
 
-Return a JSON object with this structure:
+Returner PRÆCIS dette JSON-format (ingen ekstra tekst):
 {
   "categories": [
     {
       "id": "unique-id",
-      "name": "Category Name",
-      "description": "Optional description",
+      "name": "Kategori Navn",
+      "description": "Valgfri beskrivelse",
       "items": [
         {
           "id": "unique-id",
-          "name": "Item Name",
-          "description": "Item description",
+          "name": "Ret Navn",
+          "description": "Ret beskrivelse",
           "price": { "amount": 129, "currency": "DKK" },
           "dietary": [],
           "allergens": [],
@@ -502,41 +502,48 @@ Return a JSON object with this structure:
 }`;
 
     try {
-      const openaiKey = import.meta.env.VITE_OPENAI_API_KEY;
-      if (!openaiKey) {
-        throw new Error('VITE_OPENAI_API_KEY not configured');
+      const geminiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!geminiKey) {
+        throw new Error('VITE_GEMINI_API_KEY not configured');
       }
       
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
-          max_tokens: 4000,
-        }),
-      });
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.1, // Low temperature for factual extraction
+              maxOutputTokens: 4000,
+            },
+          }),
+        }
+      );
       
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`OpenAI API failed: ${response.status} ${errorText}`);
+        throw new Error(`Gemini API failed: ${response.status} ${errorText}`);
       }
       
       const data = await response.json();
-      const content = data.choices[0]?.message?.content;
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
       
       if (!content) {
-        throw new Error('OpenAI returned empty response');
+        throw new Error('Gemini returned empty response');
       }
       
+      // Extract JSON from markdown code blocks if present
+      let jsonText = content.trim()
+        .replace(/^```(?:json)?\s*\n?/i, '')
+        .replace(/\n?```\s*$/i, '')
+        .trim();
+      
       // Parse JSON response
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        throw new Error('No JSON found in OpenAI response');
+        throw new Error('No JSON found in Gemini response');
       }
       
       const parsed = JSON.parse(jsonMatch[0]);
@@ -545,7 +552,7 @@ Return a JSON object with this structure:
       return this.convertToNormalizedMenu(parsed, context);
       
     } catch (error: any) {
-      console.error('OpenAI extraction failed:', error);
+      console.error('Gemini extraction failed:', error);
       throw error;
     }
   }
