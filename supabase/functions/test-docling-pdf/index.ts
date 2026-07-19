@@ -140,6 +140,16 @@ serve(async (req) => {
         );
       }
 
+      if (urlKind !== 'pdf') {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `The URL did not resolve to a PDF or image. Content-Type: ${contentType || 'unknown'}`,
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        );
+      }
+
       const formData = new FormData();
       formData.append(
         'file',
