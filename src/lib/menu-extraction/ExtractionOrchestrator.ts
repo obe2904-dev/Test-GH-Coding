@@ -10,7 +10,7 @@ import { ImageOCRStrategy } from './strategies/ImageOCRStrategy';
 import { StandardQualityScorer } from './QualityScorer';
 import { MenuValidator } from './MenuValidator';
 import { MenuPersistence } from './MenuPersistence';
-import { ArtifactCapture } from './ArtifactCapture';
+// import { ArtifactCapture } from './ArtifactCapture'; // DISABLED - causes Buffer errors in browser
 import {
   ExtractionContext,
   ExtractionResult,
@@ -39,7 +39,7 @@ export class ExtractionOrchestrator {
   private qualityScorer: StandardQualityScorer;
   private validator: MenuValidator;
   private persistence: MenuPersistence;
-  private artifactCapture: ArtifactCapture;
+  // private artifactCapture: ArtifactCapture; // DISABLED - causes Buffer errors in browser
   private options: OrchestrationOptions;
   
   constructor(options: OrchestrationOptions) {
@@ -69,7 +69,7 @@ export class ExtractionOrchestrator {
     this.qualityScorer = new StandardQualityScorer();
     this.validator = new MenuValidator();
     this.persistence = new MenuPersistence(options.supabaseUrl, options.supabaseKey);
-    this.artifactCapture = new ArtifactCapture(options.supabaseUrl, options.supabaseKey);
+    // this.artifactCapture = new ArtifactCapture(options.supabaseUrl, options.supabaseKey); // DISABLED
   }
   
   /**
@@ -210,8 +210,13 @@ export class ExtractionOrchestrator {
   
   /**
    * Capture artifacts for debugging
+   * DISABLED - causes Buffer errors in browser environment
    */
   private async captureArtifacts(context: ExtractionContext): Promise<void> {
+    // Fully disabled to prevent Buffer errors
+    return;
+    
+    /* DISABLED CODE
     try {
       await this.artifactCapture.ensureBucketExists();
       
@@ -232,6 +237,7 @@ export class ExtractionOrchestrator {
       console.error('Failed to capture artifacts:', error.message);
       // Continue extraction even if artifact capture fails
     }
+    */
   }
   
   /**
