@@ -163,6 +163,7 @@ export function TestPdfPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sourceLabel, setSourceLabel] = useState('');
+  const [detectedKind, setDetectedKind] = useState<'pdf' | 'image' | 'unknown' | ''>('');
   const [pageCount, setPageCount] = useState<number | null>(null);
   const [markdown, setMarkdown] = useState('');
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null);
@@ -205,6 +206,7 @@ export function TestPdfPage() {
     setError('');
     setExtractedText('');
     setSourceLabel('');
+    setDetectedKind('');
     setPageCount(null);
     setMarkdown('');
     setOcrConfidence(null);
@@ -212,6 +214,7 @@ export function TestPdfPage() {
     try {
       const fileBytes = await file.arrayBuffer();
       const detectedKind = detectFileKind(fileBytes);
+      setDetectedKind(detectedKind);
       const isImage =
         detectedKind === 'image' ||
         file.type.startsWith('image/') ||
@@ -236,12 +239,14 @@ export function TestPdfPage() {
     setError('');
     setExtractedText('');
     setSourceLabel('');
+    setDetectedKind('');
     setPageCount(null);
     setMarkdown('');
     setOcrConfidence(null);
 
     try {
       const data = await runDoclingExtract({ url: pdfUrl.trim() });
+      setDetectedKind(data.kind || 'unknown');
 
       if (data.kind === 'image' && data.imageBase64) {
         const imageData = await runImageOcr({
@@ -315,6 +320,11 @@ export function TestPdfPage() {
               Extract
             </button>
           </div>
+          {detectedKind && (
+            <div className="mt-3 text-sm text-gray-600">
+              Detected kind: <span className="font-semibold text-gray-900">{detectedKind}</span>
+            </div>
+          )}
         </div>
 
         {/* Loading State */}
