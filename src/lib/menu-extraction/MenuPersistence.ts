@@ -49,13 +49,22 @@ export class MenuPersistence {
   ): Promise<string> {
     const successfulAttempt = result.attempts.find(a => a.status === 'success');
     
+    // Map internal status to database-allowed values
+    const mapStatusToDb = (status: string): 'queued' | 'processing' | 'done' | 'error' => {
+      if (status === 'done') return 'done';
+      if (status === 'partial') return 'done'; // Partial success = done
+      if (status === 'queued') return 'queued';
+      if (status === 'processing' || status === 'extracting' || status === 'normalizing') return 'processing';
+      return 'error'; // Everything else (permanent_error, manual_review_needed, etc.)
+    };
+    
     const row: Partial<MenuResultRow> = {
       business_id: context.businessId, // Required for RLS policy
       source_id: context.sourceId,
       structured_data: result.menu || undefined,
       ai_summary: result.menu ? this.generateMenuSummary(result.menu) : undefined,
       service_periods: result.menu ? this.extractServicePeriods(result.menu) : [],
-      status: result.status,
+      status: mapStatusToDb(result.status) as any,
       
       // Tracking metadata (new columns)
       platform_detected: context.artifacts.platformMetadata?.platform,

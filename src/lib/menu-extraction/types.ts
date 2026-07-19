@@ -472,7 +472,7 @@ export interface MenuResultRow {
   structured_data: NormalizedMenu;  // JSONB
   ai_summary?: string;
   service_periods?: string[];
-  status: ExtractionStatus;
+  status: 'queued' | 'processing' | 'done' | 'error'; // Database constraint
   
   // Tracking metadata (new columns)
   platform_detected?: string;
