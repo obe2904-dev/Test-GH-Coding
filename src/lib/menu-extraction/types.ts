@@ -488,15 +488,22 @@ export interface MenuResultRow {
 
 export interface MenuItemNormalizedRow {
   id: string;
+  business_id?: string;
   menu_result_id: string;
   item_name: string;
-  item_price?: number;
-  price_raw?: string;
-  category_name?: string;
-  description?: string;
-  dietary_labels?: string[];
-  service_period?: string;
-  source_evidence?: string;  // JSON string of evidence
+  item_description?: string;
+  media_category?: 'FOOD' | 'DRINK';
+  item_price?: string;  // TEXT in database
+  category_name: string;
+  category_type: string;  // REQUIRED in database
+  service_periods?: string[];  // Array in database
+  service_period_name?: string;
+  menu_title?: string;
+  menu_url?: string;
+  is_signature?: boolean;
+  is_seasonal?: boolean;
+  is_limited_time?: boolean;
+  dish_temp_category?: string;
   created_at: string;
 }
 

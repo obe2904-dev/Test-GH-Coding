@@ -34,7 +34,7 @@ export class MenuPersistence {
     
     // 2. Flatten and insert into menu_items_normalized
     if (result.menu && (result.status === 'done' || result.status === 'partial')) {
-      await this.insertNormalizedItems(result.menu, menuResultId);
+      await this.insertNormalizedItems(result.menu, menuResultId, context.businessId);
     }
     
     return menuResultId;
@@ -97,22 +97,22 @@ export class MenuPersistence {
    */
   private async insertNormalizedItems(
     menu: NormalizedMenu,
-    menuResultId: string
+    menuResultId: string,
+    businessId: string
   ): Promise<void> {
     const items = this.flattenMenuToItems(menu, menuResultId);
     
     if (items.length === 0) return;
     
     const rows: Partial<MenuItemNormalizedRow>[] = items.map(item => ({
+      business_id: businessId,
       menu_result_id: menuResultId,
       item_name: item.itemName,
-      item_price: item.itemPrice,
-      price_raw: item.priceRaw,
+      item_description: item.description,
+      item_price: item.priceRaw || (item.itemPrice ? String(item.itemPrice) : undefined),
       category_name: item.categoryName,
-      description: item.description,
-      dietary_labels: item.dietaryLabels,
-      service_period: item.servicePeriod,
-      source_evidence: item.sourceEvidence ? JSON.stringify(item.sourceEvidence) : undefined,
+      category_type: 'FOOD', // Default - could be enhanced later
+      service_periods: item.servicePeriod ? [item.servicePeriod] : [],
     }));
     
     const { error } = await this.supabase
