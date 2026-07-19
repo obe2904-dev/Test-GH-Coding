@@ -23,21 +23,40 @@ export class MenuPersistence {
   }
   
   /**
-   * Persist extraction result to database
+   * Persist extraction result to database via Edge Function (service_role)
    */
   async persistExtractionResult(
     result: MenuExtractionResult,
     context: ExtractionContext
   ): Promise<string> {
-    // 1. Insert into menu_results_v2
-    const menuResultId = await this.insertMenuResult(result, context);
+    // Call Edge Function with service_role for secure persistence
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const functionUrl = `${supabaseUrl}/functions/v1/persist-menu-extraction`;
     
-    // 2. Flatten and insert into menu_items_normalized
-    if (result.menu && (result.status === 'done' || result.status === 'partial')) {
-      await this.insertNormalizedItems(result.menu, menuResultId, context.businessId);
+    // Get current session for JWT
+    const { data: { session } } = await this.supabase.auth.getSession();
+    if (!session) {
+      throw new Error('No active session - user must be authenticated');
     }
-    
-    return menuResultId;
+
+    const response = await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ result, context }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to persist extraction result');
+    }
+
+    console.log(`✅ Persisted via Edge Function: ${data.menuResultId} (${data.itemCount} items)`);
+    return data.menuResultId;
   }
   
   /**
