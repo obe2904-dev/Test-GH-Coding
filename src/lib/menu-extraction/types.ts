@@ -33,13 +33,9 @@ export type ExtractionStatus =
   | 'interacting'
   | 'extracting'
   | 'normalizing'
-  | 'done'
-  | 'partial'
-  | 'manual_review_needed'
-  | 'permanent_error';
   | 'validating'
-  | 'partial'
   | 'done'
+  | 'partial'
   | 'manual_review_needed'
   | 'retryable_error'
   | 'permanent_error';
