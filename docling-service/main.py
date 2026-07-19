@@ -12,6 +12,7 @@ import tempfile
 import os
 from pathlib import Path
 
+from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -20,13 +21,17 @@ app = FastAPI(title="Docling Menu Extraction Service")
 
 # Configure Docling with optimized settings for menu extraction
 pipeline_options = PdfPipelineOptions()
-pipeline_options.do_ocr = True  # Enable OCR for scanned PDFs
-pipeline_options.do_table_structure = True  # Preserve table structure for menu items
+pipeline_options.do_ocr = False  # Keep the service on the lightweight text-extraction path
+pipeline_options.do_table_structure = False
+pipeline_options.force_backend_text = True
 
 doc_converter = DocumentConverter(
     allowed_formats=[InputFormat.PDF],
     format_options={
-        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+        InputFormat.PDF: PdfFormatOption(
+            pipeline_options=pipeline_options,
+            backend=PyPdfiumDocumentBackend,
+        ),
     }
 )
 

@@ -193,6 +193,39 @@ function looksLikePdf(bytes: Uint8Array): boolean {
   return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 // %PDF
 }
 
+function looksLikeImage(bytes: Uint8Array): boolean {
+  if (!bytes || bytes.length < 3) return false
+
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+  if (isJpeg) return true
+
+  if (bytes.length >= 8) {
+    const isPng =
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    if (isPng) return true
+  }
+
+  if (bytes.length >= 6) {
+    const header = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5])
+    if (header === 'GIF87a' || header === 'GIF89a') return true
+  }
+
+  if (bytes.length >= 12) {
+    const riff = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3])
+    const webp = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11])
+    if (riff === 'RIFF' && webp === 'WEBP') return true
+  }
+
+  return false
+}
+
 /**
  * Extract text from image using Google Cloud Vision API
  */
@@ -1092,6 +1125,167 @@ If no categories can be found, return {"categories": []}.`
   return parsed
 }
 
+/**
+ * Parse PDF menu using Docling for extraction + OpenAI for structuring
+ * Replaces parsePdfMenuWithOpenAI for better PDF extraction quality
+ */
+async function parsePdfMenuWithDocling(pdfUrl: string, languageCode: string): Promise<any> {
+  const doclingUrl = Deno.env.get('DOCLING_SERVICE_URL')
+  if (!doclingUrl) {
+    console.warn('⚠️ DOCLING_SERVICE_URL not set, falling back to OpenAI direct parsing')
+    throw new Error('Docling service URL not configured')
+  }
+
+  console.log(`🔧 Extracting PDF with Docling: ${pdfUrl}`)
+
+  // Step 1: Call Docling service to extract text/markdown
+  const doclingResp = await fetch(`${doclingUrl}/extract-pdf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: pdfUrl }),
+  })
+
+  if (!doclingResp.ok) {
+    const errorText = await doclingResp.text().catch(() => 'unknown error')
+    console.error('❌ Docling extraction failed:', doclingResp.status, errorText)
+    throw new Error(`Docling extraction failed: ${doclingResp.status}`)
+  }
+
+  const doclingData = await doclingResp.json()
+  
+  if (!doclingData.success || !doclingData.text) {
+    console.error('❌ Docling returned no text:', doclingData)
+    throw new Error(doclingData.error || 'Docling extraction returned no text')
+  }
+
+  const extractedText = doclingData.text
+  const extractedMarkdown = doclingData.markdown || extractedText
+  console.log(`✅ Docling extracted ${extractedText.length} characters from PDF`)
+
+  // Step 2: Use OpenAI to structure the extracted text into menu format
+  const apiKey = Deno.env.get('OPENAI_API_KEY')
+  if (!apiKey) throw new Error('OPENAI_API_KEY environment variable not set')
+
+  const lang = (languageCode || 'da').toLowerCase().startsWith('da') ? 'DANISH' : 'the document language'
+
+  const instructionText = `You are parsing a restaurant menu. The menu is in ${lang}.
+
+The following text was extracted from a PDF menu:
+
+${extractedText.slice(0, 40000)}
+
+CRITICAL RULES:
+1) EXTRACT MENU TITLE - Look for the main menu heading. Set as "menuTitle".
+2) EXTRACT MENU SUBTITLE/DESCRIPTION - Text under the title. Set as "menuSubtitle".
+3) EXTRACT AVAILABILITY TIME - Time ranges like "11:00-15:00". Set as "availabilityTime".
+4) EXTRACT AVAILABILITY DAYS - Day info like "Mandag-Fredag". Set as "availabilityDays".
+5) DETECT ALL CATEGORY HEADERS - FORRETTER, HOVEDRETTER, DESSERTER, BURGERE, SALATER, etc.
+6) Each category can have a "timeRange" if it specifies hours.
+7) Each category can have a "categoryDescription".
+8) ONLY extract items explicitly written. Do NOT invent.
+9) Preserve original dish names (æ, ø, å).
+10) ALWAYS include full descriptions.
+11) Capture ALL prices AND currency. Danish: 95,- | 95 kr | 95 DKK → price "95", currency "DKK"
+12) Multi-line items: Name → Description → Price = ONE item.
+13) Extras/Add-ons (e.g. "Ekstra X +20,-") are separate items.
+14) Kids menu: "BØRNEMENU", "børnemad", "kids menu", "children" = always a separate category. If it appears as a line item inside another section, still hoist it out as its own category.
+15) Day-restricted sections: If a category header is followed by text like "fra onsdag til lørdag", "kun weekender", "mandag-fredag", "hverdage" etc., capture that in the category's "availabilityDays" field. Example: "TAPAS / FRA ONSDAG TIL LØRDAG" → availabilityDays: "onsdag-lørdag".
+16) Fixed-price packages: Lines like "3 RETTERS MENU 395,-", "VINMENU 3 glas 150,-", "AD LIBITUM øl, vin og vand 2 timer 295,-" are menu packages. Create a category called "PAKKER" and capture each package as an item with its price.
+17) PRICE ALWAYS BELONGS TO THE ITEM ABOVE IT - A line containing ONLY a number with ",-", "kr" or "DKK" is ALWAYS the price of the immediately preceding item. Even if there is a blank line between description and price, the price still belongs to that item.
+18) Items without a visible price - If no price line follows before the next item name or category header, set price to null.
+19) TAPAS section with component list + single price - A TAPAS section may list many individual ingredients followed by a single price for the entire board. Create ONE item with a description listing all components and that single price.
+20) Variant items (UDEN/MED) - Lines like "UDEN KYLLING" or "MED KYLLING" following a dish description are separate price variants. Create separate items for each variant with the price from the line immediately following.
+
+MENU TYPE CLASSIFICATION (REQUIRED):
+Classify what this menu primarily serves based on category names and content — NOT the business name.
+Return one value in "menu_type": coffee | wine | cocktail | beer | bakery | bar_snacks | drinks | brunch | lunch | dinner | all_day | other
+
+PRODUCT SEGMENT CLASSIFICATION (REQUIRED FOR EACH ITEM):
+Classify each menu item into exactly ONE product segment based on its name, description, and category:
+- "drinks" → All beverages: coffee, tea, wine, beer, cocktails, soft drinks, juices, etc.
+- "snacks" → Small bites, appetizers, tapas (individual), chips, nuts, olives, bread baskets
+- "main_meals" → Full meals, main courses, entrées, mains, burgers, pasta, steaks, fish dishes
+- "sharing_food" → Platters, sharing boards, tapas boards, mixed grills, family-style dishes
+- "desserts" → Desserts, sweets, cakes, ice cream, pastries
+- "specials" → Chef specials, seasonal dishes, dagens ret, dagens tilbud, limited-time offers
+- "takeaway_items" → Items explicitly marked as takeaway/to-go or in takeaway section
+- "gifting_and_addons" → Gift cards, merchandise, extras (e.g., "ekstra bacon +20")
+
+Return ONLY valid JSON in this schema:
+{
+  "menu_type": "lunch" | "brunch" | "dinner" | "all_day" | "coffee" | "wine" | "cocktail" | "beer" | "bakery" | "bar_snacks" | "drinks" | "other",
+  "menuTitle": "string|null",
+  "menuSubtitle": "string|null",
+  "availabilityTime": "string|null",
+  "availabilityDays": "string|null",
+  "categories": [
+    {
+      "name": "string",
+      "categoryDescription": "string|null",
+      "timeRange": "string|null",
+      "availabilityDays": "string|null",
+      "items": [
+        {
+          "name": "string",
+          "description": "string|null",
+          "price": "string|null",
+          "currency": "string|null",
+          "productSegment": "drinks" | "snacks" | "main_meals" | "sharing_food" | "desserts" | "specials" | "takeaway_items" | "gifting_and_addons"
+        }
+      ]
+    }
+  ]
+}
+
+If a field is not present in the PDF, set it to null.
+If no categories can be found, return {"categories": []}.`
+
+  const chatResp = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      max_tokens: 12000,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a precise menu extraction expert. Return only valid JSON.',
+        },
+        {
+          role: 'user',
+          content: instructionText,
+        },
+      ],
+    }),
+  })
+
+  if (!chatResp.ok) {
+    const errorData = await chatResp.json().catch(() => ({}))
+    console.error('❌ OpenAI Chat API error (Docling):', chatResp.status, errorData)
+    throw new Error(`OpenAI Chat API failed: ${chatResp.status}`)
+  }
+
+  const data = await chatResp.json()
+  const content = data?.choices?.[0]?.message?.content
+  if (!content) throw new Error('OpenAI returned empty response for Docling-extracted text')
+
+  const parsed = JSON.parse(content)
+
+  // Require at least one category with at least one item
+  const totalItems = (parsed?.categories ?? []).reduce(
+    (sum: number, cat: any) => sum + (cat?.items?.length ?? 0),
+    0,
+  )
+  if (totalItems === 0) throw new Error('Docling path: no menu items found in PDF')
+
+  return parsed
+}
+
 function normalizeLanguageCode(input: unknown): string {
   if (typeof input !== 'string') return 'da'
   const trimmed = input.trim()
@@ -1639,16 +1833,16 @@ serve(async (req: Request) => {
       const probeCt = _stripContentType(probeResp.headers.get('content-type'))
       const probeBytes = await readAtMostBytes(probeResp, 4096)
       const urlLooksPdf = url.toLowerCase().split('?')[0].endsWith('.pdf')
-      const isPdf = urlLooksPdf || probeCt.includes('pdf') || looksLikePdf(probeBytes)
+      const urlLower = url.toLowerCase().split('?')[0]
+      const urlLooksImage = urlLower.endsWith('.jpg') || urlLower.endsWith('.jpeg') ||
+                            urlLower.endsWith('.png') || urlLower.endsWith('.gif') ||
+                            urlLower.endsWith('.webp')
+      const probeLooksImage = looksLikeImage(probeBytes)
+      const isImageUrl = urlLooksImage || probeCt.includes('image/') || probeLooksImage
+      const isPdf = !isImageUrl && (urlLooksPdf || probeCt.includes('pdf') || looksLikePdf(probeBytes))
 
       // Check if URL is an image file (early detection to avoid unnecessary processing)
-      const urlLower = url.toLowerCase().split('?')[0]
-      const isImageUrl = urlLower.endsWith('.jpg') || urlLower.endsWith('.jpeg') || 
-                        urlLower.endsWith('.png') || urlLower.endsWith('.gif') || 
-                        urlLower.endsWith('.webp')
-      const isImageContentType = probeCt.includes('image/')
-      
-      if (isImageUrl || isImageContentType) {
+      if (isImageUrl) {
         console.log('🖼️ Image detected - attempting OCR extraction with Google Vision API')
         
         try {
@@ -1697,10 +1891,13 @@ serve(async (req: Request) => {
           await supabaseService
             .from('menu_results_v2')
             .update({
-              status: 'completed',
-              menu_structure: menuStructure,
+              status: 'done',
+              structured_data: menuStructure,
+              raw_text: extractedText,
               establishment_type: establishmentType,
               completed_at: new Date().toISOString(),
+              source_content_type: probeCt || 'image/*',
+              extraction_method: 'edge_ocr',
             })
             .eq('id', resultId)
 
@@ -1748,23 +1945,11 @@ serve(async (req: Request) => {
       if (isPdf) {
         console.log('📄 PDF detected')
 
-        // --- Fast path: download full PDF and parse directly with OpenAI ---
+        // --- Fast path: extract with Docling + structure with OpenAI ---
         let usedFastPath = false
         if (probeBytes.length < MAX_PDF_BYTES) {
           try {
-            console.log('⚡ Attempting PDF fast-path via OpenAI file input...')
-
-            // Download full PDF (re-fetch; probe only fetched 4096 bytes)
-            const pdfResp = await fetchWithTimeout(url, {
-              method: 'GET',
-              redirect: 'follow',
-              headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenuExtractorBot/1.0)' },
-            }, FETCH_TIMEOUT_MS)
-
-            const pdfBytes = await readAtMostBytes(pdfResp, MAX_PDF_BYTES)
-            if (pdfBytes.length >= MAX_PDF_BYTES) {
-              throw new Error('PDF exceeds fast-path size limit; routing to Cloud Run')
-            }
+            console.log('⚡ Attempting PDF fast-path via Docling extraction...')
 
             // Mark as processing so the Cloud Run worker won't claim the row
             await supabaseService
@@ -1773,11 +1958,11 @@ serve(async (req: Request) => {
                 status: 'processing',
                 claimed_at: new Date().toISOString(),
                 attempts: 1,
-                extraction_method: 'edge_pdf',
+                extraction_method: 'edge_docling',
               })
               .eq('id', resultId)
 
-            const structured = await parsePdfMenuWithOpenAI(pdfBytes, languageCode)
+            const structured = await parsePdfMenuWithDocling(url, languageCode)
 
             // Fetch business opening hours (same as HTML fast path)
             const { data: businessData } = await supabaseService
@@ -1915,7 +2100,7 @@ serve(async (req: Request) => {
                 structured_data: enrichedStructured,
                 completed_at: new Date().toISOString(),
                 source_content_type: probeCt || null,
-                extraction_method: 'edge_pdf',
+                extraction_method: 'edge_docling',
                 service_periods: servicePeriods,
                 service_period_name: servicePeriodName,
                 is_signature: isSignature,
@@ -1973,70 +2158,230 @@ serve(async (req: Request) => {
             }
 
             usedFastPath = true
-            console.log('✅ PDF extracted on Edge fast-path')
+            console.log('✅ PDF extracted with Docling on Edge fast-path')
             return new Response(
-              JSON.stringify({ success: true, resultId, message: 'PDF menu extracted on Edge (v2)' }),
+              JSON.stringify({ success: true, resultId, message: 'PDF menu extracted with Docling on Edge (v2)' }),
               { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
             )
           } catch (pdfFastErr) {
-            console.warn('⚠️ PDF fast-path failed; falling back to Cloud Run:', pdfFastErr)
-            // Reset status so the Cloud Run worker can claim it
+            console.warn('⚠️ PDF fast-path with Docling failed; will try slow path:', pdfFastErr)
+            // Reset status so the slow path can handle it
             await supabaseService
               .from('menu_results_v2')
-              .update({ status: 'queued', claimed_at: null, extraction_method: 'cloudrun_pdf_ocr' })
+              .update({ status: 'queued', claimed_at: null, extraction_method: 'docling_direct' })
               .eq('id', resultId)
           }
         }
 
         if (usedFastPath) return new Response('', { status: 200 }) // should never reach here
 
-        // --- Slow path: queue PDF for Cloud Run OCR worker ---
-        console.log('📄 Routing PDF to Cloud Run OCR worker')
-        const { data: pdfJobData, error: pdfJobError } = await supabaseService
-          .from('menu_results')
-          .insert({
-            business_id: businessId,
-            pdf_url: url,
-            status: 'queued',
-            source_type: 'url',
-            language_code: 'da',
-          })
-          .select('id')
-          .single()
+        // --- Slow path: extract directly with Docling service (no queue) ---
+        console.log('📄 Extracting large PDF with Docling service')
+        
+        try {
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'processing',
+              claimed_at: new Date().toISOString(),
+              extraction_method: 'docling_direct',
+            })
+            .eq('id', resultId)
 
-        if (pdfJobError) {
-          console.error('Failed to create PDF queue job:', pdfJobError)
+          const structured = await parsePdfMenuWithDocling(url, languageCode)
+
+          // Fetch business opening hours
+          const { data: businessData } = await supabaseService
+            .from('businesses')
+            .select('opening_hours')
+            .eq('id', businessId)
+            .single()
+
+          let businessHours: { open: string; close: string } | undefined
+          if (businessData?.opening_hours) {
+            const hours = businessData.opening_hours
+            const allOpen: string[] = []
+            const allClose: string[] = []
+            for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']) {
+              if (hours[day]?.open) allOpen.push(hours[day].open)
+              if (hours[day]?.close) allClose.push(hours[day].close)
+            }
+            if (allOpen.length > 0 && allClose.length > 0) {
+              allOpen.sort(); allClose.sort()
+              businessHours = { open: allOpen[0], close: allClose[allClose.length - 1] }
+              console.log(`🏢 Business hours: ${businessHours.open}-${businessHours.close}`)
+            }
+          }
+
+          // Parse menu periods
+          let menuPeriods: any[] = []
+          const menuAvailabilityTime = structured?.availabilityTime || null
+          if (structured?.categories && Array.isArray(structured.categories)) {
+            menuPeriods = parseMenuPeriods(structured.categories, businessHours, menuAvailabilityTime)
+          }
+          const menuStartTime = menuAvailabilityTime ? (menuPeriods[0]?.startTime ?? null) : null
+          const menuEndTime = menuAvailabilityTime ? (menuPeriods[menuPeriods.length - 1]?.endTime ?? null) : null
+          const enrichedStructured = { ...structured, menuPeriods, startTime: menuStartTime, endTime: menuEndTime }
+
+          // Collect explicit service periods from category headers
+          const explicitPeriods: string[] = []
+          for (const cat of structured.categories || []) {
+            const n = (cat.name || '').toLowerCase()
+            if ((n.includes('frokost') || n.includes('lunch')) && !explicitPeriods.includes('lunch'))
+              explicitPeriods.push('lunch')
+            if ((n.includes('aften') || n.includes('dinner') || n.includes('aftensmad')) && !explicitPeriods.includes('dinner'))
+              explicitPeriods.push('dinner')
+            if ((n.includes('brunch') || n.includes('morgenmad')) && !explicitPeriods.includes('brunch'))
+              explicitPeriods.push('brunch')
+            if ((n.includes('bar') || n.includes('cocktail')) && !explicitPeriods.includes('bar'))
+              explicitPeriods.push('bar')
+          }
+
+          const menuTitle = structured.menuTitle || structured.categories?.[0]?.name || ''
+          let rawPeriodName: string
+
+          if (explicitPeriods.length > 0) {
+            rawPeriodName = explicitPeriods[0]
+          } else {
+            // Existing fallback logic
+            if (menuTitle.toLowerCase().includes('brunch') || menuTitle.toLowerCase().includes('morgenmad')) {
+              rawPeriodName = 'brunch'
+            } else if (menuTitle.toLowerCase().includes('frokost') || menuTitle.toLowerCase().includes('lunch')) {
+              rawPeriodName = 'frokost'
+            } else if (menuTitle.toLowerCase().includes('aften') || menuTitle.toLowerCase().includes('dinner') || menuTitle.toLowerCase().includes('aftensmad')) {
+              rawPeriodName = 'aften'
+            } else if (menuTitle.toLowerCase().includes('bar') || menuTitle.toLowerCase().includes('cocktail') || menuTitle.toLowerCase().includes('drink')) {
+              rawPeriodName = 'bar'
+            } else if (menuPeriods.length > 0) {
+              const firstPeriod = menuPeriods[0]
+              const isAllDay = (firstPeriod.startTime === '00:00' && firstPeriod.endTime === '23:59') ||
+                               firstPeriod.type === 'all_day' ||
+                               firstPeriod.type === 'other'
+              
+              if (isAllDay) {
+                rawPeriodName = 'all_day'
+              } else {
+                const startHour = parseInt(firstPeriod.startTime?.split(':')[0] || '12')
+                if (startHour < 11) rawPeriodName = 'brunch'
+                else if (startHour >= 17) rawPeriodName = 'dinner'
+                else rawPeriodName = 'lunch'
+              }
+            } else {
+              rawPeriodName = 'lunch'
+            }
+          }
+          
+          const servicePeriods = explicitPeriods.length > 0
+            ? explicitPeriods.map(p => normalizeProgrammeName(p))
+            : [normalizeProgrammeName(rawPeriodName)]
+          
+          const servicePeriodName = servicePeriods[0]
+          console.log(`📅 Service period${servicePeriods.length > 1 ? 's' : ''}: "${rawPeriodName}" → ${servicePeriods.join(', ')} (primary: ${servicePeriodName})`)
+
+          const isSignature =
+            menuTitle.toLowerCase().includes('signatur') ||
+            menuTitle.toLowerCase().includes('specialit') ||
+            menuTitle.toLowerCase().includes('klassiker') ||
+            structured.categories?.some((cat: any) =>
+              cat.name?.toLowerCase().includes('signatur') ||
+              cat.name?.toLowerCase().includes('klassiker') ||
+              cat.name?.toLowerCase().includes('chef')
+            ) || false
+
+          const establishmentType = classifyEstablishmentType(structured)
+
+          // Extract detected language
+          let detectedLanguage = structured.detected_language
+          if (!detectedLanguage || detectedLanguage.trim() === '') {
+            console.warn(`⚠️ AI did not return detected_language, analyzing text manually...`)
+            detectedLanguage = detectLanguageFromText(structured, url)
+          }
+          console.log(`🌐 Language detected: ${detectedLanguage}`)
+
+          // Resolve menu type and timing
+          const menuType = (structured.menu_type as string | undefined) ?? servicePeriodName ?? 'other'
+          const { timeStart, timeEnd, timeSource } = resolveMenuTiming(enrichedStructured, businessHours)
+          console.log(`⏱️ Menu timing: ${menuType} ${timeStart ?? '?'}–${timeEnd ?? '?'} (source: ${timeSource})`)
+
+          await supabaseService
+            .from('menu_results_v2')
+            .update({
+              status: 'done',
+              raw_text: null,
+              structured_data: enrichedStructured,
+              completed_at: new Date().toISOString(),
+              source_content_type: probeCt || null,
+              extraction_method: 'docling_direct',
+              service_periods: servicePeriods,
+              service_period_name: servicePeriodName,
+              is_signature: isSignature,
+              language_code: detectedLanguage,
+              menu_type: menuType,
+              time_start: timeStart,
+              time_end: timeEnd,
+              time_source: timeSource,
+              time_confirmed: false,
+            })
+            .eq('id', resultId)
+          
+          console.log('✅ Menu extraction marked as done (Docling slow path)')
+
+          // Generate AI summary (non-blocking)
+          try {
+            const aiSummary = await generateMenuSummary(enrichedStructured, url, detectedLanguage)
+            if (aiSummary) {
+              await supabaseService.from('menu_results_v2')
+                .update({ ai_summary: aiSummary }).eq('id', resultId)
+              console.log('✅ Menu AI summary stored')
+            }
+          } catch (summaryErr) {
+            console.warn('⚠️ Menu summary skipped:', summaryErr)
+          }
+
+          // Select representative dishes
+          try {
+            const representativeDishes = await selectRepresentativeDishes(enrichedStructured, detectedLanguage)
+            if (representativeDishes && representativeDishes.dishes?.length > 0) {
+              await supabaseService.from('menu_results_v2')
+                .update({ representative_dishes: representativeDishes }).eq('id', resultId)
+              console.log(`✅ Representative dishes selected: ${representativeDishes.dishes.map((d: any) => d.name).join(', ')}`)
+            }
+          } catch (dishErr) {
+            console.warn('⚠️ Dish selection skipped:', dishErr)
+          }
+
+          if (establishmentType && businessId) {
+            await supabaseService
+              .from('business_operations')
+              .upsert({
+                business_id: businessId,
+                establishment_type: establishmentType,
+                has_kids_menu: enrichedStructured.hasKidsMenu ?? null,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'business_id' })
+          }
+
+          console.log('✅ Large PDF extracted with Docling')
+          return new Response(
+            JSON.stringify({ success: true, resultId, message: 'PDF menu extracted with Docling (v2)' }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+          )
+        } catch (doclingErr) {
+          console.error('❌ Docling slow path failed:', doclingErr)
           await supabaseService
             .from('menu_results_v2')
             .update({
               status: 'error',
-              error_message: 'Failed to queue PDF for processing',
+              error_message: `Docling extraction failed: ${doclingErr.message}`,
               completed_at: new Date().toISOString(),
             })
             .eq('id', resultId)
 
           return new Response(
-            JSON.stringify({ success: false, resultId, error: 'Failed to queue PDF for processing' }),
+            JSON.stringify({ success: false, resultId, error: 'PDF extraction with Docling failed' }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
-
-        await supabaseService
-          .from('menu_results_v2')
-          .update({ status: 'queued', extraction_method: 'cloudrun_pdf_ocr' })
-          .eq('id', resultId)
-
-        await triggerMenuWorkerOnce()
-        console.log(`✅ PDF queued for Cloud Run OCR with job ID: ${pdfJobData.id}`)
-        return new Response(
-          JSON.stringify({
-            success: true,
-            resultId,
-            pdfJobId: pdfJobData.id,
-            message: 'PDF menu queued for OCR processing',
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
       }
 
 

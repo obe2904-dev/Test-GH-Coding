@@ -272,7 +272,7 @@ function MenuPage() {
         if (result) {
           if (result.status === 'queued' || result.status === 'processing') status = 'extracting'
           else if (result.status === 'failed') status = 'error'
-          else if (result.status === 'done') status = 'extracted'
+          else if (result.status === 'done' || result.status === 'completed') status = 'extracted'
         } else if (source.status === 'extracting') {
           status = 'extracting'
         } else if (source.status === 'error') {
@@ -619,7 +619,7 @@ function MenuPage() {
             const updated = payload.new as any
             console.log(`🔔 Job ${resultId} status: ${updated.status}`)
 
-            if (updated.status === 'done') {
+            if (updated.status === 'done' || updated.status === 'completed') {
               // Success - update menu_sources and reload
               await supabase
                 .from('menu_sources')
