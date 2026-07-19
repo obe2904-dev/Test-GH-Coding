@@ -14,6 +14,7 @@ from config import (
     MAX_LLM_CHARS,
     STALE_JOB_MINUTES,
     GPT52_VISION_ENABLED,
+    GPT52_MODEL,
 )
 from utils.helpers import utc_now_iso, looks_like_pdf
 from utils.text_processing import (
@@ -202,6 +203,7 @@ class MenuOCRWorker:
                     content_bytes, content_type = self._fetch_url(pdf_url)
 
             is_pdf = looks_like_pdf(content_bytes) or content_type == 'application/pdf' or (pdf_url.lower().split('?')[0].endswith('.pdf'))
+            is_image = content_type.startswith('image/') or any(pdf_url.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp'])
             source_sha = hashlib.sha256(content_bytes).hexdigest()
 
             # SHA deduplication: if identical content was already successfully extracted,
@@ -300,6 +302,99 @@ class MenuOCRWorker:
                             'notes': 'Extracted from rendered PDF images (scan/low digital text).',
                         })
                         structured_data['_meta'] = meta
+            elif is_image:
+                # Direct image menu (JPG, PNG, etc.)
+                logger.info(f"🖼️ Processing image menu: {content_type}")
+                
+                # Store image
+                ext = '.jpg' if content_type == 'image/jpeg' else \
+                      '.png' if content_type == 'image/png' else \
+                      '.webp' if content_type == 'image/webp' else '.jpg'
+                storage_path = f"{business_id}/menu/{source_sha}{ext}"
+                public_url = storage_upload_public("business-documents", storage_path, content_bytes, content_type=content_type or "image/jpeg")
+                pdf_bucket = "business-documents"
+                pdf_path = storage_path
+                
+                # Use GPT vision to extract from image
+                try:
+                    # Create a simple wrapper to use the vision extractor with raw image bytes
+                    # The vision extractor expects PNG bytes in a list
+                    logger.info("🔍 Using GPT vision for image extraction")
+                    from extractors.vision_extractor import parse_menu_from_images_with_vision
+                    
+                    # Convert image to PNG if needed (vision model works best with PNG)
+                    try:
+                        from PIL import Image
+                        import io
+                        
+                        img = Image.open(io.BytesIO(content_bytes))
+                        png_buffer = io.BytesIO()
+                        img.save(png_buffer, format='PNG')
+                        png_bytes = png_buffer.getvalue()
+                        images_png = [png_bytes]
+                    except Exception as conv_err:
+                        logger.warning(f"Image conversion failed, using raw bytes: {conv_err}")
+                        images_png = [content_bytes]
+                    
+                    vision_text, vision_menu = parse_menu_from_images_with_vision(
+                        images_png, 
+                        language_code,
+                        GPT52_MODEL
+                    )
+                    
+                    if not vision_menu or not validate_structured_menu(vision_menu):
+                        error_code = 'invalid_output' if vision_menu else 'no_menu_found'
+                        user_reason = (
+                            "Could not extract a valid menu from this image. "
+                            "Please ensure the image shows a clear menu with prices and try again."
+                        )
+                        supabase.table('menu_results_v2').update({
+                            'status': 'error',
+                            'error_code': error_code,
+                            'error_message': user_reason,
+                            'raw_text': (vision_text or None),
+                            'extraction_method': 'image_ocr',
+                            'completed_at': utc_now_iso(),
+                            'storage_bucket': pdf_bucket,
+                            'storage_path': pdf_path,
+                            'source_url': pdf_url,
+                            'source_content_type': content_type,
+                            'language_code': language_code,
+                            'sha256': source_sha,
+                        }).eq('id', result_id).execute()
+                        return False
+                    
+                    raw_text = (vision_text or "").strip() or "(extracted via vision from image)"
+                    metrics = {
+                        'total_pages': 1,
+                        'char_count': len(raw_text),
+                        'method': 'image_ocr',
+                    }
+                    structured_data = vision_menu
+                    if isinstance(structured_data, dict):
+                        meta = structured_data.get('_meta', {})
+                        meta.update({
+                            'source': 'gpt-5.2-vision',
+                            'notes': 'Extracted directly from image menu.',
+                        })
+                        structured_data['_meta'] = meta
+                        
+                except Exception as img_err:
+                    logger.error(f"Image extraction failed: {img_err}")
+                    supabase.table('menu_results_v2').update({
+                        'status': 'error',
+                        'error_code': 'parser_failed',
+                        'error_message': f"Image extraction failed: {str(img_err)}",
+                        'extraction_method': 'image_ocr',
+                        'completed_at': utc_now_iso(),
+                        'storage_bucket': pdf_bucket,
+                        'storage_path': pdf_path,
+                        'source_url': pdf_url,
+                        'source_content_type': content_type,
+                        'language_code': language_code,
+                        'sha256': source_sha,
+                    }).eq('id', result_id).execute()
+                    return False
             else:
                 # HTML menu page
                 html = content_bytes.decode('utf-8', errors='ignore')

@@ -5,7 +5,6 @@ import { useTierStore } from '../../stores/tierStore'
 import { useBusinessStore } from '../../stores/businessStore'
 import { LoadingSpinner } from '../../components/ui/Feedback'
 import { AnalyzeIcon } from './BusinessProfileIcons'
-import { getMenuExtractionService } from '../../services/menuExtractionService'
 import { normalizeMenuUrl, isPdfUrl, normalizePdfUrl } from '../../lib/urlNormalization'
 
 type MenuStatus = 'pending' | 'extracting' | 'extracted' | 'error'
@@ -511,7 +510,7 @@ function MenuPage() {
   }
 
   // Internal extraction function (called by queue processor)
-  // UPDATED: Now uses Menu Extraction v2.0 with client-side orchestrator
+  // SIMPLIFIED: Creates queued job for Cloud Run worker
   const extractMenuInternal = async (cardId: string, sourceUrl: string) => {
     if (!businessId) return
 
@@ -519,105 +518,162 @@ function MenuPage() {
     setActiveExtractions(prev => new Set(prev).add(cardId))
 
     try {
-      // Clear any old error state and update status to extracting
+      // Update menu_sources to extracting status
       await supabase
         .from('menu_sources')
         .update({ status: 'extracting', error_message: null })
         .eq('id', cardId)
 
-      // Delete old extraction results for THIS specific menu source
-      await supabase
-        .from('menu_results_v2')
-        .delete()
-        .eq('source_id', cardId)
-
       setMenuCards(prev =>
         prev.map(c => c.id === cardId ? { ...c, status: 'extracting', error_message: undefined } : c)
       )
 
-      // Initialize extraction service
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
-      const extractionService = getMenuExtractionService(supabaseUrl, supabaseKey)
+      // Check for existing active jobs for this source
+      const { data: existingJobs } = await supabase
+        .from('menu_results_v2')
+        .select('id, status')
+        .eq('source_id', cardId)
+        .in('status', ['queued', 'processing'])
+        .limit(1)
 
-      console.log('🚀 Starting Menu Extraction v2.0 for:', sourceUrl)
-      
-      // Run extraction (scraper + orchestrator)
-      const result = await extractionService.extractMenu({
-        businessId,
-        sourceId: cardId,
-        sourceUrl,
-        supabaseUrl,
-        supabaseKey,
-      })
+      let resultId: string
 
-      console.log('✅ Extraction complete:', {
-        status: result.status,
-        quality: result.quality?.overallScore,
-        attempts: result.attempts?.length,
-      })
-
-      // Update menu_sources status based on result
-      if (result.status === 'done' || result.status === 'partial') {
-        await supabase
-          .from('menu_sources')
-          .update({ status: 'extracted' })
-          .eq('id', cardId)
-        
-        // Update operations pricing
-        if (operationsUpdateTimeoutRef.current) {
-          clearTimeout(operationsUpdateTimeoutRef.current)
-        }
-        operationsUpdateTimeoutRef.current = setTimeout(() => {
-          updateOperationsPricing().catch(err => 
-            console.error('Error updating operations pricing:', err)
-          )
-        }, 2000)
-        
-      } else if (result.status === 'permanent_error' || result.status === 'manual_review_needed') {
-        await supabase
-          .from('menu_sources')
-          .update({ 
-            status: 'error',
-            error_message: result.errorCode || 'Extraction failed'
+      if (existingJobs && existingJobs.length > 0) {
+        // Reuse existing queued/processing job
+        resultId = existingJobs[0].id
+        console.log(`📋 Reusing existing job: ${resultId}`)
+      } else {
+        // Create new queued job
+        const { data: newJob, error: insertError } = await supabase
+          .from('menu_results_v2')
+          .insert({
+            business_id: businessId,
+            source_id: cardId,
+            source_kind: 'url',
+            source_url: sourceUrl,
+            status: 'queued',
+            language_code: 'da',
+            attempts: 0,
           })
-          .eq('id', cardId)
+          .select('id')
+          .single()
+
+        if (insertError || !newJob) {
+          throw new Error(`Failed to create extraction job: ${insertError?.message || 'Unknown error'}`)
+        }
+
+        resultId = newJob.id
+        console.log(`📥 Created queued job: ${resultId} for ${sourceUrl}`)
       }
 
-      // Remove from active extractions and reload
-      setActiveExtractions(prev => {
-        const next = new Set(prev)
-        next.delete(cardId)
-        return next
-      })
-      
-      await loadMenuCards(businessId)
+      // Subscribe to job status changes
+      const subscription = supabase
+        .channel(`menu_result_${resultId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'menu_results_v2',
+            filter: `id=eq.${resultId}`,
+          },
+          async (payload) => {
+            const updated = payload.new as any
+            console.log(`🔔 Job ${resultId} status: ${updated.status}`)
+
+            if (updated.status === 'done') {
+              // Success - update menu_sources and reload
+              await supabase
+                .from('menu_sources')
+                .update({ status: 'extracted' })
+                .eq('id', cardId)
+
+              // Update operations pricing
+              if (operationsUpdateTimeoutRef.current) {
+                clearTimeout(operationsUpdateTimeoutRef.current)
+              }
+              operationsUpdateTimeoutRef.current = setTimeout(() => {
+                updateOperationsPricing().catch(err =>
+                  console.error('Error updating operations pricing:', err)
+                )
+              }, 2000)
+
+              // Cleanup
+              subscription.unsubscribe()
+              setActiveExtractions(prev => {
+                const next = new Set(prev)
+                next.delete(cardId)
+                return next
+              })
+
+              await loadMenuCards(businessId)
+            } else if (updated.status === 'error') {
+              // Error - update menu_sources and show error
+              await supabase
+                .from('menu_sources')
+                .update({
+                  status: 'error',
+                  error_message: updated.error_message || 'Extraction failed',
+                })
+                .eq('id', cardId)
+
+              setMenuCards(prev =>
+                prev.map(c =>
+                  c.id === cardId
+                    ? {
+                        ...c,
+                        status: 'error',
+                        error_message: updated.error_message || 'Extraction failed',
+                      }
+                    : c
+                )
+              )
+
+              // Cleanup
+              subscription.unsubscribe()
+              setActiveExtractions(prev => {
+                const next = new Set(prev)
+                next.delete(cardId)
+                return next
+              })
+            }
+          }
+        )
+        .subscribe()
+
+      // Store subscription for cleanup
+      // Note: In a production app, you'd want to track these subscriptions
+      // and clean them up when the component unmounts
 
     } catch (error) {
-      console.error('Error extracting menu:', error)
-      
+      console.error('Error creating extraction job:', error)
+
       // Remove from active extractions
       setActiveExtractions(prev => {
         const next = new Set(prev)
         next.delete(cardId)
         return next
       })
-      
+
       // Update status to error
       await supabase
         .from('menu_sources')
-        .update({ 
+        .update({
           status: 'error',
-          error_message: (error as Error).message
+          error_message: (error as Error).message,
         })
         .eq('id', cardId)
 
       setMenuCards(prev =>
-        prev.map(c => c.id === cardId ? { 
-          ...c, 
-          status: 'error',
-          error_message: (error as Error).message 
-        } : c)
+        prev.map(c =>
+          c.id === cardId
+            ? {
+                ...c,
+                status: 'error',
+                error_message: (error as Error).message,
+              }
+            : c
+        )
       )
     }
   }
