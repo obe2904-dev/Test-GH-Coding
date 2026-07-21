@@ -1162,7 +1162,7 @@ function BusinessProfilePage() {
       let response = await callAnalysis(authToken)
 
       if (!response.ok) {
-        const errorText = await response.text()
+        let errorText = await response.text()
         const needsAuthRefresh = /invalid or expired token/i.test(errorText) || response.status === 401
 
         if (needsAuthRefresh) {
@@ -1170,12 +1170,15 @@ function BusinessProfilePage() {
           if (refreshedToken) {
             authToken = refreshedToken
             response = await callAnalysis(authToken)
+
+            if (!response.ok) {
+              errorText = await response.text()
+            }
           }
         }
 
         if (!response.ok) {
-          const finalErrorText = await response.text()
-          throw new Error(finalErrorText || `HTTP ${response.status}`)
+          throw new Error(errorText || `HTTP ${response.status}`)
         }
       }
 
