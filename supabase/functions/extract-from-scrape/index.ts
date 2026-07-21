@@ -368,6 +368,25 @@ function extractTier2(payload: any): Record<string, FieldResult> {
     .join('\n')
     .toLowerCase();
 
+  const hasAny = (...patterns: Array<string | RegExp>) =>
+    patterns.some((pattern) =>
+      typeof pattern === 'string'
+        ? t.includes(pattern)
+        : pattern.test(t)
+    );
+
+  const detectServicePeriods = () => {
+    const periods = new Set<string>();
+
+    if (hasAny('brunch', 'morgenmad', /breakfast/)) periods.add('breakfast');
+    if (hasAny('frokost', 'lunch', 'midt på dagen', 'dagtid')) periods.add('lunch');
+    if (hasAny('aften', 'middag', 'dinner', 'evening', 'aftensmad')) periods.add('dinner');
+    if (hasAny('bar', 'drikke', 'drikkevarer', 'cocktail', 'wine', 'vin', 'øl', 'beer', 'kaffe', 'coffee')) periods.add('drinks');
+    if (hasAny('særarrangement', 'event', 'arrangement', 'fest', 'selskab', 'party')) periods.add('special_events');
+
+    return Array.from(periods);
+  };
+
   const flag = (key: string, result: boolean, source: string) => {
     r[key] = { value: result, tier: 2, source };
   };
@@ -389,6 +408,29 @@ function extractTier2(payload: any): Record<string, FieldResult> {
     /parkering|parkeringsplads|p-plads|parking/.test(t),
     'keyword: parking signals'
   );
+
+  // has_outdoor_seating — include terrace/patio language as well as udeservering
+  flag('has_outdoor_seating',
+    /udeservering|udendørs\s+servering|terrasse|overdækket\s+terrasse|patio|gårdhave|courtyard|outdoor\s+seating/.test(t),
+    'keyword: outdoor seating signals'
+  );
+
+  // reservation_required — explicit booking / reservation language only
+  flag('reservation_required',
+    /reservation\s*påkrævet|kun\s+reservation|bordreservation\s+påkrævet|reservering\s+nødvendig/.test(t),
+    'keyword: explicit reservation requirement'
+  );
+
+  // accepts_walk_ins — explicit walk-in friendly language only
+  flag('accepts_walk_ins',
+    /walk[-\s]?ins?|drop[-\s]?in|kom\s+bare\s+ind|uden\s+bordreservation|uden\s+booking/.test(t),
+    'keyword: explicit walk-in language'
+  );
+
+  const servicePeriods = detectServicePeriods();
+  if (servicePeriods.length > 0) {
+    r['service_periods'] = { value: servicePeriods, tier: 2, source: 'keyword: homepage service language' };
+  }
 
   return r;
 }
@@ -619,6 +661,7 @@ function buildBusinessOperations(
     kitchen_close_time:   get('kitchen_close_time'),
     smiley_url:           get('smiley_url'),
     weekly_programme:     get('weekly_programme'),
+    service_periods:      get('service_periods'),
   };
 }
 

@@ -380,6 +380,34 @@ export async function extractPageDocument(page) {
       }))
       .filter(block => block.text && block.text.length >= 10);
 
+    const semanticContainerSelector = [
+      'header', 'nav', 'main', 'footer', 'aside', 'address', 'details'
+    ].join(',');
+
+    const semanticBlocks = [...document.querySelectorAll(semanticContainerSelector)]
+      .filter(isVisible)
+      .map(element => ({
+        tag: element.tagName.toLowerCase(),
+        text: clean(element.innerText),
+        id: element.id || null,
+        class_name:
+          typeof element.className === 'string'
+            ? element.className
+            : null,
+        section_heading: getNearestHeading(element),
+        semantic_area: element.tagName.toLowerCase()
+      }))
+      .filter(block => block.text && block.text.length >= 20 && block.text.length <= 4000);
+
+    const dedupedBlocks = [];
+    const blockSeen = new Set();
+    for (const block of [...blocks, ...semanticBlocks]) {
+      const key = `${block.tag}|${block.section_heading || ''}|${block.text}`;
+      if (blockSeen.has(key)) continue;
+      blockSeen.add(key);
+      dedupedBlocks.push(block);
+    }
+
     // ========================================
     // Extract Structured Data (JSON-LD)
     // ========================================
@@ -534,7 +562,7 @@ export async function extractPageDocument(page) {
       lang: document.documentElement?.lang || null,
       meta,
       links,
-      blocks,
+      blocks: dedupedBlocks,
       json_ld_raw: jsonLdRaw,
       opening_hours_structured
     };

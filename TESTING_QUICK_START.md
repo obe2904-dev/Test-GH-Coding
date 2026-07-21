@@ -266,6 +266,7 @@ vercel link
 
 **⚠️ IMPORTANT: Deploy to NEW staging project, not production!**
 
+```bash
 npx supabase functions deploy brand-profile-generator-v5
 ```
 
@@ -317,6 +318,14 @@ npx supabase link --project-ref kvqdkohdpvmdylqgujpn
 OPENAI_API_KEY=sk-...  # Your OpenAI key (same as prod is fine)
 OPENWEATHERMAP_API_KEY=...  # Your weather key (same as prod is fine)
 ```
+
+**Current rollout status:**
+
+- `menu-extract-v2`, `menu-enqueue`, `menu-sync`, and `persist-menu-extraction` are deployed to the active Supabase project.
+- `menu-ocr-worker-v2` is deployed on Cloud Run with the browser/OCR fallback path.
+- `docling-menu-extractor` is deployed on Cloud Run and ready for PDF extraction.
+- Souk smoke test now completes end to end and syncs normalized items.
+- Cafe Faust remains the known-good control path.
 
 **✅ Verify deployment:**
 

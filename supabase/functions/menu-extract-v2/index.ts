@@ -2205,59 +2205,80 @@ serve(async (req: Request) => {
     }
 
     if (isManualTextJob) {
-      await supabaseService
-        .from('menu_results_v2')
-        .update({
-          status: 'processing',
-          claimed_at: new Date().toISOString(),
-          attempts: 1,
-          extraction_method: 'manual_text',
-        })
-        .eq('id', resultId)
-
-      let parsedMenu: any = null
       try {
-        parsedMenu = await parseMenuWithOpenAI(manualText, languageCode)
-      } catch (parseErr) {
-        console.warn('⚠️ OpenAI manual text parsing failed; using heuristic fallback:', parseErr)
+        await supabaseService
+          .from('menu_results_v2')
+          .update({
+            status: 'processing',
+            claimed_at: new Date().toISOString(),
+            attempts: 1,
+            extraction_method: 'manual_text',
+            raw_text: manualText,
+            source_content_type: 'text/plain',
+          })
+          .eq('id', resultId)
+
+        let parsedMenu: any = null
+        try {
+          parsedMenu = await parseMenuWithOpenAI(manualText, languageCode)
+        } catch (parseErr) {
+          console.warn('⚠️ OpenAI manual text parsing failed; using heuristic fallback:', parseErr)
+        }
+
+        const structured = normalizeStructuredMenu(
+          parsedMenu && parsedMenu.categories && parsedMenu.categories.length > 0
+            ? parsedMenu
+            : parseMenuTextHeuristically(manualText, languageCode)
+        )
+
+        if (!structured?.categories || structured.categories.length === 0) {
+          throw new Error('No menu categories extracted from text')
+        }
+
+        const { error: doneError } = await supabaseService
+          .from('menu_results_v2')
+          .update({
+            status: 'done',
+            raw_text: manualText,
+            structured_data: structured,
+            completed_at: new Date().toISOString(),
+            source_content_type: 'text/plain',
+            extraction_method: 'manual_text',
+          })
+          .eq('id', resultId)
+
+        if (doneError) {
+          throw new Error(`Failed to persist manual text extraction: ${doneError.message}`)
+        }
+
+        await syncNormalizedItems()
+
+        console.log('✅ Manual text extraction completed successfully')
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            resultId,
+            message: 'Menu text extracted',
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      } catch (manualTextErr) {
+        console.warn('⚠️ Manual text extraction failed:', manualTextErr)
+        await supabaseService
+          .from('menu_results_v2')
+          .update({
+            status: 'error',
+            error_message: manualTextErr instanceof Error ? manualTextErr.message : String(manualTextErr),
+            completed_at: new Date().toISOString(),
+            source_content_type: 'text/plain',
+            extraction_method: 'manual_text',
+            raw_text: manualText,
+          })
+          .eq('id', resultId)
+
+        throw manualTextErr instanceof Error ? manualTextErr : new Error(String(manualTextErr))
       }
-
-      const structured = normalizeStructuredMenu(
-        parsedMenu && parsedMenu.categories && parsedMenu.categories.length > 0
-          ? parsedMenu
-          : parseMenuTextHeuristically(manualText, languageCode)
-      )
-      if (!structured?.categories || structured.categories.length === 0) {
-        throw new Error('No menu categories extracted from text')
-      }
-
-      const establishmentType = classifyEstablishmentType(structured)
-
-      await supabaseService
-        .from('menu_results_v2')
-        .update({
-          status: 'done',
-          raw_text: manualText,
-          structured_data: structured,
-          establishment_type: establishmentType,
-          completed_at: new Date().toISOString(),
-          source_content_type: 'text/plain',
-          extraction_method: 'manual_text',
-        })
-        .eq('id', resultId)
-
-      await syncNormalizedItems()
-
-      console.log('✅ Manual text extraction completed successfully')
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          resultId,
-          message: 'Menu text extracted',
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
     }
 
     // Validate URL safety BEFORE fetching - protect against SSRF and internal networks

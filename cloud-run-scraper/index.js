@@ -1363,6 +1363,8 @@ function extractContentSections(pageDoc, openingHours = null) {
     if (text.length >= 50) {
       // Check if this section contains opening hours
       const isOpeningHours = /åbningstider|opening hours/i.test(text);
+      const isServiceSection = /frokost|lunch|aften|middag|dinner|brunch|drikkevarer|vin|cocktail|menu|smørrebrød|terrasse|bord|reservation|book|event|særarrangement/i.test(text);
+      const isContactSection = /kontakt|adresse|telefon|email|find vej|map|smiley|findsmiley/i.test(text);
       
       if (isOpeningHours && openingHours?.candidates?.length > 0) {
         // Replace with formatted structured data
@@ -1388,6 +1390,22 @@ function extractContentSections(pageDoc, openingHours = null) {
           text: formattedText,
           source_url: pageDoc.final_url,
           confidence: 0.90
+        });
+      } else if (isServiceSection) {
+        sections.push({
+          type: 'service',
+          heading: heading !== 'unknown' ? heading : null,
+          text,
+          source_url: pageDoc.final_url,
+          confidence: 0.82
+        });
+      } else if (isContactSection) {
+        sections.push({
+          type: 'contact',
+          heading: heading !== 'unknown' ? heading : null,
+          text,
+          source_url: pageDoc.final_url,
+          confidence: 0.82
         });
       } else {
         sections.push({
