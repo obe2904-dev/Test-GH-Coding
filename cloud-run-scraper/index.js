@@ -633,18 +633,19 @@ app.post('/scrape-v3', async (req, res) => {
     const platformInfo = detectPlatform(ssrHtml || await page.content(), homepageDoc);
     const hydrationTimeout = getHydrationTimeout(platformInfo.platform, platformInfo.isSPA);
 
-    // CRITICAL: Only crawl /kontakt/ if phone is missing
-    // Address is now extracted from homepage blocks (Fix 1) - no need to crawl /kontakt/
-    // Avoids Cloud Run network sandbox blocking /kontakt/ page resources
+    // Crawl additional pages when key signals are missing on the homepage.
+    // Hours and kitchen close time are often captured on /om/ or /kontakt/ pages.
     const missingPhone = contact.phones.length === 0;
     const missingAddress = contact.addresses.length === 0;
-    const missingContact = missingPhone; // Address extraction happens from homepage
-    const shouldCrawlMore = shouldContinueCrawling(homepageQuality) || missingContact;
+    const missingHours = !extraction.opening_hours?.candidates?.length;
+    const missingKitchenCloseTime = !extraction.kitchen_close_time;
+    const missingCoreSignals = missingPhone || missingAddress || missingHours || missingKitchenCloseTime;
+    const shouldCrawlMore = shouldContinueCrawling(homepageQuality) || missingCoreSignals;
     
-    console.log(`[V3] Contact check: phones=${contact.phones.length}, addresses=${contact.addresses.length}, missingPhone=${missingPhone}, shouldCrawlMore=${shouldCrawlMore}`);
+    console.log(`[V3] Core signal check: phones=${contact.phones.length}, addresses=${contact.addresses.length}, hours=${missingHours ? 'missing' : 'present'}, kitchenClose=${missingKitchenCloseTime ? 'missing' : 'present'}, shouldCrawlMore=${shouldCrawlMore}`);
     
-    if (missingContact) {
-      console.log(`[V3] Missing phone - forcing page discovery for /kontakt/`);
+    if (missingCoreSignals) {
+      console.log('[V3] Missing core homepage signals - forcing page discovery for essential pages');
     }
     
     const discoveredPages = shouldCrawlMore ? discoverAdditionalPages(homepageDoc, extraction, 6) : [];

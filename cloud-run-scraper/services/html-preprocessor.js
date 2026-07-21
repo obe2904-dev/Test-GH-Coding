@@ -404,13 +404,27 @@ function extractOpeningHours(text) {
  * @returns {string | null}
  */
 function extractKitchenCloseTime(text) {
-  // Patterns: "Køkken lukker 22:00" or "Kitchen closes at 10pm" or "Køkken: 11-22"
+  // Patterns: "Køkken lukker 22:00", "Kitchen closes at 10pm",
+  // "Køkkenet er åbent frem til kl. 21", or "Køkken: 11-22"
   const patterns = [
     /køkken[^.]*?lukker[^.]*?(\d{1,2}[:.\s]?\d{0,2})/i,
     /køkken[^.]*?(\d{1,2}[:.\s]?\d{0,2})[^.]*?lukker/i,
     /kitchen[^.]*?close[^.]*?(\d{1,2}[:.\s]?\d{0,2})/i,
+    /køkken(?:et)?[^.]*?(?:åbent\s+frem\s+til|open\s+until|åben\s+til|frem\s+til)\s*(?:kl\.?\s*)?(\d{1,2}(?:[:.]\d{2})?)/i,
     /køkken[^.]*?:(.*?\d{1,2}[:.\s]?\d{0,2})[^.]{0,30}/i,
   ];
+
+  const normaliseKitchenTime = (raw) => {
+    if (!raw) return raw;
+    const trimmed = raw.trim().replace(/\.$/, '');
+    if (/^\d{1,2}$/.test(trimmed)) {
+      return `${trimmed.padStart(2, '0')}:00`;
+    }
+    if (/^\d{1,2}[.:]\d{2}$/.test(trimmed)) {
+      return trimmed.replace('.', ':').padStart(5, '0');
+    }
+    return trimmed;
+  };
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -418,7 +432,7 @@ function extractKitchenCloseTime(text) {
       // Extract just the time portion
       const timeMatch = match[1].match(/\d{1,2}[:.\s]?\d{0,2}/);
       if (timeMatch) {
-        return timeMatch[0].replace(/\s+/g, '').replace('.', ':').trim();
+        return normaliseKitchenTime(timeMatch[0].replace(/\s+/g, '').replace('.', ':'));
       }
     }
   }

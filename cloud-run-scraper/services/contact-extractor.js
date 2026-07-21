@@ -18,10 +18,13 @@ function extractAddressFromBlocks(pageDoc) {
 
   // Simple pattern that works: Street Number, PostalCode City
   const fullPattern = /([A-ZÆØÅ][a-zæøåA-ZÆØÅ\s]+\s+\d+[A-Za-z]?)[,\s]+(\d{4})\s+([A-ZÆØÅ][a-zæøåA-ZÆØÅ\s]+)/;
+  const stripTrailingNoise = (value) =>
+    value.replace(/\s+(Find vej|Se vejkort|Åbningstider|Tlf|Tel|E-mail|CVR|Map|Maps).*$/i, '').trim();
 
   for (const block of blocks) {
     const text = block.text?.trim() || '';
-    const match = text.match(fullPattern);
+    const cleanedText = stripTrailingNoise(text);
+    const match = cleanedText.match(fullPattern);
     
     if (match) {
       const [, street, postal, city] = match;
@@ -31,7 +34,7 @@ function extractAddressFromBlocks(pageDoc) {
       address = address.replace(/^[A-Z]\s+/, '');
       
       // Clean garbage: trailing contact keywords
-      address = address.replace(/\s+(Tlf|Tel|E-mail|CVR|Se vejkort|Åbningstider).*$/i, '');
+      address = stripTrailingNoise(address);
       
       console.log(`[extractAddress] Found: "${address}"`);
       return {
