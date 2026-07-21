@@ -841,14 +841,17 @@ function parseOpeningHours(candidates: any[]): Array<{weekday: string, open_time
     // Handle both string and object formats
     let candidateStr: string;
     if (typeof candidate === 'object' && candidate !== null) {
-      // Object format: {day: "monday", time: "09.30 - 23.00"}
-      candidateStr = `${candidate.day}: ${candidate.time}`;
+      // Scraper format: {day_text: "Mandag", time_text: "11:30 - 22:00"}
+      // Also accept older fallback shapes used elsewhere in the codebase.
+      const dayValue = candidate.day_text ?? candidate.day ?? candidate.weekday ?? '';
+      const timeValue = candidate.time_text ?? candidate.time ?? candidate.opening_hours ?? '';
+      candidateStr = `${dayValue}: ${timeValue}`;
     } else {
       candidateStr = String(candidate);
     }
     
-    const match = candidateStr.match(/^([a-zæøåä]+)[\s:]+(\d{1,2}[:.]\d{2})\s*[-–—til to]+\s*(\d{1,2}[:.]\d{2})/i);
-    
+    const match = candidateStr.match(/^([a-zæøåä]+)[\s:]+(\d{1,2}(?:[:.]\d{2})?)\s*(?:[-–—]|til|to)\s*(\d{1,2}(?:[:.]\d{2})?)/i);
+
     if (match) {
       const [, day, openTime, closeTime] = match;
       const weekday = weekdayMap[day.toLowerCase()];
