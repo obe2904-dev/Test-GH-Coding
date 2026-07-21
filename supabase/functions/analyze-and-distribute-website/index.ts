@@ -18,7 +18,7 @@ const corsHeaders = {
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const GEMINI_MODEL = 'gemini-2.5-flash';
 const EXTRACTION_PROMPT_VERSION = 'v3-unified';
-const SCRAPER_TIMEOUT_MS = 125_000;
+const SCRAPER_TIMEOUT_MS = 175_000;
 
 interface AnalyzeRequest {
   url: string;

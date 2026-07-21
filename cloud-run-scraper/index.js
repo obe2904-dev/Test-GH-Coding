@@ -426,6 +426,13 @@ app.post('/scrape-v2', async (req, res) => {
 app.post('/scrape-v3', async (req, res) => {
   const startTime = Date.now();
   let browser;
+  const SCRAPE_BUDGET_MS = 150000;
+
+  const remainingBudgetMs = () => Math.max(0, SCRAPE_BUDGET_MS - (Date.now() - startTime));
+  const budgetedTimeout = (preferredMs, minimumMs = 5000) => {
+    const remaining = remainingBudgetMs();
+    return Math.max(minimumMs, Math.min(preferredMs, Math.max(minimumMs, remaining - 5000)));
+  };
 
   try {
     // API key validation
@@ -534,8 +541,8 @@ app.post('/scrape-v3', async (req, res) => {
       // SSR returned a shell — use Puppeteer with full browser rendering
       console.log('[V3] Navigating with Puppeteer (full browser render)...');
       await page.goto(url, {
-        waitUntil: 'networkidle2',
-        timeout:   30000,
+        waitUntil: 'domcontentloaded',
+        timeout:   budgetedTimeout(30000, 15000),
       });
 
       // Wait for meaningful content volume — 500 chars is enough to confirm
@@ -543,7 +550,7 @@ app.post('/scrape-v3', async (req, res) => {
       const hasContent = await page
         .waitForFunction(
           () => document.body?.innerText?.trim().length > 500,
-          { timeout: 12000 }
+          { timeout: budgetedTimeout(12000, 5000) }
         )
         .then(() => true)
         .catch(() => {
@@ -557,7 +564,7 @@ app.post('/scrape-v3', async (req, res) => {
       console.log('[V3] Running browser automation (cookie dismiss, scroll, stability)...');
       await dismissCookieDialog(page);
       await autoScroll(page);
-      await waitForContentStability(page);
+      await waitForContentStability(page, { maxWaitMs: Math.min(4000, Math.max(1500, remainingBudgetMs() - 5000)) });
     }
 
     // Extract page document — same for both SSR and Puppeteer paths
@@ -672,6 +679,11 @@ app.post('/scrape-v3', async (req, res) => {
       console.log(`[V3] Total menu pages queued for async enrichment: ${menuPagesQueued.map(p => new URL(p.url).pathname).join(', ')}`);
     }
 
+    if (remainingBudgetMs() < 15000) {
+      console.log('[V3] Crawl budget nearly exhausted - skipping optional discovery pages');
+      menuPagesQueued = [];
+    }
+
     // ========================================
     // MENU DISCOVERY - Phase 1a: Detection Only
     // ========================================
@@ -684,6 +696,11 @@ app.post('/scrape-v3', async (req, res) => {
       const menuUrlsToDiscover = menuPagesQueued.slice(0, 3);
       
       for (const menuPage of menuUrlsToDiscover) {
+        if (remainingBudgetMs() < 12000) {
+          console.log('[V3] Stopping menu discovery early due to crawl budget');
+          break;
+        }
+
         try {
           // Only discover if it looks like a landing page (not a direct PDF/image link)
           const urlObj = new URL(menuPage.url);
@@ -717,7 +734,7 @@ app.post('/scrape-v3', async (req, res) => {
           // Run discovery on HTML menu pages
           if (isMenuLandingPage(menuPage.url)) {
             console.log(`🔍 Running discovery on landing page: ${urlObj.pathname}`);
-            const discovery = await discoverMenuStructure(browser, menuPage.url, 10000);
+            const discovery = await discoverMenuStructure(browser, menuPage.url, budgetedTimeout(10000, 4000));
             menuDiscoveryResults.push(discovery);
             
             // Log key findings
@@ -751,14 +768,24 @@ app.post('/scrape-v3', async (req, res) => {
 
     // Crawl ONLY essential pages (contact + about) - skip menu pages
     if (essentialPages.length > 0) {
+      if (remainingBudgetMs() < 12000) {
+        console.log('[V3] Crawl budget nearly exhausted - skipping essential page crawl');
+      } else {
       console.log(`[V3] Crawling ${essentialPages.length} essential page(s): ${essentialPages.map(p => `${new URL(p.url).pathname} (${p.type})`).join(', ')}`);
 
       const additionalExtractions = [extraction];
 
       for (const pageInfo of essentialPages) {
+        if (remainingBudgetMs() < 10000) {
+          console.log('[V3] Stopping essential page crawl early due to crawl budget');
+          break;
+        }
+
         try {
           // Use adaptive timeout based on page type
-          const pageTimeout = pageInfo.type === 'contact' ? 12000 : 10000;
+          const pageTimeout = pageInfo.type === 'contact'
+            ? budgetedTimeout(12000, 5000)
+            : budgetedTimeout(10000, 5000);
           
           const pageDoc = await scrapePage(page, pageInfo.url, pageTimeout);
           const pageNormalizedLinks = normalizeLinks(pageDoc.links);
@@ -803,6 +830,7 @@ app.post('/scrape-v3', async (req, res) => {
       extraction.quality = finalQuality;
 
       console.log(`[V3] Final quality after merge: ${finalQuality.rating} (fields: ${finalQuality.fields_found}/${finalQuality.fields_expected})`);
+      }
     } else {
       console.log(`[V3] Homepage quality sufficient (${homepageQuality.rating}), skipping additional pages.`);
     }

@@ -15,7 +15,7 @@ if [ -z "$API_KEY" ]; then
 fi
 
 echo "Building Docker image..."
-docker build -t ${IMAGE_NAME} .
+docker buildx build --platform linux/amd64 -t ${IMAGE_NAME} --load .
 
 echo "Pushing to Container Registry..."
 docker push ${IMAGE_NAME}
@@ -29,7 +29,7 @@ gcloud run deploy ${SERVICE_NAME} \
   --set-env-vars API_KEY="${API_KEY}" \
   --memory 2Gi \
   --cpu 1 \
-  --timeout 30s \
+  --timeout 180s \
   --project ${PROJECT_ID}
 
 echo ""
