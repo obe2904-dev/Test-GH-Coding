@@ -4,17 +4,22 @@ import time
 import hashlib
 import logging
 import traceback
+import io
+import re
 import requests
 from typing import Optional, Dict, Any
 from datetime import datetime
+from PIL import Image
 
 from config import (
     supabase,
     FETCH_TIMEOUT_SECONDS,
     MAX_LLM_CHARS,
     STALE_JOB_MINUTES,
+    OPENAI_API_KEY,
     GPT52_VISION_ENABLED,
     GPT52_MODEL,
+    TESSERACT_ZOOM,
 )
 from utils.helpers import utc_now_iso, looks_like_pdf
 from utils.text_processing import (
@@ -23,6 +28,7 @@ from utils.text_processing import (
     clean_html_text_for_llm,
     html_to_text,
     find_pdf_links,
+    tesseract_lang_for,
 )
 from utils.corrections import apply_ocr_corrections
 from utils.storage import (
@@ -30,8 +36,12 @@ from utils.storage import (
     storage_upload_public,
     storage_upload_public_with_mime_fallback,
 )
-from extractors.pdf_extractor import extract_text_staged
-from extractors.vision_extractor import extract_with_vision
+from extractors.pdf_extractor import extract_text_staged, extract_text_with_tesseract
+from extractors.vision_extractor import (
+    extract_with_vision,
+    parse_menu_from_images_with_vision,
+    render_pdf_pages_to_pngs,
+)
 from extractors.browser_extractor import extract_with_browser, is_html_empty_or_minimal
 from parsers.menu_parser import parse_menu_with_llm, validate_structured_menu
 
@@ -44,6 +54,7 @@ class MenuOCRWorker:
     def __init__(self):
         self._last_stale_requeue_at = 0.0
         self._last_vision_error: Optional[str] = None
+        self.last_result: Optional[Dict[str, Any]] = None
 
     def _vision_error_is_auth(self) -> bool:
         """Check if last vision error was authentication-related."""
@@ -167,9 +178,105 @@ class MenuOCRWorker:
         content_type = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
         return resp.content, content_type
 
+    def _normalize_uheadless_url(self, url: str) -> str:
+        try:
+            from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+
+            parsed = urlparse(url)
+            query_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            width = int(query_params.get('w') or '0')
+            if 0 < width < 3200:
+                query_params['w'] = '3200'
+            return urlunparse(parsed._replace(query=urlencode(query_params, doseq=True)))
+        except Exception:
+            return url
+
+    def _extract_uheadless_image_urls(self, html: str) -> list[str]:
+        matches = re.findall(r'https:\/\/media\.uheadless\.com\/[^"\'\s>]+\.(?:jpg|jpeg|png|webp|pdf)[^"\'\s>]*', html, flags=re.IGNORECASE)
+        if not matches:
+            return []
+
+        def _score(url: str) -> int:
+            lower = url.lower()
+            score = 0
+            if 'menu' in lower:
+                score += 6
+            if 'souk' in lower:
+                score += 6
+            if 'frokost' in lower or 'lunch' in lower:
+                score += 4
+            if 'aften' in lower or 'dinner' in lower:
+                score += 4
+            if 'drink' in lower or 'drik' in lower:
+                score += 2
+            if '.pdf' in lower:
+                score += 5
+            if '/souk-' in lower:
+                score += 3
+            return score
+
+        normalized_urls = []
+        seen = set()
+        for match in matches:
+            normalized = self._normalize_uheadless_url(match).replace('&amp;', '&')
+            if '/media/' not in normalized:
+                continue
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            normalized_urls.append(normalized)
+
+        return sorted(normalized_urls, key=lambda value: (-_score(value), value))
+
+    def _fetch_and_prepare_uheadless_text(self, image_urls: list[str], language_code: str, limit: int = 3) -> list[str]:
+        prepared_texts: list[str] = []
+        for image_url in image_urls[:limit]:
+            try:
+                response = requests.get(image_url, timeout=FETCH_TIMEOUT_SECONDS, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; MenuBot/1.0)"
+                })
+                response.raise_for_status()
+
+                image_bytes = response.content
+                content_type = (response.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+                if image_url.lower().split('?')[0].endswith('.pdf') or content_type == 'application/pdf':
+                    try:
+                        pdf_text, _ = extract_text_with_tesseract(
+                            image_bytes,
+                            language_code,
+                            max_pages=2,
+                            zoom=TESSERACT_ZOOM,
+                        )
+                        pdf_text = (pdf_text or '').strip()
+                        if pdf_text:
+                            prepared_texts.append(pdf_text)
+                        continue
+                    except Exception as pdf_error:
+                        logger.warning("PDF OCR failed for %s: %s", image_url, pdf_error)
+                        continue
+
+                try:
+                    img = Image.open(io.BytesIO(image_bytes))
+                    if img.mode not in ('RGB', 'L'):
+                        img = img.convert('RGB')
+                    if img.width > 1600:
+                        new_height = int(img.height * 1600 / img.width)
+                        img = img.resize((1600, new_height))
+                    text = pytesseract.image_to_string(img, lang=tesseract_lang_for(language_code))
+                    text = (text or '').strip()
+                    if text:
+                        prepared_texts.append(text)
+                except Exception as conversion_error:
+                    logger.warning("Image OCR failed for %s: %s", image_url, conversion_error)
+            except Exception as image_error:
+                logger.warning("Failed to fetch UHeadless image %s: %s", image_url, image_error)
+
+        return prepared_texts
+
     def process_job(self, job: Dict[str, Any]) -> bool:
         """Process a single menu extraction job."""
         try:
+            self.last_result = None
             result_id = job.get('id')
             business_id = job.get('business_id')
             pdf_url = job.get('source_url') or job.get('pdf_url')
@@ -208,36 +315,47 @@ class MenuOCRWorker:
 
             # SHA deduplication: if identical content was already successfully extracted,
             # reuse the result instead of re-running expensive LLM calls.
-            try:
-                dedup_resp = (
-                    supabase
-                    .table('menu_results_v2')
-                    .select('id, structured_data, raw_text, extraction_method')
-                    .eq('sha256', source_sha)
-                    .eq('status', 'done')
-                    .neq('id', result_id)
-                    .limit(1)
-                    .execute()
-                )
-                dedup_rows = getattr(dedup_resp, 'data', None) or []
-                if dedup_rows:
-                    prior = dedup_rows[0]
-                    prior_method = prior.get('extraction_method') or 'unknown'
-                    logger.info(f"SHA dedup hit — reusing prior extraction (sha={source_sha[:12]}…, method={prior_method})")
-                    supabase.table('menu_results_v2').update({
-                        'status': 'done',
-                        'raw_text': prior.get('raw_text'),
-                        'structured_data': prior.get('structured_data'),
-                        'extraction_method': prior_method + '+dedup',
-                        'sha256': source_sha,
-                        'completed_at': utc_now_iso(),
-                        'source_url': pdf_url,
-                        'source_content_type': content_type,
-                        'language_code': language_code,
-                    }).eq('id', result_id).execute()
-                    return True
-            except Exception as _dedup_err:
-                logger.warning(f"SHA dedup check failed (will re-extract): {_dedup_err}")
+            if supabase:
+                try:
+                    dedup_resp = (
+                        supabase
+                        .table('menu_results_v2')
+                        .select('id, structured_data, raw_text, extraction_method')
+                        .eq('sha256', source_sha)
+                        .eq('status', 'done')
+                        .neq('id', result_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    dedup_rows = getattr(dedup_resp, 'data', None) or []
+                    if dedup_rows:
+                        prior = dedup_rows[0]
+                        prior_method = prior.get('extraction_method') or 'unknown'
+                        logger.info(f"SHA dedup hit — reusing prior extraction (sha={source_sha[:12]}…, method={prior_method})")
+                        supabase.table('menu_results_v2').update({
+                            'status': 'done',
+                            'raw_text': prior.get('raw_text'),
+                            'structured_data': prior.get('structured_data'),
+                            'extraction_method': prior_method + '+dedup',
+                            'sha256': source_sha,
+                            'completed_at': utc_now_iso(),
+                            'source_url': pdf_url,
+                            'source_content_type': content_type,
+                            'language_code': language_code,
+                        }).eq('id', result_id).execute()
+                        self.last_result = {
+                            'result_id': result_id,
+                            'business_id': business_id,
+                            'source_url': pdf_url,
+                            'language_code': language_code,
+                            'raw_text': prior.get('raw_text'),
+                            'structured_data': prior.get('structured_data'),
+                            'extraction_method': prior_method + '+dedup',
+                            'sha256': source_sha,
+                        }
+                        return True
+                except Exception as _dedup_err:
+                    logger.warning(f"SHA dedup check failed (will re-extract): {_dedup_err}")
 
             structured_data = None
             raw_text = None
@@ -246,7 +364,7 @@ class MenuOCRWorker:
             if is_pdf:
                 if not pdf_path:
                     storage_path = f"{business_id}/menu/{source_sha}.pdf"
-                    public_url = storage_upload_public("business-documents", storage_path, content_bytes, content_type="application/pdf")
+                    public_url = storage_upload_public("business-documents", storage_path, content_bytes, content_type="application/pdf") if supabase else pdf_url
                     pdf_bucket = "business-documents"
                     pdf_path = storage_path
                 else:
@@ -311,7 +429,7 @@ class MenuOCRWorker:
                       '.png' if content_type == 'image/png' else \
                       '.webp' if content_type == 'image/webp' else '.jpg'
                 storage_path = f"{business_id}/menu/{source_sha}{ext}"
-                public_url = storage_upload_public("business-documents", storage_path, content_bytes, content_type=content_type or "image/jpeg")
+                public_url = storage_upload_public("business-documents", storage_path, content_bytes, content_type=content_type or "image/jpeg") if supabase else pdf_url
                 pdf_bucket = "business-documents"
                 pdf_path = storage_path
                 
@@ -320,8 +438,6 @@ class MenuOCRWorker:
                     # Create a simple wrapper to use the vision extractor with raw image bytes
                     # The vision extractor expects PNG bytes in a list
                     logger.info("🔍 Using GPT vision for image extraction")
-                    from extractors.vision_extractor import parse_menu_from_images_with_vision
-                    
                     # Convert image to PNG if needed (vision model works best with PNG)
                     try:
                         from PIL import Image
@@ -406,6 +522,7 @@ class MenuOCRWorker:
                     try:
                         rendered_html, rendered_text = extract_with_browser(pdf_url, timeout_ms=30000)
                         html = rendered_html
+                        raw_text = rendered_text.strip() if rendered_text else None
                         logger.info(f"✅ Browser rendering successful: {len(html)} chars HTML")
                         metrics = {
                             'total_pages': 1,
@@ -424,11 +541,31 @@ class MenuOCRWorker:
                     content_bytes,
                     primary_content_type="text/html",
                     fallback_content_type="application/pdf",
-                )
+                ) if supabase else pdf_url
                 pdf_bucket = "business-documents"
                 pdf_path = snapshot_path
 
-                raw_text = html_to_text(html)
+                # Souk-style pages use UHeadless menu boards embedded as images.
+                # Offload those to the Cloud Run vision pipeline instead of trying
+                # to parse the page text on the edge.
+                if 'media.uheadless.com' in html.lower() and ('souk' in html.lower() or 'b-pdf' in html.lower()):
+                    uheadless_image_urls = self._extract_uheadless_image_urls(html)
+                    if uheadless_image_urls:
+                        logger.info("🖼️ UHeadless image-board fallback (%d images)", len(uheadless_image_urls))
+                        uheadless_texts = self._fetch_and_prepare_uheadless_text(uheadless_image_urls, language_code)
+
+                        if uheadless_texts:
+                            raw_text = "\n\n".join(text.strip() for text in uheadless_texts if text.strip())
+                            metrics = {
+                                'total_pages': len(uheadless_texts),
+                                'char_count': len(raw_text),
+                                'method': 'uheadless_pdf_ocr',
+                            }
+                        else:
+                            logger.warning("UHeadless OCR did not yield any text")
+
+                if raw_text is None:
+                    raw_text = html_to_text(html)
                 
                 # Only set metrics if not already set by browser extraction
                 if 'metrics' not in locals():
@@ -445,7 +582,7 @@ class MenuOCRWorker:
             else:
                 llm_text = compress_text_for_llm(raw_text, max_chars=MAX_LLM_CHARS)
 
-            if structured_data is None:
+            if structured_data is None and OPENAI_API_KEY:
                 structured_data = parse_menu_with_llm(llm_text, language_code, model="gpt-4o-mini")
                 # NOTE: gpt-4o text retry removed — if mini can't parse clean text, gpt-4o won't either;
                 # the bottleneck is input quality, not model capability. Vision fallback below handles hard cases.
@@ -472,36 +609,53 @@ class MenuOCRWorker:
             processing_time_ms = int((time.time() - start_time) * 1000)
 
             # Persist to business_documents
-            try:
-                file_name = f"{source_sha}.pdf" if is_pdf else f"{source_sha}.html"
-                supabase.table('business_documents').upsert({
-                    'business_id': business_id,
-                    'document_type': 'menu',
-                    'file_name': file_name,
-                    'storage_path': pdf_path,
-                    'public_url': public_url,
-                    'extracted_text': raw_text,
-                    'extracted_json': structured_data,
-                    'file_size': len(content_bytes),
-                    'updated_at': datetime.utcnow().isoformat() + 'Z',
-                }, on_conflict='storage_path').execute()
-            except Exception as e:
-                logger.error(f"Failed to upsert business_documents: {str(e)}")
+            if supabase:
+                try:
+                    file_name = f"{source_sha}.pdf" if is_pdf else f"{source_sha}.html"
+                    supabase.table('business_documents').upsert({
+                        'business_id': business_id,
+                        'document_type': 'menu',
+                        'file_name': file_name,
+                        'storage_path': pdf_path,
+                        'public_url': public_url,
+                        'extracted_text': raw_text,
+                        'extracted_json': structured_data,
+                        'file_size': len(content_bytes),
+                        'updated_at': datetime.utcnow().isoformat() + 'Z',
+                    }, on_conflict='storage_path').execute()
+                except Exception as e:
+                    logger.error(f"Failed to upsert business_documents: {str(e)}")
 
             # Update job status
-            supabase.table('menu_results_v2').update({
-                'status': 'done',
+            self.last_result = {
+                'result_id': result_id,
+                'business_id': business_id,
+                'source_url': pdf_url,
+                'source_content_type': content_type,
+                'language_code': language_code,
                 'raw_text': raw_text,
                 'structured_data': structured_data,
                 'extraction_method': metrics.get('method', None),
                 'sha256': source_sha,
-                'completed_at': datetime.utcnow().isoformat() + 'Z',
                 'storage_bucket': pdf_bucket,
                 'storage_path': pdf_path,
-                'source_url': pdf_url,
-                'source_content_type': content_type,
-                'language_code': language_code,
-            }).eq('id', result_id).execute()
+                'completed_at': datetime.utcnow().isoformat() + 'Z',
+                'status': 'done',
+            }
+            if supabase:
+                supabase.table('menu_results_v2').update({
+                    'status': 'done',
+                    'raw_text': raw_text,
+                    'structured_data': structured_data,
+                    'extraction_method': metrics.get('method', None),
+                    'sha256': source_sha,
+                    'completed_at': datetime.utcnow().isoformat() + 'Z',
+                    'storage_bucket': pdf_bucket,
+                    'storage_path': pdf_path,
+                    'source_url': pdf_url,
+                    'source_content_type': content_type,
+                    'language_code': language_code,
+                }).eq('id', result_id).execute()
 
             logger.info(f"✅ Job {result_id} completed in {processing_time_ms}ms")
             return True
@@ -509,7 +663,7 @@ class MenuOCRWorker:
         except Exception as e:
             logger.error(f"Error processing job: {str(e)}\n{traceback.format_exc()}")
 
-            if 'result_id' in locals():
+            if 'result_id' in locals() and supabase:
                 update_payload: Dict[str, Any] = {
                     'status': 'error',
                     'error_message': str(e),

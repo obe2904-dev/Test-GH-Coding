@@ -2,6 +2,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 // @ts-ignore - Deno ESM import
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
+import { normalizeMenuUrl } from '../_shared/menu-url.ts'
 
 // @ts-ignore - Deno global
 declare const Deno: any
@@ -19,6 +20,62 @@ function decodeHtmlUrl(url: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
+}
+
+async function getAuthenticatedUser(req: Request) {
+  const authHeader = req.headers.get('Authorization')
+  if (!authHeader) {
+    return { error: new Response(
+      JSON.stringify({ success: false, error: 'Missing authorization header', errorCode: 'unauthorized' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    ) }
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } },
+  })
+
+  const token = authHeader.replace('Bearer ', '')
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token)
+  if (authError || !user) {
+    return { error: new Response(
+      JSON.stringify({ success: false, error: 'Unauthorized', errorCode: 'unauthorized' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    ) }
+  }
+
+  return { user }
+}
+
+async function userHasBusinessAccess(supabase: any, businessId: string, userId: string): Promise<boolean> {
+  const { data: ownedBusiness, error: ownedError } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('id', businessId)
+    .eq('owner_id', userId)
+    .maybeSingle()
+
+  if (ownedError) {
+    throw new Error('Failed to verify business ownership')
+  }
+
+  if (ownedBusiness) return true
+
+  const { data: teamRow, error: teamError } = await supabase
+    .from('business_team_members')
+    .select('id')
+    .eq('business_id', businessId)
+    .eq('user_id', userId)
+    .not('accepted_at', 'is', null)
+    .maybeSingle()
+
+  if (teamError) {
+    throw new Error('Failed to verify business access')
+  }
+
+  return Boolean(teamRow)
 }
 
 function base64ToBytes(b64: string): Uint8Array {
@@ -190,19 +247,25 @@ serve(async (req: Request) => {
   try {
     // Parse request body
     const { businessId, sourceId, sourceUrl, languageCode } = await req.json()
-    const cleanSourceUrl = typeof sourceUrl === 'string' ? decodeHtmlUrl(sourceUrl).trim() : ''
+    const cleanSourceUrl = typeof sourceUrl === 'string' ? normalizeMenuUrl(sourceUrl) : ''
 
     if (!businessId || !cleanSourceUrl) {
       return new Response(
         JSON.stringify({
           success: false,
           error: 'Missing required fields: businessId, sourceUrl',
+          errorCode: 'missing_business_id',
         }),
         {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       )
+    }
+
+    const authResult = await getAuthenticatedUser(req)
+    if ('error' in authResult) {
+      return authResult.error
     }
 
     // Create Supabase client with service role key (bypasses RLS)
@@ -247,6 +310,21 @@ serve(async (req: Request) => {
         }),
         {
           status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      )
+    }
+
+    const hasAccess = await userHasBusinessAccess(supabase, businessId, authResult.user.id)
+    if (!hasAccess) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Forbidden: no access to business',
+          errorCode: 'forbidden',
+        }),
+        {
+          status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         }
       )

@@ -73,6 +73,33 @@ def run_once():
     }), 200
 
 
+@app.route('/process-job', methods=['POST'])
+def process_job():
+    """Process a specific job payload directly instead of claiming from the queue."""
+    if not _authorized_worker_trigger(request):
+        return jsonify({"error": "unauthorized"}), 401
+
+    global worker_instance
+    if not worker_instance:
+        try:
+            worker_instance = MenuOCRWorker()
+        except Exception as e:
+            return jsonify({"error": f"failed_to_init_worker: {str(e)}"}), 500
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_payload"}), 400
+    if not payload.get('id') or not payload.get('business_id'):
+        return jsonify({"error": "missing_job_fields"}), 400
+
+    ok = worker_instance.process_job(payload)
+    return jsonify({
+        "processed": bool(ok),
+        "job_id": payload.get('id'),
+        "result": worker_instance.last_result,
+    }), 200
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint."""

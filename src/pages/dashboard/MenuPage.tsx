@@ -50,6 +50,7 @@ interface MenuCard {
 
 const TIME_HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'))
 const TIME_MINUTE_OPTIONS = ['00', '15', '30', '45']
+const JOB_WAIT_TIMEOUT_MS = 5 * 60 * 1000
 
 function splitTimeValue(value: string) {
   const [hour = '', minute = ''] = value.split(':')
@@ -347,6 +348,23 @@ function MenuPage() {
       })
 
       setMenuCards(cards)
+      setActiveExtractions(prev => {
+        const extractingIds = new Set(
+          cards
+            .filter(card => card.status === 'extracting')
+            .map(card => card.id)
+        )
+
+        if (extractingIds.size === 0) {
+          return prev.size === 0 ? prev : new Set()
+        }
+
+        if (extractingIds.size === prev.size && [...extractingIds].every(id => prev.has(id))) {
+          return prev
+        }
+
+        return extractingIds
+      })
       
       // Merge DB sources into detectedUrls — preserve any detected-but-not-yet-added URLs
       const dbUrlSet = new Set(sources.map((s: any) => s.source_url))
@@ -386,12 +404,6 @@ function MenuPage() {
         normalizedUrl = `https://${normalizedUrl}`
       }
 
-      console.log('🔍 Attempting to detect menus:', {
-        originalUrl: websiteUrl,
-        normalizedUrl,
-        businessId
-      })
-
       const endpoint = import.meta.env.VITE_SUPABASE_FUNCTION_DETECT_MENUS as string
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -429,23 +441,12 @@ function MenuPage() {
       // Deduplicate URLs from API response (in case same URL appears multiple times)
       const uniqueDetectedUrls = [...new Set(detectedUrls)]
       
-      if (uniqueDetectedUrls.length < detectedUrls.length) {
-        console.log(`⚠️ Removed ${detectedUrls.length - uniqueDetectedUrls.length} duplicate URL(s) from API response`)
-      }
-
-      // Get existing menu sources to show which are already fetched
-      console.log('🔍 Checking existing menus...')
-      
       const { data: existingSources } = await supabase
         .from('menu_sources')
         .select('source_url, status')
         .eq('business_id', businessId)
       
       const existingUrls = new Set((existingSources || []).map((s: any) => s.source_url))
-      
-      console.log(`📊 Found ${uniqueDetectedUrls.length} unique menu URLs`)
-      console.log(`   - ${existingUrls.size} already in database`)
-      console.log(`   - ${uniqueDetectedUrls.length - existingUrls.size} are new`)
 
       // Merge newly detected URLs with existing state
       // uniqueDetectedUrls here is the deduplicated API response (array of URL strings)
@@ -462,7 +463,6 @@ function MenuPage() {
           }))
         
         if (newUrlsOnly.length > 0) {
-          console.log('✅ Merging URLs. Current:', currentUrls.length, 'New:', newUrlsOnly.length)
           // Pre-select only newly detected URLs
           setSelectedUrls(new Set(newUrlsOnly.map((item: { url: string }) => item.url)))
           setError(null)
@@ -473,7 +473,6 @@ function MenuPage() {
           if (existingDetected.length > 0) {
             setSelectedUrls(new Set(existingDetected))
             setError(null)
-            console.log('ℹ️ All detected URLs already loaded — pre-selected for re-extraction')
           } else {
             setError(t('menu.noLinksFound'))
           }
@@ -491,31 +490,32 @@ function MenuPage() {
   const handleExtractMenu = async (cardId: string, sourceUrl: string) => {
     if (!businessId) return
 
-    // Check if already in queue or extracting
-    if (activeExtractions.has(cardId) || extractionQueue.some(item => item.cardId === cardId)) {
-      console.log(`⏭️ Menu already queued or extracting: ${cardId}`)
-      return
-    }
-
     // Check if this URL already has a completed extraction
     const existingCard = menuCards.find(c => c.id === cardId)
     if (existingCard?.status === 'extracted') {
-      console.log(`✅ Menu already extracted: ${sourceUrl}`)
       return
     }
 
     // Add to queue instead of extracting immediately
-    console.log(`📥 Adding to extraction queue: ${sourceUrl}`)
     setExtractionQueue(prev => [...prev, { cardId, sourceUrl }])
   }
 
   // Internal extraction function (called by queue processor)
-  // SIMPLIFIED: Creates queued job for Cloud Run worker
+  // Creates a persisted enqueue record and then waits for status updates
   const extractMenuInternal = async (cardId: string, sourceUrl: string) => {
     if (!businessId) return
 
     // Track this extraction as active
     setActiveExtractions(prev => new Set(prev).add(cardId))
+
+    let subscription: { unsubscribe: () => void } | null = null
+    let waitTimeout: ReturnType<typeof setTimeout> | null = null
+    const clearWaitTimeout = () => {
+      if (waitTimeout) {
+        clearTimeout(waitTimeout)
+        waitTimeout = null
+      }
+    }
 
     try {
       // Update menu_sources to extracting status
@@ -528,7 +528,8 @@ function MenuPage() {
         prev.map(c => c.id === cardId ? { ...c, status: 'extracting', error_message: undefined } : c)
       )
 
-      // Check for existing active jobs for this source
+      let resultId: string
+
       const { data: existingJobs } = await supabase
         .from('menu_results_v2')
         .select('id, status')
@@ -536,132 +537,72 @@ function MenuPage() {
         .in('status', ['queued', 'processing'])
         .limit(1)
 
-      let resultId: string
-
+      // Remove stale queued/processing rows so retries can start cleanly.
       if (existingJobs && existingJobs.length > 0) {
-        // Reuse existing queued/processing job
-        resultId = existingJobs[0].id
-        console.log(`📋 Reusing existing job: ${resultId}`)
-      } else {
-        // Call the production extractor directly so selected menu URLs use the same
-        // PDF/image handling path as the working extraction pipeline.
-        const extractUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/menu-extract-v2`
-        
-        const { data: session } = await supabase.auth.getSession()
-        if (!session?.session?.access_token) {
-          throw new Error('Not authenticated')
-        }
-
-        const extractPayload = {
-          businessId,
-          sourceId: cardId,
-          sourceUrl,
-          languageCode: 'da',
-        }
-        console.log(`📤 Calling extractor endpoint`, extractPayload)
-        
-        const extractResponse = await fetch(extractUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.session.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
-          },
-          body: JSON.stringify(extractPayload),
-        })
-
-        console.log(`📨 Extract response status: ${extractResponse.status}`)
-        
-        if (!extractResponse.ok) {
-          const errorText = await extractResponse.text()
-          console.error(`❌ Extract failed:`, errorText)
-          throw new Error(`Failed to start extraction: ${extractResponse.status} ${errorText}`)
-        }
-
-        const extractData = await extractResponse.json()
-        console.log(`📦 Extract response data:`, extractData)
-        
-        if (!extractData.success || !extractData.resultId) {
-          console.error(`❌ Extract returned invalid response:`, extractData)
-          throw new Error(extractData.error || 'Extractor returned success=false or missing resultId')
-        }
-
-        resultId = extractData.resultId
-        console.log(`📥 Created extraction job: ${resultId} (businessId: ${businessId}, sourceId: ${cardId})`)
-        
-        // Verify the job exists in database
-        const { data: verifiedJob, error: verifyError } = await supabase
+        await supabase
           .from('menu_results_v2')
-          .select('id, status')
-          .eq('id', resultId)
-          .maybeSingle()
+          .delete()
+          .eq('source_id', cardId)
+          .in('status', ['queued', 'processing'])
+      }
 
-        if (verifyError) {
-          console.error(`⚠️ Could not verify job ${resultId}:`, verifyError)
-        } else if (!verifiedJob) {
-          throw new Error(`Backend returned resultId ${resultId}, but no menu_results_v2 row exists`)
-        } else {
-          console.log(`✅ Verified job ${resultId} exists with status ${verifiedJob.status}`)
-        }
+      // Call the extractor directly so selected menu URLs use the same
+      // URL/PDF/image handling path as the working extraction pipeline.
+      const extractUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/menu-extract-v2`
+      
+      const { data: session } = await supabase.auth.getSession()
+      if (!session?.session?.access_token) {
+        throw new Error('Not authenticated')
+      }
 
-        if (verifiedJob?.status === 'done' || verifiedJob?.status === 'completed') {
-          await supabase
-            .from('menu_sources')
-            .update({ status: 'extracted' })
-            .eq('id', cardId)
+      const normalizedUrl = isPdfUrl(sourceUrl) ? normalizePdfUrl(sourceUrl) : normalizeMenuUrl(sourceUrl)
+      const extractPayload = {
+        businessId,
+        sourceId: cardId,
+        sourceUrl: normalizedUrl,
+        languageCode: 'da',
+      }
+      const extractResponse = await fetch(extractUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.session.access_token}`,
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY as string,
+        },
+        body: JSON.stringify(extractPayload),
+      })
+      const extractData = await extractResponse.json().catch(() => null)
 
-          if (operationsUpdateTimeoutRef.current) {
-            clearTimeout(operationsUpdateTimeoutRef.current)
-          }
-          operationsUpdateTimeoutRef.current = setTimeout(() => {
-            updateOperationsPricing().catch(err =>
-              console.error('Error updating operations pricing:', err)
-            )
-          }, 2000)
+      if (!extractResponse.ok) {
+        throw new Error(extractData?.error || `Failed to start extraction: ${extractResponse.status}`)
+      }
 
-          setActiveExtractions(prev => {
-            const next = new Set(prev)
-            next.delete(cardId)
-            return next
-          })
+      if (!extractData?.success || typeof extractData.resultId !== 'string' || !extractData.resultId) {
+        console.error(`❌ Extract returned invalid response:`, extractData)
+        throw new Error(extractData?.error || 'Extractor returned success=false or missing resultId')
+      }
 
-          await loadMenuCards(businessId)
-          return
-        }
+      resultId = extractData.resultId
+      
+      // Verify the job exists in database
+      const { data: verifiedJob, error: verifyError } = await supabase
+        .from('menu_results_v2')
+        .select('id, status, error_message')
+        .eq('id', resultId)
+        .maybeSingle()
 
-        if (verifiedJob?.status === 'error' || verifiedJob?.status === 'failed') {
-          await supabase
-            .from('menu_sources')
-            .update({
-              status: 'error',
-              error_message: verifiedJob.error_message || 'Extraction failed',
-            })
-            .eq('id', cardId)
+      if (verifyError) {
+        throw new Error(`Could not verify extraction job: ${verifyError.message}`)
+      } else if (!verifiedJob) {
+        throw new Error(`Backend returned resultId ${resultId}, but no menu_results_v2 row exists`)
+      }
 
-          setMenuCards(prev =>
-            prev.map(c =>
-              c.id === cardId
-                ? {
-                    ...c,
-                    status: 'error',
-                    error_message: verifiedJob.error_message || 'Extraction failed',
-                  }
-                : c
-            )
-          )
-
-          setActiveExtractions(prev => {
-            const next = new Set(prev)
-            next.delete(cardId)
-            return next
-          })
-
-          return
-        }
+      if (verifiedJob?.status === 'error' || verifiedJob?.status === 'failed') {
+        throw new Error(verifiedJob.error_message || 'Extraction failed')
       }
 
       // Subscribe to job status changes
-      const subscription = supabase
+      subscription = supabase
         .channel(`menu_result_${resultId}`)
         .on(
           'postgres_changes',
@@ -693,7 +634,8 @@ function MenuPage() {
               }, 2000)
 
               // Cleanup
-              subscription.unsubscribe()
+              clearWaitTimeout()
+              subscription?.unsubscribe()
               setActiveExtractions(prev => {
                 const next = new Set(prev)
                 next.delete(cardId)
@@ -724,7 +666,8 @@ function MenuPage() {
               )
 
               // Cleanup
-              subscription.unsubscribe()
+              clearWaitTimeout()
+              subscription?.unsubscribe()
               setActiveExtractions(prev => {
                 const next = new Set(prev)
                 next.delete(cardId)
@@ -735,12 +678,54 @@ function MenuPage() {
         )
         .subscribe()
 
+      waitTimeout = setTimeout(() => {
+        void (async () => {
+          try {
+            await supabase
+              .from('menu_sources')
+              .update({
+                status: 'error',
+                error_message: 'Extraction timed out while waiting for completion',
+              })
+              .eq('id', cardId)
+
+            setMenuCards(prev =>
+              prev.map(c =>
+                c.id === cardId
+                  ? {
+                      ...c,
+                      status: 'error',
+                      error_message: 'Extraction timed out while waiting for completion',
+                    }
+                  : c
+              )
+            )
+
+            setActiveExtractions(prev => {
+              const next = new Set(prev)
+              next.delete(cardId)
+              return next
+            })
+
+            subscription?.unsubscribe()
+            await loadMenuCards(businessId)
+          } catch (timeoutError) {
+            console.error('Error handling extraction timeout:', timeoutError)
+          } finally {
+            clearWaitTimeout()
+          }
+        })()
+      }, JOB_WAIT_TIMEOUT_MS)
+
       // Store subscription for cleanup
       // Note: In a production app, you'd want to track these subscriptions
       // and clean them up when the component unmounts
 
     } catch (error) {
       console.error('Error creating extraction job:', error)
+
+      clearWaitTimeout()
+      subscription?.unsubscribe()
 
       // Remove from active extractions
       setActiveExtractions(prev => {
@@ -878,8 +863,6 @@ function MenuPage() {
         throw upsertError
       }
 
-      console.log(`✅ Auto-updated Operations from ${allPrices.length} food items: ${Math.round(averagePrice)} DKK, ${priceLevel}, kids menu: ${hasKidsMenu}`)
-      console.log(`ℹ️ Note: Drink menus (cocktails, wine, beer) are extracted separately but not included in pricing`)
     } catch (error) {
       console.error('Error updating operations pricing:', error)
     }
@@ -897,6 +880,8 @@ function MenuPage() {
       if (!url.startsWith('http://') && !url.startsWith('https://')) {
         url = `https://${url}`
       }
+
+      const normalizedUrl = isPdfUrl(url) ? normalizePdfUrl(url) : normalizeMenuUrl(url)
 
       // Basic URL validation
       try {
@@ -928,6 +913,7 @@ function MenuPage() {
         .insert({
           business_id: businessId,
           source_url: url,
+          normalized_url: normalizedUrl,
           source_type: 'url',
           source_origin: 'manual_added',
           status: 'pending',

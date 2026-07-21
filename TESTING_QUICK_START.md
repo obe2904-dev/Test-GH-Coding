@@ -266,6 +266,19 @@ vercel link
 
 **⚠️ IMPORTANT: Deploy to NEW staging project, not production!**
 
+npx supabase functions deploy brand-profile-generator-v5
+```
+
+**Set the safe-rollout menu extraction secrets in staging only:**
+
+```bash
+# Enable broader routing only for one test business at first
+npx supabase secrets set MENU_EXTRACT_BROADENED_ROUTING_ENABLED=true
+npx supabase secrets set MENU_EXTRACT_BROADENED_ROUTING_TEST_ONLY=true
+npx supabase secrets set MENU_EXTRACT_BROADENED_ROUTING_BUSINESS_IDS=YOUR_TEST_BUSINESS_ID
+```
+
+Keep `MENU_EXTRACT_BROADENED_ROUTING_TEST_ONLY=true` until you have confirmed the broader crawler does not regress existing working menus.
 ```bash
 # Link to NEW staging Supabase project
 npx supabase link --project-ref YOUR_NEW_STAGING_REF

@@ -3,14 +3,25 @@ Docling Menu Extraction Service
 Cloud Run service for extracting menu information from PDF documents using Docling
 """
 
+import os
+from pathlib import Path
+
+# Make Hugging Face auth available before Docling resolves its models.
+HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+if HF_TOKEN:
+    os.environ.setdefault("HF_TOKEN", HF_TOKEN)
+    os.environ.setdefault("HUGGINGFACE_HUB_TOKEN", HF_TOKEN)
+
+HF_HOME = os.environ.get("HF_HOME") or "/tmp/hf"
+os.environ.setdefault("HF_HOME", HF_HOME)
+os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(Path(HF_HOME) / "hub"))
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, List, Dict, Any
 import httpx
 import tempfile
-import os
-from pathlib import Path
 
 from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
 from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -18,6 +29,11 @@ from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 
 app = FastAPI(title="Docling Menu Extraction Service")
+
+if not HF_TOKEN:
+    print("⚠️ HF_TOKEN/HUGGINGFACE_HUB_TOKEN is not configured; Docling may rate limit when resolving models.")
+else:
+    print("✅ Hugging Face token detected for Docling model resolution.")
 
 # Configure Docling with optimized settings for menu extraction
 pipeline_options = PdfPipelineOptions()

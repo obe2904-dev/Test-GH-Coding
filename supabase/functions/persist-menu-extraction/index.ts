@@ -7,6 +7,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { normalizeStructuredMenu } from '../_shared/menu-structure-normalizer.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -108,6 +109,7 @@ serve(async (req) => {
       return 'error';
     };
 
+    const normalizedMenu = result.menu ? normalizeStructuredMenu(result.menu) : undefined;
     const successfulAttempt = result.attempts?.find((a: any) => a.status === 'success');
 
     // 1. Insert into menu_results_v2
@@ -116,9 +118,9 @@ serve(async (req) => {
       source_id: context.sourceId,
       source_kind: 'url',
       source_url: context.sourceUrl,
-      structured_data: result.menu || undefined,
-      ai_summary: result.menu ? generateMenuSummary(result.menu) : undefined,
-      service_periods: result.menu ? extractServicePeriods(result.menu) : [],
+      structured_data: normalizedMenu,
+      ai_summary: normalizedMenu ? generateMenuSummary(normalizedMenu) : undefined,
+      service_periods: normalizedMenu ? extractServicePeriods(normalizedMenu) : [],
       status: mapStatusToDb(result.status),
       platform_detected: context.artifacts?.platformMetadata?.platform,
       provider_detected: undefined,
@@ -151,8 +153,8 @@ serve(async (req) => {
     console.log(`✅ Inserted menu result: ${menuResultId}`);
 
     // 2. Insert normalized items if extraction succeeded
-    if (result.menu && (result.status === 'done' || result.status === 'partial')) {
-      const items = flattenMenuToItems(result.menu, menuResultId);
+    if (normalizedMenu && (result.status === 'done' || result.status === 'partial')) {
+      const items = flattenMenuToItems(normalizedMenu, menuResultId);
       
       if (items.length > 0) {
         const itemRows = items.map((item: any) => ({
@@ -184,7 +186,7 @@ serve(async (req) => {
       JSON.stringify({ 
         success: true, 
         menuResultId,
-        itemCount: result.menu?.categories?.reduce((sum: number, c: any) => sum + c.items.length, 0) || 0
+        itemCount: normalizedMenu?.categories?.reduce((sum: number, c: any) => sum + c.items.length, 0) || 0
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

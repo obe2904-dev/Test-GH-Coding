@@ -115,6 +115,8 @@ Deno.serve(async (req) => {
     // =====================================================
     let totalSynced = 0
     let totalItems = 0
+    let lastInsertError: string | null = null
+    let lastPreparedItems = 0
 
     for (const menuResult of menuResults) {
       try {
@@ -209,27 +211,35 @@ Deno.serve(async (req) => {
               dish_temp_category: dishTempCategory,
               seasonal_ingredients: seasonalIngredients,
               location_tags: locationTags,
-              category_availability_days: category.availabilityDays || null,
-              category_time_range: category.timeRange || null,
               source_sha256: menuResult.sha256,
               synced_at: new Date().toISOString()
             })
           }
         }
 
+        // De-duplicate rows before insert so OCR noise doesn't collapse the whole batch.
+        const uniqueItemsMap = new Map<string, any>()
+        for (const item of itemsToInsert) {
+          const key = `${item.menu_result_id}::${item.item_name}::${item.category_name}`
+          if (!uniqueItemsMap.has(key)) uniqueItemsMap.set(key, item)
+        }
+        const uniqueItemsToInsert = Array.from(uniqueItemsMap.values())
+        lastPreparedItems = uniqueItemsToInsert.length
+
         // Insert items
-        if (itemsToInsert.length > 0) {
+        if (uniqueItemsToInsert.length > 0) {
           const { error: insertError } = await supabase
             .from('menu_items_normalized')
-            .insert(itemsToInsert)
+            .upsert(uniqueItemsToInsert, { onConflict: 'menu_result_id,item_name,category_name' })
 
           if (insertError) {
+            lastInsertError = insertError.message
             console.error(`[MenuSync] Failed to insert items for menu ${menuResult.id}:`, insertError)
             continue
           }
 
-          console.log(`[MenuSync] Synced ${itemsToInsert.length} items from menu ${menuResult.id}`)
-          totalItems += itemsToInsert.length
+          console.log(`[MenuSync] Synced ${uniqueItemsToInsert.length} items from menu ${menuResult.id}`)
+          totalItems += uniqueItemsToInsert.length
           totalSynced++
         }
 
@@ -247,7 +257,9 @@ Deno.serve(async (req) => {
       success: true,
       menusProcessed: menuResults.length,
       menusSynced: totalSynced,
-      totalItems: totalItems
+      totalItems: totalItems,
+      lastPreparedItems,
+      lastInsertError,
     }), {
       headers: { 'Content-Type': 'application/json' },
     })

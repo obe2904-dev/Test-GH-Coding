@@ -5,6 +5,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 import { parseMenuPeriods } from '../_shared/menuPeriodParser.ts'
 import { validatePublicUrl, looksLikeLoginPage } from '../_shared/url-security.ts'
 import { normalizeProgrammeName } from '../_shared/content-planning/service-period-detector.ts'
+import { normalizeStructuredMenu } from '../_shared/menu-structure-normalizer.ts'
 
 // @ts-ignore - Deno global
 declare const Deno: any
@@ -19,6 +20,21 @@ const FETCH_TIMEOUT_MS = 12_000
 const MAX_HTML_BYTES = 1_200_000
 const MAX_EDGE_LLM_CHARS = 60_000
 const MAX_PDF_BYTES = 5_000_000 // 5 MB — fast path PDFs only; larger files fall back to Cloud Run
+
+const BROADENED_ROUTING_ENABLED = (Deno.env.get('MENU_EXTRACT_BROADENED_ROUTING_ENABLED') ?? '').trim().toLowerCase() === 'true'
+const BROADENED_ROUTING_TEST_ONLY = (Deno.env.get('MENU_EXTRACT_BROADENED_ROUTING_TEST_ONLY') ?? '').trim().toLowerCase() === 'true'
+const BROADENED_ROUTING_BUSINESS_IDS = (Deno.env.get('MENU_EXTRACT_BROADENED_ROUTING_BUSINESS_IDS') ?? '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean)
+
+function isBroadenedRoutingEnabledForBusiness(businessId: string): boolean {
+  if (!BROADENED_ROUTING_ENABLED) return false
+  if (BROADENED_ROUTING_TEST_ONLY) {
+    return BROADENED_ROUTING_BUSINESS_IDS.includes(businessId)
+  }
+  return true
+}
 
 function _stripContentType(ct: string | null): string {
   if (!ct) return ''
@@ -233,6 +249,11 @@ function looksLikeImage(bytes: Uint8Array): boolean {
   }
 
   return false
+}
+
+function looksLikeHtmlDocument(text: string): boolean {
+  const sample = text.slice(0, 4096)
+  return /<\s*(?:!doctype\s+html|html|head|body|main|article|section|div|script|template|meta|link)\b/i.test(sample)
 }
 
 /**
@@ -484,6 +505,160 @@ function extractJsGalleryMenuItems(html: string): string | null {
   return `JS GALLERY MENU ITEMS (extracted from filter widget):\n${lines.join('\n')}${catList}\n\n`
 }
 
+async function fetchUHeadlessMenuPdfUrls(html: string, pageUrl: string): Promise<string[]> {
+  const endpointMatch = html.match(/https:\/\/api\.uheadless\.com\/api\/url\/([^?]+)\?token=([0-9a-f-]+)(?:&depth=(\d+))?/i)
+  if (!endpointMatch) return []
+
+  const endpointPath = endpointMatch[1]
+  const token = endpointMatch[2]
+  const depth = endpointMatch[3] || '5'
+  const endpoint = `https://api.uheadless.com/api/url/${endpointPath}?token=${token}&depth=${depth}`
+  try {
+    const response = await fetchWithTimeout(endpoint, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    }, FETCH_TIMEOUT_MS)
+
+    if (!response.ok) return []
+
+    const data = await response.json().catch(() => null)
+    if (!data) return []
+
+    const pdfUrls = new Set<string>()
+    const baseUrl = new URL(endpoint)
+
+    const visit = (node: any) => {
+      if (!node || typeof node !== 'object') return
+      if (Array.isArray(node)) {
+        for (const item of node) visit(item)
+        return
+      }
+
+      if (node.contentTypeAlias === 'repeatableMenucard' && node.properties?.menucardMedia) {
+        const menuType = String(node.properties?.type || '').toLowerCase()
+        const mediaList = Array.isArray(node.properties.menucardMedia) ? node.properties.menucardMedia : []
+        for (const media of mediaList) {
+          const fileSrc = media?.properties?.umbracoFile?.src
+          const ext = String(media?.properties?.umbracoExtension || '').toLowerCase()
+          if (!fileSrc || ext !== 'pdf') continue
+
+          const absoluteUrl = new URL(fileSrc, baseUrl.origin).toString()
+          // Prefer the main menu PDF, but keep drinks as a fallback if no menu PDF exists.
+          if (menuType.includes('menu') || !menuType.includes('drikke')) {
+            pdfUrls.add(absoluteUrl)
+          } else if (pdfUrls.size === 0) {
+            pdfUrls.add(absoluteUrl)
+          }
+        }
+      }
+
+      for (const value of Object.values(node)) visit(value)
+    }
+
+    visit(data)
+    return Array.from(pdfUrls)
+  } catch (error) {
+    console.warn('⚠️ UHeadless PDF fallback failed:', error)
+    return []
+  }
+}
+
+function scoreUHeadlessMenuImageUrl(url: string): number {
+  const lower = decodeHtmlUrl(url).toLowerCase()
+  let score = 0
+
+  if (lower.includes('menu')) score += 6
+  if (lower.includes('souk')) score += 6
+  if (lower.includes('frokost') || lower.includes('lunch')) score += 4
+  if (lower.includes('aften') || lower.includes('dinner')) score += 4
+  if (lower.includes('drik') || lower.includes('drink')) score += 2
+  if (/\/souk[-_]/.test(lower)) score += 3
+  if (lower.includes('.pdf')) score += 5
+  if (/\.(jpg|jpeg|png|webp)(\?|$)/.test(lower)) score += 1
+
+  return score
+}
+
+function normalizeUHeadlessPreviewUrl(url: string): string {
+  try {
+    const normalizedUrl = new URL(decodeHtmlUrl(url))
+    const currentWidth = Number(normalizedUrl.searchParams.get('w') || '0')
+
+    if (!Number.isNaN(currentWidth) && currentWidth > 0 && currentWidth < 3200) {
+      normalizedUrl.searchParams.set('w', '3200')
+    }
+
+    return normalizedUrl.toString()
+  } catch {
+    return decodeHtmlUrl(url)
+  }
+}
+
+function fetchUHeadlessMenuImageUrls(html: string): string[] {
+  const imageMatches = html.match(/https:\/\/media\.uheadless\.com\/[^"'\s>]+\.(?:jpg|jpeg|png|webp|pdf)[^"'\s>]*/gi)
+  if (!imageMatches) return []
+
+  const urls = new Set<string>()
+  for (const match of imageMatches) {
+    const normalized = normalizeUHeadlessPreviewUrl(match).replace(/&amp;/g, '&')
+    if (!normalized.includes('/media/')) continue
+    urls.add(normalized)
+  }
+
+  return Array.from(urls).sort((left, right) => {
+    const scoreDiff = scoreUHeadlessMenuImageUrl(right) - scoreUHeadlessMenuImageUrl(left)
+    if (scoreDiff !== 0) return scoreDiff
+    return left.localeCompare(right)
+  })
+}
+
+function extractCandidateMenuAssetUrls(html: string, pageUrl: string): string[] {
+  const assetMatches = html.match(/https?:\/\/[^"'\s>]+\.(?:pdf|jpg|jpeg|png|webp)(?:\?[^"'\s>]*)?/gi) ?? []
+  const hrefMatches = Array.from(html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi))
+  const srcMatches = Array.from(html.matchAll(/<(?:img|source|iframe|embed|object)[^>]+(?:src|data)=["']([^"']+)["'][^>]*>/gi))
+
+  const candidateUrls = new Set<string>()
+  const baseUrl = (() => {
+    try {
+      return new URL(pageUrl)
+    } catch {
+      return null
+    }
+  })()
+
+  const addUrl = (raw: string, scoreHint = 0) => {
+    try {
+      const resolved = new URL(raw, baseUrl || pageUrl).toString().replace(/&amp;/g, '&')
+      candidateUrls.add(resolved)
+    } catch {
+      const fallback = raw.replace(/&amp;/g, '&')
+      if (fallback) candidateUrls.add(fallback)
+    }
+  }
+
+  for (const match of assetMatches) addUrl(match)
+  for (const [, href, text = ''] of hrefMatches) {
+    const lower = `${href} ${text}`.toLowerCase()
+    if (!/(menu|menukort|food|drinks?|dinner|lunch|brunch|takeaway|cocktail|wine|beer|pdf|jpg|jpeg|png|webp)/.test(lower)) continue
+    addUrl(href)
+  }
+  for (const match of srcMatches) addUrl(match[1])
+
+  const scored = Array.from(candidateUrls).map((url) => {
+    const lower = url.toLowerCase()
+    let score = 0
+    if (lower.includes('menu') || lower.includes('menukort')) score += 6
+    if (lower.includes('food') || lower.includes('drink') || lower.includes('dinner') || lower.includes('lunch') || lower.includes('brunch')) score += 3
+    if (lower.endsWith('.pdf')) score += 5
+    if (/(jpg|jpeg|png|webp)(\?|$)/.test(lower)) score += 2
+    return { url, score }
+  })
+
+  return scored
+    .sort((left, right) => right.score - left.score || left.url.localeCompare(right.url))
+    .map((entry) => entry.url)
+}
+
 function htmlToText(html: string): string {
   // Preserve some structure before stripping tags.
   let s = html
@@ -630,6 +805,49 @@ async function triggerMenuWorkerOnce(): Promise<void> {
     })
   } catch (e) {
     console.warn('⚠️ Failed to trigger worker /run-once:', e)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function triggerMenuWorkerDirect(job: Record<string, unknown>): Promise<any | null> {
+  const baseUrl = (Deno.env.get('MENU_OCR_WORKER_URL') ?? '').trim()
+  if (!baseUrl) return null
+
+  const token = (Deno.env.get('MENU_OCR_WORKER_TOKEN') ?? '').trim()
+  const saJsonOrB64 = (Deno.env.get('MENU_OCR_WORKER_GCP_SA_JSON') ?? '').trim()
+  const audience = (Deno.env.get('MENU_OCR_WORKER_GCP_AUDIENCE') ?? baseUrl).trim().replace(/\/$/, '')
+  const url = `${baseUrl.replace(/\/$/, '')}/process-job`
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['x-worker-token'] = token
+
+  if (saJsonOrB64) {
+    try {
+      const idToken = await mintGoogleIdToken({
+        serviceAccountJson: saJsonOrB64,
+        audience,
+      })
+      headers['Authorization'] = `Bearer ${idToken}`
+    } catch (e) {
+      console.warn('⚠️ Failed to mint Google ID token for direct worker trigger:', e)
+    }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 4500)
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(job),
+      signal: controller.signal,
+    })
+    if (!response.ok) return null
+    return await response.json().catch(() => null)
+  } catch (e) {
+    console.warn('⚠️ Failed to trigger worker /process-job:', e)
+    return null
   } finally {
     clearTimeout(timeout)
   }
@@ -1428,6 +1646,20 @@ async function userHasBusinessAccess(
   return Boolean(teamRow)
 }
 
+function isServiceRoleJwt(token: string): boolean {
+  try {
+    const payloadPart = token.split('.')[1]
+    if (!payloadPart) return false
+
+    const normalizedPayload = payloadPart.replace(/-/g, '+').replace(/_/g, '/')
+    const paddedPayload = normalizedPayload.padEnd(Math.ceil(normalizedPayload.length / 4) * 4, '=')
+    const payload = JSON.parse(atob(paddedPayload))
+    return payload?.role === 'service_role'
+  } catch {
+    return false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // generateMenuSummary — generates a 5-bullet helicopter summary via GPT-4o-mini
 // Called once at extraction time; result stored in menu_results_v2.ai_summary
@@ -1554,6 +1786,116 @@ Describe culinary character.`
   } catch (err) {
     console.error('Menu summary generation error:', err)
     return null
+  }
+}
+
+function parseMenuTextHeuristically(extractedText: string, languageCode: string): any {
+  const lines = String(extractedText || '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => line !== '|' && line !== '&' && line !== '+' && line !== '•')
+
+  const isPriceOnly = (line: string): boolean => /^(?:[€$£]\s*)?\d{1,4}(?:[.,]\d{1,2})?\s*(?:kr|kroner|dkk|eur|usd|gbp)?\s*[-,]?\s*$/i.test(line)
+  const extractInlinePrice = (line: string): { name: string; price: number | null } => {
+    const match = line.match(/^(.*?)(?:\s+)(\d{1,4}(?:[.,]\d{1,2})?)\s*(kr|kroner|dkk|eur|usd|gbp)?\s*[-,]?\s*$/i)
+    if (!match) return { name: line, price: null }
+    const price = Number(match[2].replace(',', '.'))
+    return { name: match[1].trim(), price: Number.isFinite(price) ? price : null }
+  }
+  const isHeading = (line: string): boolean => {
+    if (line.length > 60) return false
+    if (isPriceOnly(line)) return false
+    if (/[:.?]$/.test(line)) return false
+    const letters = (line.match(/[A-Za-zÆØÅæøå]/g) || []).length
+    if (letters < 3) return false
+    const upper = (line.match(/[A-ZÆØÅ]/g) || []).length
+    return upper / letters > 0.55 && /\b[A-ZÆØÅ0-9][A-ZÆØÅ0-9&+/'’().,-]*(?:\s+[A-ZÆØÅ0-9&+/'’().,-]+){0,5}\b/.test(line)
+  }
+
+  const categories: Array<{ name: string; items: Array<{ name: string; description: string | null; price: number | null; currency?: string | null }> }> = []
+  let menuTitle: string | null = null
+  let currentCategory: { name: string; items: Array<{ name: string; description: string | null; price: number | null; currency?: string | null }> } | null = null
+  let pendingItem: { name: string; description: string[]; price: number | null } | null = null
+
+  const flushPending = (priceOverride?: number | null) => {
+    if (!currentCategory || !pendingItem || !pendingItem.name) return
+    const price = typeof priceOverride === 'number' ? priceOverride : pendingItem.price
+    currentCategory.items.push({
+      name: pendingItem.name.trim(),
+      description: pendingItem.description.join(' ').trim() || null,
+      price: typeof price === 'number' && Number.isFinite(price) ? price : null,
+      currency: typeof price === 'number' && Number.isFinite(price) ? 'DKK' : null,
+    })
+    pendingItem = null
+  }
+
+  const startCategory = (name: string) => {
+    if (!name) return
+    flushPending()
+    currentCategory = { name, items: [] }
+    categories.push(currentCategory)
+  }
+
+  for (const line of lines) {
+    if (!menuTitle && isHeading(line) && line.split(' ').length <= 5) {
+      menuTitle = line.replace(/\s+/g, ' ').trim()
+      continue
+    }
+
+    if (isHeading(line)) {
+      const heading = line.replace(/\s+/g, ' ').trim()
+      if (!currentCategory || currentCategory.name !== heading) {
+        startCategory(heading)
+      }
+      continue
+    }
+
+    if (!currentCategory) {
+      startCategory('Menu')
+    }
+
+    if (isPriceOnly(line)) {
+      const value = Number(line.replace(/[^0-9.,]/g, '').replace(',', '.').replace(/\.$/, ''))
+      if (pendingItem && pendingItem.name) {
+        pendingItem.price = Number.isFinite(value) ? value : null
+        flushPending(pendingItem.price)
+      }
+      continue
+    }
+
+    const { name, price } = extractInlinePrice(line)
+    const looksLikeItemStart = price !== null || /[a-zæøå]/.test(line) || line.split(' ').length <= 8
+
+    if (looksLikeItemStart) {
+      if (pendingItem && pendingItem.name) {
+        flushPending()
+      }
+      pendingItem = { name, description: [], price }
+      if (price !== null) {
+        flushPending(price)
+      }
+      continue
+    }
+
+    if (pendingItem) {
+      pendingItem.description.push(line)
+    }
+  }
+
+  flushPending()
+
+  if (!categories.length) {
+    categories.push({
+      name: 'Menu',
+      items: lines.slice(0, 50).map((line) => ({ name: line, description: null, price: null, currency: null })),
+    })
+  }
+
+  return {
+    menuTitle: menuTitle || categories[0]?.name || 'Menu',
+    summary: menuTitle || categories[0]?.name || 'Menu',
+    categories,
   }
 }
 
@@ -1731,28 +2073,59 @@ serve(async (req: Request) => {
     )
 
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-    if (authError || !user) throw new Error('Unauthorized')
+    const isServiceRoleInvocation = token === supabaseServiceRoleKey || isServiceRoleJwt(token)
+    if (authError || !user) {
+      if (!isServiceRoleInvocation) {
+        throw new Error('Unauthorized')
+      }
+    }
 
     const supabaseService = createClient(supabaseUrl, supabaseServiceRoleKey)
 
+    const syncNormalizedItems = async () => {
+      const { error } = await supabaseService.rpc('sync_menu_items_normalized', {
+        p_business_id: businessId,
+        p_menu_result_id: resultId,
+      })
+
+      if (error) {
+        console.warn('⚠️ Failed to sync menu_items_normalized:', error.message)
+        return
+      }
+
+      console.log(`✅ Synced normalized menu items for result ${resultId}`)
+    }
+
     const body = await req.json()
     const businessId = body?.businessId
-    const url = typeof body?.url === 'string' ? decodeHtmlUrl(body.url).trim() : ''
+    const rawUrl = typeof body?.url === 'string'
+      ? body.url
+      : typeof body?.sourceUrl === 'string'
+        ? body.sourceUrl
+        : typeof body?.source_url === 'string'
+          ? body.source_url
+          : ''
+    const url = rawUrl ? decodeHtmlUrl(rawUrl).trim() : ''
+    const manualText = typeof body?.text === 'string' ? body.text.trim() : ''
     const sourceId = body?.sourceId // menu_sources.id - for tracking which source this extraction belongs to
     const languageCode = normalizeLanguageCode(body?.languageCode)
+    const sourceType = typeof body?.sourceType === 'string' ? body.sourceType : ''
+    const isManualTextJob = sourceType === 'manual_text' || (!url && manualText.length > 0)
 
     if (typeof businessId !== 'string' || !businessId) throw new Error('Missing businessId')
-    if (typeof url !== 'string' || !url) throw new Error('Missing url')
+    if (!url && !manualText) throw new Error('Missing url or text')
 
-    const hasAccess = await userHasBusinessAccess(supabase, businessId, user.id)
-    if (!hasAccess) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Forbidden: no access to business',
-        }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    if (!isServiceRoleInvocation) {
+      const hasAccess = await userHasBusinessAccess(supabase, businessId, user.id)
+      if (!hasAccess) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Forbidden: no access to business',
+          }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     // Create job row first so frontend can subscribe to updates.
@@ -1760,8 +2133,11 @@ serve(async (req: Request) => {
       .from('menu_results_v2')
       .insert({
         business_id: businessId,
-        source_kind: 'url',
-        source_url: url,
+        source_kind: isManualTextJob ? 'storage' : 'url',
+        source_url: isManualTextJob ? null : url,
+        storage_bucket: isManualTextJob ? 'manual_text' : null,
+        storage_path: isManualTextJob ? `manual_text/${businessId}/${Date.now()}.txt` : null,
+        source_content_type: isManualTextJob ? 'text/plain' : null,
         source_id: sourceId, // Link back to menu_sources for safe deletion/retry
         status: 'queued',
         language_code: languageCode,
@@ -1775,6 +2151,114 @@ serve(async (req: Request) => {
     }
 
     const resultId = resultData.id as string
+    const broadenedRoutingEnabled = isBroadenedRoutingEnabledForBusiness(businessId)
+
+    if (broadenedRoutingEnabled && !isManualTextJob) {
+      const delegated = await triggerMenuWorkerDirect({
+        id: resultId,
+        business_id: businessId,
+        source_url: url,
+        language_code: languageCode,
+      })
+
+      if (delegated) {
+        const delegatedResult = (delegated as any)?.result ?? delegated
+        if (delegatedResult?.raw_text && !delegatedResult?.structured_data) {
+          try {
+            const parsedStructured = normalizeStructuredMenu(
+              await parseMenuWithOpenAI(String(delegatedResult.raw_text), languageCode)
+            )
+
+            if (parsedStructured?.categories?.length) {
+              const { error: delegatedUpdateError } = await supabaseService
+                .from('menu_results_v2')
+                .update({
+                  structured_data: parsedStructured,
+                  raw_text: delegatedResult.raw_text,
+                  extraction_method: `${delegatedResult.extraction_method || 'cloud_run_worker'}+edge_llm`,
+                  status: 'done',
+                  completed_at: new Date().toISOString(),
+                })
+                .eq('id', resultId)
+
+              if (delegatedUpdateError) {
+                console.warn('⚠️ Failed to persist delegated worker parse:', delegatedUpdateError.message)
+              } else {
+                await syncNormalizedItems()
+              }
+            }
+          } catch (postProcessErr) {
+            console.warn('⚠️ Failed to post-process delegated worker result:', postProcessErr)
+          }
+        }
+
+        console.log('✅ Delegated broadened menu extraction to Cloud Run worker')
+        return new Response(
+          JSON.stringify({
+            success: true,
+            resultId,
+            message: 'Menu extraction delegated to Cloud Run worker',
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    if (isManualTextJob) {
+      await supabaseService
+        .from('menu_results_v2')
+        .update({
+          status: 'processing',
+          claimed_at: new Date().toISOString(),
+          attempts: 1,
+          extraction_method: 'manual_text',
+        })
+        .eq('id', resultId)
+
+      let parsedMenu: any = null
+      try {
+        parsedMenu = await parseMenuWithOpenAI(manualText, languageCode)
+      } catch (parseErr) {
+        console.warn('⚠️ OpenAI manual text parsing failed; using heuristic fallback:', parseErr)
+      }
+
+      const structured = normalizeStructuredMenu(
+        parsedMenu && parsedMenu.categories && parsedMenu.categories.length > 0
+          ? parsedMenu
+          : parseMenuTextHeuristically(manualText, languageCode)
+      )
+      if (!structured?.categories || structured.categories.length === 0) {
+        throw new Error('No menu categories extracted from text')
+      }
+
+      const establishmentType = classifyEstablishmentType(structured)
+
+      await supabaseService
+        .from('menu_results_v2')
+        .update({
+          status: 'done',
+          raw_text: manualText,
+          structured_data: structured,
+          establishment_type: establishmentType,
+          completed_at: new Date().toISOString(),
+          source_content_type: 'text/plain',
+          extraction_method: 'manual_text',
+        })
+        .eq('id', resultId)
+
+      await syncNormalizedItems()
+
+      console.log('✅ Manual text extraction completed successfully')
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          resultId,
+          message: 'Menu text extracted',
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     // Validate URL safety BEFORE fetching - protect against SSRF and internal networks
     try {
@@ -1891,7 +2375,7 @@ serve(async (req: Request) => {
           console.log(`📝 Extracted ${extractedText.length} characters, parsing menu...`)
 
           // Parse the extracted text with OpenAI
-          const menuStructure = await parseMenuWithOpenAI(extractedText, languageCode)
+          const menuStructure = normalizeStructuredMenu(await parseMenuWithOpenAI(extractedText, languageCode))
           
           // Classify establishment type
           const establishmentType = classifyEstablishmentType(menuStructure)
@@ -1971,7 +2455,7 @@ serve(async (req: Request) => {
               })
               .eq('id', resultId)
 
-            const structured = await parsePdfMenuWithDocling(url, languageCode)
+            const structured = normalizeStructuredMenu(await parsePdfMenuWithDocling(url, languageCode))
 
             // Fetch business opening hours (same as HTML fast path)
             const { data: businessData } = await supabaseService
@@ -2126,6 +2610,7 @@ serve(async (req: Request) => {
               console.error('❌ Failed to update menu_results_v2 to done (PDF):', updateError)
               throw new Error(`Failed to mark extraction as done: ${updateError.message}`)
             }
+            await syncNormalizedItems()
             console.log('✅ Menu extraction marked as done (PDF)')
 
             // Generate and store AI summary (non-blocking)
@@ -2197,7 +2682,7 @@ serve(async (req: Request) => {
             })
             .eq('id', resultId)
 
-          const structured = await parsePdfMenuWithDocling(url, languageCode)
+          const structured = normalizeStructuredMenu(await parsePdfMenuWithDocling(url, languageCode))
 
           // Fetch business opening hours
           const { data: businessData } = await supabaseService
@@ -2216,6 +2701,8 @@ serve(async (req: Request) => {
               if (hours[day]?.close) allClose.push(hours[day].close)
             }
             if (allOpen.length > 0 && allClose.length > 0) {
+
+          await syncNormalizedItems()
               allOpen.sort(); allClose.sort()
               businessHours = { open: allOpen[0], close: allClose[allClose.length - 1] }
               console.log(`🏢 Business hours: ${businessHours.open}-${businessHours.close}`)
@@ -2461,9 +2948,13 @@ serve(async (req: Request) => {
           )
         }
         
-        if (htmlCt.includes('html')) {
-          const htmlBytes = await readAtMostBytes(htmlResp, MAX_HTML_BYTES)
-          const html = new TextDecoder('utf-8').decode(htmlBytes)
+        const htmlBytes = await readAtMostBytes(htmlResp, MAX_HTML_BYTES)
+        const html = new TextDecoder('utf-8').decode(htmlBytes)
+        const bodyLooksHtml = looksLikeHtmlDocument(html)
+
+        // Some menu sites return HTML bodies with misleading or missing content types.
+        // Only broaden routing for allowlisted businesses so the default path stays unchanged.
+        if (htmlCt.includes('html') || htmlCt.includes('text/') || htmlCt.includes('xml') || htmlCt.includes('json') || (broadenedRoutingEnabled && bodyLooksHtml)) {
           
           // Detect login/authentication pages - prevent extracting password forms
           if (looksLikeLoginPage(html, url)) {
@@ -2511,11 +3002,161 @@ serve(async (req: Request) => {
             })
             .eq('id', resultId)
 
+          if (broadenedRoutingEnabled) {
+            const delegated = await triggerMenuWorkerDirect({
+              id: resultId,
+              business_id: businessId,
+              source_url: url,
+              language_code: languageCode,
+            })
+
+            if (delegated) {
+              const delegatedResult = (delegated as any)?.result ?? delegated
+              if (delegatedResult?.raw_text && !delegatedResult?.structured_data) {
+                try {
+                  const parsedStructured = normalizeStructuredMenu(
+                    await parseMenuWithOpenAI(String(delegatedResult.raw_text), languageCode)
+                  )
+
+                  if (parsedStructured?.categories?.length) {
+                    const { error: delegatedUpdateError } = await supabaseService
+                      .from('menu_results_v2')
+                      .update({
+                        structured_data: parsedStructured,
+                        raw_text: delegatedResult.raw_text,
+                        extraction_method: `${delegatedResult.extraction_method || 'cloud_run_worker'}+edge_llm`,
+                        status: 'done',
+                        completed_at: new Date().toISOString(),
+                      })
+                      .eq('id', resultId)
+
+                    if (delegatedUpdateError) {
+                      console.warn('⚠️ Failed to persist delegated worker parse:', delegatedUpdateError.message)
+                    } else {
+                      await syncNormalizedItems()
+                    }
+                  }
+                } catch (postProcessErr) {
+                  console.warn('⚠️ Failed to post-process delegated worker result:', postProcessErr)
+                }
+              }
+
+              console.log('✅ Delegated broadened HTML menu extraction to Cloud Run worker')
+              return new Response(
+                JSON.stringify({
+                  success: true,
+                  resultId,
+                  message: 'Menu extraction delegated to Cloud Run worker',
+                }),
+                { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+              )
+            }
+          }
+
           try {
-            const structured = await parseMenuWithOpenAI(llmText, languageCode)
+            const structured = normalizeStructuredMenu(await parseMenuWithOpenAI(llmText, languageCode))
             
             // Validate that we actually got menu data
             if (!structured?.categories || structured.categories.length === 0) {
+              const genericAssetUrls = broadenedRoutingEnabled ? extractCandidateMenuAssetUrls(html, url) : []
+              const genericPdfUrls = genericAssetUrls.filter((candidateUrl) => candidateUrl.toLowerCase().split('?')[0].endsWith('.pdf'))
+              const genericImageUrls = genericAssetUrls.filter((candidateUrl) => /\.(jpg|jpeg|png|webp)(\?|$)/i.test(candidateUrl))
+
+              if (broadenedRoutingEnabled && (genericPdfUrls.length > 0 || genericImageUrls.length > 0)) {
+                console.log(`🔎 Generic asset fallback found ${genericPdfUrls.length} PDF(s) and ${genericImageUrls.length} image(s)`)
+              }
+
+              const pdfUrls = genericPdfUrls.length > 0 ? genericPdfUrls : await fetchUHeadlessMenuPdfUrls(html, url)
+              if (pdfUrls.length > 0) {
+                console.log(`🔁 Falling back to PDF(s): ${pdfUrls.join(', ')}`)
+
+                const pdfSources: any[] = []
+                for (const pdfUrl of pdfUrls) {
+                  try {
+                    const pdfStructured = normalizeStructuredMenu(await parsePdfMenuWithDocling(pdfUrl, languageCode))
+                    if (pdfStructured?.categories && pdfStructured.categories.length > 0) {
+                      pdfSources.push(pdfStructured)
+                    }
+                  } catch (pdfFallbackErr) {
+                    console.warn('⚠️ UHeadless PDF fallback failed for', pdfUrl, pdfFallbackErr)
+                  }
+                }
+
+                const fallbackStructured = pdfSources[0]
+                if (fallbackStructured?.categories && fallbackStructured.categories.length > 0) {
+                  const businessHours = await (async () => {
+                    const { data: businessData } = await supabaseService
+                      .from('businesses')
+                      .select('opening_hours')
+                      .eq('id', businessId)
+                      .single()
+
+                    if (!businessData?.opening_hours) return undefined
+
+                    const hours = businessData.opening_hours
+                    const allOpen: string[] = []
+                    const allClose: string[] = []
+                    for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']) {
+                      if (hours[day]?.open) allOpen.push(hours[day].open)
+                      if (hours[day]?.close) allClose.push(hours[day].close)
+                    }
+                    if (allOpen.length === 0 || allClose.length === 0) return undefined
+                    allOpen.sort()
+                    allClose.sort()
+                    return { open: allOpen[0], close: allClose[allClose.length - 1] }
+                  })()
+
+                  let menuPeriods: any[] = []
+                  const menuAvailabilityTime = fallbackStructured?.availabilityTime || null
+                  if (fallbackStructured?.categories && Array.isArray(fallbackStructured.categories)) {
+                    menuPeriods = parseMenuPeriods(fallbackStructured.categories, businessHours, menuAvailabilityTime)
+                  }
+                  const menuStartTime = menuAvailabilityTime ? (menuPeriods[0]?.startTime ?? null) : null
+                  const menuEndTime = menuAvailabilityTime ? (menuPeriods[menuPeriods.length - 1]?.endTime ?? null) : null
+                  const enrichedStructured = { ...fallbackStructured, menuPeriods, startTime: menuStartTime, endTime: menuEndTime }
+
+                  const establishmentType = classifyEstablishmentType(fallbackStructured)
+                  let detectedLanguage = fallbackStructured.detected_language
+                  if (!detectedLanguage || detectedLanguage.trim() === '') {
+                    detectedLanguage = detectLanguageFromText(fallbackStructured, url)
+                  }
+
+                  const servicePeriods = [normalizeProgrammeName('menu')]
+                  const servicePeriodName = servicePeriods[0]
+                  const menuType = (fallbackStructured.menu_type as string | undefined) ?? servicePeriodName ?? 'other'
+                  const { timeStart, timeEnd, timeSource } = resolveMenuTiming(enrichedStructured, businessHours)
+
+                  await supabaseService
+                    .from('menu_results_v2')
+                    .update({
+                      status: 'done',
+                      raw_text: null,
+                      structured_data: enrichedStructured,
+                      completed_at: new Date().toISOString(),
+                      source_content_type: probeCt || null,
+                      extraction_method: 'uheadless_pdf_fallback',
+                      service_periods: servicePeriods,
+                      service_period_name: servicePeriodName,
+                      language_code: detectedLanguage,
+                      menu_type: menuType,
+                      time_start: timeStart,
+                      time_end: timeEnd,
+                      time_source: timeSource,
+                      time_confirmed: false,
+                    })
+                    .eq('id', resultId)
+
+                  return new Response(
+                    JSON.stringify({
+                      success: true,
+                      resultId,
+                      message: 'Menu extracted from UHeadless PDF fallback',
+                    }),
+                    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                  )
+                }
+              }
+
               throw new Error('No menu categories extracted from HTML')
             }
             
@@ -2704,6 +3345,7 @@ serve(async (req: Request) => {
                 console.error('❌ Failed to update menu_results_v2 to done (HTML):', updateError)
                 throw new Error(`Failed to mark extraction as done: ${updateError.message}`)
               }
+              await syncNormalizedItems()
               console.log('✅ Menu extraction marked as done (HTML)')
 
               // Generate and store AI summary (non-blocking)
@@ -2770,6 +3412,266 @@ serve(async (req: Request) => {
               const isNoMenuFound = errorMsg.includes('No menu categories')
               
               if (isNoMenuFound) {
+                const delegated = await triggerMenuWorkerDirect({
+                  id: resultId,
+                  business_id: businessId,
+                  source_url: url,
+                  language_code: languageCode,
+                })
+
+                if (delegated) {
+                  const delegatedResult = (delegated as any)?.result ?? delegated
+                  if (delegatedResult?.raw_text && !delegatedResult?.structured_data) {
+                    try {
+                      const parsedStructured = normalizeStructuredMenu(
+                        await parseMenuWithOpenAI(String(delegatedResult.raw_text), languageCode)
+                      )
+
+                      if (parsedStructured?.categories?.length) {
+                        const { error: delegatedUpdateError } = await supabaseService
+                          .from('menu_results_v2')
+                          .update({
+                            structured_data: parsedStructured,
+                            raw_text: delegatedResult.raw_text,
+                            extraction_method: `${delegatedResult.extraction_method || 'cloud_run_worker'}+edge_llm`,
+                            status: 'done',
+                            completed_at: new Date().toISOString(),
+                          })
+                          .eq('id', resultId)
+
+                        if (delegatedUpdateError) {
+                          console.warn('⚠️ Failed to persist delegated worker parse:', delegatedUpdateError.message)
+                        } else {
+                          await syncNormalizedItems()
+                        }
+                      }
+                    } catch (postProcessErr) {
+                      console.warn('⚠️ Failed to post-process delegated worker result:', postProcessErr)
+                    }
+                  }
+
+                  console.log('✅ Delegated HTML menu extraction to Cloud Run worker')
+                  return new Response(
+                    JSON.stringify({
+                      success: true,
+                      resultId,
+                      message: 'Menu extraction delegated to Cloud Run worker',
+                    }),
+                    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                  )
+                }
+
+                console.warn('⚠️ Cloud Run worker delegation unavailable; falling back locally')
+
+                const pdfUrls = await fetchUHeadlessMenuPdfUrls(html, url)
+                if (pdfUrls.length > 0) {
+                  console.log(`🔁 No HTML menu found, trying UHeadless PDF(s): ${pdfUrls.join(', ')}`)
+
+                  const pdfSources: any[] = []
+                  for (const pdfUrl of pdfUrls) {
+                    try {
+                      const pdfStructured = normalizeStructuredMenu(await parsePdfMenuWithDocling(pdfUrl, languageCode))
+                      if (pdfStructured?.categories && pdfStructured.categories.length > 0) {
+                        pdfSources.push(pdfStructured)
+                      }
+                    } catch (pdfFallbackErr) {
+                      console.warn('⚠️ UHeadless PDF fallback failed for', pdfUrl, pdfFallbackErr)
+                    }
+                  }
+
+                  const fallbackStructured = pdfSources[0]
+                  if (fallbackStructured?.categories && fallbackStructured.categories.length > 0) {
+                    const businessHours = await (async () => {
+                      const { data: businessData } = await supabaseService
+                        .from('businesses')
+                        .select('opening_hours')
+                        .eq('id', businessId)
+                        .single()
+
+                      if (!businessData?.opening_hours) return undefined
+
+                      const hours = businessData.opening_hours
+                      const allOpen: string[] = []
+                      const allClose: string[] = []
+                      for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']) {
+                        if (hours[day]?.open) allOpen.push(hours[day].open)
+                        if (hours[day]?.close) allClose.push(hours[day].close)
+                      }
+                      if (allOpen.length === 0 || allClose.length === 0) return undefined
+                      allOpen.sort()
+                      allClose.sort()
+                      return { open: allOpen[0], close: allClose[allClose.length - 1] }
+                    })()
+
+                    let menuPeriods: any[] = []
+                    const menuAvailabilityTime = fallbackStructured?.availabilityTime || null
+                    if (fallbackStructured?.categories && Array.isArray(fallbackStructured.categories)) {
+                      menuPeriods = parseMenuPeriods(fallbackStructured.categories, businessHours, menuAvailabilityTime)
+                    }
+                    const menuStartTime = menuAvailabilityTime ? (menuPeriods[0]?.startTime ?? null) : null
+                    const menuEndTime = menuAvailabilityTime ? (menuPeriods[menuPeriods.length - 1]?.endTime ?? null) : null
+                    const enrichedStructured = { ...fallbackStructured, menuPeriods, startTime: menuStartTime, endTime: menuEndTime }
+
+                    const establishmentType = classifyEstablishmentType(fallbackStructured)
+                    let detectedLanguage = fallbackStructured.detected_language
+                    if (!detectedLanguage || detectedLanguage.trim() === '') {
+                      detectedLanguage = detectLanguageFromText(fallbackStructured, url)
+                    }
+
+                    const servicePeriods = [normalizeProgrammeName('menu')]
+                    const servicePeriodName = servicePeriods[0]
+                    const menuType = (fallbackStructured.menu_type as string | undefined) ?? servicePeriodName ?? 'other'
+                    const { timeStart, timeEnd, timeSource } = resolveMenuTiming(enrichedStructured, businessHours)
+
+                    await supabaseService
+                      .from('menu_results_v2')
+                      .update({
+                        status: 'done',
+                        raw_text: null,
+                        structured_data: enrichedStructured,
+                        completed_at: new Date().toISOString(),
+                        source_content_type: probeCt || null,
+                        extraction_method: 'uheadless_pdf_fallback',
+                        service_periods: servicePeriods,
+                        service_period_name: servicePeriodName,
+                        language_code: detectedLanguage,
+                        menu_type: menuType,
+                        time_start: timeStart,
+                        time_end: timeEnd,
+                        time_source: timeSource,
+                        time_confirmed: false,
+                      })
+                      .eq('id', resultId)
+
+                    await syncNormalizedItems()
+
+                    return new Response(
+                      JSON.stringify({
+                        success: true,
+                        resultId,
+                        message: 'Menu extracted from UHeadless PDF fallback',
+                      }),
+                      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                    )
+                  }
+                }
+
+                const imageUrls = genericImageUrls.length > 0 ? genericImageUrls : fetchUHeadlessMenuImageUrls(html)
+                if (imageUrls.length > 0) {
+                  console.log(`🖼️ No HTML/PDF menu found, trying image OCR on ${imageUrls.length} image(s)`)
+
+                  const ocrChunks: string[] = []
+                  for (const imageUrl of imageUrls.slice(0, 20)) {
+                    try {
+                      const imageResp = await fetchWithTimeout(imageUrl, {
+                        method: 'GET',
+                        redirect: 'follow',
+                        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenuExtractorBot/1.0)' },
+                      }, FETCH_TIMEOUT_MS)
+
+                      if (!imageResp.ok) {
+                        console.warn('⚠️ UHeadless image fetch failed:', imageUrl, imageResp.status)
+                        continue
+                      }
+
+                      const imageBytes = new Uint8Array(await imageResp.arrayBuffer())
+                      if (imageBytes.length === 0) continue
+
+                      const extractedText = await extractTextFromImageWithVision(imageBytes)
+                      if (extractedText && extractedText.trim().length >= 8) {
+                        ocrChunks.push(extractedText.trim())
+                      }
+                    } catch (ocrFallbackErr) {
+                      console.warn('⚠️ UHeadless image OCR fallback failed for', imageUrl, ocrFallbackErr)
+                    }
+                  }
+
+                  const combinedOcrText = ocrChunks.join('\n\n')
+                  if (combinedOcrText.trim().length >= 10) {
+                    console.log(`📝 UHeadless OCR produced ${combinedOcrText.length} characters, parsing menu...`)
+
+                    try {
+                      const structured = normalizeStructuredMenu(await parseMenuWithOpenAI(combinedOcrText, languageCode))
+                      if (structured?.categories && structured.categories.length > 0) {
+                        const businessHours = await (async () => {
+                          const { data: businessData } = await supabaseService
+                            .from('businesses')
+                            .select('opening_hours')
+                            .eq('id', businessId)
+                            .single()
+
+                          if (!businessData?.opening_hours) return undefined
+
+                          const hours = businessData.opening_hours
+                          const allOpen: string[] = []
+                          const allClose: string[] = []
+                          for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']) {
+                            if (hours[day]?.open) allOpen.push(hours[day].open)
+                            if (hours[day]?.close) allClose.push(hours[day].close)
+                          }
+                          if (allOpen.length === 0 || allClose.length === 0) return undefined
+                          allOpen.sort()
+                          allClose.sort()
+                          return { open: allOpen[0], close: allClose[allClose.length - 1] }
+                        })()
+
+                        let menuPeriods: any[] = []
+                        const menuAvailabilityTime = structured?.availabilityTime || null
+                        if (structured?.categories && Array.isArray(structured.categories)) {
+                          menuPeriods = parseMenuPeriods(structured.categories, businessHours, menuAvailabilityTime)
+                        }
+                        const menuStartTime = menuAvailabilityTime ? (menuPeriods[0]?.startTime ?? null) : null
+                        const menuEndTime = menuAvailabilityTime ? (menuPeriods[menuPeriods.length - 1]?.endTime ?? null) : null
+                        const enrichedStructured = { ...structured, menuPeriods, startTime: menuStartTime, endTime: menuEndTime }
+
+                        const establishmentType = classifyEstablishmentType(structured)
+                        let detectedLanguage = structured.detected_language
+                        if (!detectedLanguage || detectedLanguage.trim() === '') {
+                          detectedLanguage = detectLanguageFromText(structured, url)
+                        }
+
+                        const servicePeriods = [normalizeProgrammeName('menu')]
+                        const servicePeriodName = servicePeriods[0]
+                        const menuType = (structured.menu_type as string | undefined) ?? servicePeriodName ?? 'other'
+                        const { timeStart, timeEnd, timeSource } = resolveMenuTiming(enrichedStructured, businessHours)
+
+                        await supabaseService
+                          .from('menu_results_v2')
+                          .update({
+                            status: 'done',
+                            raw_text: combinedOcrText,
+                            structured_data: enrichedStructured,
+                            completed_at: new Date().toISOString(),
+                            source_content_type: 'image/jpeg',
+                            extraction_method: 'uheadless_image_ocr_fallback',
+                            service_periods: servicePeriods,
+                            service_period_name: servicePeriodName,
+                            language_code: detectedLanguage,
+                            menu_type: menuType,
+                            time_start: timeStart,
+                            time_end: timeEnd,
+                            time_source: timeSource,
+                            time_confirmed: false,
+                          })
+                          .eq('id', resultId)
+
+                        await syncNormalizedItems()
+
+                        return new Response(
+                          JSON.stringify({
+                            success: true,
+                            resultId,
+                            message: 'Menu extracted from UHeadless image OCR fallback',
+                            establishmentType,
+                          }),
+                          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                        )
+                      }
+                    } catch (ocrParseErr) {
+                      console.warn('⚠️ UHeadless image OCR parsing failed:', ocrParseErr)
+                    }
+                  }
+
                 // Mark as error - no menu content found
                 await supabaseService
                   .from('menu_results_v2')
@@ -2779,9 +3681,9 @@ serve(async (req: Request) => {
                     completed_at: new Date().toISOString(),
                   })
                   .eq('id', resultId)
-                
+
                 console.log('⚠️ No menu found - marked as error')
-                
+
                 return new Response(
                   JSON.stringify({
                     success: false,
@@ -2790,6 +3692,7 @@ serve(async (req: Request) => {
                   }),
                   { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
                 )
+              }
               } else {
                 // Parsing error or API issue - fall back to Cloud Run as last resort
                 console.error('Edge parsing error; falling back to Cloud Run:', edgeErr)

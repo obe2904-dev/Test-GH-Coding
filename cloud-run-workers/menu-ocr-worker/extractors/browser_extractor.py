@@ -57,7 +57,7 @@ def extract_with_browser(url: str, timeout_ms: int = 30000) -> Tuple[str, str]:
                 
                 # Extract content
                 html_content = page.content()
-                text_content = page.inner_text('body')
+                text_content = _extract_primary_text(page)
                 
                 logger.info(f"✅ Browser extraction successful: {len(html_content)} chars HTML, {len(text_content)} chars text")
                 
@@ -72,6 +72,67 @@ def extract_with_browser(url: str, timeout_ms: int = 30000) -> Tuple[str, str]:
     except Exception as e:
         logger.error(f"❌ Browser extraction failed for {url}: {e}")
         raise
+
+
+def _extract_primary_text(page) -> str:
+    """Prefer the main content region when the page exposes one."""
+    consent_buttons = [
+        'button.coi-banner__decline',
+        'button.coi-banner__accept',
+        'button:has-text("Accepter alle")',
+        'button:has-text("Accept all")',
+        'button:has-text("Gem indstillinger")',
+        'button:has-text("Afvis alle")',
+    ]
+
+    for selector in consent_buttons:
+        try:
+            locator = page.locator(selector)
+            if locator.count() == 0:
+                continue
+            locator.first.click(timeout=1500)
+            page.wait_for_timeout(1000)
+            logger.info(f"✅ Dismissed consent via {selector}")
+            break
+        except Exception:
+            continue
+
+    try:
+        page.evaluate("""
+            () => {
+                const banners = document.querySelectorAll('.coi-consent-banner, .coi-banner');
+                banners.forEach((banner) => banner.remove());
+            }
+        """)
+    except Exception:
+        pass
+
+    candidate_selectors = [
+        'main',
+        '#main',
+        '[role="main"]',
+        'article',
+    ]
+
+    for selector in candidate_selectors:
+        try:
+            text = page.evaluate(
+                """(sel) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return '';
+                    return (el.innerText || el.textContent || '').trim();
+                }""",
+                selector,
+            )
+            if not text:
+                continue
+            if text:
+                logger.info(f"✅ Using primary text from {selector} ({len(text)} chars)")
+                return text
+        except Exception as e:
+            logger.debug(f"Skipping selector {selector}: {e}")
+
+    return page.inner_text('body')
 
 
 def is_html_empty_or_minimal(html: str) -> bool:
