@@ -8,6 +8,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { getCityFromPostalCode } from '../_shared/brand-profile/city-context-ai.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -17,6 +18,7 @@ const corsHeaders = {
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 const GEMINI_MODEL = 'gemini-2.5-flash';
 const EXTRACTION_PROMPT_VERSION = 'v3-unified';
+const SCRAPER_TIMEOUT_MS = 125_000;
 
 interface AnalyzeRequest {
   url: string;
@@ -159,7 +161,7 @@ serve(async (req) => {
         'X-API-Key': apiKey || '',
       },
       body: JSON.stringify({ url }),
-      signal: AbortSignal.timeout(65000),
+      signal: AbortSignal.timeout(SCRAPER_TIMEOUT_MS),
     });
 
     if (!scrapeResponse.ok) {
@@ -296,13 +298,21 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('❌ Error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const status = /invalid or expired token|missing authorization header/i.test(errorMessage)
+      ? 401
+      : /no business found for this user/i.test(errorMessage)
+        ? 403
+        : /url is required/i.test(errorMessage)
+          ? 400
+          : 500;
     return new Response(
       JSON.stringify({
         success: false,
-        error: error.message,
+        error: errorMessage,
       }),
       { 
-        status: 500,
+        status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       }
     );
@@ -647,6 +657,18 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
   // ===== UPDATE business_locations TABLE =====
   const locationUpdates: any = {};
 
+  const deriveAddressParts = (rawAddress: string) => {
+    const match = rawAddress.match(/^(.+?)\s+(\d{4})\s+(.+)$/);
+    if (!match) return { address_line1: rawAddress.trim(), postal_code: null as string | null, city: null as string | null };
+
+    const postalCode = match[2];
+    return {
+      address_line1: match[1].trim(),
+      postal_code: postalCode,
+      city: getCityFromPostalCode(postalCode) ?? match[3].trim(),
+    };
+  };
+
   if (contact.emails?.length > 0 && contact.emails[0].confidence >= 0.7) {
     locationUpdates.email = contact.emails[0].value;
   }
@@ -656,7 +678,14 @@ async function distributeStructuredData(supabase: any, businessId: string, paylo
   }
 
   if (contact.addresses?.length > 0 && contact.addresses[0].confidence >= 0.7) {
-    locationUpdates.address_line1 = contact.addresses[0].value;
+    const addressParts = deriveAddressParts(contact.addresses[0].value);
+    locationUpdates.address_line1 = addressParts.address_line1;
+    if (addressParts.postal_code) {
+      locationUpdates.postal_code = addressParts.postal_code;
+    }
+    if (addressParts.city) {
+      locationUpdates.city = addressParts.city;
+    }
   }
 
   if (Object.keys(locationUpdates).length > 0) {

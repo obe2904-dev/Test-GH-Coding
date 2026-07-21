@@ -1121,8 +1121,24 @@ function BusinessProfilePage() {
     setScrapeResult(null)
 
     try {
-      const { data: { session } } = await sb.auth.getSession()
-      const authToken = session?.access_token
+      const getAuthToken = async () => {
+        const { data: { session } } = await sb.auth.getSession()
+        return session?.access_token ?? null
+      }
+
+      const refreshAuthToken = async () => {
+        const { data, error } = await sb.auth.refreshSession()
+        if (error) {
+          console.warn('⚠️ Failed to refresh session before analysis:', error.message)
+        }
+        return data.session?.access_token ?? null
+      }
+
+      let authToken = await getAuthToken()
+
+      if (!authToken) {
+        authToken = await refreshAuthToken()
+      }
 
       if (!authToken) {
         throw new Error('Ikke godkendt')
@@ -1130,21 +1146,37 @@ function BusinessProfilePage() {
 
       console.log('🚀 Starting unified website analysis for:', url)
 
-      // Call unified analysis function (does everything)
-      const response = await fetch(
+      const callAnalysis = (token: string) => fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-and-distribute-website`,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${authToken}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ url, force_refresh: true }),
         }
       )
 
+      // Call unified analysis function (does everything)
+      let response = await callAnalysis(authToken)
+
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+        const errorText = await response.text()
+        const needsAuthRefresh = /invalid or expired token/i.test(errorText) || response.status === 401
+
+        if (needsAuthRefresh) {
+          const refreshedToken = await refreshAuthToken()
+          if (refreshedToken) {
+            authToken = refreshedToken
+            response = await callAnalysis(authToken)
+          }
+        }
+
+        if (!response.ok) {
+          const finalErrorText = await response.text()
+          throw new Error(finalErrorText || `HTTP ${response.status}`)
+        }
       }
 
       const result = await response.json()
