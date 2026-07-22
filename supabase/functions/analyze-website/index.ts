@@ -176,7 +176,7 @@ serve(async (req: any) => {
     const body = await req.json()
     console.log('📥 Received request:', body)
     
-    const { url, businessName, businessType, tier, debugMode, businessId, forceRefresh } = body
+    const { url, businessName, businessType, tier, debugMode, businessId, forceRefresh, previewOnly } = body
 
     if (!url || typeof url !== 'string') {
       console.error('❌ Missing URL in request')
@@ -1796,7 +1796,7 @@ serve(async (req: any) => {
       inserted: false,
     }
     
-    if (businessId) {
+    if (businessId && !previewOnly) {
       console.log('💾 Persisting analysis to database for business:', businessId)
       persistenceMeta.attempted = true
       persistenceMeta.businessId = businessId
@@ -1838,6 +1838,8 @@ serve(async (req: any) => {
         console.error('❌ Database persistence failed:', dbError)
         persistenceMeta.error = dbError instanceof Error ? dbError.message : String(dbError)
       }
+    } else if (previewOnly) {
+      persistenceMeta.note = 'preview_only: persistence skipped by request'
     } else {
       persistenceMeta.note = 'not_persisted: missing businessId in request'
     }
