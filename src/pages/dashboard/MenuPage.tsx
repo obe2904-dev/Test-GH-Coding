@@ -114,6 +114,13 @@ function MenuPage() {
   const [editingTimeEnd, setEditingTimeEnd] = useState('')
   const [isSavingTiming, setIsSavingTiming] = useState(false)
 
+  // Category service period edit state
+  const [editingCategoryPeriod, setEditingCategoryPeriod] = useState<{cardId: string; categoryIdx: number} | null>(null)
+  const [categoryPeriodName, setCategoryPeriodName] = useState('')
+  const [categoryPeriodStart, setCategoryPeriodStart] = useState('')
+  const [categoryPeriodEnd, setCategoryPeriodEnd] = useState('')
+  const [isSavingCategoryPeriod, setIsSavingCategoryPeriod] = useState(false)
+
   // Normalized item flags (is_signature toggle, is_active toggle)
   // keyed by item_name.toLowerCase() → { id, is_signature, is_active }
   const [normalizedItems, setNormalizedItems] = useState<Map<string, { id: string; is_signature: boolean; is_active: boolean }>>(new Map())
@@ -1360,6 +1367,79 @@ function MenuPage() {
     }
   }
 
+  const handleEditCategoryPeriod = (cardId: string, categoryIdx: number, currentPeriod?: any) => {
+    setEditingCategoryPeriod({ cardId, categoryIdx })
+    setCategoryPeriodName(currentPeriod?.name || '')
+    setCategoryPeriodStart(currentPeriod?.startTime || '')
+    setCategoryPeriodEnd(currentPeriod?.endTime || '')
+  }
+
+  const handleCancelEditCategoryPeriod = () => {
+    setEditingCategoryPeriod(null)
+    setCategoryPeriodName('')
+    setCategoryPeriodStart('')
+    setCategoryPeriodEnd('')
+  }
+
+  const handleSaveCategoryPeriod = async (resultId: string, cardId: string, categoryIdx: number) => {
+    if (!resultId) return
+
+    // Validate HH:MM format
+    const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/
+    if (categoryPeriodStart && !timeRegex.test(categoryPeriodStart)) {
+      alert('Starttid skal være i formatet HH:MM (f.eks. 09:00)')
+      return
+    }
+    if (categoryPeriodEnd && !timeRegex.test(categoryPeriodEnd)) {
+      alert('Sluttid skal være i formatet HH:MM (f.eks. 17:30)')
+      return
+    }
+
+    setIsSavingCategoryPeriod(true)
+    try {
+      // Get the current menu card and its structured_data
+      const card = menuCards.find(c => c.id === cardId)
+      if (!card?.extracted_data) {
+        alert('Ingen menu data fundet')
+        return
+      }
+
+      // Clone and update the structured_data with service period for this category
+      const updatedData = JSON.parse(JSON.stringify(card.extracted_data))
+      if (!updatedData.categories || !updatedData.categories[categoryIdx]) {
+        alert('Kategori ikke fundet')
+        return
+      }
+
+      updatedData.categories[categoryIdx].servicePeriod = {
+        name: categoryPeriodName || null,
+        startTime: categoryPeriodStart || null,
+        endTime: categoryPeriodEnd || null
+      }
+
+      // Update database
+      const { error } = await supabase
+        .from('menu_results_v2')
+        .update({
+          structured_data: updatedData,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', resultId)
+
+      if (error) throw error
+
+      // Reload menu cards to reflect changes
+      if (businessId) await loadMenuCards(businessId)
+      
+      handleCancelEditCategoryPeriod()
+    } catch (error) {
+      console.error('Error saving category period:', error)
+      alert('Kunne ikke gemme serviceperiode')
+    } finally {
+      setIsSavingCategoryPeriod(false)
+    }
+  }
+
   const loadNormalizedItems = async (bizId: string) => {
     try {
       const { data } = await supabase
@@ -2191,19 +2271,135 @@ function MenuPage() {
 
                         {/* Categories and Items */}
                         {menuCard.extracted_data.categories && menuCard.extracted_data.categories.length > 0 ? (
-                          menuCard.extracted_data.categories.map((category: any, catIdx: number) => (
+                          menuCard.extracted_data.categories.map((category: any, catIdx: number) => {
+                            const hasMultipleCategories = menuCard.extracted_data.categories.length >= 2
+                            const isEditingThisCategory = editingCategoryPeriod?.cardId === menuCard.id && editingCategoryPeriod?.categoryIdx === catIdx
+                            const categoryPeriod = category.servicePeriod
+                            
+                            return (
                             <div key={catIdx} className="mb-4 last:mb-0">
                               <div className="mb-2">
-                                <h4 className="text-sm font-semibold text-text">{category.name}</h4>
-                                {category.categoryDescription && (
-                                  <p className="text-xs text-text-secondary mt-0.5 italic">
-                                    {category.categoryDescription}
-                                  </p>
-                                )}
-                                {category.timeRange && (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-info-surface text-info-text mt-1">
-                                    🕐 {category.timeRange}
-                                  </span>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1">
+                                    <h4 className="text-sm font-semibold text-text">{category.name}</h4>
+                                    {category.categoryDescription && (
+                                      <p className="text-xs text-text-secondary mt-0.5 italic">
+                                        {category.categoryDescription}
+                                      </p>
+                                    )}
+                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                      {category.timeRange && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-info-surface text-info-text">
+                                          🕐 {category.timeRange}
+                                        </span>
+                                      )}
+                                      {categoryPeriod && (categoryPeriod.startTime || categoryPeriod.endTime || categoryPeriod.name) && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-success-surface text-success-text">
+                                          ⏰ {categoryPeriod.name || ''} {categoryPeriod.startTime && categoryPeriod.endTime ? `${categoryPeriod.startTime}-${categoryPeriod.endTime}` : ''}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {hasMultipleCategories && !isEditingThisCategory && (
+                                    <button
+                                      onClick={() => handleEditCategoryPeriod(menuCard.id, catIdx, categoryPeriod)}
+                                      className="px-2 py-1 text-xs text-cta hover:text-cta-hover border border-cta rounded hover:bg-cta/5 transition-colors whitespace-nowrap"
+                                    >
+                                      {categoryPeriod ? 'Rediger tidspunkter' : 'Tilføj tidspunkter'}
+                                    </button>
+                                  )}
+                                </div>
+                                
+                                {/* Category Service Period Edit Form */}
+                                {isEditingThisCategory && (
+                                  <div className="mt-3 p-3 border border-cta rounded-lg bg-surface">
+                                    <p className="text-xs text-text-secondary mb-2">Angiv serviceperiode for "{category.name}"</p>
+                                    <div className="space-y-2">
+                                      <div>
+                                        <label className="text-xs text-text-secondary">Periode navn (valgfri):</label>
+                                        <select
+                                          value={categoryPeriodName}
+                                          onChange={(e) => setCategoryPeriodName(e.target.value)}
+                                          className="w-full px-2 py-1 border border-border rounded text-xs mt-1"
+                                        >
+                                          <option value="">-- Vælg periode --</option>
+                                          <option value="Morgenmad">Morgenmad</option>
+                                          <option value="Brunch">Brunch</option>
+                                          <option value="Frokost">Frokost</option>
+                                          <option value="Eftermiddag">Eftermiddag</option>
+                                          <option value="Aften">Aften</option>
+                                          <option value="Aftensmad">Aftensmad</option>
+                                          <option value="Natmad">Natmad</option>
+                                        </select>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-1 flex-1">
+                                          <label className="text-xs text-text-secondary">Fra:</label>
+                                          <select
+                                            value={splitTimeValue(categoryPeriodStart).hour}
+                                            onChange={(e) => setCategoryPeriodStart(updateTimePart(categoryPeriodStart, 'hour', e.target.value))}
+                                            className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                                          >
+                                            <option value="">--</option>
+                                            {TIME_HOUR_OPTIONS.map((hour) => (
+                                              <option key={hour} value={hour}>{hour}</option>
+                                            ))}
+                                          </select>
+                                          <span className="text-xs">:</span>
+                                          <select
+                                            value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(categoryPeriodStart).minute) ? splitTimeValue(categoryPeriodStart).minute : ''}
+                                            onChange={(e) => setCategoryPeriodStart(updateTimePart(categoryPeriodStart, 'minute', e.target.value))}
+                                            className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                                          >
+                                            <option value="">--</option>
+                                            {TIME_MINUTE_OPTIONS.map((minute) => (
+                                              <option key={minute} value={minute}>{minute}</option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                        <div className="flex items-center gap-1 flex-1">
+                                          <label className="text-xs text-text-secondary">Til:</label>
+                                          <select
+                                            value={splitTimeValue(categoryPeriodEnd).hour}
+                                            onChange={(e) => setCategoryPeriodEnd(updateTimePart(categoryPeriodEnd, 'hour', e.target.value))}
+                                            className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                                          >
+                                            <option value="">--</option>
+                                            {TIME_HOUR_OPTIONS.map((hour) => (
+                                              <option key={hour} value={hour}>{hour}</option>
+                                            ))}
+                                          </select>
+                                          <span className="text-xs">:</span>
+                                          <select
+                                            value={TIME_MINUTE_OPTIONS.includes(splitTimeValue(categoryPeriodEnd).minute) ? splitTimeValue(categoryPeriodEnd).minute : ''}
+                                            onChange={(e) => setCategoryPeriodEnd(updateTimePart(categoryPeriodEnd, 'minute', e.target.value))}
+                                            className="px-2 py-1 border border-border rounded text-xs w-14 bg-white"
+                                          >
+                                            <option value="">--</option>
+                                            {TIME_MINUTE_OPTIONS.map((minute) => (
+                                              <option key={minute} value={minute}>{minute}</option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <button
+                                          onClick={() => handleSaveCategoryPeriod(menuCard.result_id!, menuCard.id, catIdx)}
+                                          disabled={isSavingCategoryPeriod}
+                                          className="px-3 py-1 bg-cta text-text-inverse rounded text-xs font-medium hover:bg-cta-hover disabled:opacity-50"
+                                        >
+                                          {isSavingCategoryPeriod ? 'Gemmer...' : '✓ Gem'}
+                                        </button>
+                                        <button
+                                          onClick={handleCancelEditCategoryPeriod}
+                                          className="px-3 py-1 bg-white rounded text-xs hover:bg-gray-100"
+                                          style={{ borderWidth: '1px', borderColor: '#FAC775', color: '#854F0B' }}
+                                        >
+                                          Annuller
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
                                 )}
                               </div>
                               <div className="space-y-2">
@@ -2262,7 +2458,8 @@ function MenuPage() {
                                 )}
                               </div>
                             </div>
-                          ))
+                            )
+                          })
                         ) : (
                           <div className="text-center py-6">
                             <p className="text-sm text-text-secondary mb-2">{t('menu.sources.emptyTitle')}</p>
