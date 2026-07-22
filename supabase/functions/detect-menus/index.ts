@@ -1,29 +1,132 @@
 // =====================================================
-// Menu Detection Function
+// detect-menus/index.ts (v2)
 // =====================================================
-// Purpose: Lightweight wrapper to detect menu URLs via Cloud Run scraper
-// Used by: /dashboard/menu page (Step 1: "Find menusider")
-// Flow: Frontend → detect-menus → Cloud Run → returns menu_all array
+// Purpose: Detect menu URLs from a business website via Cloud Run scraper,
+//          classify each URL's source_kind, and return both the legacy
+//          string[] and the richer detectedSources payload.
+// Used by: /dashboard/menu page — Step 1 "Find menusider"
+//
+// Classification kinds:
+//   'mealo'           — *.mealo.dk (dedicated JSON-API extraction path planned)
+//   'iframe_platform' — other third-party booking/menu SPAs
+//   'pdf'             — .pdf extension or application/pdf content-type
+//   'image'           — image extension or image/* content-type
+//   'html'            — everything else
+// =====================================================
 
+// @ts-ignore
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+// @ts-ignore
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3'
+// @ts-ignore
+declare const Deno: any
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// =====================================================
+// Types
+// =====================================================
+
 interface DetectMenusRequest {
   url: string
-  businessId?: string  // Optional, for logging only
+  businessId?: string
 }
 
-interface MenuUrl {
+interface RawMenuUrl {
   url: string
+  confidence?: number
+  evidence?: string
+  detection_method?: string
+  label?: string
+}
+
+type SourceKind = 'html' | 'pdf' | 'image' | 'mealo' | 'iframe_platform'
+
+interface SourceResult {
+  url: string
+  source_kind: SourceKind
   confidence: number
   evidence: string
   detection_method: string
   label?: string
+}
+
+/** Internal working item: raw URL + content-type learned during expansion (if any) */
+interface WorkItem extends RawMenuUrl {
+  /** content-type observed when we fetched this URL, '' if never fetched */
+  observedContentType: string
+}
+
+// =====================================================
+// Constants
+// =====================================================
+
+/**
+ * Third-party SPA platforms that render menus client-side.
+ * NOTE: mealo.dk is intentionally NOT in this list — Mealo gets its own
+ * source_kind because it has a known underlying JSON API and will receive
+ * a dedicated extraction path. Add new generic platforms here.
+ */
+const IFRAME_PLATFORM_HOSTS = [
+  'dinnerbooking.com',
+  'ordersystem.dk',
+  'tablemanager.io',
+  'restablo.dk',
+  'zenchef.com',
+]
+
+const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i
+const PDF_EXTENSION = /\.pdf(\?|$)/i
+
+const HEAD_TIMEOUT_MS = 4000
+const EXPANSION_FETCH_TIMEOUT_MS = 8000
+
+// =====================================================
+// Helper: classify source_kind
+// =====================================================
+
+function classifySourceKind(
+  url: string,
+  contentType: string,
+  detectionMethod: string,
+): SourceKind {
+  const urlLower = url.toLowerCase()
+  const ct = (contentType || '').toLowerCase()
+
+  // 1. Mealo — checked FIRST, before generic platforms.
+  //    Pattern: restaurantname.mealo.dk or mealo.dk itself.
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '')
+    if (host === 'mealo.dk' || host.endsWith('.mealo.dk')) {
+      return 'mealo'
+    }
+    // 2. Other iframe/SPA platforms
+    if (IFRAME_PLATFORM_HOSTS.some((p) => host === p || host.endsWith('.' + p))) {
+      return 'iframe_platform'
+    }
+  } catch {
+    // unparseable URL — fall through to extension checks
+  }
+
+  // 3. PDF — content-type wins over extension when present
+  if (ct.includes('pdf') || PDF_EXTENSION.test(urlLower)) return 'pdf'
+
+  // 4. Image
+  if (ct.startsWith('image/') || IMAGE_EXTENSIONS.test(urlLower)) return 'image'
+
+  // 5. Landing-page image extractions without a content-type
+  if (
+    detectionMethod === 'landing_page_srcset' ||
+    detectionMethod === 'landing_page_img'
+  ) {
+    return 'image'
+  }
+
+  // 6. Default
+  return 'html'
 }
 
 // =====================================================
@@ -43,211 +146,131 @@ function htmlToText(html: string): string {
 }
 
 // =====================================================
-// Helper: Detect if page is a landing page (not actual menu content)
+// Helper: Detect landing/navigation pages
 // =====================================================
+
 function isLandingPage(html: string, text: string, url?: string): boolean {
-  // Check URL pattern - paths like /menu, /da/menu, /en/menu are typically navigation pages
   if (url) {
-    const path = new URL(url).pathname.toLowerCase()
-    if (/^\/(da|en|de|se|no)?\/?menu\/?$/i.test(path)) {
-      console.log(`  → Landing page: URL path matches navigation pattern: ${path}`)
-      return true
-    }
+    try {
+      const path = new URL(url).pathname.toLowerCase()
+      if (/^\/(da|en|de|se|no)?\/?menu\/?$/i.test(path)) {
+        console.log(`  → Landing page: URL path matches navigation pattern: ${path}`)
+        return true
+      }
+    } catch { /* ignore */ }
   }
-  
-  // Very short content suggests navigation page
+
   if (text.length < 500) {
     console.log(`  → Landing page: text only ${text.length} chars`)
     return true
   }
-  
-  // Has menu navigation keywords but no actual menu items (prices, etc)
+
   const hasMenuNav = /menu|frokost|aften|lunch|dinner|brunch|morgenmad|cocktail|bar/i.test(text)
   const hasMenuItems = /kr\.|,-|\d+\s*kr|price|pris|\d+\s*dkk/i.test(text)
-  
+
   if (hasMenuNav && !hasMenuItems && text.length < 2000) {
     console.log('  → Landing page: has navigation but no menu items')
     return true
   }
-  
+
   return false
 }
 
 // =====================================================
-// Helper: Normalize URL for deduplication
+// Helper: URL normalisation for deduplication
 // =====================================================
+
 function normalizeUrlForDedup(url: string): string {
   try {
     const parsed = new URL(url)
-    // Remove query params that might differ (width, size, etc) but keep essential ones
-    const essential = ['page']
     const newParams = new URLSearchParams()
-    essential.forEach(key => {
-      const value = parsed.searchParams.get(key)
-      if (value) newParams.set(key, value)
-    })
+    const keep = parsed.searchParams.get('page')
+    if (keep) newParams.set('page', keep)
+    // Mealo: restaurantid query param IS the identity — preserve it
+    const restaurantId = parsed.searchParams.get('restaurantid')
+    if (restaurantId) newParams.set('restaurantid', restaurantId)
     parsed.search = newParams.toString()
     return parsed.href
-  } catch (e) {
+  } catch {
     return url
   }
 }
 
 // =====================================================
-// Helper: Check if URL is a false positive (privacy, contact, etc)
+// Helper: False-positive filter
 // =====================================================
+
 function isFalsePositiveUrl(url: string): boolean {
-  const urlLower = url.toLowerCase()
-  const falsePositives = [
+  const u = url.toLowerCase()
+  return [
     'privacy', 'privatlivs', 'cookie', 'kontakt', 'contact',
-    'om-os', 'about', 'terms', 'betingelser', 'gdpr'
-  ]
-  return falsePositives.some(term => urlLower.includes(term))
-}
-
-function decodeHtmlUrl(url: string): string {
-  return url
-    .replace(/&amp;/g, '&')
-    .replace(/&#38;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
+    'om-os', 'about', 'terms', 'betingelser', 'gdpr',
+  ].some((t) => u.includes(t))
 }
 
 // =====================================================
-// Helper: Extract menu URLs from HTML
+// Helper: Extract child menu URLs from a landing page
 // =====================================================
-function extractMenuUrlsFromHtml(html: string, baseUrl: string): MenuUrl[] {
-  const urls: MenuUrl[] = []
+
+function extractMenuUrlsFromHtml(html: string, baseUrl: string): RawMenuUrl[] {
+  const urls: RawMenuUrl[] = []
   const seen = new Set<string>()
-  
-  // Extract from <source srcset="...">
-  const srcsetRegex = /<source[^>]+srcset=["']([^"']+)["'][^>]*>/gi
-  let match
-  while ((match = srcsetRegex.exec(html)) !== null) {
-    const srcsetValue = match[0]
-    const urlMatch = decodeHtmlUrl(match[1].split(',')[0].trim().split(' ')[0]) // Take first URL from srcset
-    
+
+  const add = (
+    rawUrl: string,
+    method: string,
+    evidence: string,
+    label?: string,
+    confidence = 0.8,
+  ) => {
     try {
-      const absoluteUrl = new URL(urlMatch, baseUrl).href
-      const normalizedUrl = normalizeUrlForDedup(absoluteUrl)
-      
-      // Skip false positives
-      if (isFalsePositiveUrl(absoluteUrl)) continue
-      
-      // Check if this looks like a menu image
-      const altMatch = srcsetValue.match(/alt=["']([^"']+)["']/i)
-      const altText = altMatch ? altMatch[1].toLowerCase() : ''
-      
-      if (altText.includes('menu') || altText.includes('frokost') || altText.includes('aften') || 
-          altText.includes('lunch') || altText.includes('dinner')) {
-        
-        if (!seen.has(normalizedUrl)) {
-          seen.add(normalizedUrl)
-          
-          // Extract label from alt text
-          const label = altText
-            .replace(/souk\s*/i, '')
-            .replace(/menu\s*/i, '')
-            .replace(/summer|winter|forår|efterår/i, '')
-            .trim()
-          
-          urls.push({
-            url: absoluteUrl,
-            confidence: 0.85,
-            evidence: altMatch ? altMatch[1] : 'Menu image',
-            detection_method: 'landing_page_srcset',
-            label: label || undefined
-          })
-        }
-      }
-    } catch (e) {
-      // Skip invalid URLs
+      const abs = new URL(rawUrl, baseUrl).href
+      const norm = normalizeUrlForDedup(abs)
+      if (isFalsePositiveUrl(abs)) return
+      if (seen.has(norm)) return
+      seen.add(norm)
+      urls.push({ url: abs, confidence, evidence, detection_method: method, label })
+    } catch { /* skip invalid URLs */ }
+  }
+
+  // <source srcset="...">
+  for (const m of html.matchAll(/<source[^>]+srcset=["']([^"']+)["'][^>]*>/gi)) {
+    const srcUrl = m[1].split(',')[0].trim().split(' ')[0]
+    const alt = (m[0].match(/alt=["']([^"']+)["']/i) || [])[1] || ''
+    if (/menu|frokost|aften|lunch|dinner/i.test(alt)) {
+      const label = alt.replace(/souk|menu|summer|winter|forår|efterår/gi, '').trim()
+      add(srcUrl, 'landing_page_srcset', alt, label || undefined, 0.85)
     }
   }
-  
-  // Extract from <img src="...">
-  const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi
-  while ((match = imgRegex.exec(html)) !== null) {
-    const imgTag = match[0]
-    const urlMatch = decodeHtmlUrl(match[1])
-    
-    try {
-      const absoluteUrl = new URL(urlMatch, baseUrl).href
-      const normalizedUrl = normalizeUrlForDedup(absoluteUrl)
-      
-      // Skip false positives
-      if (isFalsePositiveUrl(absoluteUrl)) continue
-      
-      // Check alt text for menu keywords
-      const altMatch = imgTag.match(/alt=["']([^"']+)["']/i)
-      const altText = altMatch ? altMatch[1].toLowerCase() : ''
-      
-      if (altText.includes('menu') || altText.includes('frokost') || altText.includes('aften')) {
-        if (!seen.has(normalizedUrl)) {
-          seen.add(normalizedUrl)
-          
-          const label = altText
-            .replace(/souk\s*/i, '')
-            .replace(/menu\s*/i, '')
-            .trim()
-          
-          urls.push({
-            url: absoluteUrl,
-            confidence: 0.8,
-            evidence: altMatch ? altMatch[1] : 'Menu image',
-            detection_method: 'landing_page_img',
-            label: label || undefined
-          })
-        }
-      }
-    } catch (e) {
-      // Skip invalid URLs
+
+  // <img src="...">
+  for (const m of html.matchAll(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi)) {
+    const alt = (m[0].match(/alt=["']([^"']+)["']/i) || [])[1] || ''
+    if (/menu|frokost|aften/i.test(alt)) {
+      const label = alt.replace(/souk|menu/gi, '').trim()
+      add(m[1], 'landing_page_img', alt, label || undefined, 0.8)
     }
   }
-  
-  // Extract from <a href="...pdf"> or <a href="...jpg">
-  const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>/gi
-  while ((match = linkRegex.exec(html)) !== null) {
-    const urlMatch = decodeHtmlUrl(match[1])
-    const linkTag = match[0]
-    
-    // Skip false positives early
-    if (isFalsePositiveUrl(urlMatch)) continue
-    
-    // Check if URL looks like menu file
-    if (/\.(pdf|jpg|jpeg|png|webp)/i.test(urlMatch) || /menu|frokost|aften/i.test(urlMatch)) {
-      try {
-        const absoluteUrl = new URL(urlMatch, baseUrl).href
-        const normalizedUrl = normalizeUrlForDedup(absoluteUrl)
-        
-        if (!seen.has(normalizedUrl)) {
-          seen.add(normalizedUrl)
-          
-          // Try to extract label from link text
-          const textMatch = linkTag.match(/>([^<]+)</i)
-          const label = textMatch ? textMatch[1].trim() : undefined
-          
-          urls.push({
-            url: absoluteUrl,
-            confidence: 0.75,
-            evidence: 'Link to menu file',
-            detection_method: 'landing_page_link',
-            label
-          })
-        }
-      } catch (e) {
-        // Skip invalid URLs
-      }
+
+  // <a href="...">
+  for (const m of html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi)) {
+    const href = m[1]
+    if (isFalsePositiveUrl(href)) continue
+    if (/\.(pdf|jpg|jpeg|png|webp)/i.test(href) || /menu|frokost|aften/i.test(href)) {
+      const text = (m[0].match(/>([^<]+)</i) || [])[1]?.trim()
+      add(href, 'landing_page_link', 'Link to menu file', text, 0.75)
     }
   }
-  
-  console.log(`  → Extracted ${urls.length} menu URL(s) from landing page`)
+
+  console.log(`  → Extracted ${urls.length} child URL(s) from landing page`)
   return urls
 }
 
-serve(async (req) => {
-  // Handle CORS preflight
+// =====================================================
+// Main handler
+// =====================================================
+
+serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -256,36 +279,26 @@ serve(async (req) => {
     const startTime = Date.now()
     const { url, businessId }: DetectMenusRequest = await req.json()
 
-    if (!url) {
-      throw new Error('url is required')
-    }
+    if (!url) throw new Error('url is required')
 
     console.log('🔍 Detecting menus for:', url, businessId ? `(business: ${businessId})` : '')
 
-    // ==========================================
-    // AUTHENTICATION
-    // ==========================================
+    // ---- Auth ----
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
     const authHeader = req.headers.get('authorization')
-    if (!authHeader) {
-      throw new Error('Missing authorization header')
-    }
+    if (!authHeader) throw new Error('Missing authorization header')
 
     const token = authHeader.replace('Bearer ', '')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-    
-    if (authError || !user) {
-      throw new Error('Invalid or expired token')
-    }
+    if (authError || !user) throw new Error('Invalid or expired token')
 
     console.log('✅ User authenticated:', user.id)
 
-    // ==========================================
-    // TIER CHECK - Menu detection is paid-only
-    // ==========================================
+    // ---- Tier check ----
+    // Adjust PAID_PLANS to match tierStore.ts canonical slugs
     const { data: profile } = await supabase
       .from('profiles')
       .select('plan')
@@ -293,28 +306,22 @@ serve(async (req) => {
       .maybeSingle()
 
     const plan = profile?.plan || 'free'
-    const isPaid = ['standardplus', 'premium'].includes(plan)
-
-    if (!isPaid) {
+    const PAID_PLANS = ['smart', 'pro', 'standardplus', 'premium']
+    if (!PAID_PLANS.includes(plan)) {
       return new Response(
         JSON.stringify({
-          error: 'Menu detection requires a paid subscription (Standard Plus or Premium)',
+          error: 'Menu detection requires a paid subscription (Smart or Pro)',
           plan,
         }),
-        {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       )
     }
 
     console.log('✅ Tier check passed:', plan)
 
-    // ==========================================
-    // CALL CLOUD RUN SCRAPER
-    // ==========================================
-    const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL') || 
-                       'https://scraper-831683741713.europe-west1.run.app'
+    // ---- Call Cloud Run scraper ----
+    const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL') ||
+      'https://scraper-831683741713.europe-west1.run.app'
     const apiKey = Deno.env.get('CLOUD_RUN_API_KEY')
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
 
@@ -326,12 +333,12 @@ serve(async (req) => {
         'Content-Type': 'application/json',
         'X-API-Key': apiKey || '',
       },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         url,
         business_id: businessId,
-        openai_api_key: openaiApiKey,  // For AI Tier 2 classification
+        openai_api_key: openaiApiKey,
       }),
-      signal: AbortSignal.timeout(65000),  // 65s timeout
+      signal: AbortSignal.timeout(65000),
     })
 
     if (!scrapeResponse.ok) {
@@ -343,177 +350,183 @@ serve(async (req) => {
     const payload = await scrapeResponse.json()
     console.log('✅ Scrape complete')
 
-    // ==========================================
-    // EXTRACT MENU URLs
-    // ==========================================
-    const menuAll = payload.extraction?.services?.menu_all || []
-    
+    // ---- Extract raw menu URLs from scraper payload ----
+    const menuAll: RawMenuUrl[] = payload.extraction?.services?.menu_all || []
     console.log(`📋 Cloud Run detected ${menuAll.length} initial URL(s)`)
-    
-    // ==========================================
-    // EXPAND LANDING PAGES
-    // ==========================================
-    // For each detected URL, check if it's a landing page that needs expansion
-    const expandedUrls: MenuUrl[] = []
-    const expandedLandingPages = new Set<string>()  // Track which landing pages were expanded
-    
+
+    // ---- Expand landing pages, CAPTURING content-type as we go ----
+    // Every URL that passes through this loop either:
+    //   (a) gets fetched → we record its content-type in observedContentType, or
+    //   (b) fails to fetch → observedContentType stays '' and classification
+    //       falls back to URL patterns (plus a parallel HEAD later if needed).
+    // Landing-page CHILDREN are never fetched here → observedContentType = ''.
+    const expanded: WorkItem[] = []
+    const expandedLandingPages = new Set<string>()
+
     for (const item of menuAll) {
       const menuUrl = item.url
       console.log(`\n🔍 Checking: ${menuUrl}`)
-      
+
+      // Skip fetching for URLs classifiable from the hostname alone —
+      // Mealo/SPA pages return a JS shell that tells us nothing anyway.
+      const preClassified = classifySourceKind(menuUrl, '', item.detection_method || 'keyword')
+      if (preClassified === 'mealo' || preClassified === 'iframe_platform') {
+        console.log(`  ✅ Platform URL (${preClassified}) — no fetch needed`)
+        expanded.push({ ...item, observedContentType: '' })
+        continue
+      }
+
       try {
-        // Fetch the URL to check if it's a landing page
-        const urlResponse = await fetch(menuUrl, {
+        const urlResp = await fetch(menuUrl, {
           method: 'GET',
           redirect: 'follow',
           headers: {
             'User-Agent': 'Mozilla/5.0 (compatible; MenuDetectorBot/1.0)',
             'Accept': 'text/html,*/*;q=0.8',
           },
-          signal: AbortSignal.timeout(8000),  // 8s timeout per URL
+          signal: AbortSignal.timeout(EXPANSION_FETCH_TIMEOUT_MS),
         })
-        
-        if (!urlResponse.ok) {
-          console.log(`  ⚠️ HTTP ${urlResponse.status} - keeping original URL`)
-          expandedUrls.push({
-            url: menuUrl,
-            confidence: item.confidence || 0.9,
-            evidence: item.evidence || 'Menu',
-            detection_method: item.detection_method || 'keyword',
-          })
+
+        if (!urlResp.ok) {
+          console.log(`  ⚠️ HTTP ${urlResp.status} — keeping original`)
+          expanded.push({ ...item, observedContentType: '' })
           continue
         }
-        
-        const contentType = urlResponse.headers.get('content-type') || ''
-        
-        // If it's not HTML, keep as-is (PDF, image, etc)
+
+        const contentType = urlResp.headers.get('content-type') || ''
+
+        // Non-HTML: direct file, keep with its observed content-type
         if (!contentType.includes('html')) {
-          console.log(`  ✅ Direct file (${contentType}) - keeping original URL`)
-          expandedUrls.push({
-            url: menuUrl,
-            confidence: item.confidence || 0.9,
-            evidence: item.evidence || 'Menu',
-            detection_method: item.detection_method || 'keyword',
-          })
+          console.log(`  ✅ Direct file (${contentType}) — keeping`)
+          expanded.push({ ...item, observedContentType: contentType })
           continue
         }
-        
-        // It's HTML - check if landing page
-        const html = await urlResponse.text()
+
+        // HTML: landing-page check
+        const html = await urlResp.text()
         const text = htmlToText(html)
-        
+
         if (isLandingPage(html, text, menuUrl)) {
-          console.log('  🔄 Landing page detected - extracting child URLs')
-          const childUrls = extractMenuUrlsFromHtml(html, menuUrl)
-          
-          if (childUrls.length > 0) {
-            console.log(`  ✅ Expanded to ${childUrls.length} menu URL(s) - NOT including landing page itself`)
-            expandedUrls.push(...childUrls)
-            expandedLandingPages.add(normalizeUrlForDedup(menuUrl))  // Track that this was expanded
+          const children = extractMenuUrlsFromHtml(html, menuUrl)
+          if (children.length > 0) {
+            console.log(`  ✅ Expanded landing page → ${children.length} child URL(s)`)
+            expanded.push(
+              ...children.map((c) => ({ ...c, observedContentType: '' })),
+            )
+            expandedLandingPages.add(normalizeUrlForDedup(menuUrl))
           } else {
-            console.log('  ⚠️ Landing page with no extractable children - SKIPPING entirely')
-            // Do NOT add landing page to results if we can't find children
-            // It's better to skip it than to include a URL that will fail extraction
+            console.log('  ⚠️ Landing page with no extractable children — skipping')
           }
         } else {
-          console.log(`  ✅ Has menu content (${text.length} chars) - keeping original URL`)
-          expandedUrls.push({
-            url: menuUrl,
-            confidence: item.confidence || 0.9,
-            evidence: item.evidence || 'Menu',
-            detection_method: item.detection_method || 'keyword',
-          })
+          console.log(`  ✅ Has menu content (${text.length} chars) — keeping as HTML`)
+          expanded.push({ ...item, observedContentType: contentType })
         }
-        
-      } catch (error: any) {
-        console.log(`  ⚠️ Fetch failed: ${error.message} - keeping original URL`)
-        expandedUrls.push({
-          url: menuUrl,
-          confidence: item.confidence || 0.9,
-          evidence: item.evidence || 'Menu',
-          detection_method: item.detection_method || 'keyword',
-        })
+      } catch (err: any) {
+        console.log(`  ⚠️ Fetch failed: ${err.message} — keeping original`)
+        expanded.push({ ...item, observedContentType: '' })
       }
     }
-    
-    // ==========================================
-    // DEDUPLICATE FINAL RESULTS
-    // ==========================================
-    // Use normalized URLs to remove duplicates and expanded landing pages
-    const finalUrls: MenuUrl[] = []
+
+    // ---- Deduplicate ----
+    const deduped: WorkItem[] = []
     const finalSeen = new Set<string>()
-    
-    for (const item of expandedUrls) {
-      const normalized = normalizeUrlForDedup(item.url)
-      
-      // Skip if this is a landing page that was expanded
-      if (expandedLandingPages.has(normalized)) {
+
+    for (const item of expanded) {
+      const norm = normalizeUrlForDedup(item.url)
+      if (expandedLandingPages.has(norm)) {
         console.log(`  🗑️ Removing expanded landing page: ${item.url}`)
         continue
       }
-      
-      if (!finalSeen.has(normalized)) {
-        finalSeen.add(normalized)
-        finalUrls.push(item)
-      } else {
+      if (finalSeen.has(norm)) {
         console.log(`  🗑️ Removing duplicate: ${item.url}`)
+        continue
+      }
+      finalSeen.add(norm)
+      deduped.push(item)
+    }
+
+    // ---- Parallel HEAD only for URLs we never fetched AND cannot classify
+    //      confidently from the URL alone ----
+    // Candidates: observedContentType === '' AND URL-pattern classification
+    // returns 'html' (i.e. no extension, no platform host — genuinely unknown).
+    // Runs in parallel; total added latency ≈ HEAD_TIMEOUT_MS worst case.
+    const needsHead = deduped.filter((item) => {
+      if (item.observedContentType) return false
+      const kind = classifySourceKind(item.url, '', item.detection_method || 'keyword')
+      return kind === 'html'
+    })
+
+    if (needsHead.length > 0) {
+      console.log(`\n🔎 Parallel HEAD for ${needsHead.length} unclassified URL(s)`)
+      const results = await Promise.allSettled(
+        needsHead.map((item) =>
+          fetch(item.url, {
+            method: 'HEAD',
+            redirect: 'follow',
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenuDetectorBot/1.0)' },
+            signal: AbortSignal.timeout(HEAD_TIMEOUT_MS),
+          }).then((r) => ({ item, contentType: r.headers.get('content-type') || '' })),
+        ),
+      )
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          r.value.item.observedContentType = r.value.contentType
+        }
+        // rejected → observedContentType stays '', URL-pattern fallback applies
       }
     }
-    
-    const detectedMenuUrls = finalUrls.map(item => item.url)
-    console.log(`\n✅ Final result: ${detectedMenuUrls.length} menu URL(s) (after dedup)`)
-    
-    // Count detection methods
-    const detectionMethods = {
-      keyword: 0,
-      ai_verified: 0,
-      iframe_platform: 0,
-      landing_page_srcset: 0,
-      landing_page_img: 0,
-      landing_page_link: 0,
-    }
-    
-    finalUrls.forEach((item) => {
-      const method = item.detection_method || 'keyword'
-      if (method in detectionMethods) {
-        detectionMethods[method as keyof typeof detectionMethods]++
+
+    // ---- Final classification ----
+    const detectedSources: SourceResult[] = deduped.map((item) => {
+      const source_kind = classifySourceKind(
+        item.url,
+        item.observedContentType,
+        item.detection_method || 'keyword',
+      )
+      console.log(`  ✅ ${item.url} → ${source_kind}`)
+      return {
+        url: item.url,
+        source_kind,
+        confidence: item.confidence ?? 0.9,
+        evidence: item.evidence ?? 'Menu',
+        detection_method: item.detection_method ?? 'keyword',
+        label: item.label,
       }
     })
 
-    // ==========================================
-    // RESPONSE
-    // ==========================================
+    // ---- Response ----
+    const detectedMenuUrls = detectedSources.map((s) => s.url)
+
+    const detectionMethods: Record<string, number> = {}
+    const sourceKinds: Record<string, number> = {}
+    for (const s of detectedSources) {
+      detectionMethods[s.detection_method] = (detectionMethods[s.detection_method] || 0) + 1
+      sourceKinds[s.source_kind] = (sourceKinds[s.source_kind] || 0) + 1
+    }
+
     const duration = Date.now() - startTime
-    
+    console.log(`\n✅ Final: ${detectedMenuUrls.length} URL(s) in ${duration}ms`, sourceKinds)
+
     return new Response(
       JSON.stringify({
         success: true,
-        detectedMenuUrls,
+        detectedMenuUrls,   // string[] — legacy contract, do not remove
+        detectedSources,    // SourceResult[] — url + source_kind + metadata
         metadata: {
           totalFound: detectedMenuUrls.length,
           detectionMethods,
+          sourceKinds,
           duration_ms: duration,
           scraper_version: 'cloud-run-v3',
         },
       }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     )
-
   } catch (error: any) {
     console.error('❌ Error:', error.message)
-    
     return new Response(
-      JSON.stringify({
-        error: error.message || 'Menu detection failed',
-        success: false,
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+      JSON.stringify({ error: error.message || 'Menu detection failed', success: false }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     )
   }
 })

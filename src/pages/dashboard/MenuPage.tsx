@@ -86,6 +86,7 @@ function MenuPage() {
   const [newTextInput, setNewTextInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [detectedUrls, setDetectedUrls] = useState<Array<{url: string; isExisting: boolean}>>([])
+  const [detectedSources, setDetectedSources] = useState<Array<{url: string; source_kind: string; label?: string}>>([])
   const [selectedUrls, setSelectedUrls] = useState<Set<string>>(new Set())
   
   // File upload state (supports multiple files)
@@ -432,6 +433,12 @@ function MenuPage() {
 
       const result = await response.json()
       const detectedUrls = result.detectedMenuUrls || result.allMenuUrls || []
+
+      // Keep the richer classification payload; used at upsert time to persist source_kind.
+      // Falls back to [] for older function versions.
+      const sources: Array<{ url: string; source_kind: string; label?: string }> =
+        result.detectedSources || []
+      setDetectedSources(sources)
 
       if (detectedUrls.length === 0) {
         setError('Det var desværre ikke muligt at finde dine menuer. Prøv en af de andre måder nedenfor.')
@@ -1151,8 +1158,9 @@ function MenuPage() {
         source_origin: 'ai_detected',
         status: 'pending',
         menu_type: detectMenuType(url),
-        label: detectMenuLabel(url),
+        label: detectedSources.find((s) => s.url === url)?.label ?? detectMenuLabel(url),
         created_by: userId,
+        source_kind: detectedSources.find((s) => s.url === url)?.source_kind ?? null,
       }
     })
 
