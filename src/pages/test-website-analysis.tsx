@@ -150,11 +150,19 @@ export function TestWebsiteAnalysisPage() {
       );
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText };
+        }
+        console.error('❌ analyze-website-async error:', response.status, errorData);
+        throw new Error(errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json() as AsyncJobResponse;
+      console.log('✅ Job created:', data);
       setJobId(data.job_id);
       setStatus({
         job_id: data.job_id,
