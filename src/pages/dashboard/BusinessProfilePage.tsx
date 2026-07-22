@@ -565,6 +565,62 @@ function BusinessProfilePage() {
     }
   }, [selectedBusinessId]) // Reload when business selection changes
 
+  // Resume polling if an analysis job is still in flight for this business
+  useEffect(() => {
+    if (!businessId) return
+    let cancelled = false
+
+    const resumeInFlightJob = async () => {
+      const { data: inFlight } = await sb
+        .from('website_scrape_results')
+        .select('id, status, extraction_status')
+        .eq('business_id', businessId)
+        .eq('status', 'processing')
+        .gte('scraped_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+        .order('scraped_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (!inFlight || cancelled) return
+
+      console.log('🔄 Resuming in-flight analysis job:', inFlight.id)
+      setIsScraping(true)
+
+      const POLL_INTERVAL_MS = 3000
+      const MAX_POLLS = 120
+
+      try {
+        for (let i = 0; i < MAX_POLLS; i++) {
+          if (cancelled) return
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+
+          const { data: jobRow } = await sb
+            .from('website_scrape_results')
+            .select('id, status, extraction_status, error')
+            .eq('id', inFlight.id)
+            .maybeSingle()
+
+          if (!jobRow || cancelled) continue
+
+          if (jobRow.status === 'failed' || jobRow.extraction_status === 'failed') {
+            setScrapeError(jobRow.error || 'Website analysis fejlede')
+            return
+          }
+          if (jobRow.status === 'completed' && jobRow.extraction_status === 'completed') {
+            console.log('✅ In-flight job completed, reloading')
+            window.location.reload()
+            return
+          }
+        }
+      } finally {
+        if (!cancelled) setIsScraping(false)
+      }
+    }
+
+    resumeInFlightJob()
+    return () => { cancelled = true }
+  }, [businessId])
+
   // Handle business selection from selector modal
   const handleBusinessSelect = (businessId: string) => {
     setSelectedBusiness(businessId)
@@ -1182,57 +1238,65 @@ function BusinessProfilePage() {
         }
       }
 
-      const result = await response.json()
-      console.log('✅ Analysis complete:', result)
+      const dispatchResult = await response.json()
+      console.log('✅ Analysis dispatched:', dispatchResult)
+
+      const jobId = dispatchResult.job_id
+      if (!jobId) {
+        throw new Error(dispatchResult.error || 'No job_id returned')
+      }
+
+      // Poll the scrape row until completed/failed (max ~6 minutes).
+      // NOTE: a poll timeout is NOT a job failure — the job continues
+      // server-side and data is saved regardless. The timeout message
+      // must reflect that.
+      const POLL_INTERVAL_MS = 3000
+      const MAX_POLLS = 120
+      let finalRow: any = null
+
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+
+        const { data: jobRow, error: pollError } = await sb
+          .from('website_scrape_results')
+          .select('id, status, extraction_status, content_quality, extraction_summary, error')
+          .eq('id', jobId)
+          .maybeSingle()
+
+        if (pollError) {
+          console.warn('Poll error:', pollError.message)
+          continue
+        }
+        if (!jobRow) continue
+
+        if (jobRow.status === 'failed') {
+          throw new Error(jobRow.error || 'Scraping fejlede')
+        }
+        if (jobRow.status === 'completed' && jobRow.extraction_status === 'failed') {
+          throw new Error(jobRow.error || 'AI extraction fejlede')
+        }
+        if (jobRow.status === 'completed' && jobRow.extraction_status === 'completed') {
+          finalRow = jobRow
+          break
+        }
+        // still processing → keep polling
+      }
+
+      if (!finalRow) {
+        // Not an error state: the job continues server-side. Tell the user that.
+        throw new Error(
+          'Analysen fortsætter i baggrunden — dataene gemmes automatisk. Genindlæs siden om et par minutter for at se resultatet.'
+        )
+      }
 
       setScrapeResult({
-        scrape_id: result.scrape_id,
-        content_quality: result.quality,
-        extraction_summary: result.extraction_summary,
-        cached: !!result.cached,
-        duration_ms: result.duration_ms,
+        scrape_id: finalRow.id,
+        content_quality: finalRow.content_quality,
+        extraction_summary: finalRow.extraction_summary,
+        cached: !!dispatchResult.cached,
       })
 
-      // Build detailed summary message
-      let summaryMessage = `✅ Website analysis complete!\n\n`
-      summaryMessage += `📊 Scrape ID: ${result.scrape_id}\n`
-      summaryMessage += `Quality: ${result.quality}\n`
-      summaryMessage += `Duration: ${(result.duration_ms / 1000).toFixed(1)}s\n\n`
-
-      // Show what was distributed (new 3-tier architecture)
-      if (result.distribution_summary) {
-        const dist = result.distribution_summary
-        summaryMessage += `📝 Data Distributed:\n`
-        
-        if (dist.tier1_fields?.length > 0) {
-          summaryMessage += `  • Tier 1 (Structural): ${dist.tier1_fields.length} fields\n`
-        }
-        if (dist.tier2_fields?.length > 0) {
-          summaryMessage += `  • Tier 2 (Keywords): ${dist.tier2_fields.length} fields\n`
-        }
-        if (dist.tier3_fields?.length > 0) {
-          summaryMessage += `  • Tier 3 (AI): ${dist.tier3_fields.length} fields\n`
-        }
-        summaryMessage += `  • Total: ${dist.total_saved || 0} fields saved\n`
-        
-        if (dist.errors?.length > 0) {
-          summaryMessage += `\n⚠️ Errors: ${dist.errors.length}\n`
-        }
-      }
-
-      // Show extraction summary
-      if (result.extraction_summary) {
-        const summary = result.extraction_summary
-        if (summary.saved?.length > 0) {
-          summaryMessage += `\n✅ Extracted: ${summary.saved.length} fields\n`
-          // Show first few saved fields as examples
-          const examples = summary.saved.slice(0, 3).join(', ')
-          summaryMessage += `  ${examples}...\n`
-        }
-        if (summary.errors?.length > 0) {
-          summaryMessage += `\n⚠️ ${summary.errors.length} errors during extraction\n`
-        }
-      }
+      console.log('✅ Analysis complete:', finalRow)
 
       // Refresh page to show updated data
       window.location.reload()

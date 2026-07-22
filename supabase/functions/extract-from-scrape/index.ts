@@ -41,6 +41,7 @@ const DANISH_TO_WEEKDAY: Record<string, typeof WEEKDAYS[number]> = {
 
 interface ExtractionRequest {
   business_id: string;
+  scrape_id?: string;
 }
 
 interface FieldResult {
@@ -64,7 +65,7 @@ serve(async (req) => {
   }
 
   try {
-    const { business_id }: ExtractionRequest = await req.json();
+    const { business_id, scrape_id }: ExtractionRequest = await req.json();
     if (!business_id) throw new Error('business_id is required');
 
     const supabase = createClient(
@@ -72,14 +73,23 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
 
-    // ── Fetch latest scrape result ───────────────────────────────────────────
-    const { data: scrapeResult, error: fetchError } = await supabase
+    // ── Fetch scrape result ───────────────────────────────────────────
+    let query = supabase
       .from('website_scrape_results')
-      .select('*')
-      .eq('business_id', business_id)
-      .order('scraped_at', { ascending: false })
-      .limit(1)
-      .single();
+      .select('id, payload, scraped_at, content_quality');
+    
+    if (scrape_id) {
+      // Use specific scrape if provided
+      query = query.eq('id', scrape_id);
+    } else {
+      // Use latest scrape for business
+      query = query
+        .eq('business_id', business_id)
+        .order('scraped_at', { ascending: false })
+        .limit(1);
+    }
+    
+    const { data: scrapeResult, error: fetchError } = await query.single();
 
     if (fetchError || !scrapeResult) {
       throw new Error('No scrape result found for this business');
