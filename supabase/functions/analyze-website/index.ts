@@ -1749,10 +1749,23 @@ serve(async (req: any) => {
       console.error('❌ AI extraction failed:', extractionError)
       return new Response(
         JSON.stringify({ 
+          url,
+          businessName,
+          businessType,
+          businessTypeLabel: getBusinessTypeLabel(businessType),
+          detectedMenuUrls,
+          menuUrl,
+          bookingUrl,
+          logoUrl,
+          openingHours: extractedHours || {},
+          openingHoursReviewRequired,
+          openingHoursReviewReasons,
+          kitchenCloseTime: kitchenCloseTime || null,
           error: 'AI extraction failed',
-          details: (extractionError as Error).message
+          details: (extractionError as Error).message,
+          warning: 'Partial analysis returned because one or more AI extractors failed',
         }),
-        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
