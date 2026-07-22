@@ -76,6 +76,7 @@ const IFRAME_PLATFORM_HOSTS = [
   'tablemanager.io',
   'restablo.dk',
   'zenchef.com',
+  'webflow.io',  // Webflow sites load content dynamically
 ]
 
 const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i
