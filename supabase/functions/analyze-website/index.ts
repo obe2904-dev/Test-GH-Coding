@@ -1242,9 +1242,11 @@ serve(async (req: any) => {
       console.log('🍽️ Menu signal extracted:', JSON.stringify(menuSignal, null, 2))
       console.log('🎤 Tone of voice extracted:', toneOfVoice ? '✅' : '❌')
 
+      const contentSignatureForAnalysis = typeof contentSignature !== 'undefined' ? contentSignature : null
+
       const webAnalysisShape = classifyWebAnalysisShape({
         url,
-        contentSignature,
+        contentSignature: contentSignatureForAnalysis,
         websiteContent,
         crawledPagesCount: crawledPages.length,
         detectedMenuUrls,
