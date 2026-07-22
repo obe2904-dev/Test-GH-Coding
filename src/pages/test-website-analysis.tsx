@@ -212,7 +212,7 @@ export function TestWebsiteAnalysisPage() {
             />
             <button
               onClick={handleAnalyze}
-              disabled={loading || !websiteUrl.trim() || (status?.status === 'scraping' || status?.status === 'extracting')}
+              disabled={loading || !websiteUrl.trim() || (status?.status === 'scraping' || status?.status === 'extracting' || status?.status === 'pending')}
               className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300"
             >
               {loading ? 'Starting...' : 'Analyze'}
@@ -242,16 +242,16 @@ export function TestWebsiteAnalysisPage() {
           <div className={`border rounded-lg p-6 mb-6 ${getStatusColor(status.status)}`}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">
-                Status: {status.status.toUpperCase()}
+                Status: {status.status?.toUpperCase() || 'UNKNOWN'}
               </h2>
-              <div className="text-sm font-mono">{status.progress_percent}%</div>
+              <div className="text-sm font-mono">{status.progress_percent || 0}%</div>
             </div>
 
             {/* Progress Bar */}
             <div className="w-full bg-gray-200 rounded-full h-4 mb-4">
               <div
                 className="bg-blue-600 h-4 rounded-full transition-all duration-500"
-                style={{ width: `${status.progress_percent}%` }}
+                style={{ width: `${status.progress_percent || 0}%` }}
               />
             </div>
 
@@ -259,11 +259,11 @@ export function TestWebsiteAnalysisPage() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <span className="font-semibold">Job ID:</span>{' '}
-                <code className="bg-white/50 px-1 rounded text-xs">{status.job_id.slice(0, 8)}...</code>
+                <code className="bg-white/50 px-1 rounded text-xs">{status.job_id?.slice(0, 8) || 'N/A'}...</code>
               </div>
               <div>
                 <span className="font-semibold">URL:</span>{' '}
-                <span className="truncate block">{status.url}</span>
+                <span className="truncate block">{status.url || 'N/A'}</span>
               </div>
               {status.current_step && (
                 <div className="col-span-2">
