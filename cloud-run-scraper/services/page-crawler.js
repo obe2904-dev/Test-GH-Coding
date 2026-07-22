@@ -68,7 +68,7 @@ export function classifyPageType(url, linkText = '') {
  * @param {number} maxPages - Max additional pages to crawl (2-4)
  * @returns {array} Sorted page objects: { url, type, priority, text }
  */
-export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPages = 4) {
+export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPages = 2) {
   const candidates = [];
   const baseUrl = new URL(homepageDoc.final_url);
 
@@ -92,6 +92,13 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
       // Classify page type
       const { type, priority } = classifyPageType(link.url, link.text);
 
+      // PHASE 3: Only crawl essential page types (contact, about, hours)
+      // Menu pages are queued separately for async enrichment
+      const essentialTypes = ['contact', 'about', 'hours'];
+      if (!essentialTypes.includes(type)) {
+        continue;
+      }
+
       // Boost priority if field is missing from homepage
       let adjustedPriority = priority;
       if (type === 'contact' && homepageExtraction.contact.addresses.length === 0) {
@@ -100,8 +107,11 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
       if (type === 'about' && (!homepageExtraction.content_sections || homepageExtraction.content_sections.length < 3)) {
         adjustedPriority += 10; // Need more content
       }
+      if (type === 'hours' && !homepageExtraction.opening_hours?.candidates?.length) {
+        adjustedPriority += 10; // Really need hours
+      }
 
-      // Add to candidates (including menu pages for later queuing)
+      // Add to candidates
       candidates.push({
         url: link.url,
         type,
@@ -127,11 +137,15 @@ export function discoverAdditionalPages(homepageDoc, homepageExtraction, maxPage
     }
   }
 
-  // Take top N pages
+  // Take top N pages (strict limit: default 2)
   const result = uniqueCandidates.slice(0, maxPages);
   
-  console.log(`[Crawler] Discovered ${result.length} pages to crawl:`, 
-    result.map(p => `${new URL(p.url).pathname} (${p.type}, pri=${p.priority})`));
+  if (result.length > 0) {
+    console.log(`[Crawler] Discovered ${result.length} essential pages to crawl:`, 
+      result.map(p => `${new URL(p.url).pathname} (${p.type}, pri=${p.priority})`));
+  } else {
+    console.log(`[Crawler] No essential pages discovered - homepage is complete`);
+  }
   
   return result;
 }
@@ -266,6 +280,28 @@ export function mergePageExtractions(pageExtractions) {
     // Merge services (prefer highest confidence)
     if (!merged.services.booking || (page.services.booking && page.services.booking.confidence > merged.services.booking.confidence)) {
       merged.services.booking = page.services.booking;
+    }
+    
+    // Special case: If this is a contact page with booking content but no explicit booking link found yet,
+    // use the contact page itself as the booking URL
+    if (!merged.services.booking && page.meta?.final_url && /kontakt|contact/i.test(page.meta.final_url)) {
+      // Check if page has booking-related headers or text
+      const hasBookingContent = (page.blocks || []).some(block => {
+        const text = block.text?.toLowerCase() || '';
+        const heading = block.section_heading?.toLowerCase() || '';
+        return /(?:bestil|book|reserver).*bord|book.*table/i.test(heading) || 
+               (/(?:bestil|book|reserver).*bord/i.test(text) && text.length < 500);
+      });
+      
+      if (hasBookingContent) {
+        console.log(`[Merge] ✅ Contact page has booking content, setting as booking URL: ${page.meta.final_url}`);
+        merged.services.booking = {
+          url: page.meta.final_url,
+          confidence: 0.75,
+          evidence: 'Contact page with booking form/instructions',
+          source_url: page.meta.final_url
+        };
+      }
     }
 
     if (!merged.services.menu || (page.services.menu && page.services.menu.confidence > merged.services.menu.confidence)) {

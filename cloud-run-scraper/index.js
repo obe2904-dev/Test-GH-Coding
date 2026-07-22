@@ -9,7 +9,7 @@ import {
   autoScroll,
   waitForContentStability
 } from './services/browser-helpers.js';
-import { extractPageDocument, extractOpeningHoursFromText } from './services/dom-extractor.js';
+import { extractPageDocument, extractOpeningHoursFromText, extractKitchenCloseTime } from './services/dom-extractor.js';
 import { normalizeLinks, classifyLinks } from './services/link-classifier.js';
 import { extractContact } from './services/contact-extractor.js';
 import { calculateQuality, shouldContinueCrawling } from './services/quality-calculator.js';
@@ -104,94 +104,28 @@ async function trySSRFetch(url, minTextLength = 1000) {
 }
 
 /**
- * Detect CMS/platform type from HTML content and extracted document.
- * Returns platform fingerprint to guide scraping strategy.
+ * Get appropriate JavaScript hydration wait time based on HTML content.
+ * Simplified 3-tier detection: ordering platforms (heavy SPAs) > modern SSR > default.
  * 
  * @param {string} html - Raw HTML source
- * @param {object} homepageDoc - Extracted document from dom-extractor
- * @returns {object} { platform: string, confidence: number, isSPA: boolean }
- */
-function detectPlatform(html, homepageDoc) {
-  const checks = {
-    wordpress: [
-      /wp-content\//i.test(html),
-      /wp-json/i.test(html),
-      /wp-includes/i.test(html)
-    ],
-    umbraco_heartcore: [
-      /umbraco/i.test(html),
-      (homepageDoc?.rawText?.length || 0) < 500 && html.length > 50000 // SPA indicator
-    ],
-    umbraco: [
-      /umbraco/i.test(html),
-      (homepageDoc?.rawText?.length || 0) >= 500 // Server-rendered
-    ],
-    wix: [
-      /wix\.com/i.test(html),
-      /_wix_/i.test(html),
-      /static\.parastorage\.com/i.test(html)
-    ],
-    squarespace: [
-      /squarespace\.com/i.test(html),
-      /static1\.squarespace/i.test(html)
-    ],
-    webflow: [
-      /webflow\.io/i.test(html),
-      /data-wf-/i.test(html),
-      /assets\.website-files\.com/i.test(html)
-    ],
-    shopify: [
-      /cdn\.shopify\.com/i.test(html),
-      /Shopify\.theme/i.test(html)
-    ]
-  };
-
-  // Score each platform
-  for (const [platform, patterns] of Object.entries(checks)) {
-    const matches = patterns.filter(Boolean).length;
-    if (matches >= 2) {
-      const isSPA = platform === 'umbraco_heartcore' || (homepageDoc?.rawText?.length || 0) < 300;
-      console.log(`[Platform] Detected: ${platform} (${matches}/${patterns.length} signals, SPA: ${isSPA})`);
-      return { platform, confidence: matches / patterns.length, isSPA };
-    }
-  }
-
-  // SPA heuristic (no CMS fingerprint but thin SSR content)
-  const isSPA = (homepageDoc?.rawText?.length || 0) < 300 && html.length > 20000;
-  const platform = isSPA ? 'spa_unknown' : 'static_or_unknown';
-  
-  console.log(`[Platform] Detected: ${platform} (SPA: ${isSPA})`);
-  return { platform, confidence: 0.5, isSPA };
-}
-
-/**
- * Get appropriate JavaScript hydration wait time based on platform.
- * Different platforms need different wait times for JS frameworks to mount.
- * 
- * @param {string} platform - Platform identifier from detectPlatform()
- * @param {boolean} isSPA - Whether site is SPA/headless
  * @returns {number} Milliseconds to wait for hydration
  */
-function getHydrationTimeout(platform, isSPA) {
-  const timeouts = {
-    wordpress: 3000,
-    squarespace: 3000,
-    drupal: 4000,
-    wix: 8000,
-    webflow: 8000,
-    umbraco: 4000,
-    umbraco_heartcore: 12000,
-    spa_unknown: 10000,
-    static_or_unknown: 3000
-  };
-
-  const baseTimeout = timeouts[platform] || 5000;
+function getHydrationTimeout(html) {
+  // Tier 1: Ordering platforms (heavy SPAs needing significant JS hydration)
+  if (/mealo\.dk|wolt|just.*eat|order\.lifepeaks|heapsgo/i.test(html)) {
+    console.log('[Platform] Ordering SPA detected → 12s wait');
+    return 12000;
+  }
   
-  // Add extra time for confirmed SPAs
-  const finalTimeout = isSPA && baseTimeout < 10000 ? Math.max(baseTimeout, 10000) : baseTimeout;
+  // Tier 2: Modern SSR frameworks (fast render, minimal hydration)
+  if (/website-files\.com|webflow|wix\.com|_wix_|squarespace|parastorage\.com/i.test(html)) {
+    console.log('[Platform] Modern SSR detected → 2s wait');
+    return 2000;
+  }
   
-  console.log(`[Hydration] Platform: ${platform}, SPA: ${isSPA} → Wait: ${finalTimeout}ms`);
-  return finalTimeout;
+  // Tier 3: Default (WordPress, custom builds, unknown platforms)
+  console.log('[Platform] Default platform → 5s wait');
+  return 5000;
 }
 
 const app = express();
@@ -599,11 +533,16 @@ app.post('/scrape-v3', async (req, res) => {
     console.log(`[V3] Processing homepage extraction...`);
     const normalizedLinks = normalizeLinks(homepageDoc.links);
     const { classified: services } = await classifyLinks(normalizedLinks, { 
-      openaiApiKey: openai_api_key,
       homepageUrl: url 
     });
     const contact = await extractContact(homepageDoc);
     const opening_hours = await processOpeningHours(homepageDoc);
+    const kitchen_close_time = extractKitchenCloseTime(homepageDoc);
+    if (kitchen_close_time) {
+      console.log(`[Kitchen] ✅ Extracted kitchen close time from homepage: ${kitchen_close_time}`);
+    } else {
+      console.log(`[Kitchen] ⚠️  No kitchen close time found on homepage`);
+    }
 
     // Build initial extraction
     let extraction = {
@@ -619,10 +558,13 @@ app.post('/scrape-v3', async (req, res) => {
       },
       contact,
       opening_hours,
+      kitchen_close_time,
       services,
       content_sections: extractContentSections(homepageDoc, opening_hours),
       scraped_at: new Date().toISOString()
     };
+    
+    console.log(`[Kitchen] 🔍 extraction.kitchen_close_time = ${extraction.kitchen_close_time}`);
 
     // Calculate initial quality
     const homepageQuality = calculateQuality(extraction);
@@ -636,29 +578,44 @@ app.post('/scrape-v3', async (req, res) => {
     let pagesCrawled = [{ url: homepageDoc.final_url, quality: homepageQuality.rating }];
     let menuPagesQueued = []; // Track menu pages for async queue
 
-    // Detect platform for smart hydration timing
-    const platformInfo = detectPlatform(ssrHtml || await page.content(), homepageDoc);
-    const hydrationTimeout = getHydrationTimeout(platformInfo.platform, platformInfo.isSPA);
+    // Get smart hydration timeout based on HTML content
+    const hydrationTimeout = getHydrationTimeout(ssrHtml || await page.content());
 
-    // Crawl additional pages when key signals are missing on the homepage.
-    // Hours and kitchen close time are often captured on /om/ or /kontakt/ pages.
+    // ========================================
+    // PHASE 3: CONDITIONAL MULTI-PAGE CRAWLING
+    // Only crawl additional pages if critical fields are missing AND budget allows
+    // ========================================
+    
+    // Check for missing critical fields
     const missingPhone = contact.phones.length === 0;
     const missingAddress = contact.addresses.length === 0;
     const missingHours = !extraction.opening_hours?.candidates?.length;
-    const missingKitchenCloseTime = !extraction.kitchen_close_time;
-    const missingCoreSignals = missingPhone || missingAddress || missingHours || missingKitchenCloseTime;
-    const shouldCrawlMore = shouldContinueCrawling(homepageQuality) || missingCoreSignals;
+    const missingBooking = !extraction.services?.booking?.url;
+    const missingDescription = !extraction.business?.description?.value || 
+                               extraction.business.description.value.length < 50;
+    const sparseContent = extraction.content_sections.length < 2;
     
-    console.log(`[V3] Core signal check: phones=${contact.phones.length}, addresses=${contact.addresses.length}, hours=${missingHours ? 'missing' : 'present'}, kitchenClose=${missingKitchenCloseTime ? 'missing' : 'present'}, shouldCrawlMore=${shouldCrawlMore}`);
+    const criticalFieldsMissing = missingPhone || missingAddress || missingHours || missingBooking || missingDescription;
+    const budgetAllows = remainingBudgetMs() > 30000;  // Need at least 30s for multi-page
     
-    if (missingCoreSignals) {
-      console.log('[V3] Missing core homepage signals - forcing page discovery for essential pages');
-    }
+    // PHASE 3 REVISED: Crawl if ANY critical field missing (regardless of quality)
+    // Quality check removed - completeness is more important than speed
+    const shouldCrawlMultiPage = criticalFieldsMissing && budgetAllows;
     
-    const discoveredPages = shouldCrawlMore ? discoverAdditionalPages(homepageDoc, extraction, 6) : [];
+    console.log(`[V3] 🔍 Multi-page decision: phone=${contact.phones.length}, address=${contact.addresses.length}, hours=${missingHours ? 'missing' : 'present'}, booking=${missingBooking ? 'missing' : 'present'}, description=${missingDescription ? 'missing' : 'present'}, quality=${homepageQuality.rating}`);
+    console.log(`[V3] 📊 Critical missing: ${criticalFieldsMissing}, Budget OK: ${budgetAllows} (${Math.round(remainingBudgetMs()/1000)}s)`);
+    console.log(`[V3] ➡️  Multi-page crawl: ${shouldCrawlMultiPage ? 'YES' : 'NO'}`);
+    
+    // Discover pages only if we'll actually crawl them
+    const discoveredPages = shouldCrawlMultiPage ? discoverAdditionalPages(homepageDoc, extraction, 2) : [];
 
     // Separate pages by type: essential (contact/about) vs menu
-    const essentialPages = discoveredPages.filter(p => p.priority >= 60 && p.type !== 'menu');
+    // PHASE 3: Limit to contact and about pages only (skip hours, other)
+    const essentialTypes = ['contact', 'about'];
+    const essentialPages = discoveredPages.filter(p => 
+      essentialTypes.includes(p.type) && p.priority >= 60
+    ).slice(0, 2);  // Strict limit: max 2 pages
+    
     const menuPages = discoveredPages.filter(p => p.type === 'menu');
 
     // Track menu URLs for async queue (in response metadata)
@@ -790,7 +747,6 @@ app.post('/scrape-v3', async (req, res) => {
           const pageDoc = await scrapePage(page, pageInfo.url, pageTimeout);
           const pageNormalizedLinks = normalizeLinks(pageDoc.links);
           const { classified: pageServices } = await classifyLinks(pageNormalizedLinks, { 
-            openaiApiKey: openai_api_key,
             homepageUrl: pageInfo.url 
           });
           const pageContact = await extractContact(pageDoc);
@@ -856,9 +812,7 @@ app.post('/scrape-v3', async (req, res) => {
       scraper_metadata: {
         version:            'v3',
         scraper_type:       ssrUsed ? 'cloud-run-ssr-fetch' : 'cloud-run-puppeteer-smart',
-        platform:           platformInfo.platform,
-        platform_confidence: platformInfo.confidence,
-        is_spa:             platformInfo.isSPA,
+        hydration_timeout:  hydrationTimeout,  // Simplified: just the timeout used
         duration_ms:        duration,
         pages_crawled_count: pagesCrawled.length,
         menu_pages_skipped: menuPagesQueued.length,
@@ -1451,11 +1405,505 @@ function extractContentSections(pageDoc, openingHours = null) {
   return sections;
 }
 
+// =========================================================================
+// /scrape-v3-async - Async scraping with Supabase persistence & webhooks
+// =========================================================================
+
+app.post('/scrape-v3-async', async (req, res) => {
+  const startTime = Date.now();
+  let browser;
+  const SCRAPE_BUDGET_MS = 150000;
+
+  const remainingBudgetMs = () => Math.max(0, SCRAPE_BUDGET_MS - (Date.now() - startTime));
+  const budgetedTimeout = (preferredMs, minimumMs = 5000) => {
+    const remaining = remainingBudgetMs();
+    return Math.max(minimumMs, Math.min(preferredMs, Math.max(minimumMs, remaining - 5000)));
+  };
+
+  /**
+   * Deliver webhook with exponential backoff retry
+   */
+  async function deliverWebhook(webhookUrl, payload, apiKey, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[Webhook] Attempt ${attempt}/${maxRetries} to ${webhookUrl}`);
+        
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': apiKey,
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(30000), // 30s timeout
+        });
+
+        if (response.ok) {
+          console.log(`[Webhook] ✅ Delivered on attempt ${attempt}`);
+          return true;
+        }
+
+        const errorText = await response.text().catch(() => 'unknown error');
+        console.error(`[Webhook] ❌ Attempt ${attempt} failed: HTTP ${response.status} - ${errorText}`);
+
+      } catch (error) {
+        console.error(`[Webhook] ❌ Attempt ${attempt} network error:`, error.message);
+      }
+
+      // Exponential backoff: 2s, 4s, 8s
+      if (attempt < maxRetries) {
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        console.log(`[Webhook] Retrying in ${backoffMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+      }
+    }
+
+    console.error(`[Webhook] ❌ All ${maxRetries} attempts failed`);
+    return false;
+  }
+
+  /**
+   * Update Supabase job progress
+   */
+  async function updateJobProgress(supabase, jobId, updates) {
+    try {
+      await supabase
+        .from('scrape_jobs')
+        .update(updates)
+        .eq('id', jobId);
+    } catch (error) {
+      console.error('[Job Update] Failed:', error.message);
+    }
+  }
+
+  try {
+    // API key validation
+    const providedKey = req.headers['x-api-key'];
+    if (!providedKey || providedKey !== API_KEY) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: Invalid or missing API key'
+      });
+    }
+
+    const { 
+      url, 
+      job_id, 
+      business_id, 
+      webhook_url, 
+      webhook_api_key 
+    } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameter: url'
+      });
+    }
+
+    if (!job_id || !business_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters: job_id, business_id'
+      });
+    }
+
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid URL format'
+      });
+    }
+
+    console.log(`[V3-Async] Starting scrape for job ${job_id}: ${url}`);
+
+    // Initialize Supabase client
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Supabase credentials not configured');
+    }
+
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Update job to scraping status
+    await updateJobProgress(supabase, job_id, {
+      status: 'scraping',
+      progress_percent: 10,
+      current_step: 'Launching browser...',
+      started_at: new Date().toISOString(),
+    });
+
+    // ========================================
+    // Launch Browser
+    // ========================================
+    browser = await puppeteer.launch({
+      headless: 'new',
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-extensions'
+      ]
+    });
+
+    const page = await browser.newPage();
+    page.on('console', msg => console.log(`[Browser Console] ${msg.text()}`));
+
+    await page.setRequestInterception(true);
+    page.on('request', request => {
+      const blockedTypes = new Set(['image', 'media', 'font']);
+      if (blockedTypes.has(request.resourceType())) {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
+
+    await page.setDefaultNavigationTimeout(30000);
+    await page.setDefaultTimeout(30000);
+    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+    await updateJobProgress(supabase, job_id, {
+      progress_percent: 15,
+      current_step: 'Loading homepage...',
+    });
+
+    // ========================================
+    // HOMEPAGE: SSR Pre-flight → Puppeteer fallback
+    // ========================================
+    let homepageDoc = null;
+    let ssrUsed = false;
+
+    const ssrHtml = await trySSRFetch(url, 400);
+
+    if (ssrHtml) {
+      ssrUsed = true;
+      const preprocessed = preprocessHtml(ssrHtml);
+      homepageDoc = extractPageDocument(preprocessed, url, url);
+      console.log('[V3-Async] ✅ Using SSR pre-flight HTML');
+    } else {
+      console.log('[V3-Async] Falling back to Puppeteer for homepage');
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+      await dismissCookieDialog(page);
+      await removeKnownNoise(page);
+      await autoScroll(page, 3000);
+
+      const hydrationTimeout = getHydrationTimeout(await page.content());
+      if (hydrationTimeout > 0) {
+        console.log(`[Hydration] Waiting ${hydrationTimeout}ms for dynamic content...`);
+        await waitForContentStability(page, budgetedTimeout(hydrationTimeout));
+      }
+
+      const finalHtml = await page.content();
+      const preprocessed = preprocessHtml(finalHtml);
+      homepageDoc = extractPageDocument(preprocessed, url, url);
+    }
+
+    await updateJobProgress(supabase, job_id, {
+      progress_percent: 40,
+      current_step: 'Analyzing homepage...',
+      pages_crawled: 1,
+    });
+
+    // ========================================
+    // EXTRACT HOMEPAGE DATA
+    // ========================================
+    const normalized = normalizeLinks(homepageDoc.links, url);
+    const classified = classifyLinks(homepageDoc, normalized);
+
+    const contact = extractContact(
+      homepageDoc.blocks,
+      homepageDoc.metadata.phone || null,
+      homepageDoc.metadata.email || null,
+      homepageDoc.metadata.address || null
+    );
+
+    const opening_hours = processOpeningHours(homepageDoc);
+    const kitchen_close_time = extractKitchenCloseTime(homepageDoc);
+
+    const extraction = {
+      business_name: homepageDoc.metadata.site_name || null,
+      description: homepageDoc.metadata.description || null,
+      contact,
+      services: {
+        booking: classified.booking || null,
+        menu: classified.menu || null,
+        takeaway: classified.takeaway || null,
+        social_profiles: classified.social || [],
+      },
+      opening_hours,
+      kitchen_close_time,
+      menu: { inline: null },
+      quality: { rating: 'unknown', confidence: 0, fields_found: 0 },
+    };
+
+    const homepageExtraction = {
+      ...extraction,
+      meta: { final_url: url },
+      blocks: homepageDoc.blocks,
+    };
+
+    const pagesCrawled = [{ url, type: 'homepage', extraction: homepageExtraction }];
+
+    // ========================================
+    // MULTI-PAGE CRAWL (Conditional)
+    // ========================================
+    const missingPhone = !extraction.contact.phone;
+    const missingAddress = !extraction.contact.address;
+    const missingHours = !extraction.opening_hours || extraction.opening_hours.length === 0;
+    const missingBooking = !extraction.services?.booking?.url;
+    const missingDescription = !extraction.description;
+
+    const criticalFieldsMissing = missingPhone || missingAddress || missingHours || missingBooking || missingDescription;
+
+    if (criticalFieldsMissing) {
+      console.log('[Multi-Page] Critical fields missing, discovering additional pages...');
+      
+      await updateJobProgress(supabase, job_id, {
+        progress_percent: 50,
+        current_step: 'Crawling additional pages...',
+      });
+
+      const pagesToCrawl = discoverAdditionalPages(homepageDoc, homepageExtraction, 3);
+      console.log(`[Multi-Page] ${pagesToCrawl.length} pages queued`);
+
+      for (let i = 0; i < pagesToCrawl.length; i++) {
+        const pageInfo = pagesToCrawl[i];
+        console.log(`[Multi-Page] Crawling ${i + 1}/${pagesToCrawl.length}: ${pageInfo.url} (${pageInfo.type})`);
+
+        const pageDoc = await scrapePage(page, pageInfo.url, budgetedTimeout(20000, 5000));
+        const normalized = normalizeLinks(pageDoc.links, pageInfo.url);
+        const classified = classifyLinks(pageDoc, normalized);
+        const contact = extractContact(pageDoc.blocks, pageDoc.metadata.phone, pageDoc.metadata.email, pageDoc.metadata.address);
+
+        const pageExtraction = {
+          ...extraction,
+          contact,
+          services: {
+            booking: classified.booking,
+            menu: classified.menu,
+            takeaway: classified.takeaway,
+            social_profiles: classified.social || [],
+          },
+          meta: { final_url: pageInfo.url },
+          blocks: pageDoc.blocks,
+        };
+
+        pagesCrawled.push({
+          url: pageInfo.url,
+          type: pageInfo.type,
+          extraction: pageExtraction,
+        });
+
+        await updateJobProgress(supabase, job_id, {
+          progress_percent: 50 + ((i + 1) / pagesToCrawl.length) * 30,
+          current_step: `Crawled page ${i + 2} of ${pagesToCrawl.length + 1}`,
+          pages_crawled: pagesCrawled.length,
+        });
+      }
+
+      // Merge all extractions
+      const allExtractions = pagesCrawled.map(p => p.extraction);
+      extraction.contact = mergePageExtractions(allExtractions).contact;
+      extraction.services = mergePageExtractions(allExtractions).services;
+    }
+
+    // Calculate final quality
+    extraction.quality = calculateQuality(extraction);
+
+    const duration = Date.now() - startTime;
+    console.log(`[V3-Async] Scrape completed in ${duration}ms, quality=${extraction.quality.rating}, pages=${pagesCrawled.length}`);
+
+    // ========================================
+    // SAVE TO SUPABASE
+    // ========================================
+    await updateJobProgress(supabase, job_id, {
+      progress_percent: 85,
+      current_step: 'Saving results...',
+    });
+
+    const responsePayload = {
+      success: true,
+      version: 'v3-async',
+      extraction,
+      pages_crawled: pagesCrawled,
+      scraper_metadata: {
+        version: 'v3-async',
+        scraper_type: ssrUsed ? 'cloud-run-ssr-fetch' : 'cloud-run-puppeteer-smart',
+        hydration_timeout: ssrUsed ? 0 : getHydrationTimeout(''),
+        duration_ms: duration,
+        pages_crawled_count: pagesCrawled.length,
+        ssr_used: ssrUsed,
+      },
+    };
+
+    // Map quality to enum
+    const qualityRating = extraction.quality.rating;
+    const contentQuality = ['excellent', 'good'].includes(qualityRating) ? 'rich'
+      : qualityRating === 'partial' ? 'thin'
+      : 'shell';
+
+    const menuSource = extraction.services?.menu?.url ? 'link'
+      : extraction.menu?.inline ? 'inline'
+      : 'none';
+
+    const { data: scrapeResult, error: insertError } = await supabase
+      .from('website_scrape_results')
+      .insert({
+        business_id,
+        job_id,
+        url,
+        scraped_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        scraper_version: 'cloud-run-v3-async',
+        content_quality: contentQuality,
+        menu_source: menuSource,
+        payload: responsePayload,
+        webhook_status: 'pending',
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      throw new Error(`Failed to save scrape result: ${insertError.message}`);
+    }
+
+    console.log('[V3-Async] ✅ Saved to Supabase:', scrapeResult.id);
+
+    // ========================================
+    // DELIVER WEBHOOK
+    // ========================================
+    if (webhook_url) {
+      console.log('[V3-Async] Delivering webhook...');
+      
+      const webhookPayload = {
+        job_id,
+        scrape_result_id: scrapeResult.id,
+        status: 'success',
+        pages_crawled: pagesCrawled.length,
+        duration_ms: duration,
+        quality_rating: extraction.quality.rating,
+      };
+
+      const webhookSuccess = await deliverWebhook(
+        webhook_url,
+        webhookPayload,
+        webhook_api_key,
+        3
+      );
+
+      await supabase
+        .from('website_scrape_results')
+        .update({
+          webhook_status: webhookSuccess ? 'delivered' : 'failed',
+          webhook_attempts: 3,
+        })
+        .eq('id', scrapeResult.id);
+    }
+
+    // Return success to caller (but webhook is the main notification)
+    res.json({
+      success: true,
+      job_id,
+      scrape_result_id: scrapeResult.id,
+      pages_crawled: pagesCrawled.length,
+      quality: extraction.quality.rating,
+    });
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error('[V3-Async] ❌ Scrape failed:', error);
+
+    const { job_id, business_id, webhook_url, webhook_api_key } = req.body;
+
+    // Try to save partial/failed result
+    if (job_id && business_id) {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(
+          process.env.SUPABASE_URL,
+          process.env.SUPABASE_SERVICE_ROLE_KEY
+        );
+
+        // Save failed scrape
+        const { data: scrapeResult } = await supabase
+          .from('website_scrape_results')
+          .insert({
+            business_id,
+            job_id,
+            url: req.body.url,
+            scraped_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+            scraper_version: 'cloud-run-v3-async',
+            content_quality: 'shell',
+            menu_source: 'none',
+            payload: {
+              success: false,
+              error: error.message,
+              scraper_metadata: {
+                version: 'v3-async',
+                duration_ms: duration,
+              },
+            },
+            webhook_status: 'pending',
+          })
+          .select()
+          .single();
+
+        // Deliver failure webhook
+        if (webhook_url && scrapeResult) {
+          await deliverWebhook(
+            webhook_url,
+            {
+              job_id,
+              scrape_result_id: scrapeResult.id,
+              status: 'failed',
+              error: error.message,
+              pages_crawled: 0,
+              duration_ms: duration,
+            },
+            webhook_api_key,
+            3
+          );
+        }
+      } catch (saveError) {
+        console.error('[V3-Async] Failed to save error state:', saveError);
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      job_id,
+      scraper_metadata: {
+        version: 'v3-async',
+        duration_ms: duration,
+      },
+    });
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => null);
+    }
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    error: 'Endpoint not found. Available endpoints: GET /health, POST /scrape, POST /scrape-v2, POST /scrape-v3'
+    error: 'Endpoint not found. Available endpoints: GET /health, POST /scrape, POST /scrape-v2, POST /scrape-v3, POST /scrape-v3-async'
   });
 });
 

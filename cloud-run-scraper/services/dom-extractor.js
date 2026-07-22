@@ -39,7 +39,7 @@ const DAY_ORDER = [
  */
 function normaliseTime(raw) {
   if (!raw) return null;
-  const s = raw.trim().replace(',', '.');
+  const s = raw.trim().replace(',', '.').replace(/[.,;!?]+$/, ''); // Strip trailing punctuation
 
   // Already HH:MM or H:MM
   const colonMatch = s.match(/^(\d{1,2}):(\d{2})$/);
@@ -196,6 +196,8 @@ export function extractOpeningHoursFromText(text) {
   }
   // ── End pre-process ───────────────────────────────────────────────────────
 
+  console.log(`[Hours] Processing ${lines.length} lines:`, lines.slice(0, 5).map(l => `"${l}"`));
+
   for (const line of lines) {
     // --- Pattern: "Alle dage HH - HH" ---
     const allDaysMatch = line.match(
@@ -238,10 +240,15 @@ export function extractOpeningHoursFromText(text) {
     if (dayTimeMatch) {
       const dayPart  = dayTimeMatch[1].trim();
       const timePart = dayTimeMatch[2].trim();
+      console.log(`[Hours] Matched day+time: dayPart="${dayPart}", timePart="${timePart}"`);
 
       // Skip if dayPart doesn't look like a day name
       const days = parseDayExpression(dayPart);
-      if (days.length === 0) continue;
+      console.log(`[Hours] parseDayExpression("${dayPart}") → [${days.join(', ')}]`);
+      if (days.length === 0) {
+        console.log(`[Hours] ⚠️  No valid days parsed from "${dayPart}" - skipping line`);
+        continue;
+      }
 
       // Check for closed
       if (/lukket|closed/i.test(timePart)) {
@@ -564,7 +571,49 @@ export async function extractPageDocument(page) {
       links,
       blocks: dedupedBlocks,
       json_ld_raw: jsonLdRaw,
-      opening_hours_structured
+      opening_hours_structured,
+      kitchen_close_time: null // Extracted separately in Node context
     };
   });
+}
+
+/**
+ * Extract kitchen closing time from page text
+ * Matches patterns like:
+ * - "Køkkenet er åbent frem til kl. 21"
+ * - "Køkken lukker 22:00"
+ * - "Kitchen closes at 10pm"
+ */
+export function extractKitchenCloseTime(pageDoc) {
+  if (!pageDoc?.blocks) return null;
+  
+  // Collect all text from blocks
+  const allText = pageDoc.blocks.map(b => b.text).join(' ').toLowerCase();
+  
+  // Patterns for kitchen closing time
+  const patterns = [
+    /køkken[^.]*?lukker[^.]*?(\d{1,2}[:.\s]?\d{0,2})/i,
+    /køkken[^.]*?(\d{1,2}[:.\s]?\d{0,2})[^.]*?lukker/i,
+    /kitchen[^.]*?close[^.]*?(\d{1,2}[:.\s]?\d{0,2})/i,
+    /køkken(?:et)?[^.]*?(?:åbent\s+frem\s+til|open\s+until|åben\s+til|frem\s+til)\s*(?:kl\.?\s*)?(\d{1,2}(?:[:.]\d{2})?)/i,
+    /køkken[^.]*?:(.*?\d{1,2}[:.\s]?\d{0,2})[^.]{0,30}/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = allText.match(pattern);
+    if (match && match[1]) {
+      // Extract just the time portion
+      const timeMatch = match[1].match(/\d{1,2}[:.\s]?\d{0,2}/);
+      if (timeMatch) {
+        const raw = timeMatch[0].replace(/\s+/g, '').replace('.', ':');
+        // Normalize to HH:MM
+        const normalized = normaliseTime(raw);
+        if (normalized) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  return null;
 }

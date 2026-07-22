@@ -17,6 +17,23 @@ const BOOKING_PATTERNS = [
   /book/i, /reservation/i, /reserv/i, /bestil/i, /bord/i,
 ];
 
+const BOOKING_PROVIDER_PATTERNS = [
+  /book\.easytable\.com\/book/i,
+  /easytable\.com\/book/i,
+  /dinnerbooking\.com/i,
+  /opentable\.com/i,
+  /quandoo\.com/i,
+  /resdiary\.com/i,
+  /tableagent\.com/i,
+];
+
+const BOOKING_NOISE_PATTERNS = [
+  /facebook\.com\/privacy/i,
+  /facebook\.com\/policies/i,
+  /facebook\.com\/legal/i,
+  /\/privacy\/explanation/i,
+];
+
 const MENU_URL_PATTERNS = [
   /\/menu/i, /\/mad/i, /\/spisekort/i, /\/carte/i, /mealo\.dk/i,
   /menucard/i, /food/i,
@@ -273,9 +290,14 @@ function extractLinks(html, baseUrl) {
     ) ||
     null;
 
+  const isBookingNoise = (url) => BOOKING_NOISE_PATTERNS.some((p) => p.test(url));
+  const isBookingCandidate = (url) => !isBookingNoise(url);
+
   const booking =
-    resolved.find((url) => BOOKING_PATTERNS.some((p) => p.test(url))) ||
-    uniqueLinks.find(({ text }) => BOOKING_PATTERNS.some((p) => p.test(text)))?.url ||
+    resolved.find((url) => isBookingCandidate(url) && BOOKING_PROVIDER_PATTERNS.some((p) => p.test(url))) ||
+    uniqueLinks.find(({ url }) => isBookingCandidate(url) && BOOKING_PROVIDER_PATTERNS.some((p) => p.test(url)))?.url ||
+    resolved.find((url) => isBookingCandidate(url) && BOOKING_PATTERNS.some((p) => p.test(url))) ||
+    uniqueLinks.find(({ text, url }) => isBookingCandidate(url) && BOOKING_PATTERNS.some((p) => p.test(text)))?.url ||
     null;
 
   const takeaway =
@@ -372,9 +394,44 @@ function extractSmileyLink(allUrls) {
  * @returns {string | null}
  */
 function extractOpeningHours(text) {
-  // Find the first segment of text that matches hours patterns
-  const lines = text.split(/[.!]|\n/);
+  const normalized = text.replace(/\s+/g, ' ').trim();
 
+  const dayPattern = '(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|monday|tuesday|wednesday|thursday|friday|saturday|sunday|man|tir|ons|tor|fre|lør|søn)';
+  const timePattern = '\\d{1,2}(?:[:.]\\d{2})?';
+
+  // Primary path: capture explicit day/time runs like
+  // "Mandag kl. 09.30 – 23.00" or "Mandag – lørdag: 11.30-22"
+  const dayTimeRegex = new RegExp(
+    `\\b${dayPattern}(?:\\s*(?:til|–|-|—)\\s*${dayPattern})?(?:\\s+kl\\.?\\s*)?${timePattern}\\s*(?:[-–—]|til|to)\\s*${timePattern}`,
+    'gi'
+  );
+
+  const matches = [...normalized.matchAll(dayTimeRegex)]
+    .map((match) => match[0].replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  if (matches.length > 0) {
+    return matches.join(' | ');
+  }
+
+  // Secondary path: fall back to a keyword-led snippet, but keep decimal times intact.
+  const keywordMatch = normalized.match(
+    /(?:åbningstider|opening hours|åbent|öppettider|openingstijden)\s+(.{0,900})/i
+  );
+
+  if (keywordMatch && keywordMatch[1]) {
+    const snippet = keywordMatch[1]
+      .replace(/(?<=\d)\.(?=\d)/g, ':')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (snippet.length > 20) {
+      return snippet;
+    }
+  }
+
+  // Final fallback: old heuristic, but avoid breaking times on decimal points.
+  const lines = normalized.split(/\n+/);
   const hoursLines = [];
   let inHoursBlock = false;
 
@@ -385,7 +442,6 @@ function extractOpeningHours(text) {
       inHoursBlock = true;
       hoursLines.push(line.trim());
     } else if (inHoursBlock && hoursLines.length > 0) {
-      // Allow up to 2 non-hours lines within a block before ending it
       if (line.trim().length < 5) continue;
       break;
     }

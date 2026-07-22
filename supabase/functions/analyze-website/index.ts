@@ -68,6 +68,101 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+type WebAnalysisShape =
+  | 'homepage-rich'
+  | 'menu-first'
+  | 'subpage-supported'
+  | 'ordering-platform-hosted'
+  | 'thin'
+
+function dedupeAndLimit(items: Array<string | null | undefined>, limit = 5): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const item of items) {
+    const value = typeof item === 'string' ? item.trim() : ''
+    if (!value) continue
+
+    const key = value.toLowerCase()
+    if (seen.has(key)) continue
+
+    seen.add(key)
+    result.push(value)
+    if (result.length >= limit) break
+  }
+
+  return result
+}
+
+function buildMenuPreview(menuSignal: any, businessType: string | null): string[] {
+  const signatureItems = Array.isArray(menuSignal?.signatureItems) ? menuSignal.signatureItems : []
+  const programmeItems = Array.isArray(menuSignal?.programmes)
+    ? menuSignal.programmes.flatMap((programme: any) => Array.isArray(programme?.items) ? programme.items : [])
+    : []
+
+  const orderedItems = businessType && /bar/i.test(businessType)
+    ? [...signatureItems, ...programmeItems]
+    : [...signatureItems, ...programmeItems]
+
+  return dedupeAndLimit(orderedItems, 5)
+}
+
+function classifyWebAnalysisShape(params: {
+  url: string
+  contentSignature: any
+  websiteContent: string
+  crawledPagesCount: number
+  detectedMenuUrls: string[]
+  menuSignal: any
+  bookingUrl: string | null
+}): WebAnalysisShape {
+  const { url, contentSignature, websiteContent, crawledPagesCount, detectedMenuUrls, menuSignal, bookingUrl } = params
+
+  let hostname = ''
+  try {
+    hostname = new URL(url).hostname.toLowerCase()
+  } catch {
+    hostname = ''
+  }
+
+  const contentLower = websiteContent.toLowerCase()
+  const hasHours = /åbningstider|opening hours|åbent|open/i.test(websiteContent)
+  const hasContactSignals = /@|telefon|tlf|email|book bord|book table|kontakt/i.test(websiteContent)
+  const hasMenuSignals = (menuSignal?.hasMenu ?? false) || detectedMenuUrls.length > 0 || /menu|brunch|frokost|aften|drinks|cocktail|burger|menuer/i.test(contentLower)
+  const hasRepresentativeMenu = buildMenuPreview(menuSignal, null).length >= 3
+  const hasSubpages = crawledPagesCount >= 3 || /læs mere|about|om os|kontakt|menu/i.test(contentLower)
+
+  const orderingPlatformHosts = [
+    'mealo.dk',
+    'easytable.com',
+    'book.dinnerbooking.com',
+    'heapsgo.com',
+    'order.lifepeaks.dk',
+  ]
+
+  if (orderingPlatformHosts.some((platformHost) => hostname.includes(platformHost))) {
+    return 'ordering-platform-hosted'
+  }
+
+  if (contentSignature?.classification === 'DYNAMIC_SPA' && hasMenuSignals && !hasHours && !hasContactSignals) {
+    return 'menu-first'
+  }
+
+  if (hasMenuSignals && hasRepresentativeMenu && hasHours && hasContactSignals) {
+    return 'homepage-rich'
+  }
+
+  if (hasSubpages && hasMenuSignals) {
+    return 'subpage-supported'
+  }
+
+  if (hasMenuSignals || bookingUrl) {
+    return 'menu-first'
+  }
+
+  return 'thin'
+}
+
 serve(async (req: any) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -1147,6 +1242,20 @@ serve(async (req: any) => {
       console.log('🍽️ Menu signal extracted:', JSON.stringify(menuSignal, null, 2))
       console.log('🎤 Tone of voice extracted:', toneOfVoice ? '✅' : '❌')
 
+      const webAnalysisShape = classifyWebAnalysisShape({
+        url,
+        contentSignature,
+        websiteContent,
+        crawledPagesCount: crawledPages.length,
+        detectedMenuUrls,
+        menuSignal,
+        bookingUrl,
+      })
+      const menuPreview = buildMenuPreview(menuSignal, basicInfo?.businessType || businessType || null)
+
+      console.log('🧭 Web analysis shape:', webAnalysisShape)
+      console.log('🍴 Menu preview:', menuPreview)
+
       // Phase 4: Validate extraction quality & detect misclassifications
       console.log('═══════════════════════════════════════════════════════════')
       console.log('🔍 Phase 4: Validating extraction quality...')
@@ -1532,6 +1641,8 @@ serve(async (req: any) => {
         parking: serviceModel.parking || null,
         kidsMenu: serviceModel.kidsMenu || null,
         establishmentType: menuExtraction?.establishmentType || null,  // FSE or SBO classification
+        webAnalysisShape,
+        menuPreview,
         
         // Keywords
         keywords: keywords,
@@ -1593,6 +1704,10 @@ serve(async (req: any) => {
             venueHooks: venueHooks,
             experiencePillars: experiencePillars,
             menuExtraction: menuExtraction
+          },
+          webAnalysisProfile: {
+            shape: webAnalysisShape,
+            menuPreview,
           },
           
           // 3. Content statistics

@@ -60,6 +60,50 @@ interface ScrapedPayload {
   menu_text?: string
   about_text?: string
   full_text?: string
+
+  opening_hours_raw?: string | null
+  kitchen_close_time?: string | null
+  weekly_programme?: string | null
+}
+
+function deriveServiceSignals(payload: ScrapedPayload) {
+  const combinedText = [
+    payload.meta?.title,
+    payload.meta?.description,
+    payload.about_text,
+    payload.menu_text,
+    payload.full_text,
+    payload.opening_hours_raw,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join(' ')
+    .toLowerCase()
+
+  const rawBookingUrl = payload.links?.booking || null
+  const takeawayUrl = payload.links?.takeaway || null
+
+  const bookingUrl = rawBookingUrl && !/facebook\.com\/privacy|facebook\.com\/policies|\/privacy\/explanation/i.test(rawBookingUrl)
+    ? rawBookingUrl
+    : null
+
+  const hasOutdoorSeating = /ude\s*servering|udeservering|outdoor seating|terrasse|terrace|gårdhave|ga?rdhave|patio|udenfor|al fresco/i.test(combinedText)
+  const hasTableService = Boolean(bookingUrl) || /bordservice|bordbetjening|table service|servering|reserver|booking/i.test(combinedText)
+  const hasTakeaway = Boolean(takeawayUrl) || /takeaway|take-away|take away|afhentning|levering|delivery|wolt|just eat|foodora/i.test(combinedText)
+
+  return {
+    booking_url: bookingUrl,
+    bordservice: hasTableService,
+    reservation_required: Boolean(bookingUrl),
+    accepts_walk_ins: !Boolean(bookingUrl),
+    takeaway: hasTakeaway,
+    outdoor_seating: hasOutdoorSeating,
+    service_tags: [
+      bookingUrl ? 'booking' : null,
+      hasTableService ? 'bordservice' : null,
+      hasTakeaway ? 'takeaway' : null,
+      hasOutdoorSeating ? 'outdoor_seating' : null,
+    ].filter((tag): tag is string => Boolean(tag)),
+  }
 }
 
 /**
@@ -337,6 +381,9 @@ serve(async (req: any) => {
     
     // STEP 2: Extract menu information (deterministic, no AI needed)
     const menuInfo = extractMenuInfo(payload)
+
+    // STEP 2b: Derive service signals from the deterministic scraper payload
+    const serviceSignals = deriveServiceSignals(payload)
     
     // STEP 3: Extract business information with AI (using content quality gates)
     const aiExtraction = await extractWithAI(payload, businessName)
@@ -357,18 +404,25 @@ serve(async (req: any) => {
       address: payload.contact?.address || null,
       
       // Links (deterministic)
-      booking_url: payload.links?.booking || null,
+      booking_url: serviceSignals.booking_url,
       menu_url: menuInfo.menu_url || null,
       takeaway_url: payload.links?.takeaway || null,
       social_links: payload.links?.social || [],
       
       // Opening hours (deterministic)
-      opening_hours_text: payload.opening_hours?.text || null,
+      opening_hours_text: payload.opening_hours?.text || payload.opening_hours_raw || null,
       opening_hours_structured: payload.opening_hours?.structured || null,
+      kitchen_close_time: payload.kitchen_close_time || null,
+      weekly_programme: payload.weekly_programme || null,
       
       // Menu (deterministic + AI)
       has_menu: menuInfo.has_menu,
       menu_signal: menuInfo.menu_signal || null,
+
+      // Service signals (deterministic)
+      services: serviceSignals,
+      reservationRequired: serviceSignals.reservation_required,
+      acceptsWalkIns: serviceSignals.accepts_walk_ins,
       
       // AI-extracted content
       about: aiExtraction.about || null,

@@ -8,6 +8,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { extractBasicInfo } from '../_shared/ai-extractors/basic-info-extractor.ts';
 import { extractContact } from '../_shared/ai-extractors/contact-extractor.ts';
 import { extractMenuSignal } from '../_shared/ai-extractors/menu-signal-extractor.ts';
+import { getCityFromPostalCode } from '../_shared/brand-profile/city-context-ai.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -113,6 +114,13 @@ serve(async (req) => {
     const tier1 = extractTier1(extraction);
     const tier2 = extractTier2(extraction);
     
+    // Debug: Check if kitchen_close_time is in tier1
+    if (tier1['kitchen_close_time']) {
+      console.log(`🍳 [DEBUG] kitchen_close_time in tier1:`, tier1['kitchen_close_time']);
+    } else {
+      console.log(`🍳 [DEBUG] kitchen_close_time NOT in tier1`);
+    }
+    
     // ── AI Extraction using OLD proven extractors ────────────────────────────
     const labeledContent = buildLabeledContent(extraction);
     const aiExtracted = aiAllowed
@@ -122,6 +130,15 @@ serve(async (req) => {
     // ── Merge into table buckets ─────────────────────────────────────────────
     const businessLocations  = buildBusinessLocations(tier1, aiExtracted);
     const businessOperations = buildBusinessOperations(tier1, tier2, aiExtracted);
+    
+    // Debug: Check if kitchen_close_time made it to businessOperations
+    console.log(`🍳 [DEBUG] businessOperations object:`, JSON.stringify(businessOperations, null, 2));
+    if (businessOperations.kitchen_close_time) {
+      console.log(`🍳 [DEBUG] kitchen_close_time in businessOperations:`, businessOperations.kitchen_close_time);
+    } else {
+      console.log(`🍳 [DEBUG] kitchen_close_time NOT in businessOperations`);
+    }
+    
     const businessProfile    = buildBusinessProfile(tier1, aiExtracted);
     const businesses         = buildBusinesses(aiExtracted);
     const openingHoursRows   = buildOpeningHoursRows(extraction, business_id);
@@ -342,11 +359,18 @@ function extractTier1(payload: any): Record<string, FieldResult> {
   // Old logic selected largest section which often picked navigation menus
   // AI extractors use quality-filtered content and understand business descriptions
 
-  // kitchen_close_time: most common close time across open days
-  const candidates = payload.opening_hours?.candidates ?? [];
-  const kitchenClose = deriveKitchenCloseTime(candidates);
+  // kitchen_close_time: Prefer explicit extraction from scraper, fall back to derived from opening hours
+  let kitchenClose = payload.kitchen_close_time; // Explicit from scraper (e.g., "Køkkenet er åbent frem til kl. 21")
+  if (!kitchenClose) {
+    const candidates = payload.opening_hours?.candidates ?? [];
+    kitchenClose = deriveKitchenCloseTime(candidates); // Fallback: most common close time
+  }
   if (kitchenClose) {
-    r['kitchen_close_time'] = { value: kitchenClose, tier: 1, source: 'opening_hours.candidates' };
+    r['kitchen_close_time'] = { 
+      value: kitchenClose, 
+      tier: 1, 
+      source: payload.kitchen_close_time ? 'scraper.kitchen_close_time' : 'opening_hours.candidates' 
+    };
   }
 
   return r;
@@ -630,12 +654,15 @@ function buildBusinessLocations(
   ai: Record<string, FieldResult>
 ) {
   // Tier 1 (scraper direct) takes priority, AI extractors as fallback
+  const postalCode = (t1.postal_code ?? ai.postal_code)?.value ?? null;
+  const derivedCity = getCityFromPostalCode(typeof postalCode === 'string' ? postalCode : null);
+
   return {
     email:         (t1.email ?? ai.email)?.value                 ?? null,
     phone:         (t1.phone ?? ai.phone)?.value                 ?? null,
     address_line1: (t1.address_line1 ?? ai.address_line1)?.value ?? null,
-    postal_code:   (t1.postal_code ?? ai.postal_code)?.value     ?? null,
-    city:          (t1.city ?? ai.city)?.value                   ?? null,
+    postal_code:   postalCode,
+    city:          derivedCity ?? (t1.city ?? ai.city)?.value     ?? null,
   };
 }
 

@@ -259,7 +259,7 @@ export async function discoverMenuStructure(browser, menuUrl, timeout = 15000) {
     // Navigate to menu page
     console.log('📄 Loading menu page...');
     await page.goto(menuUrl, {
-      waitUntil: 'networkidle2',
+      waitUntil: 'domcontentloaded',
       timeout: timeout
     });
     
