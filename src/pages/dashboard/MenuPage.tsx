@@ -2121,7 +2121,7 @@ function MenuPage() {
                             )}
                             {menuCard?.extracted_data?.menuSubtitle && (
                               <span className="text-xs text-text-secondary italic ml-2">
-                                {menuCard.extracted_data.menuSubtitle}
+                                {menuCard.extracted_data?.menuSubtitle}
                               </span>
                             )}
                             
@@ -2339,16 +2339,16 @@ function MenuPage() {
                     {isExpanded && menuCard?.extracted_data && (
                       <div className="px-4 py-3 border-t border-border bg-surface-alt">
                         {/* Menu Metadata (subtitle and availability days only - timing now in header) */}
-                        {(menuCard.extracted_data.menuSubtitle || menuCard.extracted_data.availabilityDays) && (
+                        {(menuCard.extracted_data?.menuSubtitle || menuCard.extracted_data?.availabilityDays) && (
                           <div className="mb-4 pb-3 border-b border-border">
-                            {menuCard.extracted_data.menuSubtitle && (
+                            {menuCard.extracted_data?.menuSubtitle && (
                               <p className="text-sm text-text-secondary mb-2 italic">
-                                {menuCard.extracted_data.menuSubtitle}
+                                {menuCard.extracted_data?.menuSubtitle}
                               </p>
                             )}
-                            {menuCard.extracted_data.availabilityDays && (
+                            {menuCard.extracted_data?.availabilityDays && (
                               <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-success-surface text-success-text">
-                                📅 {menuCard.extracted_data.availabilityDays}
+                                📅 {menuCard.extracted_data?.availabilityDays}
                               </span>
                             )}
                           </div>
