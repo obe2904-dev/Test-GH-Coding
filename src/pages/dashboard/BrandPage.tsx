@@ -230,8 +230,8 @@ function BrandPage() {
     )
   }
 
-  // Free tier - upgrade prompt
-  if (currentTier === 'free') {
+  // Free tier - upgrade prompt (only once tier hydration has completed)
+  if (tierStatus === 'ready' && currentTier === 'free') {
     return (
       <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-full py-6 px-6">
         <div className="max-w-4xl mx-auto">

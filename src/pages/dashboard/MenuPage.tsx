@@ -65,6 +65,7 @@ function joinTimeValue(hour: string, minute: string) {
 function MenuPage() {
   const { t, i18n } = useTranslation()
   const currentTier = useTierStore((state) => state.currentTier)
+  const tierStatus = useTierStore((state) => state.tierStatus)
 
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -264,15 +265,21 @@ function MenuPage() {
       // Load results from menu_results_v2 (the queue system)
       const { data: results } = await supabase
         .from('menu_results_v2')
-        .select('id, source_id, source_url, status, error_message, structured_data, ai_summary, menu_type, time_start, time_end, time_source, time_confirmed')
+        .select('id, source_id, source_url, status, error_message, structured_data, ai_summary, menu_type, time_start, time_end, time_source, time_confirmed, created_at, updated_at, claimed_at')
         .eq('business_id', bizId)
         .order('created_at', { ascending: false })
 
       // Map results by source_id (menu_sources.id) for accurate matching
       // Note: Old results without source_id will also be mapped by URL as fallback
-      const resultMap = new Map(
-        (results || []).map((r: any) => [r.source_id || r.source_url, r])
-      )
+      const resultMap = new Map<string, any>()
+      // Results are newest-first. Keep the first result for each source so a
+      // successful retry is not overwritten by an older stuck/failed result.
+      for (const result of results || []) {
+        const key = result.source_id || result.source_url
+        if (key && !resultMap.has(key)) {
+          resultMap.set(key, result)
+        }
+      }
 
       const cards: MenuCard[] = sources.map((source: any) => {
         // First try to find by source_id (accurate)
@@ -297,8 +304,14 @@ function MenuPage() {
         
         let status: MenuStatus = 'pending'
         if (result) {
-          if (result.status === 'queued' || result.status === 'processing') status = 'extracting'
-          else if (result.status === 'failed') status = 'error'
+          if (result.status === 'queued' || result.status === 'processing') {
+            const activityTimestamp = result.updated_at || result.claimed_at || result.created_at
+            const isStale = activityTimestamp
+              ? Date.now() - new Date(activityTimestamp).getTime() > JOB_WAIT_TIMEOUT_MS
+              : false
+            status = isStale ? 'error' : 'extracting'
+          }
+          else if (result.status === 'error' || result.status === 'failed') status = 'error'
           else if (result.status === 'done' || result.status === 'completed') status = 'extracted'
         } else if (source.status === 'extracting') {
           status = 'extracting'
@@ -356,7 +369,12 @@ function MenuPage() {
           menu_type: source.menu_type || 'standard',
           label: source.label || 'Menukort',
           status,
-          error_message: result?.error_message || source.error_message,
+          error_message:
+            status === 'error' &&
+            (result?.status === 'queued' || result?.status === 'processing') &&
+            !result?.error_message
+              ? 'Udtrækningen blev afbrudt. Prøv igen.'
+              : result?.error_message || source.error_message,
           extracted_data: extractedData,
           average_price: averagePrice,
           item_count: itemCount,
@@ -529,14 +547,13 @@ function MenuPage() {
   const handleExtractMenu = async (cardId: string, sourceUrl: string) => {
     if (!businessId) return
 
-    // Check if this URL already has a completed extraction
-    const existingCard = menuCards.find(c => c.id === cardId)
-    if (existingCard?.status === 'extracted') {
-      return
-    }
-
-    // Add to queue instead of extracting immediately
-    setExtractionQueue(prev => [...prev, { cardId, sourceUrl }])
+    // Explicit user actions are allowed to refresh completed extractions.
+    // Avoid adding the same source twice while it is already waiting.
+    setExtractionQueue(prev =>
+      prev.some(item => item.cardId === cardId)
+        ? prev
+        : [...prev, { cardId, sourceUrl }]
+    )
   }
 
   // Internal extraction function (called by queue processor)
@@ -569,22 +586,6 @@ function MenuPage() {
 
       let resultId: string
 
-      const { data: existingJobs } = await supabase
-        .from('menu_results_v2')
-        .select('id, status')
-        .eq('source_id', cardId)
-        .in('status', ['queued', 'processing'])
-        .limit(1)
-
-      // Remove stale queued/processing rows so retries can start cleanly.
-      if (existingJobs && existingJobs.length > 0) {
-        await supabase
-          .from('menu_results_v2')
-          .delete()
-          .eq('source_id', cardId)
-          .in('status', ['queued', 'processing'])
-      }
-
       // Call the extractor directly so selected menu URLs use the same
       // URL/PDF/image handling path as the working extraction pipeline.
       const extractUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/menu-extract-v2`
@@ -594,13 +595,25 @@ function MenuPage() {
         throw new Error('Not authenticated')
       }
 
-      const normalizedUrl = isPdfUrl(sourceUrl) ? normalizePdfUrl(sourceUrl) : normalizeMenuUrl(sourceUrl)
-      const extractPayload = {
-        businessId,
-        sourceId: cardId,
-        sourceUrl: normalizedUrl,
-        languageCode: 'da',
-      }
+      const storageMatch = sourceUrl.match(/^storage:\/\/([^/]+)\/(.+)$/)
+      const extractPayload = storageMatch
+        ? {
+            businessId,
+            sourceId: cardId,
+            sourceType: 'storage',
+            storageBucket: storageMatch[1],
+            storagePath: storageMatch[2],
+            languageCode: 'da',
+          }
+        : {
+            businessId,
+            sourceId: cardId,
+            // Use the original URL for transport. Normalized URLs are identity
+            // keys only; stripping query parameters can invalidate signed PDFs.
+            sourceUrl: decodeHtmlUrl(sourceUrl).trim(),
+            sourceKind: detectedSources.find(source => source.url === sourceUrl)?.source_kind,
+            languageCode: 'da',
+          }
       const extractResponse = await fetch(extractUrl, {
         method: 'POST',
         headers: {
@@ -638,6 +651,25 @@ function MenuPage() {
 
       if (verifiedJob?.status === 'error' || verifiedJob?.status === 'failed') {
         throw new Error(verifiedJob.error_message || 'Extraction failed')
+      }
+
+      // Most Edge paths complete synchronously, before Realtime can subscribe.
+      // Handle that terminal state immediately instead of waiting five minutes
+      // for an UPDATE event that has already happened.
+      if (verifiedJob?.status === 'done' || verifiedJob?.status === 'completed') {
+        await supabase
+          .from('menu_sources')
+          .update({ status: 'extracted', error_message: null })
+          .eq('id', cardId)
+
+        setActiveExtractions(prev => {
+          const next = new Set(prev)
+          next.delete(cardId)
+          return next
+        })
+
+        await loadMenuCards(businessId)
+        return
       }
 
       // Subscribe to job status changes
@@ -1095,13 +1127,12 @@ function MenuPage() {
             body: formData
           })
 
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}))
-            console.error(`Upload failed for ${file.name}:`, errorData)
-            throw new Error(errorData.error || `Upload fejlede for ${file.name}`)
+          const result = await response.json().catch(() => ({}))
+          if (!response.ok || result?.success !== true) {
+            console.error(`Upload or extraction failed for ${file.name}:`, result)
+            throw new Error(result?.error || `Upload eller analyse fejlede for ${file.name}`)
           }
-          
-          const result = await response.json()
+
           successCount++
           
           // Add to processing uploads for placeholder card
@@ -1171,7 +1202,7 @@ function MenuPage() {
       await supabase
         .from('menu_results_v2')
         .delete()
-        .eq('source_url', sourceUrl)
+        .eq('source_id', cardId)
       
       // Hard-delete source (user explicitly removed this URL)
       await supabase.from('menu_sources').delete().eq('id', cardId)
@@ -1579,7 +1610,7 @@ function MenuPage() {
     }
   }
 
-  if (isLoading) {
+  if (isLoading || tierStatus === 'loading') {
     return (
       <div className="flex min-h-full items-center justify-center py-12">
         <div className="text-center animate-fade-in">
@@ -1590,8 +1621,30 @@ function MenuPage() {
     )
   }
 
-  // Free tier - upgrade prompt
-  if (currentTier === 'free') {
+  if (tierStatus === 'error') {
+    return (
+      <div className="flex min-h-full items-center justify-center px-6 py-12">
+        <div className="max-w-md rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
+          <h2 className="mb-2 text-lg font-semibold text-amber-900">
+            Kunne ikke kontrollere dit abonnement
+          </h2>
+          <p className="mb-4 text-sm text-amber-800">
+            Din plan kunne ikke hentes. Vi viser derfor ikke fejlagtigt kontoen som Free.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded bg-cta px-4 py-2 text-sm font-medium text-text-inverse"
+          >
+            Prøv igen
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Free tier - upgrade prompt (only once tier hydration has completed)
+  if (tierStatus === 'ready' && currentTier === 'free') {
     return (
       <div className="bg-surface-page min-h-full py-6 px-6">
         <div className="max-w-4xl mx-auto">
