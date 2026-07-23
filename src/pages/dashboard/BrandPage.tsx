@@ -15,6 +15,7 @@ interface BrandData {
 
 function BrandPage() {
   const currentTier = useTierStore((state) => state.currentTier)
+  const tierStatus = useTierStore((state) => state.tierStatus)
 
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)

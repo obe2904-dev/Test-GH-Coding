@@ -7,7 +7,8 @@ import { useTierStore, type Tier } from '../stores/tierStore'
  * Hook to fetch and sync the user's tier from `profiles.plan`
  */
 export function useBusinessTier() {
-  const { setTier, setTierStatus } = useTierStore()
+  const setTier = useTierStore((state) => state.setTier)
+  const setTierStatus = useTierStore((state) => state.setTierStatus)
   const user = useAuthStore((state) => state.user)
   const authLoading = useAuthStore((state) => state.loading)
 

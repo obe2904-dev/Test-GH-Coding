@@ -10,6 +10,7 @@ export default function BrandProfilePage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const currentTier = useTierStore((state) => state.currentTier)
+  const tierStatus = useTierStore((state) => state.tierStatus)
   
   // Use the consolidated brand profile hook
   const {
