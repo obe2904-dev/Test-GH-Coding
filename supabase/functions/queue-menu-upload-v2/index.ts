@@ -363,9 +363,41 @@ serve(async (req: Request) => {
         onConflict: 'storage_path',
       })
 
-    // Enqueue v2 async extraction job
+    // Map file type to source_kind for menu_sources
+    const sourceKind = detectedType.mimeType === 'application/pdf' ? 'pdf' : 'image'
+
+    // Create menu_sources entry to unify with URL-based import flow
+    const { data: sourceData, error: sourceError } = await supabaseService
+      .from('menu_sources')
+      .upsert({
+        business_id: businessId,
+        source_url: urlData.publicUrl,
+        normalized_url: urlData.publicUrl,
+        source_type: detectedType.mimeType === 'application/pdf' ? 'pdf' : 'image',
+        source_origin: 'manual_added',
+        status: 'pending',
+        menu_type: 'standard',
+        label: serviceHeadline || normalizedFileName,
+        source_kind: sourceKind,
+        file_name: normalizedFileName,
+        created_by: user.id,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'business_id,normalized_url',
+        ignoreDuplicates: false,
+      })
+      .select('id')
+      .single()
+
+    if (sourceError) {
+      console.error('Failed to create menu_sources entry:', sourceError)
+      throw new Error('Failed to register menu source')
+    }
+
+    // Enqueue v2 async extraction job linked to the source
     const insertPayload: any = {
       business_id: businessId,
+      source_id: sourceData.id,
       source_kind: 'storage',
       source_url: urlData.publicUrl,
       storage_bucket: 'business-documents',
@@ -397,6 +429,7 @@ serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: true,
+        sourceId: sourceData.id,
         resultId: resultData.id,
         storagePath: uploadData.path,
         publicUrl: urlData.publicUrl,
