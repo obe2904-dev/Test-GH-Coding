@@ -921,7 +921,12 @@ function MenuPage() {
       const { data: authData } = await supabase.auth.getUser()
       const userId = authData?.user?.id
 
-      // Insert menu source
+      // Look up source_kind and label from detectedSources if available
+      const detectedSource = detectedSources.find(s => s.url === url || s.url === normalizedUrl)
+      const source_kind = detectedSource?.source_kind || null
+      const detectedLabel = detectedSource?.label
+
+      // Insert menu source with source_kind support
       const { data: insertedSource, error: insertError } = await supabase
         .from('menu_sources')
         .insert({
@@ -932,7 +937,8 @@ function MenuPage() {
           source_origin: 'manual_added',
           status: 'pending',
           menu_type: detectMenuType(url),
-          label: detectMenuLabel(url),
+          label: detectedLabel || detectMenuLabel(url),
+          source_kind: source_kind,
           created_by: userId,
         })
         .select()

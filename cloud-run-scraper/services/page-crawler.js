@@ -312,6 +312,11 @@ export function mergePageExtractions(pageExtractions) {
       merged.services.takeaway = page.services.takeaway;
     }
 
+    // Merge table_service (true if any page has it)
+    if (page.services.table_service) {
+      merged.services.table_service = true;
+    }
+
     // Merge social profiles (deduplicate by platform)
     const socialByPlatform = new Map();
     for (const profile of [...merged.services.social_profiles, ...page.services.social_profiles]) {

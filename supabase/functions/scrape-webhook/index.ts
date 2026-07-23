@@ -11,7 +11,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-secret',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-secret, x-scrape-webhook-secret',
 };
 
 serve(async (req) => {
@@ -22,7 +22,9 @@ serve(async (req) => {
   try {
     // ---- Authenticate the caller (Cloud Run) ----
     const secret = Deno.env.get('SCRAPE_WEBHOOK_SECRET');
-    if (secret && req.headers.get('x-webhook-secret') !== secret) {
+    // Check both header variants (case-insensitive)
+    const receivedSecret = req.headers.get('x-scrape-webhook-secret') || req.headers.get('x-webhook-secret');
+    if (secret && receivedSecret !== secret) {
       return new Response(JSON.stringify({ error: 'unauthorized' }), {
         status: 401,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

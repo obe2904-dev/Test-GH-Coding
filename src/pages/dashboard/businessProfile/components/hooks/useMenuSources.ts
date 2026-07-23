@@ -17,6 +17,8 @@ export interface MenuUrlState {
   deleteRestoring?: boolean
   resultId?: string  // For tracking async extraction jobs
   extractedData?: any  // For storing structured menu data
+  source_kind?: 'html' | 'pdf' | 'image' | 'mealo' | 'iframe_platform' | null  // Content classification from detect-menus
+  label?: string  // Display label from detect-menus or URL heuristic
 }
 
 export interface UseMenuSourcesReturn {
@@ -35,7 +37,7 @@ export interface UseMenuSourcesReturn {
   hasStandardMenu: () => boolean
   handleMenuTypeChange: (url: string, newType: MenuType) => void
   confirmReplaceStandardMenu: () => void
-  addManualMenu: (input: string, file?: File) => void
+  addManualMenu: (input: string, file?: File, source_kind?: string | null, label?: string) => void
   loadMenuSources: () => Promise<void>
   saveMenuSourceToDB: (source: MenuUrlState) => Promise<void>
   extractMenuNameFromSource: (source: MenuUrlState) => string
@@ -58,16 +60,19 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
       .upsert({
         business_id: businessId,
         source_url: source.url,
+        normalized_url: source.url, // TODO: add normalization if needed
         source_type: source.fileName ? 'pdf' : 'url',
         file_name: source.fileName || null,
         menu_type: source.menuType,
         source_origin: source.source === 'ai' ? 'ai_detected' : 'manual_added',
         status: source.status,
         error_message: source.error || null,
+        source_kind: source.source_kind || null,
+        label: source.label || null,
         created_by: userId || null,
         updated_at: new Date().toISOString()
       } as any, {
-        onConflict: 'business_id,source_url'
+        onConflict: 'business_id,normalized_url'
       })
 
     if (error) {
@@ -97,6 +102,8 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
         status: row.status === 'error' ? 'pending' : (row.status as MenuUrlState['status']),
         error: row.error_message || undefined,
         fileName: row.file_name || undefined,
+        source_kind: row.source_kind || null,
+        label: row.label || undefined,
         isDeleting: false,
         deleteRestoring: false
       }))
@@ -257,7 +264,7 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
     setReplaceStandardMenuId(null)
   }
 
-  const addManualMenu = (input: string, file?: File) => {
+  const addManualMenu = (input: string, file?: File, source_kind?: string | null, label?: string) => {
     const trimmed = input.trim()
     if (!trimmed && !file) return
     
@@ -270,7 +277,9 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
         source: 'manual',
         menuType: 'standard',
         status: 'pending',
-        fileName: file.name
+        fileName: file.name,
+        source_kind: source_kind as any || null,
+        label: label || undefined
       }
     } else {
       try {
@@ -283,7 +292,9 @@ export function useMenuSources(businessId: string, userId?: string): UseMenuSour
           url: trimmed,
           source: 'manual',
           menuType: 'standard',
-          status: 'pending'
+          status: 'pending',
+          source_kind: source_kind as any || null,
+          label: label || undefined
         }
       } catch {
         throw new Error('Invalid URL')

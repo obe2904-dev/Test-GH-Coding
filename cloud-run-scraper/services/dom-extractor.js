@@ -308,6 +308,24 @@ export async function extractPageDocument(page) {
         return null;
       }
     };
+    
+    // Day name normalization map (for grid extraction)
+    const DANISH_DAYS = {
+      mandag: 'Mandag', man: 'Mandag',
+      tirsdag: 'Tirsdag', tir: 'Tirsdag',
+      onsdag: 'Onsdag', ons: 'Onsdag',
+      torsdag: 'Torsdag', tor: 'Torsdag',
+      fredag: 'Fredag', fre: 'Fredag',
+      lørdag: 'Lørdag', lør: 'Lørdag', lor: 'Lørdag',
+      søndag: 'Søndag', søn: 'Søndag', son: 'Søndag',
+      monday: 'Mandag', mon: 'Mandag',
+      tuesday: 'Tirsdag', tue: 'Tirsdag', tues: 'Tirsdag',
+      wednesday: 'Onsdag', wed: 'Onsdag',
+      thursday: 'Torsdag', thu: 'Torsdag', thur: 'Torsdag', thurs: 'Torsdag',
+      friday: 'Fredag', fri: 'Fredag',
+      saturday: 'Lørdag', sat: 'Lørdag',
+      sunday: 'Søndag', sun: 'Søndag',
+    };
 
     /**
      * CRITICAL: isVisible() uses getBoundingClientRect()
@@ -446,13 +464,27 @@ export async function extractPageDocument(page) {
     const extractOpeningHours = () => {
       const pairs = [];
       
-      // Find sections containing opening hours keywords
+      // Find sections containing opening hours keywords OR grid patterns with day names
       const hoursKeywords = ['åbningstider', 'opening hours', 'öffnungszeiten', 'horaires'];
+      const dayPatterns = /monday|tuesday|wednesday|thursday|friday|saturday|sunday|mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag/i;
       const allElements = [...document.querySelectorAll('*')];
       
       const hoursContainers = allElements.filter(el => {
         const text = (el.textContent || '').toLowerCase();
-        return hoursKeywords.some(kw => text.includes(kw)) && text.length < 500;
+        const hasKeyword = hoursKeywords.some(kw => text.includes(kw)) && text.length < 500;
+        
+        // Also include grid containers with day names + time patterns
+        const hasGrid = el.className && /grid/i.test(el.className);
+        const hasDays = dayPatterns.test(text);
+        const hasTimes = /\d{1,2}[:.]\d{2}/.test(text);
+        const isGridWithHours = hasGrid && hasDays && hasTimes && text.length < 1000;
+        
+        return hasKeyword || isGridWithHours;
+      });
+      
+      console.log('[ExtractHours] Total containers found:', hoursContainers.length);
+      hoursContainers.slice(0, 3).forEach((c, i) => {
+        console.log(`[ExtractHours] Container ${i}: class="${c.className}", textLen=${c.textContent?.length}, hasGrid=${c.className && /grid/i.test(c.className)}`);
       });
 
       for (const container of hoursContainers) {
@@ -527,7 +559,56 @@ export async function extractPageDocument(page) {
           }
         }
 
-        // Strategy 5: Plain text parsing (fallback for unstructured hours)
+        // Strategy 5: CSS Grid with separate day/time columns (lavaaarhus.dk pattern)
+        // Look for grid containers where days are in one column, times in another
+        const gridContainers = container.querySelectorAll ? [...(container.querySelectorAll('[class*="grid"]') || [])].filter(isVisible) : [];
+        for (const grid of gridContainers) {
+          const gridChildren = grid.children ? [...grid.children].filter(isVisible) : [];
+          
+          // Look for exactly 2 children (day column + time column)
+          if (gridChildren.length === 2) {
+            // Use innerHTML and replace <br> with newlines BEFORE cleaning
+            const col1Html = gridChildren[0]?.innerHTML || '';
+            const col2Html = gridChildren[1]?.innerHTML || '';
+            
+            // Convert <br> tags to newlines, strip HTML tags, but DON'T clean yet (preserves newlines)
+            const col1RawText = col1Html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+            const col2RawText = col2Html.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+            
+            if (!col1RawText || !col2RawText) {
+              continue;
+            }
+            
+            // Split by newlines FIRST, then clean each line individually
+            const col1Lines = col1RawText.split(/\n/).map(l => clean(l)?.replace(/:$/, '') || '').filter(Boolean);
+            const col2Lines = col2RawText.split(/\n/).map(l => clean(l) || '').filter(Boolean);
+            
+            // Check if col1 has day names and col2 has times
+            const hasDays = col1Lines.some(line => /monday|tuesday|wednesday|thursday|friday|saturday|sunday|mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag/i.test(line));
+            const hasTimes = col2Lines.some(line => /\d{1,2}[:.]\d{2}/.test(line));
+            
+            if (hasDays && hasTimes && col1Lines.length === col2Lines.length) {
+              // Pair up the lines
+              for (let i = 0; i < col1Lines.length; i++) {
+                const dayText = col1Lines[i];
+                const timeText = col2Lines[i];
+                
+                // Normalize day name to Danish canonical form
+                const dayKey = dayText.toLowerCase().trim();
+                const normalizedDay = DANISH_DAYS[dayKey] || dayText;
+                
+                if (dayText && timeText && /\d{1,2}[:.]\d{2}/.test(timeText)) {
+                  pairs.push({ day_text: normalizedDay, time_text: timeText, structure: 'grid' });
+                }
+              }
+              
+              // If we found pairs, stop processing this grid
+              if (pairs.length > 0) break;
+            }
+          }
+        }
+
+        // Strategy 6: Plain text parsing (fallback for unstructured hours)
         if (pairs.length === 0) {
           const fullText = clean(container?.innerText);
           if (fullText) {
@@ -549,13 +630,18 @@ export async function extractPageDocument(page) {
         }
 
         // If we found pairs in this container, stop looking
-        if (pairs.length > 0) break;
+        if (pairs.length > 0) {
+          console.log(`[ExtractHours] Breaking from container loop with ${pairs.length} pairs`);
+          break;
+        }
       }
 
+      console.log(`[ExtractHours] Final pairs count: ${pairs.length}`);
       return pairs.length > 0 ? pairs : null;
     };
 
     const opening_hours_structured = extractOpeningHours();
+    console.log('[ExtractHours] opening_hours_structured:', opening_hours_structured ? `${opening_hours_structured.length} pairs` : 'null');
 
     // ========================================
     // Return Page Document

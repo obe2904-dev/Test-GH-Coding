@@ -143,13 +143,14 @@ serve(async (req) => {
 
     const job_id = jobRow.id;
 
-    // ---- Dispatch Cloud Run (fire, short-await handshake only) ----
+    // ---- Dispatch Cloud Run (await full processing) ----
     const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL') ||
       'https://scraper-831683741713.europe-west1.run.app';
     const apiKey = Deno.env.get('CLOUD_RUN_API_KEY');
     const callback_url = `${supabaseUrl}/functions/v1/scrape-webhook`;
 
-    // Short timeout: we only need Cloud Run to ACCEPT the job, not finish it.
+    // Cloud Run processes synchronously and writes to DB before returning
+    // 3 minute timeout to allow full scraping + extraction
     const dispatch = await fetch(`${cloudRunUrl}/scrape-v3`, {
       method: 'POST',
       headers: {
@@ -157,7 +158,7 @@ serve(async (req) => {
         'X-API-Key': apiKey || '',
       },
       body: JSON.stringify({ url, job_id, callback_url, async: true }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(180000),
     }).catch((e: Error) => {
       throw new Error(`Scraper dispatch failed: ${e.message}`);
     });
