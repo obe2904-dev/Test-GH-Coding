@@ -156,7 +156,14 @@ export function Sidebar({ className = '' }: SidebarProps) {
   // Debug logging for tier status
   useEffect(() => {
     console.log('🔧 Sidebar tier check:', { tierStatus, currentTier, isFree })
-  }, [tierStatus, currentTier, isFree])
+    console.log('🔧 Sidebar completion check:', { 
+      profileState: completion.profileState,
+      menuState: completion.menuState, 
+      locationState: completion.locationState,
+      brandState: completion.brandState,
+      loading: completion.loading
+    })
+  }, [tierStatus, currentTier, isFree, completion])
 
   // Helper to render nav item
   const renderNavItem = (item: { id: string; label: string; icon: any; path: string; locked?: boolean; isSequentialLock?: boolean; badge?: string; completed?: boolean; completionState?: CompletionState }) => {
