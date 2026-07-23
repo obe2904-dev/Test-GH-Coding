@@ -272,9 +272,9 @@ export function Sidebar({ className = '' }: SidebarProps) {
               <div className="absolute left-0 top-3 bottom-3 w-px bg-border"></div>
               
               {renderNavItem({ id: 'profile', label: t('navigation.setup.profile'), icon: GlobeIcon, path: '/dashboard/profile', completed: completion.profileState === 'complete', completionState: completion.profileState })}
-              {renderNavItem({ id: 'menu', label: t('navigation.setup.menu'), icon: MenuIcon, path: '/dashboard/menu', locked: isFree || (!isFree && completion.profileState !== 'complete'), isSequentialLock: !isFree && completion.profileState !== 'complete', completed: completion.menu, completionState: completion.menuState })}
-              {renderNavItem({ id: 'location', label: t('navigation.setup.location'), icon: MapPinIcon, path: '/dashboard/location', locked: isFree || (!isFree && completion.menuState === 'none'), isSequentialLock: !isFree && completion.menuState === 'none', completed: completion.location, completionState: completion.locationState })}
-              {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand', locked: isFree || (!isFree && completion.locationState === 'none'), isSequentialLock: !isFree && completion.locationState === 'none', completed: completion.brandProfile, completionState: completion.brandState })}
+              {renderNavItem({ id: 'menu', label: t('navigation.setup.menu'), icon: MenuIcon, path: '/dashboard/menu', locked: isFree, completed: completion.menu, completionState: completion.menuState })}
+              {renderNavItem({ id: 'location', label: t('navigation.setup.location'), icon: MapPinIcon, path: '/dashboard/location', locked: isFree, completed: completion.location, completionState: completion.locationState })}
+              {renderNavItem({ id: 'brand-profile', label: t('navigation.setup.brand'), icon: SparklesIcon, path: '/dashboard/brand', locked: isFree, completed: completion.brandProfile, completionState: completion.brandState })}
             </div>
           )}
         </div>
