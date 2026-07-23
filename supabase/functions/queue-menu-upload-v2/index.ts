@@ -363,6 +363,10 @@ serve(async (req: Request) => {
 
     // Map file type to source_kind for menu_sources
     const sourceKind = detectedType.mimeType === 'application/pdf' ? 'pdf' : 'image'
+    
+    // Note: source_type field only accepts 'url' or 'pdf' (legacy schema)
+    // source_kind is the new field that properly distinguishes 'pdf' vs 'image'
+    const sourceType = detectedType.mimeType === 'application/pdf' ? 'pdf' : 'url'
 
     // Create menu_sources entry to unify with URL-based import flow
     const { data: sourceData, error: sourceError } = await supabaseService
@@ -371,7 +375,7 @@ serve(async (req: Request) => {
         business_id: businessId,
         source_url: urlData.publicUrl,
         normalized_url: urlData.publicUrl,
-        source_type: detectedType.mimeType === 'application/pdf' ? 'pdf' : 'image',
+        source_type: sourceType,
         source_origin: 'manual_added',
         status: 'pending',
         menu_type: 'standard',
