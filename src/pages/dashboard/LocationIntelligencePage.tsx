@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import { useTierStore } from '../../stores/tierStore';
 import { LocationAnalysis, LocationCategoryId } from '../../lib/location/core/types';
 import type { SupportedLocale } from '../../lib/location/core/types';
 import { LocationCategoryIcon } from '../../components/setup/LocationCategoryIcon';
@@ -56,8 +58,35 @@ const SEASONAL_PATTERN_MAP: Record<string, 'year_round' | 'summer_peak' | 'semes
 
 function LocationIntelligencePage() {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
+  const currentTier = useTierStore((state) => state.currentTier);
+  const tierStatus = useTierStore((state) => state.tierStatus);
   // Map i18n language to locale config key for location category names
   const uiLocale: SupportedLocale = i18n.language === 'en' ? 'en-US' : 'da-DK';
+
+  // Free tier - upgrade prompt (only once tier hydration has completed)
+  console.log('🔒 LocationIntelligencePage tier check:', { tierStatus, currentTier, isLocked: tierStatus === 'ready' && currentTier === 'free' })
+  if (tierStatus === 'ready' && currentTier === 'free') {
+    return (
+      <div className="bg-surface-page min-h-full py-6 px-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-6">
+            <h1 className="text-xl font-bold text-brand mb-1">Lokations Intelligence</h1>
+            <p className="text-sm text-text-secondary">Opgrader for at låse op</p>
+          </div>
+          <div className="bg-surface-alt rounded-lg border border-border p-6">
+            <h3 className="font-semibold text-brand mb-4 text-lg">Opgrader til Smart eller Pro</h3>
+            <button
+              onClick={() => navigate('/dashboard/plans')}
+              className="px-4 py-2 bg-cta text-text-inverse rounded font-medium text-sm"
+            >
+              Se planer
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const [address, setAddress] = useState('');
   const [businessId, setBusinessId] = useState<string | null>(null);

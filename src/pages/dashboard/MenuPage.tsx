@@ -1644,6 +1644,7 @@ function MenuPage() {
   }
 
   // Free tier - upgrade prompt (only once tier hydration has completed)
+  console.log('🔒 MenuPage tier check:', { tierStatus, currentTier, isLocked: tierStatus === 'ready' && currentTier === 'free' })
   if (tierStatus === 'ready' && currentTier === 'free') {
     return (
       <div className="bg-surface-page min-h-full py-6 px-6">

@@ -91,6 +91,7 @@ export default function BrandProfilePage() {
   }
 
   // Show upgrade prompt for free tier users only after tier hydration completes
+  console.log('🔒 BrandProfilePage_NEW tier check:', { tierStatus, currentTier, isLocked: tierStatus === 'ready' && currentTier === 'free' })
   if (tierStatus === 'ready' && currentTier === 'free') {
     return (
       <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-full py-12 px-6">

@@ -232,6 +232,7 @@ function BrandPage() {
   }
 
   // Free tier - upgrade prompt (only once tier hydration has completed)
+  console.log('🔒 BrandPage tier check:', { tierStatus, currentTier, isLocked: tierStatus === 'ready' && currentTier === 'free' })
   if (tierStatus === 'ready' && currentTier === 'free') {
     return (
       <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-full py-6 px-6">
