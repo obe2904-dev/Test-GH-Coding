@@ -303,9 +303,7 @@ function isExcludedBusinessLink(link) {
     .join(' ')
     .toLowerCase();
 
-  return /privacy|privatliv|cookie|legal|policy|terms|consent|tracking|support|help|optout|\/share|\/sharer/.test(
-    combined
-  );
+  return /privacy|privatliv|cookie|legal|policy|terms|consent|tracking|support|help|optout|\/share|\/sharer|tripadvisor.*reviews?|localpoireviews|google\s+reviews?|anmeldelser/.test(combined);
 }
 
 /**
@@ -378,15 +376,15 @@ function pageHasBookingContent(pageDoc) {
  */
 function scoreMenuLink(link) {
   const url = link.url.toLowerCase();
-  const combined = [
+  const directEvidence = [
     link.text,
     link.aria_label,
-    link.title,
-    link.section_heading
+    link.title
   ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
+  const contextEvidence = (link.section_heading || '').toLowerCase();
 
   let score = 0;
 
@@ -399,7 +397,8 @@ function scoreMenuLink(link) {
   // Core menu terms, meal periods, menu types, menu sections, drink menus
   const menuKeywords = [
     // Core menu/card terms
-    'menu', 'menukort', 'madkort', 'drikkekort', 'food menu', 'wine list', 'vinkort',
+    'menu', 'menukort', 'madkort', 'drikkekort', 'drikkevarer', 'drikkevarekort',
+    'food menu', 'wine list', 'vinkort',
     // Meal periods
     'morgenmad', 'morgenmenu', 'breakfast',
     'brunch', 'brunchmenu', 'brunchkort', 'brunchbuffet',
@@ -423,13 +422,17 @@ function scoreMenuLink(link) {
   ].join('|');
   
   const menuRegex = new RegExp(`(?:^|\\s)(${menuKeywords})(?:\\s|$)`, 'i');
-  if (menuRegex.test(combined)) {
+  if (menuRegex.test(directEvidence)) {
     score += 50;
+  } else if (menuRegex.test(contextEvidence)) {
+    // A surrounding heading is supporting evidence only. It must never make
+    // an unrelated link (for example "Google Reviews") a menu by itself.
+    score += 10;
   }
 
   // URL path patterns (expanded to match bruttolist)
   const pathKeywords = [
-    'menu', 'menukort', 'madkort', 'drikkekort',
+    'menu', 'menukort', 'madkort', 'drikkekort', 'drikkevarer', 'drikkevarekort',
     'morgenmad', 'morgenmenu', 'breakfast',
     'brunch', 'brunchmenu', 'brunchkort',
     'frokost', 'frokostmenu', 'frokostkort', 'lunch',
@@ -458,7 +461,7 @@ function scoreMenuLink(link) {
   }
 
   // PENALTY: Takeaway/delivery indicators
-  if (/takeaway|take-away|delivery|order|bestil|catering|gift|gavekort/.test(combined + ' ' + url)) {
+  if (/takeaway|take-away|delivery|order|bestil|catering|gift|gavekort/.test(directEvidence + ' ' + url)) {
     score -= 70;
   }
 
@@ -540,11 +543,21 @@ function isGoogleMapsUrl(urlString) {
     const url = new URL(urlString);
     const host = url.hostname.replace(/^www\./, '');
 
+    const isGoogleLocalSearch =
+      host === 'google.com' &&
+      url.pathname === '/search' &&
+      (
+        url.searchParams.get('tbm') === 'lcl' ||
+        url.searchParams.has('rldimm') ||
+        url.hash.toLowerCase().includes('localpoireviews')
+      );
+
     return (
       host === 'maps.google.com' ||
       host === 'maps.app.goo.gl' ||
       (host === 'goo.gl' && url.pathname.startsWith('/maps')) ||
-      (host === 'google.com' && url.pathname.startsWith('/maps'))
+      (host === 'google.com' && url.pathname.startsWith('/maps')) ||
+      isGoogleLocalSearch
     );
   } catch {
     return false;

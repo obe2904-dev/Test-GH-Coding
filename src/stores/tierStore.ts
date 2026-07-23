@@ -69,6 +69,7 @@ interface TierState {
   // Tier management
   setTier: (tier: Tier) => void
   setTierStatus: (status: TierState['tierStatus']) => void
+  clearTierCache: () => void
   
   // Reset quotas (called daily/monthly)
   resetDailyQuotas: () => void
@@ -211,6 +212,22 @@ export const useTierStore = create<TierState>((set, get) => ({
 
   setTierStatus: (status: TierState['tierStatus']) => {
     set({ tierStatus: status })
+  },
+
+  clearTierCache: () => {
+    // Clear all tier-related localStorage entries
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key?.startsWith('business:tier:')) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key))
+    console.log('🗑️ Cleared tier cache:', keysToRemove.length, 'entries')
+    
+    // Reset to loading state to trigger fresh fetch
+    set({ tierStatus: 'loading', currentTier: 'free' })
   },
 
   canUseFeature: (quotaType: 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis', period: 'daily' | 'monthly') => {

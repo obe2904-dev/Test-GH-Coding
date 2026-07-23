@@ -3,6 +3,7 @@ import { unstable_HistoryRouter as HistoryRouter, Routes, Route, Navigate } from
 import { useAuthStore } from './stores/authStore'
 import { useConnectionsStore } from './stores/connectionsStore'
 import { useBusinessTier } from './hooks/useBusinessTier'
+import { useTierStore } from './stores/tierStore'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { LoadingScreen } from './components/LoadingScreen'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -140,13 +141,29 @@ const TestBusinessGoals = lazy(() =>
 function App() {
   const { initialize, user, loading } = useAuthStore()
   const { loadPlatformsFromDatabase, platformsLoaded } = useConnectionsStore()
+  const clearTierCache = useTierStore((state) => state.clearTierCache)
   
   // Fetch and sync business tier from database
   useBusinessTier()
 
   useEffect(() => {
     initialize()
-  }, [initialize])
+    
+    // Expose dev tools in browser console
+    if (import.meta.env.DEV) {
+      (window as any).devTools = {
+        clearTierCache: () => {
+          clearTierCache()
+          console.log('✅ Tier cache cleared. Refreshing page to re-fetch tier...')
+          window.location.reload()
+        },
+        showTierStore: () => {
+          console.log('Current tier store state:', useTierStore.getState())
+        }
+      }
+      console.log('🛠️ Dev tools available: window.devTools.clearTierCache(), window.devTools.showTierStore()')
+    }
+  }, [initialize, clearTierCache])
 
   // Load platform selections when user is authenticated — single source of truth
   // Individual pages also call this but the store guard prevents duplicate DB calls

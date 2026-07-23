@@ -15,6 +15,7 @@ if HF_TOKEN:
 HF_HOME = os.environ.get("HF_HOME") or "/tmp/hf"
 os.environ.setdefault("HF_HOME", HF_HOME)
 os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(Path(HF_HOME) / "hub"))
+DOCLING_ARTIFACTS_PATH = os.environ.get("DOCLING_ARTIFACTS_PATH") or "/opt/docling-models"
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -30,13 +31,15 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 
 app = FastAPI(title="Docling Menu Extraction Service")
 
-if not HF_TOKEN:
-    print("⚠️ HF_TOKEN/HUGGINGFACE_HUB_TOKEN is not configured; Docling may rate limit when resolving models.")
+if Path(DOCLING_ARTIFACTS_PATH).is_dir():
+    print(f"✅ Using local Docling model artifacts from {DOCLING_ARTIFACTS_PATH}.")
+elif not HF_TOKEN:
+    print("⚠️ Local Docling models and HF_TOKEN are not configured; model resolution may be rate limited.")
 else:
     print("✅ Hugging Face token detected for Docling model resolution.")
 
 # Configure Docling with optimized settings for menu extraction
-pipeline_options = PdfPipelineOptions()
+pipeline_options = PdfPipelineOptions(artifacts_path=DOCLING_ARTIFACTS_PATH)
 pipeline_options.do_ocr = False  # Keep the service on the lightweight text-extraction path
 pipeline_options.do_table_structure = False
 pipeline_options.force_backend_text = True

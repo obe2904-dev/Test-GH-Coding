@@ -13,6 +13,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Prefetch the only model enabled by this service. Keeping it in the image
+# prevents Cloud Run cold starts from depending on Hugging Face availability
+# or anonymous per-IP rate limits.
+ENV DOCLING_ARTIFACTS_PATH=/opt/docling-models
+RUN docling-tools models download layout --output-dir ${DOCLING_ARTIFACTS_PATH}
+
 # Copy application code
 COPY . .
 

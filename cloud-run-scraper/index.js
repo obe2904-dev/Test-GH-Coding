@@ -62,6 +62,13 @@ async function trySSRFetch(url, minTextLength = 1000) {
 
     const html = await response.text();
 
+    if (
+      /please wait while your request is being verified|checking your browser|verify you are human|cf-chl-|cloudflare ray id/i
+        .test(html)
+    ) {
+      throw new Error('BOT_CHALLENGE_DETECTED');
+    }
+
     // Extract alt text from img tags before stripping — some pages carry
     // meaningful content labels in alt attributes (logo names, section labels)
     const altTexts = [...html.matchAll(/\balt=["']([^"']{3,})["']/gi)]
@@ -94,6 +101,10 @@ async function trySSRFetch(url, minTextLength = 1000) {
     return html;
 
   } catch (err) {
+    if (err.message === 'BOT_CHALLENGE_DETECTED') {
+      console.log('[SSR] Bot challenge detected — stopping browser fallback');
+      throw err;
+    }
     if (err.name === 'AbortError') {
       console.log('[SSR] Pre-flight timed out — falling back to Puppeteer');
     } else {

@@ -18,6 +18,15 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 // @ts-ignore
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3'
+import { validatePublicUrl } from '../_shared/url-security.ts'
+import {
+  classifyDetectedMenuSource,
+  extractCanonicalMenuUrl,
+  isFalsePositiveMenuUrl,
+  isLikelyMenuSitemapUrl,
+  normalizeMenuDiscoveryUrl,
+  type DetectedMenuSourceKind,
+} from '../_shared/menu-detection-quality.ts'
 // @ts-ignore
 declare const Deno: any
 
@@ -43,7 +52,7 @@ interface RawMenuUrl {
   label?: string
 }
 
-type SourceKind = 'html' | 'pdf' | 'image' | 'mealo' | 'iframe_platform'
+type SourceKind = DetectedMenuSourceKind
 
 interface SourceResult {
   url: string
@@ -64,26 +73,109 @@ interface WorkItem extends RawMenuUrl {
 // Constants
 // =====================================================
 
-/**
- * Third-party SPA platforms that render menus client-side.
- * NOTE: mealo.dk is intentionally NOT in this list — Mealo gets its own
- * source_kind because it has a known underlying JSON API and will receive
- * a dedicated extraction path. Add new generic platforms here.
- */
-const IFRAME_PLATFORM_HOSTS = [
-  'dinnerbooking.com',
-  'ordersystem.dk',
-  'tablemanager.io',
-  'restablo.dk',
-  'zenchef.com',
-  'webflow.io',  // Webflow sites load content dynamically
-]
-
-const IMAGE_EXTENSIONS = /\.(jpg|jpeg|png|webp|gif)(\?|$)/i
-const PDF_EXTENSION = /\.pdf(\?|$)/i
-
 const HEAD_TIMEOUT_MS = 4000
 const EXPANSION_FETCH_TIMEOUT_MS = 8000
+const MAX_DISCOVERY_CANDIDATES = 20
+const MAX_EXPANSION_HTML_BYTES = 1_000_000
+const SCRAPER_TIMEOUT_MS = 42_000
+const SITEMAP_TIMEOUT_MS = 7_000
+
+async function userHasBusinessAccess(
+  supabase: any,
+  businessId: string,
+  userId: string,
+): Promise<boolean> {
+  const { data: ownedBusiness } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('id', businessId)
+    .eq('owner_id', userId)
+    .maybeSingle()
+
+  if (ownedBusiness) return true
+
+  const { data: membership } = await supabase
+    .from('business_team_members')
+    .select('business_id')
+    .eq('business_id', businessId)
+    .eq('user_id', userId)
+    .not('accepted_at', 'is', null)
+    .maybeSingle()
+
+  return Boolean(membership)
+}
+
+async function readResponseTextAtMost(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return ''
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+
+  while (total < maxBytes) {
+    const { value, done } = await reader.read()
+    if (done || !value) break
+    const remaining = maxBytes - total
+    const chunk = value.byteLength > remaining ? value.slice(0, remaining) : value
+    chunks.push(chunk)
+    total += chunk.byteLength
+    if (chunk.byteLength < value.byteLength) {
+      await reader.cancel()
+      break
+    }
+  }
+
+  const combined = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    combined.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(combined)
+}
+
+function extractDiscoveryCandidates(payload: any): RawMenuUrl[] {
+  const discoveries = Array.isArray(payload?.menu_discovery) ? payload.menu_discovery : []
+  const candidates: RawMenuUrl[] = []
+
+  const addAssets = (
+    values: unknown,
+    detectionMethod: string,
+    evidence: string,
+    confidence: number,
+  ) => {
+    if (!Array.isArray(values)) return
+    for (const value of values) {
+      const url = typeof value === 'string'
+        ? value
+        : typeof (value as any)?.url === 'string'
+          ? (value as any).url
+          : ''
+      if (!url) continue
+      candidates.push({
+        url,
+        confidence,
+        evidence,
+        detection_method: detectionMethod,
+        label: typeof (value as any)?.text === 'string'
+          ? (value as any).text
+          : typeof (value as any)?.alt === 'string'
+            ? (value as any).alt
+            : undefined,
+      })
+    }
+  }
+
+  for (const discovery of discoveries) {
+    const assets = discovery?.assets || {}
+    addAssets(assets.pdfLinks, 'browser_discovery_pdf', 'PDF discovered in rendered menu page', 0.9)
+    addAssets(assets.imageLinks, 'browser_discovery_image', 'Image discovered in rendered menu page', 0.88)
+    addAssets(assets.displayedImages, 'browser_discovery_image', 'Displayed menu image discovered in rendered page', 0.85)
+    addAssets(assets.submenuLinks, 'browser_discovery_submenu', 'Submenu discovered in rendered menu page', 0.82)
+  }
+
+  return candidates
+}
 
 // =====================================================
 // Helper: classify source_kind
@@ -94,40 +186,7 @@ function classifySourceKind(
   contentType: string,
   detectionMethod: string,
 ): SourceKind {
-  const urlLower = url.toLowerCase()
-  const ct = (contentType || '').toLowerCase()
-
-  // 1. Mealo — checked FIRST, before generic platforms.
-  //    Pattern: restaurantname.mealo.dk or mealo.dk itself.
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, '')
-    if (host === 'mealo.dk' || host.endsWith('.mealo.dk')) {
-      return 'mealo'
-    }
-    // 2. Other iframe/SPA platforms
-    if (IFRAME_PLATFORM_HOSTS.some((p) => host === p || host.endsWith('.' + p))) {
-      return 'iframe_platform'
-    }
-  } catch {
-    // unparseable URL — fall through to extension checks
-  }
-
-  // 3. PDF — content-type wins over extension when present
-  if (ct.includes('pdf') || PDF_EXTENSION.test(urlLower)) return 'pdf'
-
-  // 4. Image
-  if (ct.startsWith('image/') || IMAGE_EXTENSIONS.test(urlLower)) return 'image'
-
-  // 5. Landing-page image extractions without a content-type
-  if (
-    detectionMethod === 'landing_page_srcset' ||
-    detectionMethod === 'landing_page_img'
-  ) {
-    return 'image'
-  }
-
-  // 6. Default
-  return 'html'
+  return classifyDetectedMenuSource(url, contentType, detectionMethod)
 }
 
 // =====================================================
@@ -182,31 +241,88 @@ function isLandingPage(html: string, text: string, url?: string): boolean {
 // =====================================================
 
 function normalizeUrlForDedup(url: string): string {
-  try {
-    const parsed = new URL(url)
-    const newParams = new URLSearchParams()
-    const keep = parsed.searchParams.get('page')
-    if (keep) newParams.set('page', keep)
-    // Mealo: restaurantid query param IS the identity — preserve it
-    const restaurantId = parsed.searchParams.get('restaurantid')
-    if (restaurantId) newParams.set('restaurantid', restaurantId)
-    parsed.search = newParams.toString()
-    return parsed.href
-  } catch {
-    return url
-  }
+  return normalizeMenuDiscoveryUrl(url)
 }
 
 // =====================================================
 // Helper: False-positive filter
 // =====================================================
 
-function isFalsePositiveUrl(url: string): boolean {
-  const u = url.toLowerCase()
-  return [
-    'privacy', 'privatlivs', 'cookie', 'kontakt', 'contact',
-    'om-os', 'about', 'terms', 'betingelser', 'gdpr',
-  ].some((t) => u.includes(t))
+function isFalsePositiveUrl(url: string, label = ''): boolean {
+  return isFalsePositiveMenuUrl(url, label)
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+}
+
+function extractSitemapLocations(xml: string): string[] {
+  return Array.from(xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi))
+    .map((match) => decodeXmlText(match[1].trim()))
+    .filter(Boolean)
+}
+
+async function fetchSitemapText(url: string): Promise<string> {
+  validatePublicUrl(url)
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; MenuDetectorBot/1.0)',
+      'Accept': 'application/xml,text/xml,text/plain;q=0.9,*/*;q=0.5',
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(SITEMAP_TIMEOUT_MS),
+  })
+  if (!response.ok) return ''
+  return await readResponseTextAtMost(response, MAX_EXPANSION_HTML_BYTES)
+}
+
+async function discoverMenusFromSitemap(websiteUrl: string): Promise<RawMenuUrl[]> {
+  const root = new URL(websiteUrl)
+  const sitemapUrl = new URL('/sitemap.xml', root.origin).href
+  const robotsUrl = new URL('/robots.txt', root.origin).href
+
+  const [sitemapXml, robotsText] = await Promise.all([
+    fetchSitemapText(sitemapUrl).catch(() => ''),
+    fetchSitemapText(robotsUrl).catch(() => ''),
+  ])
+
+  const robotsSitemaps = Array.from(
+    robotsText.matchAll(/^\s*Sitemap:\s*(\S+)\s*$/gim),
+    (match) => match[1],
+  )
+  const initialLocations = extractSitemapLocations(sitemapXml)
+  const nestedSitemaps = [...robotsSitemaps, ...initialLocations]
+    .filter((candidate) => /sitemap.*\.xml(?:\?|$)/i.test(candidate))
+    .slice(0, 5)
+  const nestedXml = await Promise.all(
+    nestedSitemaps.map((candidate) => fetchSitemapText(candidate).catch(() => '')),
+  )
+
+  const seen = new Set<string>()
+  const candidates: RawMenuUrl[] = []
+  for (const candidate of [...initialLocations, ...nestedXml.flatMap(extractSitemapLocations)]) {
+    if (!isLikelyMenuSitemapUrl(candidate) || isFalsePositiveUrl(candidate)) continue
+    try {
+      validatePublicUrl(candidate)
+      const normalized = normalizeUrlForDedup(candidate)
+      if (seen.has(normalized)) continue
+      seen.add(normalized)
+      candidates.push({
+        url: candidate,
+        confidence: 0.76,
+        evidence: 'Menu page discovered through public sitemap',
+        detection_method: 'sitemap_fallback',
+      })
+    } catch {
+      // Ignore malformed or non-public sitemap entries.
+    }
+  }
+  return candidates.slice(0, MAX_DISCOVERY_CANDIDATES)
 }
 
 // =====================================================
@@ -227,7 +343,7 @@ function extractMenuUrlsFromHtml(html: string, baseUrl: string): RawMenuUrl[] {
     try {
       const abs = new URL(rawUrl, baseUrl).href
       const norm = normalizeUrlForDedup(abs)
-      if (isFalsePositiveUrl(abs)) return
+      if (isFalsePositiveUrl(abs, label || evidence)) return
       if (seen.has(norm)) return
       seen.add(norm)
       urls.push({ url: abs, confidence, evidence, detection_method: method, label })
@@ -280,7 +396,30 @@ serve(async (req: Request) => {
     const startTime = Date.now()
     const { url, businessId }: DetectMenusRequest = await req.json()
 
-    if (!url) throw new Error('url is required')
+    if (!url) {
+      return new Response(
+        JSON.stringify({ error: 'url is required', success: false }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
+    if (!businessId) {
+      return new Response(
+        JSON.stringify({ error: 'businessId is required', success: false }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
+
+    try {
+      validatePublicUrl(url)
+    } catch (urlError) {
+      return new Response(
+        JSON.stringify({
+          error: urlError instanceof Error ? urlError.message : 'Invalid public URL',
+          success: false,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
 
     console.log('🔍 Detecting menus for:', url, businessId ? `(business: ${businessId})` : '')
 
@@ -297,6 +436,13 @@ serve(async (req: Request) => {
     if (authError || !user) throw new Error('Invalid or expired token')
 
     console.log('✅ User authenticated:', user.id)
+
+    if (!await userHasBusinessAccess(supabase, businessId, user.id)) {
+      return new Response(
+        JSON.stringify({ error: 'Forbidden: no access to business', success: false }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
 
     // ---- Tier check ----
     // Adjust PAID_PLANS to match tierStore.ts canonical slugs
@@ -324,36 +470,51 @@ serve(async (req: Request) => {
     const cloudRunUrl = Deno.env.get('CLOUD_RUN_SCRAPER_URL') ||
       'https://scraper-831683741713.europe-west1.run.app'
     const apiKey = Deno.env.get('CLOUD_RUN_API_KEY')
-    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
 
     console.log('📡 Calling Cloud Run scraper...')
 
-    const scrapeResponse = await fetch(`${cloudRunUrl}/scrape-v3`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey || '',
-      },
-      body: JSON.stringify({
-        url,
-        business_id: businessId,
-        openai_api_key: openaiApiKey,
-      }),
-      signal: AbortSignal.timeout(65000),
-    })
+    let payload: any
+    let scraperWarning: string | null = null
+    try {
+      const scrapeResponse = await fetch(`${cloudRunUrl}/scrape-v3`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': apiKey || '',
+        },
+        body: JSON.stringify({
+          url,
+          business_id: businessId,
+        }),
+        signal: AbortSignal.timeout(SCRAPER_TIMEOUT_MS),
+      })
 
-    if (!scrapeResponse.ok) {
-      const errorText = await scrapeResponse.text()
-      console.error('❌ Scraper failed:', scrapeResponse.status, errorText)
-      throw new Error(`Scraper failed: ${scrapeResponse.status} ${errorText}`)
+      if (!scrapeResponse.ok) {
+        const errorText = await scrapeResponse.text()
+        throw new Error(`Scraper failed: ${scrapeResponse.status} ${errorText}`)
+      }
+
+      payload = await scrapeResponse.json()
+      console.log('✅ Scrape complete')
+    } catch (scraperError) {
+      scraperWarning = scraperError instanceof Error ? scraperError.message : String(scraperError)
+      console.warn('⚠️ Primary scraper unavailable; trying sitemap fallback:', scraperWarning)
+      const sitemapCandidates = await discoverMenusFromSitemap(url)
+      payload = {
+        extraction: { services: { menu_all: sitemapCandidates } },
+        menu_discovery: [],
+      }
     }
-
-    const payload = await scrapeResponse.json()
-    console.log('✅ Scrape complete')
 
     // ---- Extract raw menu URLs from scraper payload ----
     const menuAll: RawMenuUrl[] = payload.extraction?.services?.menu_all || []
-    console.log(`📋 Cloud Run detected ${menuAll.length} initial URL(s)`)
+    const browserDiscovered = extractDiscoveryCandidates(payload)
+    const discoveryCandidates = [...menuAll, ...browserDiscovered]
+      .filter((item) => !isFalsePositiveUrl(item.url, item.label || item.evidence || ''))
+      .slice(0, MAX_DISCOVERY_CANDIDATES)
+    console.log(
+      `📋 Cloud Run detected ${menuAll.length} link(s) and ${browserDiscovered.length} rendered asset(s)`,
+    )
 
     // ---- Expand landing pages, CAPTURING content-type as we go ----
     // Every URL that passes through this loop either:
@@ -364,17 +525,24 @@ serve(async (req: Request) => {
     const expanded: WorkItem[] = []
     const expandedLandingPages = new Set<string>()
 
-    for (const item of menuAll) {
+    const expansionResults = await Promise.all(discoveryCandidates.map(async (item) => {
       const menuUrl = item.url
       console.log(`\n🔍 Checking: ${menuUrl}`)
 
-      // Skip fetching for URLs classifiable from the hostname alone —
-      // Mealo/SPA pages return a JS shell that tells us nothing anyway.
+      try {
+        validatePublicUrl(menuUrl)
+      } catch (urlError) {
+        console.warn(`  ⛔ Skipping unsafe discovered URL: ${menuUrl}`, urlError)
+        return { items: [] as WorkItem[], expandedLandingPage: null as string | null }
+      }
+
       const preClassified = classifySourceKind(menuUrl, '', item.detection_method || 'keyword')
       if (preClassified === 'mealo' || preClassified === 'iframe_platform') {
         console.log(`  ✅ Platform URL (${preClassified}) — no fetch needed`)
-        expanded.push({ ...item, observedContentType: '' })
-        continue
+        return {
+          items: [{ ...item, observedContentType: '' }],
+          expandedLandingPage: null,
+        }
       }
 
       try {
@@ -390,41 +558,65 @@ serve(async (req: Request) => {
 
         if (!urlResp.ok) {
           console.log(`  ⚠️ HTTP ${urlResp.status} — keeping original`)
-          expanded.push({ ...item, observedContentType: '' })
-          continue
+          return {
+            items: [{ ...item, observedContentType: '' }],
+            expandedLandingPage: null,
+          }
         }
 
         const contentType = urlResp.headers.get('content-type') || ''
-
-        // Non-HTML: direct file, keep with its observed content-type
         if (!contentType.includes('html')) {
           console.log(`  ✅ Direct file (${contentType}) — keeping`)
-          expanded.push({ ...item, observedContentType: contentType })
-          continue
+          return {
+            items: [{ ...item, observedContentType: contentType }],
+            expandedLandingPage: null,
+          }
         }
 
-        // HTML: landing-page check
-        const html = await urlResp.text()
+        const html = await readResponseTextAtMost(urlResp, MAX_EXPANSION_HTML_BYTES)
         const text = htmlToText(html)
+        const canonicalUrl = extractCanonicalMenuUrl(html, menuUrl)
+        let preferredUrl = menuUrl
+        if (canonicalUrl) {
+          try {
+            validatePublicUrl(canonicalUrl)
+            preferredUrl = canonicalUrl
+          } catch {
+            console.warn(`  ⚠️ Ignoring unsafe canonical URL: ${canonicalUrl}`)
+          }
+        }
 
         if (isLandingPage(html, text, menuUrl)) {
           const children = extractMenuUrlsFromHtml(html, menuUrl)
           if (children.length > 0) {
             console.log(`  ✅ Expanded landing page → ${children.length} child URL(s)`)
-            expanded.push(
-              ...children.map((c) => ({ ...c, observedContentType: '' })),
-            )
-            expandedLandingPages.add(normalizeUrlForDedup(menuUrl))
-          } else {
-            console.log('  ⚠️ Landing page with no extractable children — skipping')
+            return {
+              items: children.map((child) => ({ ...child, observedContentType: '' })),
+              expandedLandingPage: normalizeUrlForDedup(menuUrl),
+            }
           }
+          console.log('  ⚠️ Landing page with no extractable children — keeping original')
         } else {
           console.log(`  ✅ Has menu content (${text.length} chars) — keeping as HTML`)
-          expanded.push({ ...item, observedContentType: contentType })
+        }
+
+        return {
+          items: [{ ...item, url: preferredUrl, observedContentType: contentType }],
+          expandedLandingPage: null,
         }
       } catch (err: any) {
         console.log(`  ⚠️ Fetch failed: ${err.message} — keeping original`)
-        expanded.push({ ...item, observedContentType: '' })
+        return {
+          items: [{ ...item, observedContentType: '' }],
+          expandedLandingPage: null,
+        }
+      }
+    }))
+
+    for (const result of expansionResults) {
+      expanded.push(...result.items)
+      if (result.expandedLandingPage) {
+        expandedLandingPages.add(result.expandedLandingPage)
       }
     }
 
@@ -433,6 +625,10 @@ serve(async (req: Request) => {
     const finalSeen = new Set<string>()
 
     for (const item of expanded) {
+      if (isFalsePositiveUrl(item.url, item.label || item.evidence || '')) {
+        console.log(`  🗑️ Removing false positive: ${item.url}`)
+        continue
+      }
       const norm = normalizeUrlForDedup(item.url)
       if (expandedLandingPages.has(norm)) {
         console.log(`  🗑️ Removing expanded landing page: ${item.url}`)
@@ -461,11 +657,14 @@ serve(async (req: Request) => {
       console.log(`\n🔎 Parallel HEAD for ${needsHead.length} unclassified URL(s)`)
       const results = await Promise.allSettled(
         needsHead.map((item) =>
-          fetch(item.url, {
-            method: 'HEAD',
-            redirect: 'follow',
-            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenuDetectorBot/1.0)' },
-            signal: AbortSignal.timeout(HEAD_TIMEOUT_MS),
+          Promise.resolve().then(() => {
+            validatePublicUrl(item.url)
+            return fetch(item.url, {
+              method: 'HEAD',
+              redirect: 'follow',
+              headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MenuDetectorBot/1.0)' },
+              signal: AbortSignal.timeout(HEAD_TIMEOUT_MS),
+            })
           }).then((r) => ({ item, contentType: r.headers.get('content-type') || '' })),
         ),
       )
@@ -519,6 +718,7 @@ serve(async (req: Request) => {
           sourceKinds,
           duration_ms: duration,
           scraper_version: 'cloud-run-v3',
+          scraper_warning: scraperWarning,
         },
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },

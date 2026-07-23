@@ -51,9 +51,10 @@ export function useBusinessTier() {
         // optimisation while the database remains the source of truth.
         const cacheKey = `business:tier:${user.id}`
         const cachedTier = normalizePlan(localStorage.getItem(cacheKey))
-        if (cachedTier) setTier(cachedTier)
 
         const resolveTierFromDatabase = async (): Promise<Tier | null> => {
+          console.log('🔍 Resolving tier for user:', user.id)
+          
           const { data: ownedBusiness, error: ownedBusinessError } = await supabase
             .from('businesses')
             .select('id, plan')
@@ -61,10 +62,16 @@ export function useBusinessTier() {
             .maybeSingle()
 
           if (ownedBusinessError) {
-            console.warn('Error fetching business plan for owner:', ownedBusinessError)
-          } else {
+            console.warn('❌ Error fetching business plan for owner:', ownedBusinessError)
+          } else if (ownedBusiness) {
+            console.log('📊 Found owned business:', ownedBusiness.id, 'plan:', ownedBusiness.plan)
             const tier = normalizePlan((ownedBusiness as any)?.plan)
-            if (tier) return tier
+            if (tier) {
+              console.log('✅ Resolved tier from owned business:', tier)
+              return tier
+            }
+          } else {
+            console.log('ℹ️ No owned business found')
           }
 
           const { data: teamMember, error: teamMemberError } = await supabase
@@ -75,8 +82,9 @@ export function useBusinessTier() {
             .maybeSingle()
 
           if (teamMemberError) {
-            console.warn('Error checking business team membership:', teamMemberError)
+            console.warn('❌ Error checking business team membership:', teamMemberError)
           } else if (teamMember?.business_id) {
+            console.log('👥 Found team membership for business:', teamMember.business_id)
             const { data: teamBusiness, error: teamBusinessError } = await supabase
               .from('businesses')
               .select('id, plan')
@@ -84,10 +92,14 @@ export function useBusinessTier() {
               .maybeSingle()
 
             if (teamBusinessError) {
-              console.warn('Error fetching team business plan:', teamBusinessError)
-            } else {
+              console.warn('❌ Error fetching team business plan:', teamBusinessError)
+            } else if (teamBusiness) {
+              console.log('📊 Team business plan:', teamBusiness.plan)
               const tier = normalizePlan((teamBusiness as any)?.plan)
-              if (tier) return tier
+              if (tier) {
+                console.log('✅ Resolved tier from team business:', tier)
+                return tier
+              }
             }
           }
 
@@ -98,10 +110,14 @@ export function useBusinessTier() {
             .maybeSingle()
 
           if (profileError) {
-            console.warn('Error fetching profile plan:', profileError)
-          } else {
+            console.warn('❌ Error fetching profile plan:', profileError)
+          } else if (profile) {
+            console.log('👤 Profile plan:', profile.plan)
             const tier = normalizePlan((profile as any)?.plan)
-            if (tier) return tier
+            if (tier) {
+              console.log('✅ Resolved tier from profile:', tier)
+              return tier
+            }
           }
 
           try {
@@ -127,6 +143,7 @@ export function useBusinessTier() {
 
         if (mounted) {
           if (resolvedTier) {
+            console.log('✅ Final resolved tier:', resolvedTier, '(was cached as:', cachedTier, ')')
             setTier(resolvedTier)
             localStorage.setItem(cacheKey, resolvedTier)
             setTierStatus('ready')
@@ -134,12 +151,14 @@ export function useBusinessTier() {
           }
 
           if (cachedTier) {
+            console.log('⚠️ Using cached tier (no DB result):', cachedTier)
             setTier(cachedTier)
             setTierStatus('ready')
             return
           }
 
           // Default to free only when every authoritative lookup failed.
+          console.log('⚠️ Defaulting to free tier (no DB result, no cache)')
           setTier('free')
           localStorage.setItem(cacheKey, 'free')
           setTierStatus('ready')

@@ -6,6 +6,7 @@ import { parseMenuPeriods } from '../_shared/menuPeriodParser.ts'
 import { validatePublicUrl, looksLikeLoginPage } from '../_shared/url-security.ts'
 import { normalizeProgrammeName } from '../_shared/content-planning/service-period-detector.ts'
 import { normalizeStructuredMenu } from '../_shared/menu-structure-normalizer.ts'
+import { validateMenuStorageSource } from '../_shared/menu-storage-source.ts'
 
 // @ts-ignore - Deno global
 declare const Deno: any
@@ -25,7 +26,7 @@ const BROADENED_ROUTING_ENABLED = (Deno.env.get('MENU_EXTRACT_BROADENED_ROUTING_
 const BROADENED_ROUTING_TEST_ONLY = (Deno.env.get('MENU_EXTRACT_BROADENED_ROUTING_TEST_ONLY') ?? '').trim().toLowerCase() === 'true'
 const BROADENED_ROUTING_BUSINESS_IDS = (Deno.env.get('MENU_EXTRACT_BROADENED_ROUTING_BUSINESS_IDS') ?? '')
   .split(',')
-  .map((value) => value.trim())
+  .map((value: string) => value.trim())
   .filter(Boolean)
 
 function isBroadenedRoutingEnabledForBusiness(businessId: string): boolean {
@@ -796,7 +797,7 @@ async function triggerMenuWorkerOnce(): Promise<void> {
   }
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 4500)
+  const timeout = setTimeout(() => controller.abort(), 120_000)
   try {
     await fetch(url, {
       method: 'POST',
@@ -1203,7 +1204,7 @@ async function parsePdfMenuWithOpenAI(pdfBytes: Uint8Array, languageCode: string
 
   // --- 1. Upload PDF to OpenAI Files API ---
   const formData = new FormData()
-  formData.append('file', new Blob([pdfBytes], { type: 'application/pdf' }), 'menu.pdf')
+  formData.append('file', new Blob([pdfBytes as BlobPart], { type: 'application/pdf' }), 'menu.pdf')
   formData.append('purpose', 'user_data')
 
   const uploadResp = await fetch('https://api.openai.com/v1/files', {
@@ -1370,6 +1371,7 @@ async function parsePdfMenuWithDocling(pdfUrl: string, languageCode: string): Pr
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: pdfUrl }),
+    signal: AbortSignal.timeout(240_000),
   })
 
   if (!doclingResp.ok) {
@@ -1845,7 +1847,7 @@ function parseMenuTextHeuristically(extractedText: string, languageCode: string)
 
     if (isHeading(line)) {
       const heading = line.replace(/\s+/g, ' ').trim()
-      if (!currentCategory || currentCategory.name !== heading) {
+      if (!currentCategory || (currentCategory as { name: string }).name !== heading) {
         startCategory(heading)
       }
       continue
@@ -2052,6 +2054,9 @@ serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders })
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: corsHeaders })
 
+  let failureResultId: string | null = null
+  let failureServiceClient: any = null
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
@@ -2081,6 +2086,7 @@ serve(async (req: Request) => {
     }
 
     const supabaseService = createClient(supabaseUrl, supabaseServiceRoleKey)
+    failureServiceClient = supabaseService
 
     const syncNormalizedItems = async () => {
       const { error } = await supabaseService.rpc('sync_menu_items_normalized', {
@@ -2105,17 +2111,23 @@ serve(async (req: Request) => {
         : typeof body?.source_url === 'string'
           ? body.source_url
           : ''
-    const url = rawUrl ? decodeHtmlUrl(rawUrl).trim() : ''
+    let url = rawUrl ? decodeHtmlUrl(rawUrl).trim() : ''
     const manualText = typeof body?.text === 'string' ? body.text.trim() : ''
-    const sourceId = body?.sourceId // menu_sources.id - for tracking which source this extraction belongs to
+    let sourceId = typeof body?.sourceId === 'string' && body.sourceId
+      ? body.sourceId
+      : null // menu_sources.id - for tracking which source this extraction belongs to
+    const requestedSourceKind = typeof body?.sourceKind === 'string' ? body.sourceKind.trim() : ''
     const languageCode = normalizeLanguageCode(body?.languageCode)
     const sourceType = typeof body?.sourceType === 'string' ? body.sourceType : ''
-    const isManualTextJob = sourceType === 'manual_text' || (!url && manualText.length > 0)
+    const hasStorageInput = body?.storageBucket !== undefined || body?.storagePath !== undefined
+    const isStorageJob = sourceType === 'storage' || hasStorageInput
+    const isManualTextJob = !isStorageJob && (sourceType === 'manual_text' || (!url && manualText.length > 0))
 
     if (typeof businessId !== 'string' || !businessId) throw new Error('Missing businessId')
-    if (!url && !manualText) throw new Error('Missing url or text')
+    if (!url && !manualText && !isStorageJob) throw new Error('Missing url, text, or storage source')
 
     if (!isServiceRoleInvocation) {
+      if (!user) throw new Error('Unauthorized')
       const hasAccess = await userHasBusinessAccess(supabase, businessId, user.id)
       if (!hasAccess) {
         return new Response(
@@ -2128,15 +2140,69 @@ serve(async (req: Request) => {
       }
     }
 
+    const storageSource = isStorageJob
+      ? validateMenuStorageSource(businessId, body?.storageBucket, body?.storagePath)
+      : null
+
+    // Prefer the server-side classification persisted by detect-menus. The
+    // client hint is only used for a just-detected source that has not yet
+    // round-tripped through menu_sources.
+    let detectedSourceKind = requestedSourceKind
+    if (typeof sourceId === 'string' && sourceId) {
+      const { data: sourceRow, error: sourceLookupError } = await supabaseService
+        .from('menu_sources')
+        .select('source_kind')
+        .eq('id', sourceId)
+        .eq('business_id', businessId)
+        .maybeSingle()
+
+      if (sourceLookupError) {
+        console.warn('⚠️ Could not load menu source classification:', sourceLookupError.message)
+        sourceId = null
+      } else if (typeof sourceRow?.source_kind === 'string' && sourceRow.source_kind) {
+        detectedSourceKind = sourceRow.source_kind
+      } else if (!sourceRow) {
+        // Never link a job to a source belonging to another business.
+        sourceId = null
+      }
+
+      if (sourceId) {
+        // A retry must not leave an older queued/processing row competing with
+        // the new job or keeping the UI permanently attached to stale state.
+        const { error: supersedeError } = await supabaseService
+          .from('menu_results_v2')
+          .update({
+            status: 'error',
+            error_message: 'Superseded by a new extraction attempt',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('business_id', businessId)
+          .eq('source_id', sourceId)
+          .in('status', ['queued', 'processing'])
+
+        if (supersedeError) {
+          console.warn('⚠️ Could not supersede previous extraction attempt:', supersedeError.message)
+        }
+      }
+    }
+
     // Create job row first so frontend can subscribe to updates.
     const { data: resultData, error: resultError } = await supabaseService
       .from('menu_results_v2')
       .insert({
         business_id: businessId,
-        source_kind: isManualTextJob ? 'storage' : 'url',
-        source_url: isManualTextJob ? null : url,
-        storage_bucket: isManualTextJob ? 'manual_text' : null,
-        storage_path: isManualTextJob ? `manual_text/${businessId}/${Date.now()}.txt` : null,
+        source_kind: isManualTextJob || isStorageJob ? 'storage' : 'url',
+        source_url: isManualTextJob || isStorageJob ? null : url,
+        storage_bucket: isStorageJob
+          ? storageSource!.bucket
+          : isManualTextJob
+            ? 'manual_text'
+            : null,
+        storage_path: isStorageJob
+          ? storageSource!.path
+          : isManualTextJob
+            ? `manual_text/${businessId}/${Date.now()}.txt`
+            : null,
         source_content_type: isManualTextJob ? 'text/plain' : null,
         source_id: sourceId, // Link back to menu_sources for safe deletion/retry
         status: 'queued',
@@ -2151,55 +2217,113 @@ serve(async (req: Request) => {
     }
 
     const resultId = resultData.id as string
-    const broadenedRoutingEnabled = isBroadenedRoutingEnabledForBusiness(businessId)
+    failureResultId = resultId
 
-    if (broadenedRoutingEnabled && !isManualTextJob) {
+    const delegateToWorkerAndPersist = async (method: string): Promise<boolean> => {
       const delegated = await triggerMenuWorkerDirect({
         id: resultId,
         business_id: businessId,
         source_url: url,
         language_code: languageCode,
       })
+      if (!delegated) return false
 
-      if (delegated) {
-        const delegatedResult = (delegated as any)?.result ?? delegated
-        if (delegatedResult?.raw_text && !delegatedResult?.structured_data) {
-          try {
-            const parsedStructured = normalizeStructuredMenu(
-              await parseMenuWithOpenAI(String(delegatedResult.raw_text), languageCode)
-            )
+      const delegatedResult = (delegated as any)?.result ?? delegated
+      const rawText = typeof delegatedResult?.raw_text === 'string'
+        ? delegatedResult.raw_text.trim()
+        : ''
+      let structured = delegatedResult?.structured_data
 
-            if (parsedStructured?.categories?.length) {
-              const { error: delegatedUpdateError } = await supabaseService
-                .from('menu_results_v2')
-                .update({
-                  structured_data: parsedStructured,
-                  raw_text: delegatedResult.raw_text,
-                  extraction_method: `${delegatedResult.extraction_method || 'cloud_run_worker'}+edge_llm`,
-                  status: 'done',
-                  completed_at: new Date().toISOString(),
-                })
-                .eq('id', resultId)
+      if (!structured && rawText) {
+        structured = normalizeStructuredMenu(await parseMenuWithOpenAI(rawText, languageCode))
+      }
 
-              if (delegatedUpdateError) {
-                console.warn('⚠️ Failed to persist delegated worker parse:', delegatedUpdateError.message)
-              } else {
-                await syncNormalizedItems()
-              }
-            }
-          } catch (postProcessErr) {
-            console.warn('⚠️ Failed to post-process delegated worker result:', postProcessErr)
-          }
-        }
+      if (!structured?.categories?.length) return false
 
+      const { error: delegatedUpdateError } = await supabaseService
+        .from('menu_results_v2')
+        .update({
+          structured_data: structured,
+          raw_text: rawText || null,
+          extraction_method: `${delegatedResult?.extraction_method || method}+edge_llm`,
+          source_content_type: delegatedResult?.source_content_type || null,
+          sha256: delegatedResult?.sha256 || null,
+          status: 'done',
+          error_message: null,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', resultId)
+
+      if (delegatedUpdateError) {
+        console.warn('⚠️ Failed to persist delegated worker result:', delegatedUpdateError.message)
+        return false
+      }
+
+      await syncNormalizedItems()
+      return true
+    }
+
+    if (storageSource) {
+      const { data: signedUrlData, error: signedUrlError } = await supabaseService.storage
+        .from(storageSource.bucket)
+        .createSignedUrl(storageSource.path, 15 * 60)
+
+      if (signedUrlError || !signedUrlData?.signedUrl) {
+        const storageError = `Failed to access stored menu: ${signedUrlError?.message || 'Unknown storage error'}`
+        await supabaseService
+          .from('menu_results_v2')
+          .update({
+            status: 'error',
+            error_message: storageError,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', resultId)
+        throw new Error(storageError)
+      }
+
+      // Temporary transport URL only. The durable job identity remains
+      // storage_bucket + storage_path in menu_results_v2.
+      url = signedUrlData.signedUrl
+    }
+
+    const broadenedRoutingEnabled = isBroadenedRoutingEnabledForBusiness(businessId)
+    const requiresBrowserWorker =
+      detectedSourceKind === 'mealo' || detectedSourceKind === 'iframe_platform'
+
+    if ((broadenedRoutingEnabled || requiresBrowserWorker) && !isManualTextJob && !isStorageJob) {
+      try {
+        if (await delegateToWorkerAndPersist(requiresBrowserWorker ? 'browser_worker' : 'cloud_run_worker')) {
         console.log('✅ Delegated broadened menu extraction to Cloud Run worker')
         return new Response(
           JSON.stringify({
             success: true,
             resultId,
-            message: 'Menu extraction delegated to Cloud Run worker',
+              message: 'Menu extraction completed by Cloud Run worker',
           }),
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      } catch (postProcessErr) {
+        console.warn('⚠️ Failed to process delegated worker result:', postProcessErr)
+      }
+
+      if (requiresBrowserWorker) {
+        await supabaseService
+          .from('menu_results_v2')
+          .update({
+            status: 'error',
+            error_message: 'The dynamic menu page could not be extracted',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', resultId)
+
+        return new Response(
+          JSON.stringify({
+            success: false,
+            resultId,
+            error: 'The dynamic menu page could not be extracted',
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
         )
       }
     }
@@ -2345,6 +2469,10 @@ serve(async (req: Request) => {
       }
 
       const probeCt = _stripContentType(probeResp.headers.get('content-type'))
+      const contentRange = probeResp.headers.get('content-range') || ''
+      const contentRangeTotal = Number(contentRange.match(/\/(\d+)$/)?.[1] || 0)
+      const contentLength = Number(probeResp.headers.get('content-length') || 0)
+      const observedFileSize = contentRangeTotal || contentLength
       const probeBytes = await readAtMostBytes(probeResp, 4096)
       const urlLooksPdf = url.toLowerCase().split('?')[0].endsWith('.pdf')
       const urlLower = url.toLowerCase().split('?')[0]
@@ -2401,19 +2529,36 @@ serve(async (req: Request) => {
           // Classify establishment type
           const establishmentType = classifyEstablishmentType(menuStructure)
 
-          // Mark as completed
-          await supabaseService
+          // Mark as completed. establishment_type belongs to business_operations,
+          // not menu_results_v2; including it here makes PostgREST reject the
+          // entire update and leaves the result stuck in "processing".
+          const { error: imageUpdateError } = await supabaseService
             .from('menu_results_v2')
             .update({
               status: 'done',
               structured_data: menuStructure,
               raw_text: extractedText,
-              establishment_type: establishmentType,
               completed_at: new Date().toISOString(),
               source_content_type: probeCt || 'image/*',
               extraction_method: 'edge_ocr',
             })
             .eq('id', resultId)
+
+          if (imageUpdateError) {
+            throw new Error(`Failed to save image extraction result: ${imageUpdateError.message}`)
+          }
+
+          const { error: imageOpsError } = await supabaseService
+            .from('business_operations')
+            .upsert({
+              business_id: businessId,
+              establishment_type: establishmentType,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'business_id' })
+
+          if (imageOpsError) {
+            console.warn('⚠️ Failed to save image establishment_type:', imageOpsError.message)
+          }
 
           console.log('✅ Image OCR extraction completed successfully')
 
@@ -2461,7 +2606,8 @@ serve(async (req: Request) => {
 
         // --- Fast path: extract with Docling + structure with OpenAI ---
         let usedFastPath = false
-        if (probeBytes.length < MAX_PDF_BYTES) {
+        let doclingFastFailed = false
+        if (!observedFileSize || observedFileSize <= MAX_PDF_BYTES) {
           try {
             console.log('⚡ Attempting PDF fast-path via Docling extraction...')
 
@@ -2679,16 +2825,43 @@ serve(async (req: Request) => {
               { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
             )
           } catch (pdfFastErr) {
-            console.warn('⚠️ PDF fast-path with Docling failed; will try slow path:', pdfFastErr)
-            // Reset status so the slow path can handle it
+            console.warn('⚠️ PDF fast-path with Docling failed; delegating to OCR worker:', pdfFastErr)
+            doclingFastFailed = true
             await supabaseService
               .from('menu_results_v2')
-              .update({ status: 'queued', claimed_at: null, extraction_method: 'docling_direct' })
+              .update({ status: 'queued', claimed_at: null, extraction_method: 'cloud_run_pdf_fallback' })
               .eq('id', resultId)
           }
         }
 
         if (usedFastPath) return new Response('', { status: 200 }) // should never reach here
+        if (doclingFastFailed) {
+          let fallbackCompleted = false
+          try {
+            fallbackCompleted = await delegateToWorkerAndPersist('cloud_run_pdf_fallback')
+          } catch (workerError) {
+            console.warn('⚠️ PDF OCR fallback failed:', workerError)
+          }
+          if (!fallbackCompleted) {
+            await supabaseService
+              .from('menu_results_v2')
+              .update({
+                status: 'error',
+                error_message: 'PDF extraction and OCR fallback both failed',
+                completed_at: new Date().toISOString(),
+              })
+              .eq('id', resultId)
+          }
+          return new Response(
+            JSON.stringify({
+              success: fallbackCompleted,
+              resultId,
+              message: fallbackCompleted ? 'PDF extracted with OCR fallback' : undefined,
+              error: fallbackCompleted ? undefined : 'PDF extraction and OCR fallback both failed',
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+          )
+        }
 
         // --- Slow path: extract directly with Docling service (no queue) ---
         console.log('📄 Extracting large PDF with Docling service')
@@ -2884,19 +3057,42 @@ serve(async (req: Request) => {
             { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
           )
         } catch (doclingErr) {
-          console.error('❌ Docling slow path failed:', doclingErr)
+          console.error('❌ Docling slow path failed; delegating to OCR worker:', doclingErr)
+          const doclingErrorMessage = doclingErr instanceof Error ? doclingErr.message : String(doclingErr)
           await supabaseService
             .from('menu_results_v2')
             .update({
-              status: 'error',
-              error_message: `Docling extraction failed: ${doclingErr.message}`,
-              completed_at: new Date().toISOString(),
+              status: 'queued',
+              claimed_at: null,
+              extraction_method: 'cloud_run_pdf_fallback',
+              error_message: `Docling extraction failed; OCR fallback queued: ${doclingErrorMessage}`,
             })
             .eq('id', resultId)
 
+          let fallbackCompleted = false
+          try {
+            fallbackCompleted = await delegateToWorkerAndPersist('cloud_run_pdf_fallback')
+          } catch (workerError) {
+            console.warn('⚠️ PDF OCR fallback failed:', workerError)
+          }
+          if (!fallbackCompleted) {
+            await supabaseService
+              .from('menu_results_v2')
+              .update({
+                status: 'error',
+                error_message: 'PDF extraction and OCR fallback both failed',
+                completed_at: new Date().toISOString(),
+              })
+              .eq('id', resultId)
+          }
           return new Response(
-            JSON.stringify({ success: false, resultId, error: 'PDF extraction with Docling failed' }),
-            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            JSON.stringify({
+              success: fallbackCompleted,
+              resultId,
+              message: fallbackCompleted ? 'PDF extracted with OCR fallback' : undefined,
+              error: fallbackCompleted ? undefined : 'PDF extraction and OCR fallback both failed',
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
       }
@@ -3216,7 +3412,7 @@ serve(async (req: Request) => {
               }
 
               // Parse menu periods from extracted categories
-              let menuPeriods = []
+              let menuPeriods: any[] = []
               const menuAvailabilityTime = structured?.availabilityTime || null
               if (structured?.categories && Array.isArray(structured.categories)) {
                 // Use menu-level availabilityTime if present (e.g., "@ 17.30 – 21.30")
@@ -3577,7 +3773,13 @@ serve(async (req: Request) => {
                   }
                 }
 
-                const imageUrls = genericImageUrls.length > 0 ? genericImageUrls : fetchUHeadlessMenuImageUrls(html)
+                const fallbackGenericImageUrls = broadenedRoutingEnabled
+                  ? extractCandidateMenuAssetUrls(html, url)
+                      .filter((candidateUrl) => /\.(jpg|jpeg|png|webp)(\?|$)/i.test(candidateUrl))
+                  : []
+                const imageUrls = fallbackGenericImageUrls.length > 0
+                  ? fallbackGenericImageUrls
+                  : fetchUHeadlessMenuImageUrls(html)
                 if (imageUrls.length > 0) {
                   console.log(`🖼️ No HTML/PDF menu found, trying image OCR on ${imageUrls.length} image(s)`)
 
@@ -3768,6 +3970,21 @@ serve(async (req: Request) => {
     )
   } catch (error: any) {
     console.error('❌ menu-extract-v2 error:', error)
+    if (failureResultId && failureServiceClient) {
+      try {
+        await failureServiceClient
+          .from('menu_results_v2')
+          .update({
+            status: 'error',
+            error_message: error?.message || 'Menu extraction failed unexpectedly',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', failureResultId)
+          .in('status', ['queued', 'processing'])
+      } catch (statusError) {
+        console.warn('⚠️ Failed to persist terminal extraction error:', statusError)
+      }
+    }
     return new Response(
       JSON.stringify({
         error: error?.message || 'Failed to queue menu extraction',

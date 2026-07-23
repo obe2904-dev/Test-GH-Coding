@@ -25,7 +25,7 @@ gcloud run deploy ${SERVICE_NAME} \
   --timeout 300 \
   --max-instances 10 \
   --allow-unauthenticated \
-  --set-env-vars HF_HOME=/tmp/hf,HUGGINGFACE_HUB_CACHE=/tmp/hf/hub
+  --set-env-vars HF_HOME=/tmp/hf,HUGGINGFACE_HUB_CACHE=/tmp/hf/hub,DOCLING_ARTIFACTS_PATH=/opt/docling-models
 
 if [[ -n "${HF_TOKEN:-}" ]]; then
   echo "Deploying with HF_TOKEN from local environment"

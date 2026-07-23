@@ -52,6 +52,11 @@ function detectLinkType(url, text = '') {
   return 'other';
 }
 
+function hasMenuSemanticSignal(url, text = '') {
+  return /menu|menukort|frokost|aften|brunch|morgenmad|drikkevarer|cocktail/i
+    .test(`${url} ${text}`);
+}
+
 /**
  * Check if link text suggests a menu category/section
  * @param {string} text - Link text
@@ -102,16 +107,21 @@ async function extractMenuAssets(page) {
       
       // Extract all images (potential menu scans)
       document.querySelectorAll('img[src]').forEach(img => {
-        const src = img.src;
+        const src = img.currentSrc || img.src;
         const alt = img.alt || '';
+        const container = img.closest('figure, section, article, li, div');
+        const heading = container?.querySelector('h1, h2, h3, h4, h5, h6')?.textContent?.trim() || '';
+        const caption = img.closest('figure')?.querySelector('figcaption')?.textContent?.trim() || '';
         
         // Only include if image looks like content (not icons/logos)
         if (src && !src.includes('logo') && !src.includes('icon')) {
           images.push({
             url: src,
             alt: alt,
-            width: img.width,
-            height: img.height
+            width: img.naturalWidth || img.width,
+            height: img.naturalHeight || img.height,
+            heading,
+            caption
           });
         }
       });
@@ -127,13 +137,18 @@ async function extractMenuAssets(page) {
         }
       });
       
-      return { links, images, buttons };
+      return {
+        links,
+        images,
+        buttons,
+        bodyText: (document.body?.innerText || '').slice(0, 50000)
+      };
     });
     
     return assets;
   } catch (err) {
     console.error('❌ Failed to extract menu assets:', err.message);
-    return { links: [], images: [], buttons: [] };
+    return { links: [], images: [], buttons: [], bodyText: '' };
   }
 }
 
@@ -143,27 +158,57 @@ async function extractMenuAssets(page) {
  * @param {string} pageUrl - URL of the menu page
  * @returns {object} Structure classification
  */
-function classifyMenuStructure(assets, pageUrl) {
-  const { links = [], images = [], buttons = [] } = assets;
+export function classifyMenuStructure(assets, pageUrl) {
+  const { links = [], images = [], buttons = [], bodyText = '' } = assets;
+  const priceHits = (
+    bodyText.match(/\b\d{1,4}\s*(?:[.,]\d{1,2})?\s*(?:kr\.?|dkk|,-|-)(?=\s|$)/gi) || []
+  ).length;
+  const menuTextHits = (
+    bodyText.match(/menu|menukort|frokost|aften|brunch|morgenmad|drikkevarer|forret|hovedret|dessert/gi) || []
+  ).length;
+  const hasStrongInlineMenu = priceHits >= 3 && menuTextHits >= 2;
   
   // Classify all links by type
   const pdfLinks = links.filter(l => detectLinkType(l.url, l.text) === 'pdf');
-  const imageLinks = links.filter(l => detectLinkType(l.url, l.text) === 'image');
+  const imageLinks = links.filter(
+    l => detectLinkType(l.url, l.text) === 'image' && hasMenuSemanticSignal(l.url, l.text),
+  );
   const submenuLinks = links.filter(l => detectLinkType(l.url, l.text) === 'submenu');
   
   // Also check for image elements (not linked, but displayed)
   const largeImages = images.filter(img => img.width > 400 && img.height > 400);
   const menuImages = largeImages.filter(img => {
     const urlLower = img.url.toLowerCase();
-    const altLower = img.alt.toLowerCase();
-    return urlLower.includes('menu') || altLower.includes('menu') ||
-           urlLower.match(/\.(jpg|jpeg|png)$/i);
+    const semanticText = [img.alt, img.heading, img.caption]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    const menuSignal = /menu|menukort|frokost|aften|brunch|morgenmad|drikkevarer|cocktail/.test(
+      `${urlLower} ${semanticText}`
+    );
+    const renderedPdf = /\.pdf(?:\?|$)/i.test(urlLower);
+    return menuSignal || renderedPdf;
   });
   
   // Check for menu category buttons (common in modern sites)
   const menuButtons = buttons.filter(b => isMenuCategoryLink(b.text));
   
   // Classification logic (priority order)
+
+  // Strong inline HTML wins over decorative photography. Restaurant menu
+  // pages often contain real dish/price text alongside large gallery images.
+  if (hasStrongInlineMenu) {
+    return {
+      structure: 'inline_html',
+      confidence: 'high',
+      assets: {
+        linkCount: links.length,
+        priceHits
+      },
+      extractionMethod: 'edge_html',
+      reasoning: `Found substantial inline menu text (${priceHits} prices)`
+    };
+  }
   
   // 1. Image Gallery - Multiple menu images or image links
   if (imageLinks.length > 0 || menuImages.length > 0) {
