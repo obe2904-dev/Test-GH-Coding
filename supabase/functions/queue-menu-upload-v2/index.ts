@@ -387,6 +387,7 @@ serve(async (req: Request) => {
         source_kind: sourceKind,                            // new classifier
         source_origin: 'manual_added',                      // use existing constraint-compliant value
         status: 'pending',
+        menu_type: 'standard',                              // required field
         file_name: safeName,
         label,
         created_by: user.id,
