@@ -121,6 +121,14 @@ function MenuPage() {
   const [categoryPeriodEnd, setCategoryPeriodEnd] = useState('')
   const [isSavingCategoryPeriod, setIsSavingCategoryPeriod] = useState(false)
 
+  // Toast notification state
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [toastType, setToastType] = useState<'success' | 'error'>('success')
+  const [showToast, setShowToast] = useState(false)
+
+  // Track processing uploads to show placeholder cards
+  const [processingUploads, setProcessingUploads] = useState<Array<{id: string; fileName: string; headline: string}>>([])
+
   // Normalized item flags (is_signature toggle, is_active toggle)
   // keyed by item_name.toLowerCase() → { id, is_signature, is_active }
   const [normalizedItems, setNormalizedItems] = useState<Map<string, { id: string; is_signature: boolean; is_active: boolean }>>(new Map())
@@ -128,6 +136,17 @@ function MenuPage() {
   // Store polling intervals for cleanup
   const pollIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
   const operationsUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Toast helper function
+  const showToastNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage(message)
+    setToastType(type)
+    setShowToast(true)
+    setTimeout(() => {
+      setShowToast(false)
+      setTimeout(() => setToastMessage(null), 300)
+    }, 4000)
+  }
 
   // Queue processor - extracts one menu at a time
   useEffect(() => {
@@ -356,6 +375,13 @@ function MenuPage() {
       })
 
       setMenuCards(cards)
+      
+      // Remove processing placeholders for completed extractions
+      setProcessingUploads(prev => {
+        const completedIds = new Set(cards.filter(c => c.status === 'extracted' || c.status === 'error').map(c => c.result_id))
+        return prev.filter(upload => !completedIds.has(upload.id))
+      })
+      
       setActiveExtractions(prev => {
         const extractingIds = new Set(
           cards
@@ -1046,6 +1072,7 @@ function MenuPage() {
 
       const uploadEndpoint = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/queue-menu-upload-v2`
       let successCount = 0
+      const newProcessingUploads: Array<{id: string; fileName: string; headline: string}> = []
       
       // Upload each file sequentially
       for (let i = 0; i < uploadFiles.length; i++) {
@@ -1076,7 +1103,15 @@ function MenuPage() {
             throw new Error(errorData.error || `Upload fejlede for ${file.name}`)
           }
           
+          const result = await response.json()
           successCount++
+          
+          // Add to processing uploads for placeholder card
+          newProcessingUploads.push({
+            id: result.resultId || `upload-${Date.now()}-${i}`,
+            fileName: file.name,
+            headline: uploadHeadline
+          })
         } catch (fileError) {
           console.error(`Error uploading ${file.name}:`, fileError)
           // Continue with other files, show error at the end
@@ -1085,6 +1120,15 @@ function MenuPage() {
             setError(`${successCount > 0 ? `${successCount} fil(er) uploadet. ` : ''}Kunne ikke uploade "${file.name}". Prøv igen eller kontakt support hvis problemet fortsætter.`)
           }
         }
+      }
+
+      // Show success toast and create placeholder cards
+      if (successCount > 0) {
+        const fileText = successCount === 1 ? 'fil' : 'filer'
+        showToastNotification(`${successCount} ${fileText} uploadet! Analyserer nu...`, 'success')
+        
+        // Add processing placeholders
+        setProcessingUploads(prev => [...prev, ...newProcessingUploads])
       }
 
       // Reset form if all succeeded
@@ -1738,20 +1782,30 @@ function MenuPage() {
                 <p className="text-xs text-text-secondary mb-3">
                   Upload menu som fil (AI læser den automatisk)
                 </p>
-                <input
-                  type="text"
-                  value={uploadHeadline}
-                  onChange={(e) => setUploadHeadline(e.target.value)}
-                  placeholder="Menu overskrift (f.eks. Frokost, Brunch)"
-                  className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
-                />
-                <input
-                  type="text"
-                  value={uploadServicePeriod}
-                  onChange={(e) => setUploadServicePeriod(e.target.value)}
-                  placeholder="Serverings tid (f.eks. Man-Fre 11-15)"
-                  className="w-full px-3 py-2 border border-border rounded text-sm mb-2"
-                />
+                <div className="mb-2">
+                  <input
+                    type="text"
+                    value={uploadHeadline}
+                    onChange={(e) => setUploadHeadline(e.target.value)}
+                    placeholder="Menu overskrift (f.eks. Frokost, Brunch)"
+                    className={`w-full px-3 py-2 border rounded text-sm ${!uploadHeadline.trim() && uploadFiles && uploadFiles.length > 0 ? 'border-warning' : 'border-border'}`}
+                  />
+                  {!uploadHeadline.trim() && uploadFiles && uploadFiles.length > 0 && (
+                    <p className="text-xs text-warning mt-1">* Dette felt er påkrævet</p>
+                  )}
+                </div>
+                <div className="mb-2">
+                  <input
+                    type="text"
+                    value={uploadServicePeriod}
+                    onChange={(e) => setUploadServicePeriod(e.target.value)}
+                    placeholder="Serverings tid (f.eks. Man-Fre 11-15)"
+                    className={`w-full px-3 py-2 border rounded text-sm ${!uploadServicePeriod.trim() && uploadFiles && uploadFiles.length > 0 ? 'border-warning' : 'border-border'}`}
+                  />
+                  {!uploadServicePeriod.trim() && uploadFiles && uploadFiles.length > 0 && (
+                    <p className="text-xs text-warning mt-1">* Dette felt er påkrævet</p>
+                  )}
+                </div>
                 
                 <p className="text-xs text-text-secondary mb-2 mt-3">
                   Indtast tid hvornår dette serveres, så vi kan tilpasse opslag til dig
@@ -1970,6 +2024,31 @@ function MenuPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Processing Upload Placeholders */}
+              {processingUploads.map((upload) => (
+                <div key={upload.id} className="bg-surface rounded-lg border border-border overflow-hidden">
+                  <div className="p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-semibold text-text truncate">{upload.headline}</h3>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-info-surface text-info-text animate-pulse">
+                            Behandler...
+                          </span>
+                        </div>
+                        <p className="text-sm text-text-secondary mt-1">{upload.fileName}</p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="h-1.5 w-full bg-surface-alt rounded-full overflow-hidden">
+                            <div className="h-full bg-cta rounded-full animate-pulse" style={{width: '60%'}}></div>
+                          </div>
+                        </div>
+                        <p className="text-xs text-text-muted mt-2">AI analyserer din menu. Dette kan tage et par minutter...</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
 
               {/* Individual Menu Source Cards */}
               {detectedUrls.map((item) => {
@@ -2876,6 +2955,20 @@ function MenuPage() {
           </div>
         </div>
       </div>
+
+      {/* Toast Notification */}
+      {showToast && toastMessage && (
+        <div className="fixed bottom-4 right-4 z-50 animate-slide-up">
+          <div className={`px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 ${
+            toastType === 'success' ? 'bg-success text-white' : 'bg-error text-white'
+          }`}>
+            <span className="text-lg">
+              {toastType === 'success' ? '✓' : '✕'}
+            </span>
+            <span className="text-sm font-medium">{toastMessage}</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
