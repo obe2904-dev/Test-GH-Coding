@@ -137,6 +137,7 @@ export function Sidebar({ className = '' }: SidebarProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const currentTier = useTierStore((state) => state.currentTier)
+  const tierStatus = useTierStore((state) => state.tierStatus)
   const { isPro } = useSubscriptionTier()
   const { activePath, setActivePath, setWriteSelfStep, setAiIdeerStep, setWeeklyPlanStep } = usePostCreationStore()
   const { pathname } = useLocation()
@@ -149,7 +150,7 @@ export function Sidebar({ className = '' }: SidebarProps) {
   const [mediaGalleryModalOpen, setMediaGalleryModalOpen] = useState(false)
 
   // Check if user is on free tier
-  const isFree = currentTier === 'free'
+  const isFree = tierStatus === 'ready' && currentTier === 'free'
   const isWeeklyPlanLocked = isFree
 
   // Helper to render nav item
@@ -210,7 +211,15 @@ export function Sidebar({ className = '' }: SidebarProps) {
           Post2Grow
         </button>
         {/* Tier Badge */}
-        {currentTier === 'free' ? (
+        {tierStatus === 'loading' ? (
+          <span className="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-500">
+            Henter plan...
+          </span>
+        ) : tierStatus === 'error' ? (
+          <span className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700">
+            Plan utilgængelig
+          </span>
+        ) : currentTier === 'free' ? (
           <button
             onClick={() => navigate('/dashboard/plans')}
             className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all"

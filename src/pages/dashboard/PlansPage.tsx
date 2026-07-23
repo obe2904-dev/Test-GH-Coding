@@ -4,6 +4,7 @@ import { useTierStore } from '../../stores/tierStore'
 export function PlansPage() {
   const { t } = useTranslation()
   const currentTier = useTierStore((state) => state.currentTier)
+  const tierStatus = useTierStore((state) => state.tierStatus)
 
   const plans = [
     {
@@ -71,7 +72,15 @@ export function PlansPage() {
         <div className="flex items-center justify-between gap-4">
           <span>{t('plans.currentPlan', 'Current plan')}</span>
           <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
-            {currentTier === 'free' ? 'Free' : currentTier === 'standardplus' ? 'Smart' : 'Pro'}
+            {tierStatus === 'loading'
+              ? t('common.loading', 'Loading...')
+              : tierStatus === 'error'
+                ? t('common.error', 'Unavailable')
+                : currentTier === 'free'
+                  ? 'Free'
+                  : currentTier === 'standardplus'
+                    ? 'Smart'
+                    : 'Pro'}
           </span>
         </div>
       </div>

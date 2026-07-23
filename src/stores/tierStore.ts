@@ -42,6 +42,7 @@ interface QuotaUsage {
 
 interface TierState {
   currentTier: Tier
+  tierStatus: 'loading' | 'ready' | 'error'
   quotaUsage: QuotaUsage
   dailyUsage: DailyUsage
   monthlyUsage: MonthlyUsage
@@ -67,6 +68,7 @@ interface TierState {
   
   // Tier management
   setTier: (tier: Tier) => void
+  setTierStatus: (status: TierState['tierStatus']) => void
   
   // Reset quotas (called daily/monthly)
   resetDailyQuotas: () => void
@@ -112,7 +114,10 @@ const TIER_LIMITS: Record<Tier, TierLimits> = {
 }
 
 export const useTierStore = create<TierState>((set, get) => ({
-  currentTier: 'free', // Default to free
+  // The authenticated hook hydrates the user-scoped cache. A global cache can
+  // leak the previous account's plan into the next signed-in session.
+  currentTier: 'free',
+  tierStatus: 'loading',
   quotaUsage: {
     aiIdeasToday: 0,
     captionGenerationsToday: 0,
@@ -202,6 +207,10 @@ export const useTierStore = create<TierState>((set, get) => ({
 
   setTier: (tier: Tier) => {
     set({ currentTier: tier })
+  },
+
+  setTierStatus: (status: TierState['tierStatus']) => {
+    set({ tierStatus: status })
   },
 
   canUseFeature: (quotaType: 'aiGenerations' | 'pdfUploads' | 'websiteAnalysis', period: 'daily' | 'monthly') => {
