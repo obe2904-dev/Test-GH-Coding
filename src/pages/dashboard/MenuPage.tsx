@@ -2355,9 +2355,9 @@ function MenuPage() {
                         )}
 
                         {/* Categories and Items */}
-                        {menuCard.extracted_data.categories && menuCard.extracted_data.categories.length > 0 ? (
+                        {menuCard.extracted_data?.categories && menuCard.extracted_data.categories.length > 0 ? (
                           menuCard.extracted_data.categories.map((category: any, catIdx: number) => {
-                            const hasMultipleCategories = menuCard.extracted_data.categories.length >= 2
+                            const hasMultipleCategories = menuCard.extracted_data?.categories?.length >= 2
                             const isEditingThisCategory = editingCategoryPeriod?.cardId === menuCard.id && editingCategoryPeriod?.categoryIdx === catIdx
                             const categoryPeriod = category.servicePeriod
                             
