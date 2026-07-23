@@ -92,7 +92,6 @@ function MenuPage() {
   // File upload state (supports multiple files)
   const [uploadFiles, setUploadFiles] = useState<FileList | null>(null)
   const [uploadHeadline, setUploadHeadline] = useState('')
-  const [uploadServicePeriod, setUploadServicePeriod] = useState('')
   const [isUploadingFile, setIsUploadingFile] = useState(false)
   
   // Time state for three input sections
@@ -1037,7 +1036,7 @@ function MenuPage() {
   }
 
   const handleUploadFile = async () => {
-    if (!businessId || !uploadFiles || uploadFiles.length === 0 || !uploadHeadline.trim() || !uploadServicePeriod.trim()) return
+    if (!businessId || !uploadFiles || uploadFiles.length === 0 || !uploadHeadline.trim()) return
 
     setIsUploadingFile(true)
     setError(null)
@@ -1086,7 +1085,6 @@ function MenuPage() {
           formData.append('languageCode', 'da')
           formData.append('fileName', file.name)
           formData.append('menuHeadline', uploadHeadline)
-          formData.append('servicePeriod', uploadServicePeriod)
 
           // Call queue-menu-upload-v2 Edge Function
           const response = await fetch(uploadEndpoint, {
@@ -1135,7 +1133,6 @@ function MenuPage() {
       if (successCount === uploadFiles.length) {
         setUploadFiles(null)
         setUploadHeadline('')
-        setUploadServicePeriod('')
       }
       
       await loadMenuCards(businessId)
@@ -1794,18 +1791,6 @@ function MenuPage() {
                     <p className="text-xs text-warning mt-1">* Dette felt er påkrævet</p>
                   )}
                 </div>
-                <div className="mb-2">
-                  <input
-                    type="text"
-                    value={uploadServicePeriod}
-                    onChange={(e) => setUploadServicePeriod(e.target.value)}
-                    placeholder="Serverings tid (f.eks. Man-Fre 11-15)"
-                    className={`w-full px-3 py-2 border rounded text-sm ${!uploadServicePeriod.trim() && uploadFiles && uploadFiles.length > 0 ? 'border-warning' : 'border-border'}`}
-                  />
-                  {!uploadServicePeriod.trim() && uploadFiles && uploadFiles.length > 0 && (
-                    <p className="text-xs text-warning mt-1">* Dette felt er påkrævet</p>
-                  )}
-                </div>
                 
                 <p className="text-xs text-text-secondary mb-2 mt-3">
                   Indtast tid hvornår dette serveres, så vi kan tilpasse opslag til dig
@@ -1875,7 +1860,7 @@ function MenuPage() {
                 )}
                 <button
                   onClick={handleUploadFile}
-                  disabled={!uploadFiles || uploadFiles.length === 0 || !uploadHeadline.trim() || !uploadServicePeriod.trim() || isUploadingFile}
+                  disabled={!uploadFiles || uploadFiles.length === 0 || !uploadHeadline.trim() || isUploadingFile}
                   className="w-full px-4 py-2 text-sm font-medium text-text-inverse bg-cta rounded hover:bg-cta-hover disabled:bg-surface-alt disabled:cursor-not-allowed"
                 >
                   {isUploadingFile ? 'Uploader...' : 'Upload og analyser'}

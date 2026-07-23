@@ -318,11 +318,9 @@ serve(async (req: Request) => {
       .replace(/\.[^.]+$/, '')
       .replace(/[^a-zA-Z0-9._-]/g, '_')
 
-    // Optional: menu headline and service period from user
+    // Optional: menu headline from user
     const menuHeadline = form.get('menuHeadline')
-    const servicePeriod = form.get('servicePeriod')
     const serviceHeadline = typeof menuHeadline === 'string' ? menuHeadline.trim() : null
-    const servicePeriodText = typeof servicePeriod === 'string' ? servicePeriod.trim() : null
 
     const uploadBytes = new Uint8Array(await file.arrayBuffer())
     if (uploadBytes.length === 0) throw new Error('Empty file')
@@ -407,12 +405,9 @@ serve(async (req: Request) => {
       language_code: languageCode,
     }
 
-    // Add optional service period metadata if provided
+    // Add optional service period name if provided
     if (serviceHeadline) {
       insertPayload.service_period_name = serviceHeadline
-    }
-    if (servicePeriodText) {
-      insertPayload.service_periods = [servicePeriodText]
     }
 
     const { data: resultData, error: resultError } = await supabaseService
