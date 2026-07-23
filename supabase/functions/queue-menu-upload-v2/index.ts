@@ -392,46 +392,65 @@ serve(async (req: Request) => {
       throw new Error('Failed to register menu source')
     }
 
-    // Enqueue v2 async extraction job linked to the source
-    const insertPayload: any = {
-      business_id: businessId,
-      source_id: sourceData.id,
-      source_kind: 'storage',
-      source_url: urlData.publicUrl,
-      storage_bucket: 'menu-files',
-      storage_path: storagePath,
-      source_content_type: detectedType.mimeType,
-      status: 'queued',
-      language_code: languageCode,
+    console.log('✅ Created menu_sources entry, now triggering extraction via menu-extract-v2')
+
+    // Trigger extraction immediately via menu-extract-v2 Edge function
+    // This reuses existing extraction logic for PDFs/images instead of queueing for Cloud Run worker
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    const extractUrl = `${supabaseUrl}/functions/v1/menu-extract-v2`
+    
+    try {
+      const extractResponse = await fetch(extractUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          businessId: businessId,
+          url: urlData.publicUrl,
+          sourceId: sourceData.id,
+          languageCode: languageCode,
+        }),
+      })
+
+      if (!extractResponse.ok) {
+        const errorText = await extractResponse.text()
+        console.error('❌ menu-extract-v2 call failed:', extractResponse.status, errorText)
+        throw new Error(`Extraction trigger failed: ${extractResponse.status}`)
+      }
+
+      const extractResult = await extractResponse.json()
+      console.log('✅ menu-extract-v2 triggered successfully, resultId:', extractResult?.resultId)
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          sourceId: sourceData.id,
+          resultId: extractResult?.resultId,
+          storagePath: uploadData.path,
+          publicUrl: urlData.publicUrl,
+          languageCode,
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    } catch (extractError: any) {
+      console.error('❌ Failed to trigger extraction:', extractError)
+      // Still return success for upload, but note extraction failed
+      return new Response(
+        JSON.stringify({
+          success: true,
+          sourceId: sourceData.id,
+          resultId: null,
+          storagePath: uploadData.path,
+          publicUrl: urlData.publicUrl,
+          languageCode,
+          extractionError: extractError?.message || 'Failed to trigger extraction',
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
-
-    // Add optional service period name if provided
-    if (serviceHeadline) {
-      insertPayload.service_period_name = serviceHeadline
-    }
-
-    const { data: resultData, error: resultError } = await supabaseService
-      .from('menu_results_v2')
-      .insert(insertPayload)
-      .select('id')
-      .single()
-
-    if (resultError) throw new Error('Failed to create extraction job')
-
-    // Best-effort: wake Cloud Run on demand (useful if service scales to zero).
-    await triggerMenuWorkerOnce()
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        sourceId: sourceData.id,
-        resultId: resultData.id,
-        storagePath: uploadData.path,
-        publicUrl: urlData.publicUrl,
-        languageCode,
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
   } catch (error: any) {
     return new Response(
       JSON.stringify({
