@@ -1,5 +1,5 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSubscriptionTier } from '@/hooks/useSubscriptionTier'
 import { useTierStore } from '../../stores/tierStore'
@@ -153,6 +153,11 @@ export function Sidebar({ className = '' }: SidebarProps) {
   const isFree = tierStatus === 'ready' && currentTier === 'free'
   const isWeeklyPlanLocked = isFree
 
+  // Debug logging for tier status
+  useEffect(() => {
+    console.log('🔧 Sidebar tier check:', { tierStatus, currentTier, isFree })
+  }, [tierStatus, currentTier, isFree])
+
   // Helper to render nav item
   const renderNavItem = (item: { id: string; label: string; icon: any; path: string; locked?: boolean; isSequentialLock?: boolean; badge?: string; completed?: boolean; completionState?: CompletionState }) => {
     const Icon = item.icon
@@ -219,7 +224,7 @@ export function Sidebar({ className = '' }: SidebarProps) {
           <span className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700">
             Plan utilgængelig
           </span>
-        ) : currentTier === 'free' ? (
+        ) : isFree ? (
           <button
             onClick={() => navigate('/dashboard/plans')}
             className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-md text-[10px] font-medium text-purple-700 hover:from-purple-100 hover:to-blue-100 transition-all"
