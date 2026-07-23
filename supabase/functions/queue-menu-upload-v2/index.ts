@@ -332,7 +332,7 @@ serve(async (req: Request) => {
     const storagePath = `${businessId}/menu/${crypto.randomUUID()}_${normalizedFileName}`
 
     const { data: uploadData, error: uploadError } = await supabaseService.storage
-      .from('user-media')
+      .from('menu-files')
       .upload(storagePath, uploadBytes, {
         contentType: detectedType.mimeType,
         upsert: false,
@@ -341,7 +341,7 @@ serve(async (req: Request) => {
     if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`)
 
     const { data: urlData } = supabaseService.storage
-      .from('user-media')
+      .from('menu-files')
       .getPublicUrl(storagePath)
 
     // Canonical stored menu
@@ -398,7 +398,7 @@ serve(async (req: Request) => {
       source_id: sourceData.id,
       source_kind: 'storage',
       source_url: urlData.publicUrl,
-      storage_bucket: 'user-media',
+      storage_bucket: 'menu-files',
       storage_path: storagePath,
       source_content_type: detectedType.mimeType,
       status: 'queued',
